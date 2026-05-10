@@ -36,3 +36,33 @@ def test_frontend_wires_backend_calls_and_toasts() -> None:
     assert "toaster.toast" in source
     assert "is_running" in source
     assert "dependency_error" in source
+
+
+def test_frontend_uses_decky_log_modal() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        "ConfirmModal",
+        "showModal",
+        "type LogModalProps",
+        "function LogModal",
+        "bAlertDialog={true}",
+        'strTitle="Plugin Logs"',
+        "onOK={closeModal}",
+        "onCancel={closeModal}",
+        'maxHeight: "60vh"',
+        'overflowY: "auto"',
+        'fontFamily: "monospace"',
+        'fontSize: "12px"',
+        'whiteSpace: "pre-wrap"',
+        'backgroundColor: "rgba(0, 0, 0, 0.3)"',
+        'padding: "10px"',
+        'borderRadius: "4px"',
+        'userSelect: "text"',
+        'logs.length === 0 ? "No recent logs" : logs.map(formatLogEntry).join("\\n")',
+        "showModal(<LogModal logs={logs} />)",
+    ]:
+        assert required_text in source
+
+    assert "showLogs" not in source
+    assert "setShowLogs" not in source

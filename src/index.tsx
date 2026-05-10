@@ -1,7 +1,9 @@
 import {
   ButtonItem,
+  ConfirmModal,
   PanelSection,
   PanelSectionRow,
+  showModal,
   staticClasses
 } from "@decky/ui";
 import {
@@ -60,6 +62,11 @@ type LogEntry = {
   game_name: string | null;
 };
 
+type LogModalProps = {
+  logs: LogEntry[];
+  closeModal?: () => void;
+};
+
 const getSettings = callable<[], Settings>("get_settings");
 const setAutoSyncEnabled = callable<[enabled: boolean], Settings>("set_auto_sync_enabled");
 const refreshGamesCall = callable<[], RefreshResult>("refresh_games");
@@ -76,6 +83,33 @@ const statusLabels: Record<GameStatus["status"], string> = {
   error: "Error"
 };
 
+function LogModal({ logs, closeModal }: LogModalProps) {
+  return (
+    <ConfirmModal
+      bAlertDialog={true}
+      strTitle="Plugin Logs"
+      onOK={closeModal}
+      onCancel={closeModal}
+    >
+      <div
+        style={{
+          maxHeight: "60vh",
+          overflowY: "auto",
+          fontFamily: "monospace",
+          fontSize: "12px",
+          whiteSpace: "pre-wrap",
+          backgroundColor: "rgba(0, 0, 0, 0.3)",
+          padding: "10px",
+          borderRadius: "4px",
+          userSelect: "text",
+        }}
+      >
+        {logs.length === 0 ? "No recent logs" : logs.map(formatLogEntry).join("\n")}
+      </div>
+    </ConfirmModal>
+  );
+}
+
 function Content() {
   const [settings, setSettings] = useState<Settings>({ auto_sync_enabled: false });
   const [games, setGames] = useState<GameStatus[]>([]);
@@ -89,7 +123,6 @@ function Content() {
     last_error: null
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [showLogs, setShowLogs] = useState(false);
   const [dependencyError, setDependencyError] = useState<string | null>(null);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
 
@@ -265,17 +298,10 @@ function Content() {
 
       <PanelSection title="Logs">
         <PanelSectionRow>
-          <ButtonItem layout="below" onClick={() => setShowLogs((current) => !current)}>
+          <ButtonItem layout="below" onClick={() => showModal(<LogModal logs={logs} />)}>
             Show Logs
           </ButtonItem>
         </PanelSectionRow>
-        {showLogs ? (
-          <PanelSectionRow>
-            <div>
-              {logs.length === 0 ? "No recent logs" : logs.map(formatLogEntry).join("\n")}
-            </div>
-          </PanelSectionRow>
-        ) : null}
       </PanelSection>
     </>
   );
