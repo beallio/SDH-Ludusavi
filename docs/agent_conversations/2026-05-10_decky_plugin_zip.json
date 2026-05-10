@@ -14,7 +14,7 @@
     "tests/test_package_plugin.py"
   ],
   "design_decisions": [
-    "Write the generated archive to ignored path out/SDH-ludusavi.zip.",
+    "Write the generated archive to ignored path out/SDH-ludusavi.zip with a top-level SDH-ludusavi/ plugin directory.",
     "Keep the zip allowlist in scripts/package_plugin.py so tests can assert the archive contains required Decky runtime files and nothing else.",
     "Install .git/hooks/post-commit as a local symlink to the tracked scripts/post_commit.sh."
   ],

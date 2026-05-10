@@ -73,7 +73,7 @@ Create the Decky plugin zip:
 ./run.sh uv run python scripts/package_plugin.py
 ```
 
-The package is written to `out/SDH-ludusavi.zip`. The local post-commit hook runs
+The package is written to `out/SDH-ludusavi.zip` and contains a top-level `SDH-ludusavi/` plugin directory. The local post-commit hook runs
 `scripts/post_commit.sh`, which rebuilds `dist/index.js` and recreates that zip after
 each commit.
 

@@ -10,7 +10,7 @@ project and includes only runtime files required by Decky Loader.
 - `scripts/package_plugin.py` owns the exact allowlist of plugin runtime files.
 - `scripts/post_commit.sh` rebuilds the frontend bundle and calls the packager.
 - The local `.git/hooks/post-commit` delegates to `scripts/post_commit.sh`.
-- The generated archive is written to ignored path `out/SDH-ludusavi.zip`.
+- The generated archive is written to ignored path `out/SDH-ludusavi.zip` and contains a top-level `SDH-ludusavi/` plugin directory.
 
 ## Core Data Structures
 

@@ -21,6 +21,7 @@ def test_package_script_defines_decky_runtime_files_only() -> None:
 
     assert module.PROJECT_NAME == "SDH-ludusavi"
     assert module.ZIP_FILENAME == "SDH-ludusavi.zip"
+    assert module.ARCHIVE_ROOT == "SDH-ludusavi"
     assert module.REQUIRED_FILES == (
         "LICENSE",
         "dist/index.js",
@@ -50,11 +51,19 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
         names = set(archive.namelist())
 
     assert names == set(module.iter_required_archive_names(Path.cwd()))
+    assert all(name.startswith("SDH-ludusavi/") for name in names)
+    assert "SDH-ludusavi/plugin.json" in names
+    assert "SDH-ludusavi/dist/index.js" in names
     assert "README.md" not in names
+    assert "SDH-ludusavi/README.md" not in names
     assert "src/index.tsx" not in names
+    assert "SDH-ludusavi/src/index.tsx" not in names
     assert "docs/plans/sdh_ludusavi.md" not in names
+    assert "SDH-ludusavi/docs/plans/sdh_ludusavi.md" not in names
     assert "node_modules/.modules.yaml" not in names
+    assert "SDH-ludusavi/node_modules/.modules.yaml" not in names
     assert "dist/index.js.map" not in names
+    assert "SDH-ludusavi/dist/index.js.map" not in names
 
 
 def test_post_commit_script_builds_the_project_zip() -> None:

@@ -7,6 +7,7 @@ from pathlib import Path
 
 PROJECT_NAME = "SDH-ludusavi"
 ZIP_FILENAME = "SDH-ludusavi.zip"
+ARCHIVE_ROOT = "SDH-ludusavi"
 
 REQUIRED_FILES = (
     "LICENSE",
@@ -24,8 +25,8 @@ EXCLUDED_PARTS = {"__pycache__"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo"}
 
 
-def iter_required_archive_names(project_root: Path) -> tuple[str, ...]:
-    archive_names = list(REQUIRED_FILES)
+def iter_required_plugin_paths(project_root: Path) -> tuple[str, ...]:
+    plugin_paths = list(REQUIRED_FILES)
 
     for directory_name in REQUIRED_DIRECTORIES:
         directory = project_root / directory_name
@@ -40,9 +41,15 @@ def iter_required_archive_names(project_root: Path) -> tuple[str, ...]:
                 continue
             if path.suffix in EXCLUDED_SUFFIXES:
                 continue
-            archive_names.append(relative.as_posix())
+            plugin_paths.append(relative.as_posix())
 
-    return tuple(sorted(archive_names))
+    return tuple(sorted(plugin_paths))
+
+
+def iter_required_archive_names(project_root: Path) -> tuple[str, ...]:
+    return tuple(
+        f"{ARCHIVE_ROOT}/{plugin_path}" for plugin_path in iter_required_plugin_paths(project_root)
+    )
 
 
 def validate_required_files(project_root: Path) -> None:
@@ -54,7 +61,7 @@ def validate_required_files(project_root: Path) -> None:
 
 def build_plugin_zip(project_root: Path, output_dir: Path) -> Path:
     validate_required_files(project_root)
-    archive_names = iter_required_archive_names(project_root)
+    plugin_paths = iter_required_plugin_paths(project_root)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     zip_path = output_dir / ZIP_FILENAME
@@ -64,8 +71,8 @@ def build_plugin_zip(project_root: Path, output_dir: Path) -> Path:
         temporary_zip_path.unlink()
 
     with zipfile.ZipFile(temporary_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for archive_name in archive_names:
-            archive.write(project_root / archive_name, archive_name)
+        for plugin_path in plugin_paths:
+            archive.write(project_root / plugin_path, f"{ARCHIVE_ROOT}/{plugin_path}")
 
     temporary_zip_path.replace(zip_path)
     return zip_path
