@@ -58,4 +58,5 @@ Backend methods exposed to the frontend:
   rendering, force action state, spinner, refresh button, dependency-state display,
   and toast handling.
 - Validate with `./run.sh uv run ruff check . --fix`, `./run.sh uv run ruff format .`,
-  `./run.sh uv run ty check py_modules/`, `./run.sh uv run pytest`, and the frontend build.
+  `./run.sh uv run ty check py_modules/sdh_ludusavi/`, `./run.sh uv run pytest`,
+  and the frontend build.

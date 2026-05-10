@@ -1,0 +1,156 @@
+Metadata-Version: 2.4
+Name: pyludusavi
+Version: 0.1.1
+Summary: A robust, type-safe Python wrapper for the Ludusavi game backup tool.
+Project-URL: Homepage, https://github.com/beallio/pyludusavi
+Project-URL: Repository, https://github.com/beallio/pyludusavi
+Project-URL: Issues, https://github.com/beallio/pyludusavi/issues
+Author-email: David Beall <6121439+beallio@users.noreply.github.com>
+License: MIT
+License-File: LICENSE
+Keywords: api,game-backup,gaming,ludusavi,wrapper
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Games/Entertainment
+Classifier: Topic :: System :: Archiving :: Backup
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+
+# pyludusavi
+
+A robust, type-safe Python wrapper for the [Ludusavi](https://github.com/mtkennerly/ludusavi) CLI.
+
+## Features
+
+- **Broad CLI Coverage**: Supports the core Ludusavi subcommands and commonly used flags.
+- **Linux-First**: Native support for both local binaries and Flatpak.
+- **Type-Safe**: Comprehensive `TypedDict` models for all JSON outputs (Python 3.12+).
+- **Dual-Mode Execution**: Transparently handles binary vs. Flatpak command prefixing.
+- **TDD-Backed**: High-quality implementation with an extensive regression suite.
+
+## Setup
+
+For local development, use the project wrapper so virtual environments and tool
+caches stay outside Dropbox:
+
+```bash
+source .envrc
+./run.sh uv sync
+```
+
+Run validation through the same wrapper:
+
+```bash
+./run.sh uv run ruff check .
+./run.sh uv run ty check src/
+./run.sh uv run pytest
+```
+
+## Installation
+
+Use `uv` when adding the package to another Python project:
+
+```bash
+uv add pyludusavi
+```
+
+## Quick Start
+
+### Basic Initialization
+The wrapper automatically discovers Ludusavi via `PATH` or Flatpak.
+
+```python
+from pyludusavi import Ludusavi
+
+lud = Ludusavi()
+print(f"Ludusavi version: {lud.version()}")
+```
+
+### Backing Up Games
+Perform a preview scan or a full backup.
+
+```python
+# Preview a backup for a specific game
+result = lud.backup(games=["The Witcher 3"], preview=True)
+
+# Access typed data
+for name, game in result.data["games"].items():
+    print(f"Game: {name}, Status: {game['change']}")
+```
+
+### Searching for Games
+Use Steam IDs or fuzzy matching to find games in the manifest.
+
+```python
+# Find by Steam ID
+result = lud.find(steam_id="292030")
+
+# Use fuzzy matching
+result = lud.find(games=["Witcher"], fuzzy=True)
+```
+
+### Advanced Usage
+
+#### Flatpak Support
+If you have Ludusavi installed via Flatpak, `pyludusavi` detects it automatically. You can also specify a custom binary path or Flatpak ID:
+
+```python
+lud = Ludusavi(explicit_path="/usr/bin/ludusavi")
+lud = Ludusavi(flatpak_id="com.github.mtkennerly.ludusavi")
+```
+
+#### Custom Config Directory
+```python
+lud = Ludusavi(config_dir="/home/user/my-ludusavi-config")
+```
+
+#### Bulk API
+For performance-critical bulk operations, use the native `api` subcommand:
+
+```python
+payload = {
+    "requests": [
+        {"kind": "backup", "games": ["Game 1"]},
+        {"kind": "backup", "games": ["Game 2"]}
+    ]
+}
+lud.bulk_api(payload)
+```
+
+#### Cloud Sync
+Use the upload/download helpers with the same common options exposed by the CLI.
+
+```python
+lud.cloud_upload(games=["The Witcher 3"], local="/backups", cloud="/cloud", preview=True)
+lud.cloud_download(games=["The Witcher 3"], force=True)
+```
+
+#### Wrap Game Launch
+Ludusavi requires either a direct game name or launcher inference when wrapping a command.
+
+```python
+lud.wrap(["./game.exe", "--windowed"], name="The Witcher 3")
+lud.wrap(["steam", "-applaunch", "292030"], infer="steam", force=True)
+```
+
+#### Game Aliases
+`add_game_alias()` updates Ludusavi's `customGames` configuration using only the Python standard library. It writes the updated config as JSON, which Ludusavi can read as YAML, but this does not preserve existing comments or formatting in `config.yaml`.
+
+## Error Handling
+
+- `LudusaviNotFoundError`: Raised if the executable or Flatpak isn't found.
+- `LudusaviExecutionError`: Raised if the process exits with a non-zero code.
+- `LudusaviContractError`: Raised if the CLI output is malformed or non-JSON when expected.
+
+## Dependency Requirements
+
+- Python 3.12+
+- uv
+- Ludusavi v0.31.0+
+- pytest, pytest-cov, ruff, and ty for local development
+
+## License
+
+MIT

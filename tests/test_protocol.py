@@ -19,12 +19,15 @@ def test_decky_required_plugin_files_exist():
         "tsconfig.json",
         "src/index.tsx",
         "py_modules/sdh_ludusavi/service.py",
+        "py_modules/pyludusavi/__init__.py",
+        "py_modules/pyludusavi-0.1.1.dist-info/licenses/LICENSE",
     ]:
         assert Path(required_path).exists()
 
 
 def test_backend_package_uses_decky_py_modules_path():
     assert Path("py_modules/sdh_ludusavi").is_dir()
+    assert Path("py_modules/pyludusavi").is_dir()
     assert not Path("src/sdh_ludusavi").exists()
 
 

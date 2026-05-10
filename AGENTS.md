@@ -366,7 +366,7 @@ Before any commit, agents must execute:
 ```
 ./run.sh uv run ruff check . --fix
 ./run.sh uv run ruff format .
-./run.sh uv run ty check py_modules/
+./run.sh uv run ty check py_modules/sdh_ludusavi/
 ./run.sh uv run pytest
 ```
 

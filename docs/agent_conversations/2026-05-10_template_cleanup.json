@@ -19,6 +19,8 @@
     "docs/plans/template_cleanup.md",
     "docs/plans/sdh_ludusavi.md",
     "py_modules/sdh_ludusavi",
+    "py_modules/pyludusavi",
+    "py_modules/pyludusavi-0.1.1.dist-info",
     "pyproject.toml",
     "scripts/check_tdd.sh",
     "src/sdh_ludusavi",
@@ -35,6 +37,7 @@
   "results": [
     "Added a cleanup plan.",
     "Moved Python backend modules into py_modules.",
+    "Vendored pyludusavi into py_modules for Decky runtime imports.",
     "Updated local Python tooling to test and type-check py_modules.",
     "Added static checks for Decky-required files and removed template-only paths."
   ]

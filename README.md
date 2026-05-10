@@ -42,6 +42,7 @@ The installable Decky plugin is built from these required files:
 - `package.json`: frontend package metadata and version.
 - `main.py`: Python backend entry point for Decky RPC calls.
 - `py_modules/sdh_ludusavi/`: Python backend modules on Decky's runtime import path.
+- `py_modules/pyludusavi/`: vendored pure-Python Ludusavi adapter dependency.
 - `src/index.tsx`: TypeScript frontend source.
 - `dist/index.js`: generated frontend bundle from `pnpm run build`.
 - `LICENSE`: redistributable license text.
@@ -73,7 +74,7 @@ Before committing changes, run:
 ```bash
 ./run.sh uv run ruff check . --fix
 ./run.sh uv run ruff format .
-./run.sh uv run ty check py_modules/
+./run.sh uv run ty check py_modules/sdh_ludusavi/
 ./run.sh uv run pytest
 pnpm run build
 ```
