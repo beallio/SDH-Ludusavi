@@ -27,11 +27,11 @@ Issues = "https://github.com/beallio/SDH-ludusavi/issues"
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/sdh_ludusavi"]
+packages = ["py_modules/sdh_ludusavi"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "src/sdh_ludusavi",
+    "py_modules/sdh_ludusavi",
     "README.md",
     "LICENSE",
 ]
@@ -48,9 +48,9 @@ line-length = 100
 cache-dir = "/tmp/sdh_ludusavi/.ruff_cache"
 
 [tool.pytest.ini_options]
-addopts = "--cov=src --cov-report=term"
+addopts = "--cov=py_modules --cov-report=term"
 cache_dir = "/tmp/sdh_ludusavi/.pytest_cache"
-pythonpath = ["src"]
+pythonpath = ["py_modules"]
 
 [tool.coverage.run]
 data_file = "/tmp/sdh_ludusavi/.coverage"

@@ -1,0 +1,41 @@
+{
+  "date": "2026-05-10",
+  "task_objective": "Clean Decky template leftovers and verify SDH-ludusavi uses a Decky-compatible plugin layout.",
+  "files_modified": [
+    ".vscode/build.sh",
+    ".vscode/config.sh",
+    ".vscode/defsettings.json",
+    ".vscode/setup.sh",
+    ".vscode/tasks.json",
+    "AGENTS.md",
+    "README.md",
+    "assets/logo.png",
+    "backend/Dockerfile",
+    "backend/Makefile",
+    "backend/entrypoint.sh",
+    "backend/src/main.c",
+    "decky.pyi",
+    "defaults/defaults.txt",
+    "docs/plans/template_cleanup.md",
+    "docs/plans/sdh_ludusavi.md",
+    "py_modules/sdh_ludusavi",
+    "pyproject.toml",
+    "scripts/check_tdd.sh",
+    "src/sdh_ludusavi",
+    "tests/test_protocol.py"
+  ],
+  "tests_added": [
+    "tests/test_protocol.py Decky layout and template cleanup assertions"
+  ],
+  "design_decisions": [
+    "Use py_modules/sdh_ludusavi for Python backend code because Decky Loader adds plugin py_modules to sys.path.",
+    "Remove the template C backend, placeholder defaults, unused logo asset, and VS Code deployment scaffold because SDH-ludusavi does not use them.",
+    "Keep root Decky files and TypeScript frontend source required for building the plugin."
+  ],
+  "results": [
+    "Added a cleanup plan.",
+    "Moved Python backend modules into py_modules.",
+    "Updated local Python tooling to test and type-check py_modules.",
+    "Added static checks for Decky-required files and removed template-only paths."
+  ]
+}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Check if new/modified source files have matching test files
-files=$(git diff --cached --name-only --diff-filter=ACM | grep "^src/.*\.py$" || true)
+files=$(git diff --cached --name-only --diff-filter=ACM | grep "^py_modules/.*\.py$" || true)
 
 for f in $files; do
   base=$(basename "$f" .py)

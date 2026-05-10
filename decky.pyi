@@ -70,35 +70,35 @@ DECKY_PLUGIN_SETTINGS_DIR: str
 """
 The recommended path in which to store configuration files (created automatically).
 Environment variable: `DECKY_PLUGIN_SETTINGS_DIR`.
-e.g.: `/home/deck/homebrew/settings/decky-plugin-template`
+e.g.: `/home/deck/homebrew/settings/SDH-ludusavi`
 """
 
 DECKY_PLUGIN_RUNTIME_DIR: str
 """
 The recommended path in which to store runtime data (created automatically).
 Environment variable: `DECKY_PLUGIN_RUNTIME_DIR`.
-e.g.: `/home/deck/homebrew/data/decky-plugin-template`
+e.g.: `/home/deck/homebrew/data/SDH-ludusavi`
 """
 
 DECKY_PLUGIN_LOG_DIR: str
 """
 The recommended path in which to store persistent logs (created automatically).
 Environment variable: `DECKY_PLUGIN_LOG_DIR`.
-e.g.: `/home/deck/homebrew/logs/decky-plugin-template`
+e.g.: `/home/deck/homebrew/logs/SDH-ludusavi`
 """
 
 DECKY_PLUGIN_DIR: str
 """
 The root of the plugin's directory.
 Environment variable: `DECKY_PLUGIN_DIR`.
-e.g.: `/home/deck/homebrew/plugins/decky-plugin-template`
+e.g.: `/home/deck/homebrew/plugins/SDH-ludusavi`
 """
 
 DECKY_PLUGIN_NAME: str
 """
 The name of the plugin as specified in the 'plugin.json'.
 Environment variable: `DECKY_PLUGIN_NAME`.
-e.g.: `Example Plugin`
+e.g.: `SDH-ludusavi`
 """
 
 DECKY_PLUGIN_VERSION: str
@@ -112,14 +112,14 @@ DECKY_PLUGIN_AUTHOR: str
 """
 The author of the plugin as specified in the 'plugin.json'.
 Environment variable: `DECKY_PLUGIN_AUTHOR`.
-e.g.: `John Doe`
+e.g.: `David Beall`
 """
 
 DECKY_PLUGIN_LOG: str
 """
 The path to the plugin's main logfile.
 Environment variable: `DECKY_PLUGIN_LOG`.
-e.g.: `/home/deck/homebrew/logs/decky-plugin-template/plugin.log`
+e.g.: `/home/deck/homebrew/logs/SDH-ludusavi/plugin.log`
 """
 
 """

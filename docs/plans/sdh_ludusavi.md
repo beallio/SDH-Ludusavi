@@ -10,9 +10,9 @@ for save configuration; the plugin stores only local UI and operation state.
 
 - `main.py` provides the Decky RPC facade and delegates behavior to a typed Python
   service.
-- `src/sdh_ludusavi/service.py` owns settings, cached game status, operation locking,
+- `py_modules/sdh_ludusavi/service.py` owns settings, cached game status, operation locking,
   conservative automatic sync decisions, and recent logs.
-- `src/sdh_ludusavi/ludusavi.py` adapts `pyludusavi.Ludusavi` using the required
+- `py_modules/sdh_ludusavi/ludusavi.py` adapts `pyludusavi.Ludusavi` using the required
   Ludusavi Flatpak ID `com.github.mtkennerly.ludusavi`.
 - `src/index.tsx` renders the Decky panel and calls the backend methods through
   `@decky/api`.
@@ -58,4 +58,4 @@ Backend methods exposed to the frontend:
   rendering, force action state, spinner, refresh button, dependency-state display,
   and toast handling.
 - Validate with `./run.sh uv run ruff check . --fix`, `./run.sh uv run ruff format .`,
-  `./run.sh uv run ty check src/`, `./run.sh uv run pytest`, and the frontend build.
+  `./run.sh uv run ty check py_modules/`, `./run.sh uv run pytest`, and the frontend build.

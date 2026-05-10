@@ -77,12 +77,13 @@ Characteristics:
 ```
 pyproject.toml
 uv.lock
-src/{package}/
+py_modules/{package}/
+src/
 tests/
 uv dependency management
 ```
 
-A repository with `pyproject.toml`, `uv.lock`, `src/`, and `tests/` is Project Mode.
+A repository with `pyproject.toml`, `uv.lock`, `py_modules/`, `src/`, and `tests/` is Project Mode.
 
 ---
 
@@ -98,7 +99,8 @@ AGENTS.md
 pyproject.toml
 uv.lock
 run.sh
-src/{package}/
+py_modules/{package}/
+src/
 tests/
 scripts/check_tdd.sh
 docs/plans/
@@ -110,7 +112,8 @@ docs/agent_conversations/
 
 Directory purposes:
 
-- `src/{package}/`: importable project code.
+- `py_modules/{package}/`: Decky runtime-importable Python backend code.
+- `src/`: TypeScript frontend source.
 - `tests/`: automated tests.
 - `scripts/`: local enforcement and maintenance scripts.
 - `docs/plans/`: implementation plans created before code changes.
@@ -363,7 +366,7 @@ Before any commit, agents must execute:
 ```
 ./run.sh uv run ruff check . --fix
 ./run.sh uv run ruff format .
-./run.sh uv run ty check src/
+./run.sh uv run ty check py_modules/
 ./run.sh uv run pytest
 ```
 
