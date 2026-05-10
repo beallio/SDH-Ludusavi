@@ -1,57 +1,97 @@
-import os
+from __future__ import annotations
 
-# The decky plugin module is located at decky-loader/plugin
-# For easy intellisense checkout the decky-loader code repo
-# and add the `decky-loader/plugin/imports` path to `python.analysis.extraPaths` in `.vscode/settings.json`
+import os
+from pathlib import Path
+from typing import Any
+
 import decky
-import asyncio
+
+from sdh_ludusavi.service import OperationLockedError, SDHLudusaviService
+
 
 class Plugin:
-    # A normal method. It can be called from the TypeScript side using @decky/api.
-    async def add(self, left: int, right: int) -> int:
-        return left + right
+    def __init__(self) -> None:
+        self._backend: SDHLudusaviService | None = None
 
-    async def long_running(self):
-        await asyncio.sleep(15)
-        # Passing through a bunch of random data, just as an example
-        await decky.emit("timer_event", "Hello from the backend!", True, 2)
+    def _service(self) -> SDHLudusaviService:
+        if self._backend is None:
+            settings_dir = Path(getattr(decky, "DECKY_SETTINGS_DIR", "/tmp/sdh_ludusavi"))
+            self._backend = SDHLudusaviService(state_path=settings_dir / "sdh_ludusavi.json")
+        return self._backend
 
-    # Asyncio-compatible long-running code, executed in a task when the plugin is loaded
-    async def _main(self):
-        self.loop = asyncio.get_event_loop()
-        decky.logger.info("Hello World!")
+    async def get_settings(self) -> dict[str, bool]:
+        return self._service().get_settings()
 
-    # Function called first during the unload process, utilize this to handle your plugin being stopped, but not
-    # completely removed
-    async def _unload(self):
-        decky.logger.info("Goodnight World!")
-        pass
+    async def set_auto_sync_enabled(self, enabled: bool) -> dict[str, bool]:
+        return self._service().set_auto_sync_enabled(enabled)
 
-    # Function called after `_unload` during uninstall, utilize this to clean up processes and other remnants of your
-    # plugin that may remain on the system
-    async def _uninstall(self):
-        decky.logger.info("Goodbye World!")
-        pass
+    async def refresh_games(self) -> dict[str, object]:
+        return await self._call("refresh_games", self._service().refresh_games)
 
-    async def start_timer(self):
-        self.loop.create_task(self.long_running())
+    async def handle_game_start(
+        self, game_name: str, app_id: str | None = None
+    ) -> dict[str, object]:
+        return await self._call(
+            "handle_game_start",
+            lambda: self._service().handle_game_start(game_name, app_id),
+        )
 
-    # Migrations that should be performed before entering `_main()`.
-    async def _migration(self):
-        decky.logger.info("Migrating")
-        # Here's a migration example for logs:
-        # - `~/.config/decky-template/template.log` will be migrated to `decky.decky_LOG_DIR/template.log`
-        decky.migrate_logs(os.path.join(decky.DECKY_USER_HOME,
-                                               ".config", "decky-template", "template.log"))
-        # Here's a migration example for settings:
-        # - `~/homebrew/settings/template.json` is migrated to `decky.decky_SETTINGS_DIR/template.json`
-        # - `~/.config/decky-template/` all files and directories under this root are migrated to `decky.decky_SETTINGS_DIR/`
+    async def handle_game_exit(
+        self, game_name: str, app_id: str | None = None
+    ) -> dict[str, object]:
+        return await self._call(
+            "handle_game_exit",
+            lambda: self._service().handle_game_exit(game_name, app_id),
+        )
+
+    async def force_backup(self, game_name: str) -> dict[str, object]:
+        return await self._call("force_backup", lambda: self._service().force_backup(game_name))
+
+    async def force_restore(self, game_name: str) -> dict[str, object]:
+        return await self._call("force_restore", lambda: self._service().force_restore(game_name))
+
+    async def get_versions(self) -> dict[str, str] | dict[str, object]:
+        return await self._call("get_versions", self._service().get_versions)
+
+    async def get_operation_status(self) -> dict[str, object]:
+        return self._service().get_operation_status()
+
+    async def get_recent_logs(self) -> list[dict[str, object]]:
+        return self._service().get_recent_logs()
+
+    async def _main(self) -> None:
+        decky.logger.info("SDH-ludusavi backend loaded")
+        self._service()
+
+    async def _unload(self) -> None:
+        decky.logger.info("SDH-ludusavi backend unloaded")
+
+    async def _uninstall(self) -> None:
+        decky.logger.info("SDH-ludusavi backend uninstalled")
+
+    async def _migration(self) -> None:
+        decky.logger.info("Migrating SDH-ludusavi legacy paths")
+        decky.migrate_logs(
+            os.path.join(decky.DECKY_USER_HOME, ".config", "decky-template", "template.log"),
+            os.path.join(decky.DECKY_USER_HOME, ".config", "sdh-ludusavi", "plugin.log"),
+        )
         decky.migrate_settings(
             os.path.join(decky.DECKY_HOME, "settings", "template.json"),
-            os.path.join(decky.DECKY_USER_HOME, ".config", "decky-template"))
-        # Here's a migration example for runtime data:
-        # - `~/homebrew/template/` all files and directories under this root are migrated to `decky.decky_RUNTIME_DIR/`
-        # - `~/.local/share/decky-template/` all files and directories under this root are migrated to `decky.decky_RUNTIME_DIR/`
+            os.path.join(decky.DECKY_USER_HOME, ".config", "decky-template"),
+            os.path.join(decky.DECKY_USER_HOME, ".config", "sdh-ludusavi"),
+        )
         decky.migrate_runtime(
             os.path.join(decky.DECKY_HOME, "template"),
-            os.path.join(decky.DECKY_USER_HOME, ".local", "share", "decky-template"))
+            os.path.join(decky.DECKY_USER_HOME, ".local", "share", "decky-template"),
+            os.path.join(decky.DECKY_USER_HOME, ".local", "share", "sdh-ludusavi"),
+        )
+
+    async def _call(self, operation: str, callback: Any) -> Any:
+        try:
+            return callback()
+        except OperationLockedError as exc:
+            decky.logger.info("%s skipped: %s", operation, exc)
+            return {"status": "skipped", "reason": "operation_running", "message": str(exc)}
+        except Exception as exc:
+            decky.logger.exception("%s failed", operation)
+            return {"status": "failed", "message": str(exc)}

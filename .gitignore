@@ -36,6 +36,19 @@ Thumbs.db
 dist/
 
 __pycache__/
+**/__pycache__/
+*.pyc
+.ruff_cache/
+.pytest_cache/
+.cache/
+.venv/
+.venv
+dist/
+build/
+coverage.xml
+.coverage
+*.parquet
+/tmp/
 
 /.yalc
 yalc.lock

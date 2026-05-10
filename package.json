@@ -1,7 +1,7 @@
 {
-  "name": "decky-plugin-template",
+  "name": "sdh-ludusavi",
   "version": "0.0.1",
-  "description": "A template to quickly create decky plugins from scratch, based on TypeScript and webpack",
+  "description": "Decky Loader panel for Ludusavi save backup and restore controls",
   "type": "module",
   "scripts": {
     "build": "rollup -c",
@@ -10,21 +10,22 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SteamDeckHomebrew/decky-plugin-template.git"
+    "url": "git+https://github.com/beallio/SDH-ludusavi.git"
   },
   "keywords": [
     "decky",
     "plugin",
-    "plugin-template",
+    "ludusavi",
+    "save-backup",
     "steam-deck",
     "deck"
   ],
-  "author": "You <you@you.tld>",
-  "license": "BSD-3-Clause",
+  "author": "David Beall <6121439+beallio@users.noreply.github.com>",
+  "license": "MIT",
   "bugs": {
-    "url": "https://github.com/SteamDeckHomebrew/decky-plugin-template/issues"
+    "url": "https://github.com/beallio/SDH-ludusavi/issues"
   },
-  "homepage": "https://github.com/SteamDeckHomebrew/decky-plugin-template#readme",
+  "homepage": "https://github.com/beallio/SDH-ludusavi#readme",
   "devDependencies": {
     "@decky/rollup": "^1.0.2",
     "@decky/ui": "^4.11.0",

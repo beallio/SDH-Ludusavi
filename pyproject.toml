@@ -1,0 +1,64 @@
+[project]
+name = "SDH-ludusavi"
+dynamic = ["version"]
+description = "Decky Loader plugin for Ludusavi save backup and restore controls"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "David Beall", email = "6121439+beallio@users.noreply.github.com" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+keywords = ["decky", "ludusavi", "steam-deck", "backup", "saves"]
+dependencies = [
+    "pyludusavi>=0.1.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/beallio/SDH-ludusavi"
+Repository = "https://github.com/beallio/SDH-ludusavi"
+Issues = "https://github.com/beallio/SDH-ludusavi/issues"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sdh_ludusavi"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/sdh_ludusavi",
+    "README.md",
+    "LICENSE",
+]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+cache-dir = "/tmp/sdh_ludusavi/.uv_cache"
+
+[tool.ruff]
+line-length = 100
+cache-dir = "/tmp/sdh_ludusavi/.ruff_cache"
+
+[tool.pytest.ini_options]
+addopts = "--cov=src --cov-report=term"
+cache_dir = "/tmp/sdh_ludusavi/.pytest_cache"
+pythonpath = ["src"]
+
+[tool.coverage.run]
+data_file = "/tmp/sdh_ludusavi/.coverage"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.3.0",
+    "ty>=0.0.24",
+]

@@ -1,0 +1,6 @@
+protocol_version = "2"
+project = "SDH-ludusavi"
+execution_mode = "Project"
+cache_root = "/tmp/sdh_ludusavi"
+command_wrapper = "./run.sh"
+type_checker = "ty"
