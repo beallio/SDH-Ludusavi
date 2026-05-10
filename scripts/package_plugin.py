@@ -11,12 +11,13 @@ ARCHIVE_ROOT = "SDH-ludusavi"
 
 REQUIRED_FILES = (
     "LICENSE",
-    "dist/index.js",
     "main.py",
     "package.json",
     "plugin.json",
 )
+REQUIRED_RUNTIME_FILES = ("dist/index.js",)
 REQUIRED_DIRECTORIES = (
+    "dist",
     "py_modules/pyludusavi",
     "py_modules/pyludusavi-0.1.1.dist-info",
     "py_modules/sdh_ludusavi",
@@ -26,7 +27,7 @@ EXCLUDED_SUFFIXES = {".pyc", ".pyo"}
 
 
 def iter_required_plugin_paths(project_root: Path) -> tuple[str, ...]:
-    plugin_paths = list(REQUIRED_FILES)
+    plugin_paths = set(REQUIRED_FILES)
 
     for directory_name in REQUIRED_DIRECTORIES:
         directory = project_root / directory_name
@@ -41,7 +42,7 @@ def iter_required_plugin_paths(project_root: Path) -> tuple[str, ...]:
                 continue
             if path.suffix in EXCLUDED_SUFFIXES:
                 continue
-            plugin_paths.append(relative.as_posix())
+            plugin_paths.add(relative.as_posix())
 
     return tuple(sorted(plugin_paths))
 
@@ -53,7 +54,7 @@ def iter_required_archive_names(project_root: Path) -> tuple[str, ...]:
 
 
 def validate_required_files(project_root: Path) -> None:
-    for file_name in REQUIRED_FILES:
+    for file_name in REQUIRED_FILES + REQUIRED_RUNTIME_FILES:
         path = project_root / file_name
         if not path.is_file():
             raise FileNotFoundError(f"Required plugin file is missing: {file_name}")

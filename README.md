@@ -44,7 +44,8 @@ The installable Decky plugin is built from these required files:
 - `py_modules/sdh_ludusavi/`: Python backend modules on Decky's runtime import path.
 - `py_modules/pyludusavi/`: vendored pure-Python Ludusavi adapter dependency.
 - `src/index.tsx`: TypeScript frontend source.
-- `dist/index.js`: generated frontend bundle from `pnpm run build`.
+- `dist/`: generated frontend bundle, source map, and any built frontend assets from
+  `pnpm run build`.
 - `LICENSE`: redistributable license text.
 
 Install frontend dependencies when needed:
@@ -73,9 +74,10 @@ Create the Decky plugin zip:
 ./run.sh uv run python scripts/package_plugin.py
 ```
 
-The package is written to `out/SDH-ludusavi.zip` and contains a top-level `SDH-ludusavi/` plugin directory. The local post-commit hook runs
-`scripts/post_commit.sh`, which rebuilds `dist/index.js` and recreates that zip after
-each commit.
+The package is written to `out/SDH-ludusavi.zip` and contains a top-level
+`SDH-ludusavi/` plugin directory. The local post-commit hook runs
+`scripts/post_commit.sh`, which rebuilds `dist/` and recreates that zip after each
+commit.
 
 ## Status Messages
 
