@@ -1,5 +1,6 @@
 {
   "name": "SDH-ludusavi",
+  "version": "0.1.0",
   "author": "David Beall",
   "flags": ["debug", "_root"],
   "api_version": 1,

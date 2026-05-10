@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import zipfile
 from pathlib import Path
 
@@ -60,8 +61,42 @@ def validate_required_files(project_root: Path) -> None:
             raise FileNotFoundError(f"Required plugin file is missing: {file_name}")
 
 
+def validate_package_versions(project_root: Path) -> str:
+    plugin_version = _metadata_version(project_root / "plugin.json")
+    package_version = _metadata_version(project_root / "package.json")
+
+    missing = [
+        file_name
+        for file_name, metadata_version in (
+            ("plugin.json", plugin_version),
+            ("package.json", package_version),
+        )
+        if not metadata_version
+    ]
+    if missing:
+        raise ValueError(f"Plugin metadata versions must be set in: {', '.join(missing)}")
+    if plugin_version != package_version:
+        raise ValueError(
+            "Plugin metadata versions must match: "
+            f"plugin.json={plugin_version}, package.json={package_version}"
+        )
+    return plugin_version
+
+
+def _metadata_version(path: Path) -> str | None:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        return None
+    value = data.get("version")
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 def build_plugin_zip(project_root: Path, output_dir: Path) -> Path:
     validate_required_files(project_root)
+    validate_package_versions(project_root)
     plugin_paths = iter_required_plugin_paths(project_root)
 
     output_dir.mkdir(parents=True, exist_ok=True)

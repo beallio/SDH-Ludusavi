@@ -13,7 +13,7 @@ game status, operation status, and recent operation logs.
 - Ludusavi game selector using Ludusavi game names as canonical IDs.
 - Refresh Games, Force Backup, and Force Restore actions.
 - Manual backup and restore remain available when Automatic Sync is disabled.
-- Ludusavi and rclone version display through the Ludusavi Flatpak environment.
+- SDH-ludusavi, Ludusavi, and rclone version display.
 - Missing Flatpak, missing rclone, missing config, and command failures appear in
   the panel and logs.
 

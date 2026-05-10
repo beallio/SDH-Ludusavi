@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
+
+import pytest
 
 
 def load_package_module():
@@ -50,10 +53,14 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
 
     with zipfile.ZipFile(zip_path) as archive:
         names = set(archive.namelist())
+        plugin_metadata = json.loads(archive.read("SDH-ludusavi/plugin.json"))
+        package_metadata = json.loads(archive.read("SDH-ludusavi/package.json"))
 
     assert names == set(module.iter_required_archive_names(Path.cwd()))
     assert all(name.startswith("SDH-ludusavi/") for name in names)
     assert "SDH-ludusavi/plugin.json" in names
+    assert plugin_metadata["version"] == "0.1.0"
+    assert package_metadata["version"] == "0.1.0"
     assert "SDH-ludusavi/dist/index.js" in names
     assert "SDH-ludusavi/dist/index.js.map" in names
     assert "README.md" not in names
@@ -64,6 +71,31 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
     assert "SDH-ludusavi/docs/plans/sdh_ludusavi.md" not in names
     assert "node_modules/.modules.yaml" not in names
     assert "SDH-ludusavi/node_modules/.modules.yaml" not in names
+
+
+def test_package_metadata_versions_match_release_version() -> None:
+    module = load_package_module()
+    plugin_metadata = json.loads(Path("plugin.json").read_text())
+    package_metadata = json.loads(Path("package.json").read_text())
+
+    assert plugin_metadata["version"] == "0.1.0"
+    assert package_metadata["version"] == "0.1.0"
+    assert module.validate_package_versions(Path.cwd()) == "0.1.0"
+
+
+def test_package_validation_rejects_mismatched_metadata(tmp_path: Path) -> None:
+    module = load_package_module()
+    (tmp_path / "plugin.json").write_text(
+        json.dumps({"name": "SDH-ludusavi", "version": "0.1.0"}),
+        encoding="utf-8",
+    )
+    (tmp_path / "package.json").write_text(
+        json.dumps({"name": "sdh-ludusavi", "version": "0.1.1"}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Plugin metadata versions must match"):
+        module.validate_package_versions(tmp_path)
 
 
 def test_post_commit_script_builds_the_project_zip() -> None:

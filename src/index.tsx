@@ -49,6 +49,7 @@ type OperationResult = {
 };
 
 type Versions = {
+  sdh_ludusavi?: string;
   ludusavi?: string;
   rclone?: string;
   status?: string;
@@ -290,6 +291,7 @@ function Content() {
       <PanelSection title="Versions">
         <PanelSectionRow>
           <div>
+            <div>SDH-ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
             <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
             <div>rclone: {versions.rclone ?? "Unknown"}</div>
           </div>

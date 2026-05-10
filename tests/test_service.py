@@ -157,11 +157,19 @@ def test_global_operation_lock_blocks_new_operations(tmp_path: Path) -> None:
     assert service.get_operation_status()["name"] == "refresh"
 
 
-def test_version_lookup_and_missing_dependency_states_are_logged(tmp_path: Path) -> None:
+def test_version_lookup_and_missing_dependency_states_are_logged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("sdh_ludusavi.service.resolve_version", lambda: "0.1.dev104+gabcdef")
     adapter = FakeAdapter()
     service = service_with_state(tmp_path, adapter)
 
-    assert service.get_versions() == {"ludusavi": "ludusavi 0.31.0", "rclone": "rclone v1.66.0"}
+    assert service.get_versions() == {
+        "sdh_ludusavi": "0.1.dev104+gabcdef",
+        "ludusavi": "ludusavi 0.31.0",
+        "rclone": "rclone v1.66.0",
+    }
 
     adapter.refresh_error = RuntimeError("Ludusavi Flatpak is not installed")
     result = service.refresh_games()

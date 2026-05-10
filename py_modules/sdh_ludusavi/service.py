@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from ._version import resolve_version
+
 
 class OperationLockedError(RuntimeError):
     """Raised when a global Ludusavi operation is already running."""
@@ -177,7 +179,9 @@ class SDHLudusaviService:
         return {"status": "restored", "game": game.name, "result": result}
 
     def get_versions(self) -> dict[str, str]:
-        return self._run_locked("versions", None, self._adapter.get_versions)
+        versions = dict(self._run_locked("versions", None, self._adapter.get_versions))
+        versions["sdh_ludusavi"] = resolve_version()
+        return versions
 
     def get_operation_status(self) -> dict[str, object]:
         return self._operation.to_dict()

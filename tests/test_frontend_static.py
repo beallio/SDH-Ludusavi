@@ -38,6 +38,14 @@ def test_frontend_wires_backend_calls_and_toasts() -> None:
     assert "dependency_error" in source
 
 
+def test_frontend_exposes_sdh_ludusavi_version_row() -> None:
+    source = FRONTEND.read_text()
+
+    assert "sdh_ludusavi?: string;" in source
+    assert '<div>SDH-ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>' in source
+    assert source.index("SDH-ludusavi:") < source.index("Ludusavi:")
+
+
 def test_frontend_uses_decky_log_modal() -> None:
     source = FRONTEND.read_text()
 
