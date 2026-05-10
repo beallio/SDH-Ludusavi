@@ -77,6 +77,46 @@ The package is written to `out/SDH-ludusavi.zip` and contains a top-level `SDH-l
 `scripts/post_commit.sh`, which rebuilds `dist/index.js` and recreates that zip after
 each commit.
 
+## Status Messages
+
+Game status values:
+
+- `has_backup`: Ludusavi recognizes at least one backup for the game. The UI labels this as `Backup ready`.
+- `needs_first_backup`: Ludusavi recognizes the game, but no backup exists yet. This is the normal no-backup state. The UI labels this as `Needs first backup`.
+- `configured`: Ludusavi recognizes the game, but the plugin has not marked it as `has_backup` or `needs_first_backup`. This is a fallback state for ambiguous status data.
+- `error`: Ludusavi reported a failed file, registry item, or invalid game state for the game.
+
+Operation result values:
+
+- `backed_up`: A backup operation completed for the selected or matched game.
+- `restored`: A restore operation completed for the selected or matched game.
+- `skipped`: The plugin intentionally did not run backup or restore. See the skip reasons below.
+- `failed`: The frontend caught an unexpected operation failure and displays the error message.
+
+Skip reasons:
+
+- `auto_sync_disabled`: Automatic Sync is off. Manual Force Backup and Force Restore remain available.
+- `operation_running`: Another refresh, backup, restore, or version lookup is already running.
+- `unmatched_game`: The provided game name did not confidently match a Ludusavi game name.
+- `no_backup`: Restore was requested or considered, but Ludusavi has no backup for that game.
+- `local_current`: On game start, Ludusavi data indicated the local save is already current.
+- `ambiguous_recency`: On game start, the plugin could not prove that the backup is newer than the local save, so it skipped automatic restore.
+
+Operation status fields:
+
+- `is_running`: `true` while the global operation lock is held.
+- `name`: The active operation name, such as `refresh`, `backup`, `restore`, or `versions`.
+- `game_name`: The game associated with the active operation, when applicable.
+- `last_result`: `ok` after a successful locked operation, `failed` after an exception, or `null` before any operation result is recorded.
+- `last_error`: The latest operation error text, or `null` when no error is recorded.
+
+Other UI states:
+
+- `dependency_error`: A refresh-time dependency or Ludusavi error shown directly in the panel.
+- `No Ludusavi games found`: The UI has no cached Ludusavi games to show in the selector.
+- `Unknown`: Version information is not available for Ludusavi or rclone.
+- Log levels are currently `info` for normal decisions and `error` for refresh or dependency failures.
+
 ## Validation
 
 Before committing changes, run:
