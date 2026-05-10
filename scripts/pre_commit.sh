@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "Running protocol checks..."
+
+./run.sh uv run ruff check . --fix || {
+  echo "Ruff linting failed. Fix your code."
+  exit 1
+}
+
+echo "Formatting code..."
+./run.sh uv run ruff format .
+
+git add -u
+
+echo "Checking types..."
+./run.sh uv run ty check py_modules/sdh_ludusavi/ || {
+  echo "Type check failed."
+  exit 1
+}
+
+echo "Running tests..."
+./run.sh uv run pytest || {
+  echo "Pytest failed. Commit aborted."
+  exit 1
+}
+
+./run.sh bash scripts/check_tdd.sh || {
+  echo "TDD check failed."
+  exit 1
+}
+
+echo "Protocol checks passed. Committing..."

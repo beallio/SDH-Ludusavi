@@ -1,0 +1,24 @@
+{
+  "date": "2026-05-10",
+  "task_objective": "Rename the local checkout directory to SDH-ludusavi and update pre-commit validation before committing.",
+  "files_modified": [
+    ".git/hooks/pre-commit",
+    "docs/agent_conversations/2026-05-10_rename_project_directory_precommit.json",
+    "docs/plans/rename_project_directory_precommit.md",
+    "scripts/pre_commit.sh",
+    "tests/test_protocol.py"
+  ],
+  "tests_added": [
+    "tests/test_protocol.py tracked pre-commit hook assertions"
+  ],
+  "design_decisions": [
+    "Use the exact project name SDH-ludusavi for the local checkout directory.",
+    "Keep .git/hooks/pre-commit aligned with the current project checks.",
+    "Add scripts/pre_commit.sh as the tracked source for the hook behavior."
+  ],
+  "results": [
+    "Renamed /home/beallio/Dropbox/Scripts/decky-plugin-template to /home/beallio/Dropbox/Scripts/SDH-ludusavi.",
+    "Updated the local pre-commit hook to run through ./run.sh and type-check py_modules/sdh_ludusavi/.",
+    "Added tracked tests for the pre-commit command contract."
+  ]
+}

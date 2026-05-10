@@ -41,3 +41,13 @@ def test_template_only_files_are_removed():
         ".vscode/defsettings.json",
     ]:
         assert not Path(removed_path).exists()
+
+
+def test_tracked_pre_commit_hook_uses_current_project_checks():
+    hook = Path("scripts/pre_commit.sh").read_text()
+
+    assert "./run.sh uv run ruff check . --fix" in hook
+    assert "./run.sh uv run ruff format ." in hook
+    assert "./run.sh uv run ty check py_modules/sdh_ludusavi/" in hook
+    assert "./run.sh uv run pytest" in hook
+    assert "./run.sh bash scripts/check_tdd.sh" in hook
