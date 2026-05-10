@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import threading
 from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 from ._version import resolve_version
+
+LOGGER = logging.getLogger(__name__)
 
 
 class OperationLockedError(RuntimeError):
@@ -90,6 +94,7 @@ class SDHLudusaviService:
         self._auto_sync_enabled = False
         self._games: dict[str, GameStatus] = {}
         self._operation = OperationState()
+        self._operation_lock = threading.Lock()
         self._logs: deque[LogEntry] = deque(maxlen=log_limit)
         self._load_state()
 
@@ -192,11 +197,26 @@ class SDHLudusaviService:
     def _load_state(self) -> None:
         if not self._state_path.exists():
             return
-        data = json.loads(self._state_path.read_text(encoding="utf-8"))
+        try:
+            raw_state = self._state_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            self._warn_state_load(f"unreadable state file: {exc}")
+            return
+        if not raw_state.strip():
+            self._warn_state_load("empty state file")
+            return
+        try:
+            data = json.loads(raw_state)
+        except json.JSONDecodeError as exc:
+            self._warn_state_load(f"invalid JSON: {exc}")
+            return
+        if not isinstance(data, dict):
+            self._warn_state_load("state file must contain a JSON object")
+            return
         self._auto_sync_enabled = bool(data.get("auto_sync_enabled", False))
 
     def _save_state(self) -> None:
-        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        self._state_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         self._state_path.write_text(
             json.dumps(self.get_settings(), indent=2, sort_keys=True),
             encoding="utf-8",
@@ -228,7 +248,7 @@ class SDHLudusaviService:
         return self._games.get(normalized)
 
     def _run_locked(self, operation: str, game_name: str | None, callback: Any) -> Any:
-        if self._operation.is_running:
+        if self._operation.is_running or not self._operation_lock.acquire(blocking=False):
             raise OperationLockedError(f"{self._operation.name or 'operation'} is already running")
 
         self._operation.is_running = True
@@ -246,6 +266,7 @@ class SDHLudusaviService:
             return result
         finally:
             self._operation.is_running = False
+            self._operation_lock.release()
 
     def _skip(self, operation: str, game_name: str, reason: str) -> dict[str, object]:
         self._log("info", f"Skipped {operation} for {game_name}: {reason}", operation, game_name)
@@ -259,6 +280,9 @@ class SDHLudusaviService:
         game_name: str | None = None,
     ) -> None:
         self._logs.append(LogEntry(level, message, operation, game_name))
+
+    def _warn_state_load(self, reason: str) -> None:
+        LOGGER.warning("Ignoring SDH-ludusavi state at %s: %s", self._state_path, reason)
 
 
 def _normalize(game_name: str) -> str:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import threading
 from pathlib import Path
 
 import pytest
@@ -65,7 +67,46 @@ def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
     reloaded = service_with_state(tmp_path)
 
     assert reloaded.get_settings() == {"auto_sync_enabled": True}
-    assert json.loads((tmp_path / "state.json").read_text())["auto_sync_enabled"] is True
+    assert json.loads((tmp_path / "state.json").read_text()) == {"auto_sync_enabled": True}
+
+
+@pytest.mark.parametrize("contents", ["", "{", "[]"])
+def test_invalid_state_files_load_defaults_and_log_warning(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    contents: str,
+) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(contents, encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING, logger="sdh_ludusavi.service"):
+        service = service_with_state(tmp_path)
+
+    assert service.get_settings() == {"auto_sync_enabled": False}
+    assert "Ignoring SDH-ludusavi state" in caplog.text
+
+
+def test_unreadable_state_file_loads_defaults_and_logs_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text('{"auto_sync_enabled": true}', encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def unreadable(path: Path, *args: object, **kwargs: object) -> str:
+        if path == state_path:
+            raise OSError("permission denied")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", unreadable)
+
+    with caplog.at_level(logging.WARNING, logger="sdh_ludusavi.service"):
+        service = service_with_state(tmp_path)
+
+    assert service.get_settings() == {"auto_sync_enabled": False}
+    assert "permission denied" in caplog.text
 
 
 def test_refresh_games_caches_statuses(tmp_path: Path) -> None:
@@ -155,6 +196,40 @@ def test_global_operation_lock_blocks_new_operations(tmp_path: Path) -> None:
         service.force_backup("Hades")
 
     assert service.get_operation_status()["name"] == "refresh"
+
+
+def test_concurrent_operations_are_rejected_by_thread_safe_lock(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+    service.refresh_games()
+    entered = threading.Event()
+    release = threading.Event()
+    first_result: list[dict[str, object]] = []
+    first_errors: list[BaseException] = []
+
+    def slow_callback() -> dict[str, object]:
+        entered.set()
+        release.wait(timeout=1)
+        return {"ok": True}
+
+    def run_first_operation() -> None:
+        try:
+            first_result.append(service._run_locked("backup", "Hades", slow_callback))
+        except BaseException as exc:  # pragma: no cover - failure details are asserted below.
+            first_errors.append(exc)
+
+    first_thread = threading.Thread(target=run_first_operation)
+    first_thread.start()
+    assert entered.wait(timeout=1)
+
+    with pytest.raises(OperationLockedError):
+        service._run_locked("restore", "Hades", lambda: {"ok": True})
+
+    release.set()
+    first_thread.join(timeout=1)
+
+    assert not first_thread.is_alive()
+    assert first_errors == []
+    assert first_result == [{"ok": True}]
 
 
 def test_version_lookup_and_missing_dependency_states_are_logged(

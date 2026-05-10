@@ -34,6 +34,21 @@ Use the wrapper so Python virtual environments and caches stay outside Dropbox:
 
 The wrapper stores Python tooling state under `/tmp/sdh_ludusavi`.
 
+## State and Runtime Privileges
+
+Runtime settings are stored in Decky/plugin-owned settings space at
+`DECKY_SETTINGS_DIR/sdh_ludusavi.json` when Decky provides that directory. If Decky does
+not provide a settings directory, the backend falls back to
+`DECKY_USER_HOME/.config/sdh-ludusavi/sdh_ludusavi.json` with a private `0700` config
+directory, then to the current user's home config directory if `DECKY_USER_HOME` is not
+available. Tooling caches still live under `/tmp/sdh_ludusavi`; plugin settings do not.
+
+`plugin.json` still includes Decky's `_root` flag. That remains intentional until the
+backend is validated on a real Steam Deck without root for Ludusavi Flatpak access,
+settings persistence, migration paths, and backup/restore behavior. The flag should be
+removed only after that validation proves the plugin works correctly without elevated
+Decky backend privileges.
+
 ## Project Structure
 
 The installable Decky plugin is built from these required files:

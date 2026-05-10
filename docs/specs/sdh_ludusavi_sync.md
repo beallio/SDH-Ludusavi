@@ -21,6 +21,19 @@ Ludusavi game names are canonical game IDs. Steam app IDs are optional metadata.
 available when automatic sync is disabled, subject to game status and the global
 operation lock.
 
+Runtime state is stored as `sdh_ludusavi.json` in `DECKY_SETTINGS_DIR` when Decky
+provides that directory. If Decky does not provide it, the backend uses a private
+`0700` fallback under `DECKY_USER_HOME/.config/sdh-ludusavi/`, then the current user's
+home config directory if `DECKY_USER_HOME` is unavailable. The persisted JSON schema is
+unchanged:
+
+```json
+{"auto_sync_enabled": true}
+```
+
+Empty, corrupt, unreadable, or non-object state files are ignored with a warning and
+default to `auto_sync_enabled: false`.
+
 ## Game Status
 
 Each game has one of these statuses:
@@ -58,3 +71,9 @@ The Decky panel includes an Automatic Sync toggle, a Ludusavi game selector, ref
 force backup, force restore, progress state, Ludusavi/rclone versions, dependency
 states, and a recent log panel. Backup and restore events emit Decky toast
 notifications for start, success, skipped, and failure outcomes.
+
+## Runtime Privilege
+
+`plugin.json` keeps Decky's `_root` flag for now. Removing it requires validation on a
+real Steam Deck that Ludusavi Flatpak access, settings persistence, migration paths, and
+backup/restore operations all work without elevated Decky backend privileges.
