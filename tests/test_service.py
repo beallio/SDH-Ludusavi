@@ -67,8 +67,8 @@ def test_settings_do_not_initialize_ludusavi_adapter(tmp_path: Path) -> None:
         state_path=tmp_path / "state.json",
     )
 
-    assert service.get_settings() == {"auto_sync_enabled": False}
-    assert service.set_auto_sync_enabled(True) == {"auto_sync_enabled": True}
+    assert service.get_settings() == {"auto_sync_enabled": False, "selected_game": ""}
+    assert service.set_auto_sync_enabled(True) == {"auto_sync_enabled": True, "selected_game": ""}
 
 
 def test_refresh_reports_ludusavi_adapter_initialization_failure(tmp_path: Path) -> None:
@@ -112,13 +112,16 @@ def test_ludusavi_adapter_factory_is_reused_after_success(tmp_path: Path) -> Non
 def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
 
-    assert service.get_settings() == {"auto_sync_enabled": False}
-    assert service.set_auto_sync_enabled(True) == {"auto_sync_enabled": True}
+    assert service.get_settings() == {"auto_sync_enabled": False, "selected_game": ""}
+    assert service.set_auto_sync_enabled(True) == {"auto_sync_enabled": True, "selected_game": ""}
 
     reloaded = service_with_state(tmp_path)
 
-    assert reloaded.get_settings() == {"auto_sync_enabled": True}
-    assert json.loads((tmp_path / "state.json").read_text()) == {"auto_sync_enabled": True}
+    assert reloaded.get_settings() == {"auto_sync_enabled": True, "selected_game": ""}
+    assert json.loads((tmp_path / "state.json").read_text()) == {
+        "auto_sync_enabled": True,
+        "selected_game": "",
+    }
 
 
 def test_failed_state_save_keeps_existing_state_file(
@@ -158,7 +161,7 @@ def test_invalid_state_files_load_defaults_and_log_warning(
     with caplog.at_level(logging.WARNING, logger="sdh_ludusavi.service"):
         service = service_with_state(tmp_path)
 
-    assert service.get_settings() == {"auto_sync_enabled": False}
+    assert service.get_settings() == {"auto_sync_enabled": False, "selected_game": ""}
     assert "Ignoring SDH-ludusavi state" in caplog.text
 
 
@@ -181,7 +184,7 @@ def test_unreadable_state_file_loads_defaults_and_logs_warning(
     with caplog.at_level(logging.WARNING, logger="sdh_ludusavi.service"):
         service = service_with_state(tmp_path)
 
-    assert service.get_settings() == {"auto_sync_enabled": False}
+    assert service.get_settings() == {"auto_sync_enabled": False, "selected_game": ""}
     assert "permission denied" in caplog.text
 
 
@@ -257,7 +260,7 @@ def test_force_operations_work_when_auto_sync_disabled(tmp_path: Path) -> None:
     backup = service.force_backup("Hades")
     restore = service.force_restore("Hades")
 
-    assert service.get_settings() == {"auto_sync_enabled": False}
+    assert service.get_settings() == {"auto_sync_enabled": False, "selected_game": ""}
     assert backup["status"] == "backed_up"
     assert restore["status"] == "restored"
     assert adapter.backups == ["Hades"]

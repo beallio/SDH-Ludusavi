@@ -6,7 +6,8 @@ import {
   PanelSectionRow,
   showModal,
   staticClasses,
-  ToggleField
+  ToggleField,
+  Spinner
 } from "@decky/ui";
 import {
   callable,
@@ -18,6 +19,7 @@ import { FaDatabase } from "react-icons/fa";
 
 type Settings = {
   auto_sync_enabled: boolean;
+  selected_game: string;
 };
 
 type GameStatus = {
@@ -71,12 +73,25 @@ type LogModalProps = {
 
 const getSettings = callable<[], Settings>("get_settings");
 const setAutoSyncEnabled = callable<[enabled: boolean], Settings>("set_auto_sync_enabled");
+const setSelectedGameCall = callable<[gameName: string], Settings>("set_selected_game");
 const refreshGamesCall = callable<[force: boolean], RefreshResult>("refresh_games");
 const forceBackupCall = callable<[gameName: string], OperationResult>("force_backup");
 const forceRestoreCall = callable<[gameName: string], OperationResult>("force_restore");
 const getVersions = callable<[], Versions>("get_versions");
 const getOperationStatus = callable<[], OperationStatus>("get_operation_status");
 const getRecentLogs = callable<[], LogEntry[]>("get_recent_logs");
+const logCall = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
+
+const log = (level: "info" | "debug" | "warning" | "error", message: string, operation?: string, gameName?: string) => {
+  const prefix = `SDH-ludusavi${operation ? `:${operation}` : ""}${gameName ? ` [${gameName}]` : ""}`;
+  const fullMsg = `${prefix}: ${message}`;
+  
+  if (level === "error") console.error(fullMsg);
+  else if (level === "warning") console.warn(fullMsg);
+  else console.log(fullMsg);
+
+  void logCall(level, message, operation, gameName);
+};
 
 const statusLabels: Record<GameStatus["status"], string> = {
   configured: "Configured",
@@ -84,6 +99,17 @@ const statusLabels: Record<GameStatus["status"], string> = {
   needs_first_backup: "Needs first backup",
   error: "Error"
 };
+
+function SpinnerButton({ children, loading, ...props }: any) {
+  return (
+    <ButtonItem {...props} disabled={props.disabled || loading}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px" }}>
+        {loading && <Spinner style={{ width: "16px", height: "16px" }} />}
+        {children}
+      </div>
+    </ButtonItem>
+  );
+}
 
 function LogModal({ logs, closeModal }: LogModalProps) {
   return (
@@ -113,7 +139,7 @@ function LogModal({ logs, closeModal }: LogModalProps) {
 }
 
 function Content() {
-  const [settings, setSettings] = useState<Settings>({ auto_sync_enabled: false });
+  const [settings, setSettings] = useState<Settings>({ auto_sync_enabled: false, selected_game: "" });
   const [games, setGames] = useState<GameStatus[]>([]);
   const [selectedGame, setSelectedGame] = useState("");
   const [versions, setVersions] = useState<Versions>({});
@@ -134,53 +160,57 @@ function Content() {
   const isBusy = operation.is_running || busyLabel !== null;
 
   useEffect(() => {
-    console.log("SDH-ludusavi: Plugin mounted, starting initial load");
+    log("info", "Plugin mounted, starting initial load");
     void loadInitial();
   }, []);
 
   const loadInitial = async () => {
     setBusyLabel("Loading");
     try {
-      console.log("SDH-ludusavi: Fetching initial settings and versions");
+      log("debug", "Fetching initial settings and versions");
       const loadedSettings = await getSettings();
-      console.log("SDH-ludusavi: Loaded settings:", loadedSettings);
+      log("debug", `Loaded settings: ${JSON.stringify(loadedSettings)}`);
       setSettings(loadedSettings);
+      if (loadedSettings.selected_game) {
+        setSelectedGame(loadedSettings.selected_game);
+      }
 
       const loadedVersions = await getVersions();
-      console.log("SDH-ludusavi: Loaded versions:", loadedVersions);
+      log("debug", `Loaded versions: ${JSON.stringify(loadedVersions)}`);
       setVersions(loadedVersions);
 
-      console.log("SDH-ludusavi: Initializing game list (cached)");
+      log("debug", "Initializing game list (cached)");
       const refreshed = await refreshGamesCall(false);
-      applyRefreshResult(refreshed);
+      applyRefreshResult(refreshed, loadedSettings.selected_game);
 
       const loadedOperation = await getOperationStatus();
       setOperation(loadedOperation);
       const loadedLogs = await getRecentLogs();
       setLogs(loadedLogs);
     } catch (error) {
-      console.error("SDH-ludusavi: Initial load failed:", error);
+      log("error", `Initial load failed: ${error}`);
       setLogs(await getRecentLogs().catch(() => []));
     } finally {
       setBusyLabel(null);
     }
   };
 
-  const applyRefreshResult = (result: RefreshResult) => {
-    console.log(`SDH-ludusavi: Applying refresh result (${result.games.length} games)`);
+  const applyRefreshResult = (result: RefreshResult, preferredGame?: string) => {
+    log("debug", `Applying refresh result (${result.games.length} games)`);
     setGames(result.games);
     setSelectedGame((current) => {
-      if (current && result.games.some((game) => game.name === current)) {
-        return current;
+      const target = preferredGame || current;
+      if (target && result.games.some((game) => game.name === target)) {
+        return target;
       }
       const firstGame = result.games[0]?.name ?? "";
-      console.log(`SDH-ludusavi: Defaulting selected game to ${firstGame}`);
+      log("debug", `Defaulting selected game to ${firstGame}`);
       return firstGame;
     });
   };
 
   const refreshGames = async () => {
-    console.log("SDH-ludusavi: Manual refresh triggered");
+    log("info", "Manual refresh triggered");
     setBusyLabel("Refreshing games");
     try {
       const result = await refreshGamesCall(true);
@@ -192,26 +222,38 @@ function Content() {
         body: "Ludusavi game status refreshed"
       });
     } catch (error) {
-      console.error("SDH-ludusavi: Manual refresh failed:", error);
+      log("error", `Manual refresh failed: ${error}`);
     } finally {
       setBusyLabel(null);
     }
   };
 
   const toggleAutoSync = async (enabled: boolean) => {
-    console.log(`SDH-ludusavi: Toggling auto-sync to ${enabled}`);
+    log("info", `Toggling auto-sync to ${enabled}`);
     setBusyLabel("Updating settings");
     try {
       const updated = await setAutoSyncEnabled(enabled);
       setSettings(updated);
     } catch (error) {
-      console.error("SDH-ludusavi: Failed to toggle auto-sync:", error);
+      log("error", `Failed to toggle auto-sync: ${error}`);
       toaster.toast({
         title: "SDH-ludusavi settings failed",
         body: error instanceof Error ? error.message : String(error)
       });
     } finally {
       setBusyLabel(null);
+    }
+  };
+
+  const onGameChange = async (data: any) => {
+    const value = typeof data === 'object' ? data?.data : data;
+    log("info", `Selected game changed to ${value}`);
+    setSelectedGame(value);
+    try {
+      const updated = await setSelectedGameCall(value);
+      setSettings(updated);
+    } catch (error) {
+      log("error", `Failed to persist selected game: ${error}`);
     }
   };
 
@@ -222,12 +264,12 @@ function Content() {
     if (!selectedGame) {
       return;
     }
-    console.log(`SDH-ludusavi: Triggering force ${label} for ${selectedGame}`);
+    log("info", `Triggering force ${label} for ${selectedGame}`, label, selectedGame);
     setBusyLabel(`${label} running`);
     toaster.toast({ title: `SDH-ludusavi ${label}`, body: `${label} started for ${selectedGame}` });
     try {
       const result = await operationCall(selectedGame);
-      console.log(`SDH-ludusavi: Force ${label} completed:`, result);
+      log("info", `Force ${label} completed: ${JSON.stringify(result)}`, label, selectedGame);
       toaster.toast({
         title: `SDH-ludusavi ${label}`,
         body: summarizeOperationResult(result, label)
@@ -237,7 +279,7 @@ function Content() {
       setOperation(await getOperationStatus());
       setLogs(await getRecentLogs());
     } catch (error) {
-      console.error(`SDH-ludusavi: Force ${label} failed:`, error);
+      log("error", `Force ${label} failed: ${error}`, label, selectedGame);
       toaster.toast({
         title: `SDH-ludusavi ${label} failed`,
         body: error instanceof Error ? error.message : String(error)
@@ -265,11 +307,7 @@ function Content() {
               data: game.name
             }))}
             selectedOption={selectedGame}
-            onChange={(data: any) => {
-              const value = typeof data === 'object' ? data?.data : data;
-              console.log(`SDH-ludusavi: Selected game changed to ${value}`);
-              setSelectedGame(value);
-            }}
+            onChange={(data: any) => void onGameChange(data)}
           />
         </PanelSectionRow>
 
@@ -281,32 +319,39 @@ function Content() {
         </PanelSectionRow>
 
         <PanelSectionRow>
-          <ButtonItem layout="below" disabled={isBusy} onClick={() => void refreshGames()}>
+          <SpinnerButton 
+            layout="below" 
+            disabled={isBusy} 
+            loading={busyLabel === "Refreshing games"}
+            onClick={() => void refreshGames()}
+          >
             Refresh Games
-          </ButtonItem>
+          </SpinnerButton>
         </PanelSectionRow>
 
         <PanelSectionRow>
-          <ButtonItem
+          <SpinnerButton
             layout="below"
             disabled={isBusy || !selectedStatus}
+            loading={busyLabel === "Backup running"}
             onClick={() => void runForceOperation("Backup", forceBackupCall)}
           >
             Force Backup
-          </ButtonItem>
+          </SpinnerButton>
         </PanelSectionRow>
 
         <PanelSectionRow>
-          <ButtonItem
+          <SpinnerButton
             layout="below"
             disabled={isBusy || selectedStatus?.status !== "has_backup"}
+            loading={busyLabel === "Restore running"}
             onClick={() => void runForceOperation("Restore", forceRestoreCall)}
           >
             Force Restore
-          </ButtonItem>
+          </SpinnerButton>
         </PanelSectionRow>
 
-        {isBusy ? (
+        {isBusy && busyLabel === "Loading" ? (
           <PanelSectionRow>
             <div style={{ color: "#60a5fa", fontSize: "14px", marginTop: "12px", padding: "0 4px", fontWeight: 500 }}>
               {busyLabel ?? `Running ${operation.name ?? "operation"}`}

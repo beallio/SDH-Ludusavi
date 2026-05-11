@@ -24,12 +24,14 @@ def test_frontend_wires_backend_calls_and_toasts() -> None:
     for callable_name in [
         '"get_settings"',
         '"set_auto_sync_enabled"',
+        '"set_selected_game"',
         '"refresh_games"',
         '"force_backup"',
         '"force_restore"',
         '"get_versions"',
         '"get_operation_status"',
         '"get_recent_logs"',
+        '"log"',
     ]:
         assert callable_name in source
 
@@ -61,7 +63,7 @@ def test_frontend_initial_load_fetches_logs_after_refresh() -> None:
     source = FRONTEND.read_text()
 
     assert "const loadedLogs = await getRecentLogs();" in source
-    assert source.index("applyRefreshResult(refreshed);") < source.index(
+    assert source.index("applyRefreshResult(refreshed") < source.index(
         "const loadedLogs = await getRecentLogs();"
     )
 
@@ -114,6 +116,6 @@ def test_frontend_uses_simplified_dropdown_labels() -> None:
 def test_frontend_includes_verbose_logging() -> None:
     source = FRONTEND.read_text()
 
-    assert 'console.log("SDH-ludusavi: Plugin mounted, starting initial load")' in source
-    assert "console.log(`SDH-ludusavi: Selected game changed to ${value}`)" in source
-    assert 'console.error("SDH-ludusavi: Initial load failed:", error)' in source
+    assert 'log("info", "Plugin mounted, starting initial load")' in source
+    assert 'log("info", `Selected game changed to ${value}`)' in source
+    assert 'log("error", `Initial load failed: ${error}`)' in source

@@ -34,11 +34,36 @@ class Plugin:
                     self._backend = SDHLudusaviService(state_path=_state_path())
         return self._backend
 
-    async def get_settings(self) -> dict[str, bool]:
+    async def get_settings(self) -> dict[str, Any]:
         return self._service().get_settings()
 
-    async def set_auto_sync_enabled(self, enabled: bool) -> dict[str, bool]:
+    async def set_auto_sync_enabled(self, enabled: bool) -> dict[str, Any]:
         return self._service().set_auto_sync_enabled(enabled)
+
+    async def set_selected_game(self, game_name: str) -> dict[str, Any]:
+        return self._service().set_selected_game(game_name)
+
+    async def log(
+        self,
+        level: str,
+        message: str,
+        operation: str | None = None,
+        game_name: str | None = None,
+    ) -> None:
+        """
+        Route frontend logs to the backend service (LogModal) and decky.logger.
+        """
+        self._service().log(level, message, operation, game_name)
+        log_msg = f"{operation or 'frontend'}: {message}"
+        if game_name:
+            log_msg = f"[{game_name}] {log_msg}"
+
+        if level == "error":
+            decky.logger.error(log_msg)
+        elif level == "warning":
+            decky.logger.warning(log_msg)
+        else:
+            decky.logger.info(log_msg)
 
     async def refresh_games(self, force: bool = False) -> dict[str, object]:
         return await self._call("refresh_games", lambda: self._service().refresh_games(force))
