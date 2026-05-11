@@ -13,7 +13,7 @@ def test_frontend_exposes_sdh_ludusavi_panel_controls() -> None:
         "Refresh Games",
         "Force Backup",
         "Force Restore",
-        "Show Logs",
+        "View Logs",
     ]:
         assert text in source
 

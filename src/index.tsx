@@ -235,6 +235,11 @@ function Content() {
 
   return (
     <>
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "16px", backgroundColor: "rgba(35, 41, 49, 1)", borderBottom: "1px solid rgba(51, 65, 85, 0.5)" }}>
+        <FaDatabase style={{ color: "white", width: "20px", height: "20px" }} />
+        <h1 style={{ color: "white", fontWeight: 600, fontSize: "18px", margin: 0 }}>SDH-ludusavi</h1>
+      </div>
+
       <PanelSection title="Sync">
         <ToggleField
           label="Automatic Sync"
@@ -246,7 +251,7 @@ function Content() {
         <PanelSectionRow>
           <DropdownItem
             menuLabel="Select Game"
-            rgOptions={games.map(game => ({
+            rgOptions={games.map((game) => ({
               label: `${game.name} - ${statusLabels[game.status]}`,
               data: game.name
             }))}
@@ -259,10 +264,9 @@ function Content() {
         </PanelSectionRow>
 
         <PanelSectionRow>
-          <div>
-            <div>{selectedStatus ? statusLabels[selectedStatus.status] : "No Ludusavi games found"}</div>
-            {selectedStatus?.error ? <div>{selectedStatus.error}</div> : null}
-            {dependencyError ? <div>{dependencyError}</div> : null}
+          <div style={{ color: "#cbd5e1", fontSize: "14px", margin: "12px 0", padding: "0 4px" }}>
+            <span style={{ color: "#64748b", fontWeight: "bold", marginRight: "8px" }}>Status:</span>
+            {selectedStatus ? statusLabels[selectedStatus.status] : "No Ludusavi games found"}
           </div>
         </PanelSectionRow>
 
@@ -285,7 +289,7 @@ function Content() {
         <PanelSectionRow>
           <ButtonItem
             layout="below"
-            disabled={isBusy || !selectedStatus?.has_backup}
+            disabled={isBusy || selectedStatus?.status !== "has_backup"}
             onClick={() => void runForceOperation("Restore", forceRestoreCall)}
           >
             Force Restore
@@ -294,14 +298,16 @@ function Content() {
 
         {isBusy ? (
           <PanelSectionRow>
-            <div>{busyLabel ?? `Running ${operation.name ?? "operation"}`}</div>
+            <div style={{ color: "#60a5fa", fontSize: "14px", marginTop: "12px", padding: "0 4px", fontWeight: 500 }}>
+              {busyLabel ?? `Running ${operation.name ?? "operation"}`}
+            </div>
           </PanelSectionRow>
         ) : null}
       </PanelSection>
 
       <PanelSection title="Versions">
         <PanelSectionRow>
-          <div>
+          <div style={{ color: "#cbd5e1", fontSize: "14px", display: "flex", flexDirection: "column", gap: "4px", padding: "12px", backgroundColor: "rgba(30, 41, 59, 0.3)", borderRadius: "4px" }}>
             <div>SDH-ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
             <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
           </div>
@@ -311,7 +317,7 @@ function Content() {
       <PanelSection title="Logs">
         <PanelSectionRow>
           <ButtonItem layout="below" onClick={() => showModal(<LogModal logs={logs} />)}>
-            Show Logs
+            View Logs
           </ButtonItem>
         </PanelSectionRow>
       </PanelSection>
