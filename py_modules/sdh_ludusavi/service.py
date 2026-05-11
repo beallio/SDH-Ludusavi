@@ -116,8 +116,6 @@ class SDHLudusaviService:
             Exception
         ) as exc:  # pragma: no cover - concrete exception types come from pyludusavi.
             message = str(exc)
-            self._operation.last_error = message
-            self._log("error", message, operation="refresh")
             return {"games": self._cached_games(), "dependency_error": message}
 
         return {"games": [game.to_dict() for game in games], "dependency_error": None}
@@ -259,6 +257,7 @@ class SDHLudusaviService:
         if self._operation.is_running or not self._operation_lock.acquire(blocking=False):
             raise OperationLockedError(f"{self._operation.name or 'operation'} is already running")
 
+        self._log("info", f"Starting {operation}", operation, game_name)
         self._operation.is_running = True
         self._operation.name = operation
         self._operation.game_name = game_name
@@ -268,6 +267,7 @@ class SDHLudusaviService:
         except Exception as exc:
             self._operation.last_error = str(exc)
             self._operation.last_result = "failed"
+            self._log("error", f"{operation} failed: {exc}", operation, game_name)
             raise
         else:
             self._operation.last_result = "ok"

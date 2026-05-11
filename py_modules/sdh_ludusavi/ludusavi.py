@@ -113,16 +113,21 @@ def _game_error(game: dict[str, Any]) -> str | None:
 def _rclone_command_from_prefix(command_prefix: list[str]) -> list[str] | None:
     try:
         run_index = command_prefix.index("run")
-    except ValueError:
+        for app_index in range(run_index + 1, len(command_prefix)):
+            if not command_prefix[app_index].startswith("-"):
+                return command_prefix[:app_index] + [
+                    "--command=rclone",
+                    command_prefix[app_index],
+                    "version",
+                ]
         return None
+    except ValueError:
+        pass
 
-    for app_index in range(run_index + 1, len(command_prefix)):
-        if not command_prefix[app_index].startswith("-"):
-            return command_prefix[:app_index] + [
-                "--command=rclone",
-                command_prefix[app_index],
-                "version",
-            ]
+    if command_prefix and command_prefix[-1].endswith("ludusavi"):
+        rclone_path = command_prefix[-1].replace("ludusavi", "rclone")
+        return command_prefix[:-1] + [rclone_path, "version"]
+
     return None
 
 
