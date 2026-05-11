@@ -17,10 +17,13 @@ STATE_FILE_NAME = "sdh_ludusavi.json"
 class Plugin:
     def __init__(self) -> None:
         self._backend: SDHLudusaviService | None = None
+        self._backend_lock = threading.Lock()
 
     def _service(self) -> SDHLudusaviService:
         if self._backend is None:
-            self._backend = SDHLudusaviService(state_path=_state_path())
+            with self._backend_lock:
+                if self._backend is None:
+                    self._backend = SDHLudusaviService(state_path=_state_path())
         return self._backend
 
     async def get_settings(self) -> dict[str, bool]:
@@ -97,6 +100,11 @@ class Plugin:
             decky.logger.info("%s skipped: %s", operation, exc)
             return {"status": "skipped", "reason": "operation_running", "message": str(exc)}
         except Exception as exc:
+            decky.logger.exception("%s failed", operation)
+            return {"status": "failed", "message": str(exc)}
+        except asyncio.CancelledError:
+            raise
+        except BaseException as exc:
             decky.logger.exception("%s failed", operation)
             return {"status": "failed", "message": str(exc)}
 

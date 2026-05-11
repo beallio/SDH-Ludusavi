@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 from collections import deque
@@ -217,10 +218,16 @@ class SDHLudusaviService:
 
     def _save_state(self) -> None:
         self._state_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-        self._state_path.write_text(
-            json.dumps(self.get_settings(), indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+        temp_path = self._state_path.with_name(f".{self._state_path.name}.tmp")
+        try:
+            temp_path.write_text(
+                json.dumps(self.get_settings(), indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            os.replace(temp_path, self._state_path)
+        except OSError:
+            temp_path.unlink(missing_ok=True)
+            raise
 
     def _refresh_statuses_unlocked(self) -> list[GameStatus]:
         games = [self._coerce_game_status(game) for game in self._adapter.refresh_statuses()]
@@ -266,6 +273,8 @@ class SDHLudusaviService:
             return result
         finally:
             self._operation.is_running = False
+            self._operation.name = None
+            self._operation.game_name = None
             self._operation_lock.release()
 
     def _skip(self, operation: str, game_name: str, reason: str) -> dict[str, object]:

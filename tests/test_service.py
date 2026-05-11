@@ -70,6 +70,31 @@ def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
     assert json.loads((tmp_path / "state.json").read_text()) == {"auto_sync_enabled": True}
 
 
+def test_failed_state_save_keeps_existing_state_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text('{"auto_sync_enabled": false}', encoding="utf-8")
+    service = service_with_state(tmp_path)
+    original_write_text = Path.write_text
+
+    def fail_after_partial_temp_write(
+        path: Path, data: str, *args: object, **kwargs: object
+    ) -> int:
+        if path.parent == tmp_path:
+            original_write_text(path, '{"auto_sync_enabled":', *args, **kwargs)
+            raise OSError("disk full")
+        return original_write_text(path, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_after_partial_temp_write)
+
+    with pytest.raises(OSError, match="disk full"):
+        service.set_auto_sync_enabled(True)
+
+    assert json.loads(state_path.read_text(encoding="utf-8")) == {"auto_sync_enabled": False}
+
+
 @pytest.mark.parametrize("contents", ["", "{", "[]"])
 def test_invalid_state_files_load_defaults_and_log_warning(
     tmp_path: Path,
@@ -118,6 +143,8 @@ def test_refresh_games_caches_statuses(tmp_path: Path) -> None:
     assert result["games"][0]["status"] == "has_backup"
     assert result["games"][1]["status"] == "needs_first_backup"
     assert service.get_operation_status()["is_running"] is False
+    assert service.get_operation_status()["name"] is None
+    assert service.get_operation_status()["game_name"] is None
 
 
 def test_start_matches_steam_and_non_steam_names_conservatively(tmp_path: Path) -> None:
