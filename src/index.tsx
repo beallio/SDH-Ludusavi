@@ -62,6 +62,7 @@ type Versions = {
 type LogEntry = {
   level: string;
   message: string;
+  timestamp: string;
   operation: string | null;
   game_name: string | null;
 };
@@ -104,7 +105,7 @@ function SpinnerButton({ children, loading, ...props }: any) {
   return (
     <ButtonItem {...props} disabled={props.disabled || loading}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px" }}>
-        {loading && <Spinner style={{ width: "16px", height: "16px" }} />}
+        {loading && <Spinner style={{ width: "16px", height: "16px", color: "#1a9fff" }} />}
         {children}
       </div>
     </ButtonItem>
@@ -392,7 +393,7 @@ function summarizeOperationResult(result: OperationResult, label: "Backup" | "Re
 
 function formatLogEntry(entry: LogEntry) {
   const game = entry.game_name ? ` ${entry.game_name}` : "";
-  return `[${entry.level}]${game} ${entry.message}`;
+  return `[${entry.timestamp}] [${entry.level}]${game} ${entry.message}`;
 }
 
 export default definePlugin(() => {

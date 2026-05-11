@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import threading
+from datetime import datetime
 from collections.abc import Callable
 from collections import deque
 from dataclasses import asdict, dataclass
@@ -78,6 +79,7 @@ class LogEntry:
 
     level: str
     message: str
+    timestamp: str
     operation: str | None = None
     game_name: str | None = None
 
@@ -289,8 +291,8 @@ class SDHLudusaviService:
         return self._operation.to_dict()
 
     def get_recent_logs(self) -> list[dict[str, object]]:
-        """Return the most recent log entries from the ring buffer."""
-        return [entry.to_dict() for entry in reversed(self._logs)]
+        """Return the most recent log entries from the ring buffer in chronological order."""
+        return [entry.to_dict() for entry in self._logs]
 
     def _load_state(self) -> None:
         """Load the plugin settings from the persistent state file."""
@@ -433,7 +435,8 @@ class SDHLudusaviService:
         game_name: str | None = None,
     ) -> None:
         """Add an entry to the internal diagnostic log buffer."""
-        self._logs.append(LogEntry(level, message, operation, game_name))
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._logs.append(LogEntry(level, message, timestamp, operation, game_name))
 
     def _warn_state_load(self, reason: str) -> None:
         """Log a warning about a failed state load."""

@@ -86,8 +86,8 @@ def test_refresh_reports_ludusavi_adapter_initialization_failure(tmp_path: Path)
         "games": [],
         "dependency_error": "Ludusavi Flatpak is not available to Decky",
     }
-    assert service.get_recent_logs()[0]["level"] == "error"
-    assert "Ludusavi Flatpak" in service.get_recent_logs()[0]["message"]
+    assert service.get_recent_logs()[-1]["level"] == "error"
+    assert "Ludusavi Flatpak" in service.get_recent_logs()[-1]["message"]
 
 
 def test_ludusavi_adapter_factory_is_reused_after_success(tmp_path: Path) -> None:
@@ -331,5 +331,5 @@ def test_version_lookup_and_missing_dependency_states_are_logged(
     result = service.refresh_games()
 
     assert result["dependency_error"] == "Ludusavi Flatpak is not installed"
-    assert service.get_recent_logs()[0]["level"] == "error"
-    assert "Ludusavi Flatpak" in service.get_recent_logs()[0]["message"]
+    assert service.get_recent_logs()[-1]["level"] == "error"
+    assert "Ludusavi Flatpak" in service.get_recent_logs()[-1]["message"]

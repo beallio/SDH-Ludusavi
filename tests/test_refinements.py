@@ -51,11 +51,16 @@ def test_selected_game_persistence(tmp_path: Path) -> None:
 def test_unified_logging_exposure(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
 
-    service.log("info", "Test message", operation="test_op", game_name="Test Game")
+    service.log("info", "First message", operation="op1")
+    service.log("info", "Second message", operation="op2")
 
     logs = service.get_recent_logs()
-    assert len(logs) == 1
-    assert logs[0]["level"] == "info"
-    assert logs[0]["message"] == "Test message"
-    assert logs[0]["operation"] == "test_op"
-    assert logs[0]["game_name"] == "Test Game"
+    assert len(logs) == 2
+
+    # Chronological order: First should be at index 0
+    assert logs[0]["message"] == "First message"
+    assert logs[1]["message"] == "Second message"
+
+    # Assert timestamp presence
+    assert "timestamp" in logs[0]
+    assert len(logs[0]["timestamp"]) == 19  # YYYY-MM-DD HH:MM:SS
