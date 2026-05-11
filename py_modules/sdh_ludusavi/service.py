@@ -116,15 +116,22 @@ class SDHLudusaviService:
         self._load_state()
 
     def get_settings(self) -> dict[str, bool]:
+        """Return the current plugin settings."""
         return {"auto_sync_enabled": self._auto_sync_enabled}
 
     def set_auto_sync_enabled(self, enabled: bool) -> dict[str, bool]:
+        """Update the automatic sync setting and persist it to disk."""
         self._auto_sync_enabled = bool(enabled)
         self._save_state()
         self._log("info", f"Automatic sync {'enabled' if enabled else 'disabled'}")
         return self.get_settings()
 
     def refresh_games(self, force: bool = False) -> dict[str, object]:
+        """
+        Refresh the list of games and their backup status from Ludusavi.
+
+        If force is False, returns the cached game list if available.
+        """
         if not force and self._games:
             self._log("debug", "Returning cached game list", "refresh")
             return {"games": self._cached_games(), "dependency_error": None}
@@ -141,6 +148,11 @@ class SDHLudusaviService:
         return {"games": [game.to_dict() for game in games], "dependency_error": None}
 
     def handle_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+        """
+        Logic triggered when a game is launched in Steam.
+
+        Checks if a restore is needed based on backup recency.
+        """
         self._log(
             "debug",
             f"handle_game_start triggered for game='{game_name}', app_id='{app_id}'",
@@ -185,6 +197,11 @@ class SDHLudusaviService:
         return self._skip("start", game.name, "ambiguous_recency")
 
     def handle_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+        """
+        Logic triggered when a game is closed in Steam.
+
+        Triggers an automatic backup if enabled.
+        """
         self._log(
             "debug",
             f"handle_game_exit triggered for game='{game_name}', app_id='{app_id}'",
@@ -215,8 +232,10 @@ class SDHLudusaviService:
         return {"status": "backed_up", "game": game.name, "result": result}
 
     def force_backup(self, game_name: str) -> dict[str, object]:
+        """Trigger a manual backup for the specified game."""
         game = self._match_game(game_name)
         if game is None:
+            self._log("debug", "Skipping: game not found in Ludusavi list", "backup", game_name)
             return self._skip("backup", game_name, "unmatched_game")
 
         result = self._run_locked("backup", game.name, lambda: self._ludusavi().backup(game.name))
@@ -225,10 +244,13 @@ class SDHLudusaviService:
         return {"status": "backed_up", "game": game.name, "result": result}
 
     def force_restore(self, game_name: str) -> dict[str, object]:
+        """Trigger a manual restore for the specified game."""
         game = self._match_game(game_name)
         if game is None:
+            self._log("debug", "Skipping: game not found in Ludusavi list", "restore", game_name)
             return self._skip("restore", game_name, "unmatched_game")
         if not game.has_backup:
+            self._log("debug", "Skipping: game has no backup to restore", "restore", game.name)
             return self._skip("restore", game.name, "no_backup")
 
         result = self._run_locked("restore", game.name, lambda: self._ludusavi().restore(game.name))
@@ -236,6 +258,11 @@ class SDHLudusaviService:
         return {"status": "restored", "game": game.name, "result": result}
 
     def get_versions(self) -> dict[str, str]:
+        """
+        Fetch version information for Ludusavi and the plugin itself.
+
+        Results are cached in memory for the duration of the session.
+        """
         if self._versions is not None:
             self._log("debug", "Returning cached version list", "versions")
             return self._versions
@@ -247,12 +274,15 @@ class SDHLudusaviService:
         return versions
 
     def get_operation_status(self) -> dict[str, object]:
+        """Return information about the currently running or last completed operation."""
         return self._operation.to_dict()
 
     def get_recent_logs(self) -> list[dict[str, object]]:
+        """Return the most recent log entries from the ring buffer."""
         return [entry.to_dict() for entry in reversed(self._logs)]
 
     def _load_state(self) -> None:
+        """Load the plugin settings from the persistent state file."""
         if not self._state_path.exists():
             return
         try:
@@ -275,6 +305,7 @@ class SDHLudusaviService:
         self._log("debug", f"Loaded state: auto_sync_enabled={self._auto_sync_enabled}")
 
     def _save_state(self) -> None:
+        """Persist the current plugin settings to the state file."""
         self._state_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         temp_path = self._state_path.with_name(f".{self._state_path.name}.tmp")
         try:
@@ -289,12 +320,34 @@ class SDHLudusaviService:
             raise
 
     def _refresh_statuses_unlocked(self) -> list[GameStatus]:
-        games = [self._coerce_game_status(game) for game in self._ludusavi().refresh_statuses()]
+        """
+        Internal implementation of status refresh, executed within
+        the operation lock.
+        """
+        raw_statuses = self._ludusavi().refresh_statuses()
+        self._log(
+            "debug", f"Retrieved {len(raw_statuses)} raw game statuses from Ludusavi", "refresh"
+        )
+
+        games = []
+        for raw_game in raw_statuses:
+            try:
+                game = self._coerce_game_status(raw_game)
+                games.append(game)
+            except Exception as exc:
+                self._log(
+                    "error",
+                    f"Failed to parse status for game {raw_game.get('name')}: {exc}",
+                    "refresh",
+                )
+
         self._games = {_normalize(game.name): game for game in games}
         self._log("info", f"Refreshed {len(games)} Ludusavi games", "refresh")
         return games
 
     def _coerce_game_status(self, data: dict[str, object]) -> GameStatus:
+        """Parse raw Ludusavi JSON output into a GameStatus object."""
+        self._log("debug", f"Coercing status for '{data.get('name')}'", "refresh")
         error = data.get("error")
         return GameStatus(
             name=str(data["name"]),
@@ -308,6 +361,10 @@ class SDHLudusaviService:
         return [game.to_dict() for game in self._games.values()]
 
     def _match_game(self, game_name: str) -> GameStatus | None:
+        """
+        Attempt to match a Steam game name to an entry in the Ludusavi
+        game list.
+        """
         normalized = _normalize(game_name)
         if not self._games:
             self._log("debug", f"_match_game triggering refresh for {game_name}", "refresh")
@@ -320,6 +377,10 @@ class SDHLudusaviService:
         return game
 
     def _run_locked(self, operation: str, game_name: str | None, callback: Any) -> Any:
+        """
+        Execute a callback while holding the operation lock, ensuring
+        exclusive access to Ludusavi.
+        """
         if self._operation.is_running or not self._operation_lock.acquire(blocking=False):
             raise OperationLockedError(f"{self._operation.name or 'operation'} is already running")
 
@@ -345,6 +406,7 @@ class SDHLudusaviService:
             self._operation_lock.release()
 
     def _skip(self, operation: str, game_name: str, reason: str) -> dict[str, object]:
+        """Record a skipped operation status."""
         self._log("info", f"Skipped {operation} for {game_name}: {reason}", operation, game_name)
         return {"status": "skipped", "game": game_name, "reason": reason}
 
@@ -355,22 +417,27 @@ class SDHLudusaviService:
         operation: str | None = None,
         game_name: str | None = None,
     ) -> None:
+        """Add an entry to the internal diagnostic log buffer."""
         self._logs.append(LogEntry(level, message, operation, game_name))
 
     def _warn_state_load(self, reason: str) -> None:
+        """Log a warning about a failed state load."""
         LOGGER.warning("Ignoring SDH-ludusavi state at %s: %s", self._state_path, reason)
 
     def _ludusavi(self) -> LudusaviAdapter:
+        """Lazy initializer for the Ludusavi adapter."""
         if self._adapter is None:
             self._adapter = self._adapter_factory()
         return self._adapter
 
 
 def _normalize(game_name: str) -> str:
+    """Normalize a game name for easier matching."""
     return re.sub(r"[^a-z0-9]+", " ", game_name.casefold()).strip()
 
 
 def _default_adapter_factory() -> LudusaviAdapter:
+    """The default factory for creating a Ludusavi adapter."""
     from .ludusavi import PyludusaviAdapter
 
     return PyludusaviAdapter()

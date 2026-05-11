@@ -130,6 +130,12 @@ class Plugin:
 
 
 def _state_path() -> Path:
+    """
+    Determine the optimal directory to store the plugin's persistent state file.
+
+    Checks DECKY_PLUGIN_SETTINGS_DIR and DECKY_SETTINGS_DIR, falling back to
+    a private folder in the user's home directory if neither are available.
+    """
     settings_dir = getattr(
         decky, "DECKY_PLUGIN_SETTINGS_DIR", getattr(decky, "DECKY_SETTINGS_DIR", None)
     )
@@ -150,6 +156,10 @@ def _state_path() -> Path:
 
 
 def _fallback_state_path() -> Path:
+    """
+    Search for a suitable fallback configuration directory when Decky Loader's
+    standard settings directory is unavailable.
+    """
     candidates: list[Path] = []
     decky_user_home = getattr(decky, "DECKY_USER_HOME", None) or os.environ.get("DECKY_USER_HOME")
     if decky_user_home:
@@ -176,11 +186,19 @@ def _fallback_state_path() -> Path:
 
 
 def _ensure_private_directory(path: Path) -> None:
+    """
+    Create a directory with strict 0700 permissions to protect sensitive
+    plugin data.
+    """
     path.mkdir(parents=True, mode=0o700, exist_ok=True)
     path.chmod(0o700)
 
 
 async def _run_blocking(callback: Any) -> Any:
+    """
+    Helper to run a synchronous callback in a dedicated thread while
+    maintaining the async event loop's responsiveness.
+    """
     context = contextvars.copy_context()
     complete = threading.Event()
     value: Any = None

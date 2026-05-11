@@ -134,18 +134,23 @@ function Content() {
   const isBusy = operation.is_running || busyLabel !== null;
 
   useEffect(() => {
+    console.log("SDH-ludusavi: Plugin mounted, starting initial load");
     void loadInitial();
   }, []);
 
   const loadInitial = async () => {
     setBusyLabel("Loading");
     try {
+      console.log("SDH-ludusavi: Fetching initial settings and versions");
       const loadedSettings = await getSettings();
+      console.log("SDH-ludusavi: Loaded settings:", loadedSettings);
       setSettings(loadedSettings);
 
       const loadedVersions = await getVersions();
+      console.log("SDH-ludusavi: Loaded versions:", loadedVersions);
       setVersions(loadedVersions);
 
+      console.log("SDH-ludusavi: Initializing game list (cached)");
       const refreshed = await refreshGamesCall(false);
       applyRefreshResult(refreshed);
 
@@ -154,6 +159,7 @@ function Content() {
       const loadedLogs = await getRecentLogs();
       setLogs(loadedLogs);
     } catch (error) {
+      console.error("SDH-ludusavi: Initial load failed:", error);
       setLogs(await getRecentLogs().catch(() => []));
     } finally {
       setBusyLabel(null);
@@ -161,16 +167,20 @@ function Content() {
   };
 
   const applyRefreshResult = (result: RefreshResult) => {
+    console.log(`SDH-ludusavi: Applying refresh result (${result.games.length} games)`);
     setGames(result.games);
     setSelectedGame((current) => {
       if (current && result.games.some((game) => game.name === current)) {
         return current;
       }
-      return result.games[0]?.name ?? "";
+      const firstGame = result.games[0]?.name ?? "";
+      console.log(`SDH-ludusavi: Defaulting selected game to ${firstGame}`);
+      return firstGame;
     });
   };
 
   const refreshGames = async () => {
+    console.log("SDH-ludusavi: Manual refresh triggered");
     setBusyLabel("Refreshing games");
     try {
       const result = await refreshGamesCall(true);
@@ -179,19 +189,23 @@ function Content() {
       setLogs(await getRecentLogs());
       toaster.toast({
         title: "SDH-ludusavi",
-        body: result.dependency_error ?? "Ludusavi game status refreshed"
+        body: "Ludusavi game status refreshed"
       });
+    } catch (error) {
+      console.error("SDH-ludusavi: Manual refresh failed:", error);
     } finally {
       setBusyLabel(null);
     }
   };
 
   const toggleAutoSync = async (enabled: boolean) => {
+    console.log(`SDH-ludusavi: Toggling auto-sync to ${enabled}`);
     setBusyLabel("Updating settings");
     try {
       const updated = await setAutoSyncEnabled(enabled);
       setSettings(updated);
     } catch (error) {
+      console.error("SDH-ludusavi: Failed to toggle auto-sync:", error);
       toaster.toast({
         title: "SDH-ludusavi settings failed",
         body: error instanceof Error ? error.message : String(error)
@@ -208,10 +222,12 @@ function Content() {
     if (!selectedGame) {
       return;
     }
+    console.log(`SDH-ludusavi: Triggering force ${label} for ${selectedGame}`);
     setBusyLabel(`${label} running`);
     toaster.toast({ title: `SDH-ludusavi ${label}`, body: `${label} started for ${selectedGame}` });
     try {
       const result = await operationCall(selectedGame);
+      console.log(`SDH-ludusavi: Force ${label} completed:`, result);
       toaster.toast({
         title: `SDH-ludusavi ${label}`,
         body: summarizeOperationResult(result, label)
@@ -221,6 +237,7 @@ function Content() {
       setOperation(await getOperationStatus());
       setLogs(await getRecentLogs());
     } catch (error) {
+      console.error(`SDH-ludusavi: Force ${label} failed:`, error);
       toaster.toast({
         title: `SDH-ludusavi ${label} failed`,
         body: error instanceof Error ? error.message : String(error)
@@ -249,12 +266,13 @@ function Content() {
           <DropdownItem
             menuLabel="Select Game"
             rgOptions={games.map((game) => ({
-              label: `${game.name} - ${statusLabels[game.status]}`,
+              label: game.name,
               data: game.name
             }))}
-            selectedOption={games.findIndex(g => g.name === selectedGame) !== -1 ? selectedGame : (games[0]?.name ?? "")}
+            selectedOption={selectedGame}
             onChange={(data: any) => {
               const value = typeof data === 'object' ? data?.data : data;
+              console.log(`SDH-ludusavi: Selected game changed to ${value}`);
               setSelectedGame(value);
             }}
           />

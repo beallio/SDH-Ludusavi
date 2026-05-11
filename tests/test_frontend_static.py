@@ -102,3 +102,18 @@ def test_frontend_uses_decky_log_modal() -> None:
 
     assert "showLogs" not in source
     assert "setShowLogs" not in source
+
+
+def test_frontend_uses_simplified_dropdown_labels() -> None:
+    source = FRONTEND.read_text()
+
+    assert "label: game.name" in source
+    assert "statusLabels" not in source.split("rgOptions")[1].split("})")[0]
+
+
+def test_frontend_includes_verbose_logging() -> None:
+    source = FRONTEND.read_text()
+
+    assert 'console.log("SDH-ludusavi: Plugin mounted, starting initial load")' in source
+    assert "console.log(`SDH-ludusavi: Selected game changed to ${value}`)" in source
+    assert 'console.error("SDH-ludusavi: Initial load failed:", error)' in source
