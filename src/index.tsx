@@ -250,8 +250,11 @@ function Content() {
               label: `${game.name} - ${statusLabels[game.status]}`,
               data: game.name
             }))}
-            selectedOption={selectedGame}
-            onChange={(data: any) => setSelectedGame(data?.data ?? data)}
+            selectedOption={games.findIndex(g => g.name === selectedGame) !== -1 ? selectedGame : (games[0]?.name ?? "")}
+            onChange={(data: any) => {
+              const value = typeof data === 'object' ? data?.data : data;
+              setSelectedGame(value);
+            }}
           />
         </PanelSectionRow>
 
