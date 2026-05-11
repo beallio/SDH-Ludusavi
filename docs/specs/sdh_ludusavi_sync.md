@@ -13,6 +13,12 @@ The backend constructs `pyludusavi.Ludusavi` with:
 Ludusavi(flatpak_id="com.github.mtkennerly.ludusavi")
 ```
 
+The adapter passes Decky's `DECKY_USER_HOME` into the vendored `pyludusavi` discovery
+layer when available. `pyludusavi` prefers `flatpak run --user` candidates with
+`HOME`, `XDG_DATA_HOME`, and `FLATPAK_USER_DIR` pointed at that user home, then falls
+back to default/system Flatpak candidates. rclone version probing reuses the discovered
+Flatpak command prefix instead of performing a separate Flatpak lookup.
+
 Ludusavi game names are canonical game IDs. Steam app IDs are optional metadata.
 
 ## Settings

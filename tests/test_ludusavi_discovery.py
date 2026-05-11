@@ -7,6 +7,19 @@ import pytest
 
 from pyludusavi import discovery
 
+APP_ID = "com.github.mtkennerly.ludusavi"
+DECK_HOME = "/home/deck"
+DECK_USER_FLATPAK_PREFIX = [
+    "/usr/bin/env",
+    f"HOME={DECK_HOME}",
+    f"XDG_DATA_HOME={DECK_HOME}/.local/share",
+    f"FLATPAK_USER_DIR={DECK_HOME}/.local/share/flatpak",
+    "/usr/bin/flatpak",
+    "run",
+    "--user",
+    APP_ID,
+]
+
 
 def test_explicit_flatpak_id_uses_absolute_flatpak_when_path_lookup_fails(
     monkeypatch: pytest.MonkeyPatch,
@@ -17,14 +30,37 @@ def test_explicit_flatpak_id_uses_absolute_flatpak_when_path_lookup_fails(
 
     def verify(prefix: list[str]) -> bool:
         calls.append(prefix)
-        return prefix == ["/usr/bin/flatpak", "run", "com.github.mtkennerly.ludusavi"]
+        return prefix == ["/usr/bin/flatpak", "run", APP_ID]
 
     monkeypatch.setattr(discovery, "_verify", verify)
 
     assert discovery.find_ludusavi(
-        explicit_flatpak_id="com.github.mtkennerly.ludusavi",
-    ) == ["/usr/bin/flatpak", "run", "com.github.mtkennerly.ludusavi"]
-    assert ["/usr/bin/flatpak", "run", "com.github.mtkennerly.ludusavi"] in calls
+        explicit_flatpak_id=APP_ID,
+    ) == ["/usr/bin/flatpak", "run", APP_ID]
+    assert ["/usr/bin/flatpak", "run", APP_ID] in calls
+
+
+def test_explicit_flatpak_id_prefers_decky_user_flatpak_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+
+    def verify(prefix: list[str]) -> bool:
+        calls.append(prefix)
+        return prefix == DECK_USER_FLATPAK_PREFIX
+
+    monkeypatch.setattr(discovery, "_verify", verify)
+
+    assert (
+        discovery.find_ludusavi(
+            explicit_flatpak_id=APP_ID,
+            flatpak_user_home=DECK_HOME,
+        )
+        == DECK_USER_FLATPAK_PREFIX
+    )
+    assert calls[0] == DECK_USER_FLATPAK_PREFIX
 
 
 def test_default_flatpak_lookup_uses_absolute_flatpak_when_path_lookup_fails(
@@ -34,13 +70,13 @@ def test_default_flatpak_lookup_uses_absolute_flatpak_when_path_lookup_fails(
     monkeypatch.setattr(
         discovery,
         "_verify",
-        lambda prefix: prefix == ["/usr/bin/flatpak", "run", "com.github.mtkennerly.ludusavi"],
+        lambda prefix: prefix == ["/usr/bin/flatpak", "run", APP_ID],
     )
 
     assert discovery.find_ludusavi() == [
         "/usr/bin/flatpak",
         "run",
-        "com.github.mtkennerly.ludusavi",
+        APP_ID,
     ]
 
 
@@ -56,7 +92,7 @@ def test_default_flatpak_lookup_falls_back_when_path_flatpak_fails(
 
     def verify(prefix: list[str]) -> bool:
         calls.append(prefix)
-        return prefix == ["/usr/bin/flatpak", "run", "com.github.mtkennerly.ludusavi"]
+        return prefix == ["/usr/bin/flatpak", "run", APP_ID]
 
     monkeypatch.setattr(shutil, "which", which)
     monkeypatch.setattr(discovery, "_verify", verify)
@@ -64,11 +100,11 @@ def test_default_flatpak_lookup_falls_back_when_path_flatpak_fails(
     assert discovery.find_ludusavi() == [
         "/usr/bin/flatpak",
         "run",
-        "com.github.mtkennerly.ludusavi",
+        APP_ID,
     ]
     assert calls[:2] == [
-        ["flatpak", "run", "com.github.mtkennerly.ludusavi"],
-        ["/usr/bin/flatpak", "run", "com.github.mtkennerly.ludusavi"],
+        ["flatpak", "run", APP_ID],
+        ["/usr/bin/flatpak", "run", APP_ID],
     ]
 
 
@@ -89,9 +125,9 @@ def test_default_flatpak_lookup_raises_when_all_candidates_fail(
         discovery.find_ludusavi()
 
     assert calls == [
-        ["/usr/bin/flatpak", "run", "com.github.mtkennerly.ludusavi"],
-        ["/bin/flatpak", "run", "com.github.mtkennerly.ludusavi"],
-        ["/usr/local/bin/flatpak", "run", "com.github.mtkennerly.ludusavi"],
+        ["/usr/bin/flatpak", "run", APP_ID],
+        ["/bin/flatpak", "run", APP_ID],
+        ["/usr/local/bin/flatpak", "run", APP_ID],
     ]
 
 
@@ -104,5 +140,5 @@ def test_verify_uses_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(subprocess, "run", run)
 
-    assert discovery._verify(["/usr/bin/flatpak", "run", "com.github.mtkennerly.ludusavi"]) is False
+    assert discovery._verify(["/usr/bin/flatpak", "run", APP_ID]) is False
     assert seen_timeout == [5.0]

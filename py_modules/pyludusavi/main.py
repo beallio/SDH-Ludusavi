@@ -22,6 +22,7 @@ class Ludusavi:
         config_dir: Optional[str] = None,
         no_manifest_update: bool = False,
         flatpak_id: Optional[str] = None,
+        flatpak_user_home: Optional[str] = None,
     ):
         """
         Initialize the Ludusavi wrapper.
@@ -31,10 +32,12 @@ class Ludusavi:
             config_dir: Optional --config directory for Ludusavi.
             no_manifest_update: If True, appends --no-manifest-update to all calls.
             flatpak_id: Optional Flatpak app ID to run explicitly.
+            flatpak_user_home: Optional user home for per-user Flatpak discovery.
         """
         self.command_prefix = find_ludusavi(
             explicit_path=explicit_path,
             explicit_flatpak_id=flatpak_id,
+            flatpak_user_home=flatpak_user_home,
         )
 
         # Add global options to prefix if they apply to the binary call

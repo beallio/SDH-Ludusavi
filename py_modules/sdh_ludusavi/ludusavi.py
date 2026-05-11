@@ -1,25 +1,22 @@
 from __future__ import annotations
 
-import shutil
 import subprocess
 from collections.abc import Mapping
 from typing import Any, cast
 
 
 FLATPAK_ID = "com.github.mtkennerly.ludusavi"
-FLATPAK_EXECUTABLES = (
-    "/usr/bin/flatpak",
-    "/bin/flatpak",
-    "/usr/local/bin/flatpak",
-)
 
 
 class PyludusaviAdapter:
-    def __init__(self, flatpak_id: str = FLATPAK_ID) -> None:
+    def __init__(self, flatpak_id: str = FLATPAK_ID, flatpak_user_home: str | None = None) -> None:
         from pyludusavi import Ludusavi
 
-        self._flatpak_id = flatpak_id
-        self._client = Ludusavi(flatpak_id=flatpak_id)
+        ludusavi_factory = cast(Any, Ludusavi)
+        self._client = ludusavi_factory(
+            flatpak_id=flatpak_id,
+            flatpak_user_home=flatpak_user_home or _decky_user_home(),
+        )
 
     def refresh_statuses(self) -> list[dict[str, object]]:
         preview = self._client.backup(preview=True).data
@@ -61,25 +58,24 @@ class PyludusaviAdapter:
         }
 
     def _rclone_version(self) -> str:
-        errors: list[str] = []
-        for flatpak in _flatpak_commands():
-            try:
-                result = subprocess.run(
-                    [flatpak, "run", "--command=rclone", self._flatpak_id, "version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                    check=True,
-                )
-            except (
-                FileNotFoundError,
-                subprocess.CalledProcessError,
-                subprocess.TimeoutExpired,
-            ) as exc:
-                errors.append(str(exc))
-                continue
-            return result.stdout.splitlines()[0] if result.stdout else "unavailable"
-        return f"unavailable: {'; '.join(errors)}"
+        command = _rclone_command_from_prefix(list(self._client.command_prefix))
+        if command is None:
+            return "unavailable"
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=True,
+            )
+        except (
+            FileNotFoundError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as exc:
+            return f"unavailable: {exc}"
+        return result.stdout.splitlines()[0] if result.stdout else "unavailable"
 
 
 def _games_from_output(output: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -101,12 +97,33 @@ def _game_error(game: dict[str, Any]) -> str | None:
     return None
 
 
-def _flatpak_commands() -> list[str]:
-    commands: list[str] = []
-    path_lookup = shutil.which("flatpak")
-    if path_lookup:
-        commands.append(path_lookup)
-    for command in FLATPAK_EXECUTABLES:
-        if command not in commands:
-            commands.append(command)
-    return commands
+def _rclone_command_from_prefix(command_prefix: list[str]) -> list[str] | None:
+    try:
+        run_index = command_prefix.index("run")
+    except ValueError:
+        return None
+
+    for app_index in range(run_index + 1, len(command_prefix)):
+        if not command_prefix[app_index].startswith("-"):
+            return command_prefix[:app_index] + [
+                "--command=rclone",
+                command_prefix[app_index],
+                "version",
+            ]
+    return None
+
+
+def _decky_user_home() -> str | None:
+    import os
+
+    env_home = os.environ.get("DECKY_USER_HOME")
+    if env_home:
+        return env_home
+
+    try:
+        import decky
+    except ImportError:
+        return None
+
+    user_home = getattr(decky, "DECKY_USER_HOME", None)
+    return str(user_home) if user_home else None

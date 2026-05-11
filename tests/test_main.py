@@ -229,4 +229,4 @@ def test_service_fallback_uses_private_user_config_and_logs_warning(
     expected = Path(decky.DECKY_USER_HOME) / ".config" / "sdh-ludusavi" / "sdh_ludusavi.json"
     assert captured["state_path"] == expected
     assert expected.parent.stat().st_mode & 0o777 == 0o700
-    assert any("DECKY_SETTINGS_DIR" in warning for warning in logger.warnings)
+    assert any("DECKY_PLUGIN_SETTINGS_DIR" in warning for warning in logger.warnings)

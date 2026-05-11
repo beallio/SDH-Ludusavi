@@ -1,0 +1,35 @@
+{
+  "date": "2026-05-10",
+  "task_objective": "Fix Ludusavi Flatpak discovery when Decky's backend cannot see the user's Flatpak installation.",
+  "files_modified": [
+    "README.md",
+    "docs/agent_conversations/2026-05-10_flatpak_user_install_discovery.json",
+    "docs/plans/flatpak_user_install_discovery.md",
+    "docs/specs/sdh_ludusavi_sync.md",
+    "py_modules/pyludusavi/discovery.py",
+    "py_modules/pyludusavi/main.py",
+    "py_modules/sdh_ludusavi/ludusavi.py",
+    "tests/test_ludusavi.py",
+    "tests/test_ludusavi_discovery.py"
+  ],
+  "tests_added": [
+    "tests/test_ludusavi_discovery.py Deck-user Flatpak discovery preference",
+    "tests/test_ludusavi.py pyludusavi flatpak_user_home constructor pass-through",
+    "tests/test_ludusavi.py SDH adapter passes Decky user home into pyludusavi",
+    "tests/test_ludusavi.py rclone probe reuses pyludusavi command prefix"
+  ],
+  "design_decisions": [
+    "Keep Ludusavi discovery in pyludusavi and extend it with an optional flatpak_user_home argument.",
+    "Prefer flatpak run --user with Decky's user home environment before falling back to default/system Flatpak candidates.",
+    "Use pyludusavi's discovered command prefix for rclone probing so Ludusavi and rclone run through the same Flatpak installation."
+  ],
+  "results": [
+    "./run.sh uv run pytest tests/test_ludusavi_discovery.py tests/test_ludusavi.py passed",
+    "./run.sh uv run ruff check . --fix passed",
+    "./run.sh uv run ruff format . passed",
+    "./run.sh uv run ty check py_modules/sdh_ludusavi/ passed",
+    "./run.sh uv run pytest passed with 62 tests",
+    "./node_modules/.bin/rollup -c rebuilt dist/index.js",
+    "./run.sh uv run python scripts/package_plugin.py rebuilt out/SDH-ludusavi.zip"
+  ]
+}

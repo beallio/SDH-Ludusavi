@@ -110,13 +110,20 @@ class Plugin:
 
 
 def _state_path() -> Path:
-    settings_dir = getattr(decky, "DECKY_SETTINGS_DIR", None)
+    settings_dir = getattr(
+        decky, "DECKY_PLUGIN_SETTINGS_DIR", getattr(decky, "DECKY_SETTINGS_DIR", None)
+    )
+    if not settings_dir:
+        settings_dir = os.environ.get("DECKY_PLUGIN_SETTINGS_DIR") or os.environ.get(
+            "DECKY_SETTINGS_DIR"
+        )
+
     if settings_dir:
         return Path(settings_dir) / STATE_FILE_NAME
 
     fallback_path = _fallback_state_path()
     decky.logger.warning(
-        "DECKY_SETTINGS_DIR is unavailable; storing SDH-ludusavi settings at %s",
+        "DECKY_PLUGIN_SETTINGS_DIR is unavailable; storing SDH-ludusavi settings at %s",
         fallback_path,
     )
     return fallback_path
@@ -124,7 +131,7 @@ def _state_path() -> Path:
 
 def _fallback_state_path() -> Path:
     candidates: list[Path] = []
-    decky_user_home = getattr(decky, "DECKY_USER_HOME", None)
+    decky_user_home = getattr(decky, "DECKY_USER_HOME", None) or os.environ.get("DECKY_USER_HOME")
     if decky_user_home:
         candidates.append(Path(decky_user_home))
 

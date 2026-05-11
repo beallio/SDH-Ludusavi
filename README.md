@@ -24,6 +24,12 @@ game status, operation status, and recent operation logs.
 - Python package dependency: `pyludusavi`.
 - Frontend dependencies from `package.json`.
 
+The backend locates Ludusavi through the vendored `pyludusavi` package. It constructs
+`pyludusavi.Ludusavi(flatpak_id="com.github.mtkennerly.ludusavi")`; discovery first
+checks Decky's user Flatpak installation with `flatpak run --user` using
+`DECKY_USER_HOME` for `HOME`, `XDG_DATA_HOME`, and `FLATPAK_USER_DIR`, then falls back
+to default/system Flatpak candidates.
+
 ## Development Setup
 
 Use the wrapper so Python virtual environments and caches stay outside Dropbox:

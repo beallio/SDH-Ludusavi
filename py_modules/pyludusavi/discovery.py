@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Optional
 
 FLATPAK_EXECUTABLES = (
@@ -7,6 +8,7 @@ FLATPAK_EXECUTABLES = (
     "/bin/flatpak",
     "/usr/local/bin/flatpak",
 )
+ENV_EXECUTABLE = "/usr/bin/env"
 VERIFY_TIMEOUT_SECONDS = 5
 
 
@@ -20,6 +22,7 @@ def find_ludusavi(
     explicit_path: Optional[str] = None,
     explicit_flatpak_id: Optional[str] = None,
     flatpak_id: str = "com.github.mtkennerly.ludusavi",
+    flatpak_user_home: Optional[str] = None,
 ) -> list[str]:
     """
     Find the Ludusavi executable or Flatpak.
@@ -46,8 +49,7 @@ def find_ludusavi(
 
     # 2. Explicit Flatpak ID
     if explicit_flatpak_id:
-        for flatpak in _flatpak_commands():
-            prefix = [flatpak, "run", explicit_flatpak_id]
+        for prefix in _flatpak_prefixes(explicit_flatpak_id, flatpak_user_home):
             if _verify(prefix):
                 return prefix
         raise LudusaviNotFoundError(
@@ -61,8 +63,7 @@ def find_ludusavi(
             return [path_lookup]
 
     # 4. Flatpak ID lookup
-    for flatpak in _flatpak_commands():
-        prefix = [flatpak, "run", flatpak_id]
+    for prefix in _flatpak_prefixes(flatpak_id, flatpak_user_home):
         if _verify(prefix):
             return prefix
 
@@ -78,6 +79,28 @@ def _flatpak_commands() -> list[str]:
         if command not in commands:
             commands.append(command)
     return commands
+
+
+def _flatpak_prefixes(flatpak_id: str, flatpak_user_home: Optional[str]) -> list[list[str]]:
+    prefixes: list[list[str]] = []
+    for flatpak in _flatpak_commands():
+        if flatpak_user_home:
+            prefixes.append(
+                _flatpak_user_env(flatpak_user_home) + [flatpak, "run", "--user", flatpak_id]
+            )
+        prefixes.append([flatpak, "run", flatpak_id])
+    return prefixes
+
+
+def _flatpak_user_env(flatpak_user_home: str) -> list[str]:
+    user_home = Path(flatpak_user_home).expanduser()
+    data_home = user_home / ".local" / "share"
+    return [
+        ENV_EXECUTABLE,
+        f"HOME={user_home}",
+        f"XDG_DATA_HOME={data_home}",
+        f"FLATPAK_USER_DIR={data_home / 'flatpak'}",
+    ]
 
 
 def _verify(prefix: list[str]) -> bool:

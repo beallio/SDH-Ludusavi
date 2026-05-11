@@ -1,13 +1,59 @@
 import subprocess
+import sys
+import types
 
 import pytest
 
-from sdh_ludusavi import ludusavi
+import pyludusavi
+from pyludusavi import main as pyludusavi_main
 from sdh_ludusavi.ludusavi import FLATPAK_ID, PyludusaviAdapter, _game_error, _games_from_output
 
 
 def test_flatpak_id_is_required_ludusavi_flatpak() -> None:
     assert FLATPAK_ID == "com.github.mtkennerly.ludusavi"
+
+
+def test_pyludusavi_constructor_accepts_flatpak_user_home(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def find_ludusavi(**kwargs: object) -> list[str]:
+        captured.update(kwargs)
+        return ["/usr/bin/flatpak", "run", FLATPAK_ID]
+
+    monkeypatch.setattr(pyludusavi_main, "find_ludusavi", find_ludusavi)
+
+    pyludusavi_main.Ludusavi(flatpak_id=FLATPAK_ID, flatpak_user_home="/home/deck")
+
+    assert captured["explicit_flatpak_id"] == FLATPAK_ID
+    assert captured["flatpak_user_home"] == "/home/deck"
+
+
+def test_adapter_passes_decky_user_home_to_pyludusavi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeLudusavi:
+        command_prefix = ["/usr/bin/flatpak", "run", FLATPAK_ID]
+
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(pyludusavi, "Ludusavi", FakeLudusavi)
+    monkeypatch.setitem(
+        sys.modules,
+        "decky",
+        types.SimpleNamespace(DECKY_USER_HOME="/home/deck"),
+    )
+
+    PyludusaviAdapter()
+
+    assert captured == {
+        "flatpak_id": FLATPAK_ID,
+        "flatpak_user_home": "/home/deck",
+    }
 
 
 def test_games_from_output_accepts_ludusavi_api_shape() -> None:
@@ -69,7 +115,9 @@ def test_compare_recency_remains_ambiguous_without_direct_recency_proof() -> Non
     assert client.requested_games == ["Hades"]
 
 
-def test_rclone_version_uses_absolute_flatpak_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rclone_version_uses_pyludusavi_discovered_flatpak_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[list[str]] = []
 
     class FakeCompletedProcess:
@@ -77,17 +125,35 @@ def test_rclone_version_uses_absolute_flatpak_fallback(monkeypatch: pytest.Monke
 
     def fake_run(command: list[str], **kwargs: object) -> FakeCompletedProcess:
         calls.append(command)
-        if command[0] == "flatpak":
-            raise FileNotFoundError("flatpak")
         return FakeCompletedProcess()
 
     adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
-    adapter._flatpak_id = FLATPAK_ID
-    monkeypatch.setattr(ludusavi, "_flatpak_commands", lambda: ["flatpak", "/usr/bin/flatpak"])
+    adapter._client = types.SimpleNamespace(
+        command_prefix=[
+            "/usr/bin/env",
+            "HOME=/home/deck",
+            "XDG_DATA_HOME=/home/deck/.local/share",
+            "FLATPAK_USER_DIR=/home/deck/.local/share/flatpak",
+            "/usr/bin/flatpak",
+            "run",
+            "--user",
+            FLATPAK_ID,
+        ]
+    )
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     assert adapter._rclone_version() == "rclone v1.66.0"
     assert calls == [
-        ["flatpak", "run", "--command=rclone", FLATPAK_ID, "version"],
-        ["/usr/bin/flatpak", "run", "--command=rclone", FLATPAK_ID, "version"],
+        [
+            "/usr/bin/env",
+            "HOME=/home/deck",
+            "XDG_DATA_HOME=/home/deck/.local/share",
+            "FLATPAK_USER_DIR=/home/deck/.local/share/flatpak",
+            "/usr/bin/flatpak",
+            "run",
+            "--user",
+            "--command=rclone",
+            FLATPAK_ID,
+            "version",
+        ],
     ]
