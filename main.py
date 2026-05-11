@@ -32,8 +32,8 @@ class Plugin:
     async def set_auto_sync_enabled(self, enabled: bool) -> dict[str, bool]:
         return self._service().set_auto_sync_enabled(enabled)
 
-    async def refresh_games(self) -> dict[str, object]:
-        return await self._call("refresh_games", self._service().refresh_games)
+    async def refresh_games(self, force: bool = False) -> dict[str, object]:
+        return await self._call("refresh_games", lambda: self._service().refresh_games(force))
 
     async def handle_game_start(
         self, game_name: str, app_id: str | None = None

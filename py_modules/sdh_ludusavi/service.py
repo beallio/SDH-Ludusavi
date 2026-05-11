@@ -109,7 +109,10 @@ class SDHLudusaviService:
         self._log("info", f"Automatic sync {'enabled' if enabled else 'disabled'}")
         return self.get_settings()
 
-    def refresh_games(self) -> dict[str, object]:
+    def refresh_games(self, force: bool = False) -> dict[str, object]:
+        if not force and self._games:
+            return {"games": self._cached_games(), "dependency_error": None}
+
         try:
             games = self._run_locked("refresh", None, self._refresh_statuses_unlocked)
         except (

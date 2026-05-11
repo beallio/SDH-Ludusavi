@@ -63,7 +63,7 @@ type LogEntry = {
 
 const getSettings = callable<[], Settings>("get_settings");
 const setAutoSyncEnabled = callable<[enabled: boolean], Settings>("set_auto_sync_enabled");
-const refreshGamesCall = callable<[], RefreshResult>("refresh_games");
+const refreshGamesCall = callable<[force: boolean], RefreshResult>("refresh_games");
 const forceBackupCall = callable<[gameName: string], OperationResult>("force_backup");
 const forceRestoreCall = callable<[gameName: string], OperationResult>("force_restore");
 const getVersions = callable<[], Versions>("get_versions");
@@ -112,7 +112,7 @@ function Content() {
       setSettings(loadedSettings);
 
       const [refreshed, loadedVersions] = await Promise.all([
-        refreshGamesCall(),
+        refreshGamesCall(false),
         getVersions()
       ]);
       applyRefreshResult(refreshed);
@@ -144,7 +144,7 @@ function Content() {
   const refreshGames = async () => {
     setBusyLabel("Refreshing games");
     try {
-      const result = await refreshGamesCall();
+      const result = await refreshGamesCall(true);
       applyRefreshResult(result);
       setOperation(await getOperationStatus());
       setLogs(await getRecentLogs());
@@ -187,7 +187,7 @@ function Content() {
         title: `SDH-ludusavi ${label}`,
         body: summarizeOperationResult(result, label)
       });
-      const refreshed = await refreshGamesCall();
+      const refreshed = await refreshGamesCall(false);
       applyRefreshResult(refreshed);
       setOperation(await getOperationStatus());
       setLogs(await getRecentLogs());
