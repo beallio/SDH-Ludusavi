@@ -124,9 +124,10 @@ def _rclone_command_from_prefix(command_prefix: list[str]) -> list[str] | None:
     except ValueError:
         pass
 
-    if command_prefix and command_prefix[-1].endswith("ludusavi"):
-        rclone_path = command_prefix[-1].replace("ludusavi", "rclone")
-        return command_prefix[:-1] + [rclone_path, "version"]
+    for i, part in enumerate(command_prefix):
+        if part.endswith("bin/ludusavi") or part == "ludusavi":
+            rclone_path = part.replace("ludusavi", "rclone")
+            return command_prefix[:i] + [rclone_path, "version"]
 
     return None
 

@@ -169,10 +169,12 @@ def test_rclone_version_uses_pyludusavi_discovered_flatpak_prefix(
 def test_rclone_command_from_prefix_supports_explicit_path() -> None:
     from sdh_ludusavi.ludusavi import _rclone_command_from_prefix
 
-    assert _rclone_command_from_prefix(["/usr/bin/sudo", "-u", "deck", "/path/to/ludusavi"]) == [
+    assert _rclone_command_from_prefix(
+        ["/usr/bin/sudo", "-u", "deck", "/path/to/bin/ludusavi"]
+    ) == [
         "/usr/bin/sudo",
         "-u",
         "deck",
-        "/path/to/rclone",
+        "/path/to/bin/rclone",
         "version",
     ]

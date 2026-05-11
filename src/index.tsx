@@ -1,6 +1,7 @@
 import {
   ButtonItem,
   ConfirmModal,
+  DropdownItem,
   PanelSection,
   PanelSectionRow,
   showModal,
@@ -143,12 +144,11 @@ function Content() {
       const loadedSettings = await getSettings();
       setSettings(loadedSettings);
 
-      const [refreshed, loadedVersions] = await Promise.all([
-        refreshGamesCall(false),
-        getVersions()
-      ]);
-      applyRefreshResult(refreshed);
+      const loadedVersions = await getVersions();
       setVersions(loadedVersions);
+
+      const refreshed = await refreshGamesCall(false);
+      applyRefreshResult(refreshed);
 
       const loadedOperation = await getOperationStatus();
       setOperation(loadedOperation);
@@ -244,17 +244,15 @@ function Content() {
         />
 
         <PanelSectionRow>
-          <select
-            value={selectedGame}
-            onChange={(event) => setSelectedGame(event.target.value)}
-            style={{ width: "100%" }}
-          >
-            {games.map((game) => (
-              <option key={game.name} value={game.name}>
-                {game.name} - {statusLabels[game.status]}
-              </option>
-            ))}
-          </select>
+          <DropdownItem
+            menuLabel="Select Game"
+            rgOptions={games.map(game => ({
+              label: `${game.name} - ${statusLabels[game.status]}`,
+              data: game.name
+            }))}
+            selectedOption={selectedGame}
+            onChange={(option) => setSelectedGame(option.data)}
+          />
         </PanelSectionRow>
 
         <PanelSectionRow>
