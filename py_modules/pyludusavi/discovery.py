@@ -42,8 +42,11 @@ def find_ludusavi(
     """
     # 1. Explicit path
     if explicit_path:
-        if _verify([explicit_path]):
-            return [explicit_path]
+        prefix = [explicit_path]
+        if flatpak_user:
+            prefix = ["/usr/bin/sudo", "-u", flatpak_user] + prefix
+        if _verify(prefix):
+            return prefix
         raise LudusaviNotFoundError(
             f"Explicitly provided Ludusavi path not found or invalid: {explicit_path}"
         )
