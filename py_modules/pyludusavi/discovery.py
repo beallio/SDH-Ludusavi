@@ -23,6 +23,7 @@ def find_ludusavi(
     explicit_flatpak_id: Optional[str] = None,
     flatpak_id: str = "com.github.mtkennerly.ludusavi",
     flatpak_user_home: Optional[str] = None,
+    flatpak_user: Optional[str] = None,
 ) -> list[str]:
     """
     Find the Ludusavi executable or Flatpak.
@@ -49,7 +50,7 @@ def find_ludusavi(
 
     # 2. Explicit Flatpak ID
     if explicit_flatpak_id:
-        for prefix in _flatpak_prefixes(explicit_flatpak_id, flatpak_user_home):
+        for prefix in _flatpak_prefixes(explicit_flatpak_id, flatpak_user_home, flatpak_user):
             if _verify(prefix):
                 return prefix
         raise LudusaviNotFoundError(
@@ -63,7 +64,7 @@ def find_ludusavi(
             return [path_lookup]
 
     # 4. Flatpak ID lookup
-    for prefix in _flatpak_prefixes(flatpak_id, flatpak_user_home):
+    for prefix in _flatpak_prefixes(flatpak_id, flatpak_user_home, flatpak_user):
         if _verify(prefix):
             return prefix
 
@@ -81,9 +82,13 @@ def _flatpak_commands() -> list[str]:
     return commands
 
 
-def _flatpak_prefixes(flatpak_id: str, flatpak_user_home: Optional[str]) -> list[list[str]]:
+def _flatpak_prefixes(
+    flatpak_id: str, flatpak_user_home: Optional[str], flatpak_user: Optional[str]
+) -> list[list[str]]:
     prefixes: list[list[str]] = []
     for flatpak in _flatpak_commands():
+        if flatpak_user:
+            prefixes.append(["/usr/bin/sudo", "-u", flatpak_user, flatpak, "run", flatpak_id])
         if flatpak_user_home:
             prefixes.append(
                 _flatpak_user_env(flatpak_user_home) + [flatpak, "run", "--user", flatpak_id]

@@ -23,6 +23,7 @@ class Ludusavi:
         no_manifest_update: bool = False,
         flatpak_id: Optional[str] = None,
         flatpak_user_home: Optional[str] = None,
+        flatpak_user: Optional[str] = None,
     ):
         """
         Initialize the Ludusavi wrapper.
@@ -33,11 +34,13 @@ class Ludusavi:
             no_manifest_update: If True, appends --no-manifest-update to all calls.
             flatpak_id: Optional Flatpak app ID to run explicitly.
             flatpak_user_home: Optional user home for per-user Flatpak discovery.
+            flatpak_user: Optional username to run Flatpak via sudo -u.
         """
         self.command_prefix = find_ludusavi(
             explicit_path=explicit_path,
             explicit_flatpak_id=flatpak_id,
             flatpak_user_home=flatpak_user_home,
+            flatpak_user=flatpak_user,
         )
 
         # Add global options to prefix if they apply to the binary call

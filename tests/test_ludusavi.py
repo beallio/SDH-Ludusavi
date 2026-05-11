@@ -45,7 +45,7 @@ def test_adapter_passes_decky_user_home_to_pyludusavi(
     monkeypatch.setitem(
         sys.modules,
         "decky",
-        types.SimpleNamespace(DECKY_USER_HOME="/home/deck"),
+        types.SimpleNamespace(DECKY_USER_HOME="/home/deck", DECKY_USER="deck"),
     )
 
     PyludusaviAdapter()
@@ -53,6 +53,7 @@ def test_adapter_passes_decky_user_home_to_pyludusavi(
     assert captured == {
         "flatpak_id": FLATPAK_ID,
         "flatpak_user_home": "/home/deck",
+        "flatpak_user": "deck",
     }
 
 

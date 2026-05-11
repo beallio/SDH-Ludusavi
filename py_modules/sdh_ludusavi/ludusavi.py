@@ -9,13 +9,19 @@ FLATPAK_ID = "com.github.mtkennerly.ludusavi"
 
 
 class PyludusaviAdapter:
-    def __init__(self, flatpak_id: str = FLATPAK_ID, flatpak_user_home: str | None = None) -> None:
+    def __init__(
+        self,
+        flatpak_id: str = FLATPAK_ID,
+        flatpak_user_home: str | None = None,
+        flatpak_user: str | None = None,
+    ) -> None:
         from pyludusavi import Ludusavi
 
         ludusavi_factory = cast(Any, Ludusavi)
         self._client = ludusavi_factory(
             flatpak_id=flatpak_id,
             flatpak_user_home=flatpak_user_home or _decky_user_home(),
+            flatpak_user=flatpak_user or _decky_user(),
         )
 
     def refresh_statuses(self) -> list[dict[str, object]]:
@@ -127,3 +133,19 @@ def _decky_user_home() -> str | None:
 
     user_home = getattr(decky, "DECKY_USER_HOME", None)
     return str(user_home) if user_home else None
+
+
+def _decky_user() -> str | None:
+    import os
+
+    env_user = os.environ.get("DECKY_USER")
+    if env_user:
+        return env_user
+
+    try:
+        import decky
+    except ImportError:
+        return None
+
+    user = getattr(decky, "DECKY_USER", None)
+    return str(user) if user else None
