@@ -249,11 +249,6 @@ function Content() {
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "16px", backgroundColor: "rgba(35, 41, 49, 1)", borderBottom: "1px solid rgba(51, 65, 85, 0.5)" }}>
-        <FaDatabase style={{ color: "white", width: "20px", height: "20px" }} />
-        <h1 style={{ color: "white", fontWeight: 600, fontSize: "18px", margin: 0 }}>SDH-ludusavi</h1>
-      </div>
-
       <PanelSection title="Sync">
         <ToggleField
           label="Automatic Sync"
