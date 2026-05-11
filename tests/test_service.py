@@ -58,6 +58,57 @@ def service_with_state(tmp_path: Path, adapter: FakeAdapter | None = None) -> SD
     return SDHLudusaviService(adapter=adapter or FakeAdapter(), state_path=tmp_path / "state.json")
 
 
+def test_settings_do_not_initialize_ludusavi_adapter(tmp_path: Path) -> None:
+    def fail_factory() -> FakeAdapter:
+        raise RuntimeError("Ludusavi should not be initialized")
+
+    service = SDHLudusaviService(
+        adapter_factory=fail_factory,
+        state_path=tmp_path / "state.json",
+    )
+
+    assert service.get_settings() == {"auto_sync_enabled": False}
+    assert service.set_auto_sync_enabled(True) == {"auto_sync_enabled": True}
+
+
+def test_refresh_reports_ludusavi_adapter_initialization_failure(tmp_path: Path) -> None:
+    def fail_factory() -> FakeAdapter:
+        raise RuntimeError("Ludusavi Flatpak is not available to Decky")
+
+    service = SDHLudusaviService(
+        adapter_factory=fail_factory,
+        state_path=tmp_path / "state.json",
+    )
+
+    result = service.refresh_games()
+
+    assert result == {
+        "games": [],
+        "dependency_error": "Ludusavi Flatpak is not available to Decky",
+    }
+    assert service.get_recent_logs()[0]["level"] == "error"
+    assert "Ludusavi Flatpak" in service.get_recent_logs()[0]["message"]
+
+
+def test_ludusavi_adapter_factory_is_reused_after_success(tmp_path: Path) -> None:
+    calls = 0
+
+    def factory() -> FakeAdapter:
+        nonlocal calls
+        calls += 1
+        return FakeAdapter()
+
+    service = SDHLudusaviService(
+        adapter_factory=factory,
+        state_path=tmp_path / "state.json",
+    )
+
+    service.refresh_games()
+    service.get_versions()
+
+    assert calls == 1
+
+
 def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
 

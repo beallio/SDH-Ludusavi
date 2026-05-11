@@ -74,6 +74,6 @@ notifications for start, success, skipped, and failure outcomes.
 
 ## Runtime Privilege
 
-`plugin.json` keeps Decky's `_root` flag for now. Removing it requires validation on a
-real Steam Deck that Ludusavi Flatpak access, settings persistence, migration paths, and
-backup/restore operations all work without elevated Decky backend privileges.
+`plugin.json` does not request Decky's `_root` flag. The backend runs as the Decky user
+so the Ludusavi Flatpak can see that user's Ludusavi configuration, backup metadata,
+and Flatpak runtime state.

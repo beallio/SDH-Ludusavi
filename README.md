@@ -43,11 +43,10 @@ not provide a settings directory, the backend falls back to
 directory, then to the current user's home config directory if `DECKY_USER_HOME` is not
 available. Tooling caches still live under `/tmp/sdh_ludusavi`; plugin settings do not.
 
-`plugin.json` still includes Decky's `_root` flag. That remains intentional until the
-backend is validated on a real Steam Deck without root for Ludusavi Flatpak access,
-settings persistence, migration paths, and backup/restore behavior. The flag should be
-removed only after that validation proves the plugin works correctly without elevated
-Decky backend privileges.
+`plugin.json` does not request Decky's `_root` flag. The backend runs as the Decky user
+so the Ludusavi Flatpak can see that user's Ludusavi configuration, backup metadata,
+and Flatpak runtime state. If a future feature needs elevated privileges, it should be
+validated separately without regressing Ludusavi access.
 
 ## Project Structure
 

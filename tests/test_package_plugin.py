@@ -80,6 +80,8 @@ def test_package_metadata_versions_match_release_version() -> None:
 
     assert plugin_metadata["version"] == "0.1.0"
     assert package_metadata["version"] == "0.1.0"
+    assert "_root" not in plugin_metadata.get("flags", [])
+    assert "root" not in plugin_metadata["publish"]["tags"]
     assert module.validate_package_versions(Path.cwd()) == "0.1.0"
 
 

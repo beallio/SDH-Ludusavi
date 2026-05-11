@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import threading
+from collections.abc import Callable
 from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -82,15 +83,15 @@ class SDHLudusaviService:
     def __init__(
         self,
         adapter: LudusaviAdapter | None = None,
+        adapter_factory: Callable[[], LudusaviAdapter] | None = None,
         state_path: Path | None = None,
         log_limit: int = 50,
     ) -> None:
-        if adapter is None:
-            from .ludusavi import PyludusaviAdapter
-
-            adapter = PyludusaviAdapter()
+        if adapter is not None and adapter_factory is not None:
+            raise ValueError("adapter and adapter_factory cannot both be provided")
 
         self._adapter = adapter
+        self._adapter_factory = adapter_factory or _default_adapter_factory
         self._state_path = state_path or Path("/tmp/sdh_ludusavi/state.json")
         self._auto_sync_enabled = False
         self._games: dict[str, GameStatus] = {}
@@ -134,12 +135,12 @@ class SDHLudusaviService:
         if not game.has_backup:
             return self._skip("start", game.name, "no_backup")
 
-        recency = self._adapter.compare_recency(game.name)
+        recency = self._ludusavi().compare_recency(game.name)
         if recency == "backup_newer":
             result = self._run_locked(
                 "restore",
                 game.name,
-                lambda: self._adapter.restore(game.name),
+                lambda: self._ludusavi().restore(game.name),
             )
             self._log("info", f"Restored {game.name} before launch", "restore", game.name)
             return {"status": "restored", "game": game.name, "result": result}
@@ -158,7 +159,7 @@ class SDHLudusaviService:
         if game is None:
             return self._skip("exit", game_name, "unmatched_game")
 
-        result = self._run_locked("backup", game.name, lambda: self._adapter.backup(game.name))
+        result = self._run_locked("backup", game.name, lambda: self._ludusavi().backup(game.name))
         self._refresh_statuses_unlocked()
         self._log("info", f"Backed up {game.name} after exit", "backup", game.name)
         return {"status": "backed_up", "game": game.name, "result": result}
@@ -168,7 +169,7 @@ class SDHLudusaviService:
         if game is None:
             return self._skip("backup", game_name, "unmatched_game")
 
-        result = self._run_locked("backup", game.name, lambda: self._adapter.backup(game.name))
+        result = self._run_locked("backup", game.name, lambda: self._ludusavi().backup(game.name))
         self._refresh_statuses_unlocked()
         self._log("info", f"Backed up {game.name}", "backup", game.name)
         return {"status": "backed_up", "game": game.name, "result": result}
@@ -180,12 +181,12 @@ class SDHLudusaviService:
         if not game.has_backup:
             return self._skip("restore", game.name, "no_backup")
 
-        result = self._run_locked("restore", game.name, lambda: self._adapter.restore(game.name))
+        result = self._run_locked("restore", game.name, lambda: self._ludusavi().restore(game.name))
         self._log("info", f"Restored {game.name}", "restore", game.name)
         return {"status": "restored", "game": game.name, "result": result}
 
     def get_versions(self) -> dict[str, str]:
-        versions = dict(self._run_locked("versions", None, self._adapter.get_versions))
+        versions = dict(self._run_locked("versions", None, lambda: self._ludusavi().get_versions()))
         versions["sdh_ludusavi"] = resolve_version()
         return versions
 
@@ -230,7 +231,7 @@ class SDHLudusaviService:
             raise
 
     def _refresh_statuses_unlocked(self) -> list[GameStatus]:
-        games = [self._coerce_game_status(game) for game in self._adapter.refresh_statuses()]
+        games = [self._coerce_game_status(game) for game in self._ludusavi().refresh_statuses()]
         self._games = {_normalize(game.name): game for game in games}
         self._log("info", f"Refreshed {len(games)} Ludusavi games", "refresh")
         return games
@@ -293,6 +294,17 @@ class SDHLudusaviService:
     def _warn_state_load(self, reason: str) -> None:
         LOGGER.warning("Ignoring SDH-ludusavi state at %s: %s", self._state_path, reason)
 
+    def _ludusavi(self) -> LudusaviAdapter:
+        if self._adapter is None:
+            self._adapter = self._adapter_factory()
+        return self._adapter
+
 
 def _normalize(game_name: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", game_name.casefold()).strip()
+
+
+def _default_adapter_factory() -> LudusaviAdapter:
+    from .ludusavi import PyludusaviAdapter
+
+    return PyludusaviAdapter()

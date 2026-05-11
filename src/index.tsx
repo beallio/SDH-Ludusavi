@@ -140,19 +140,23 @@ function Content() {
   const loadInitial = async () => {
     setBusyLabel("Loading");
     try {
-      const [loadedSettings, refreshed, loadedVersions, loadedOperation, loadedLogs] =
-        await Promise.all([
-          getSettings(),
-          refreshGamesCall(),
-          getVersions(),
-          getOperationStatus(),
-          getRecentLogs()
-        ]);
+      const loadedSettings = await getSettings();
       setSettings(loadedSettings);
+
+      const [refreshed, loadedVersions] = await Promise.all([
+        refreshGamesCall(),
+        getVersions()
+      ]);
       applyRefreshResult(refreshed);
       setVersions(loadedVersions);
+
+      const loadedOperation = await getOperationStatus();
       setOperation(loadedOperation);
+      const loadedLogs = await getRecentLogs();
       setLogs(loadedLogs);
+    } catch (error) {
+      setDependencyError(error instanceof Error ? error.message : String(error));
+      setLogs(await getRecentLogs().catch(() => []));
     } finally {
       setBusyLabel(null);
     }

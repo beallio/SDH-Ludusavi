@@ -2,10 +2,10 @@
   "name": "SDH-ludusavi",
   "version": "0.1.0",
   "author": "David Beall",
-  "flags": ["debug", "_root"],
+  "flags": ["debug"],
   "api_version": 1,
   "publish": {
-    "tags": ["ludusavi", "backup", "saves", "root"],
+    "tags": ["ludusavi", "backup", "saves"],
     "description": "Decky Loader controls for Ludusavi save backups and restores.",
     "image": "https://opengraph.githubassets.com/1/SteamDeckHomebrew/PluginLoader"
   }

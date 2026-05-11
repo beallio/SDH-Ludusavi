@@ -38,6 +38,15 @@ def test_frontend_wires_backend_calls_and_toasts() -> None:
     assert "dependency_error" in source
 
 
+def test_frontend_initial_load_fetches_logs_after_refresh() -> None:
+    source = FRONTEND.read_text()
+
+    assert "const loadedLogs = await getRecentLogs();" in source
+    assert source.index("applyRefreshResult(refreshed);") < source.index(
+        "const loadedLogs = await getRecentLogs();"
+    )
+
+
 def test_frontend_exposes_sdh_ludusavi_version_row() -> None:
     source = FRONTEND.read_text()
 
