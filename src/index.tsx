@@ -190,8 +190,18 @@ function Content() {
   };
 
   const toggleAutoSync = async (enabled: boolean) => {
-    const updated = await setAutoSyncEnabled(enabled);
-    setSettings(updated);
+    setBusyLabel("Updating settings");
+    try {
+      const updated = await setAutoSyncEnabled(enabled);
+      setSettings(updated);
+    } catch (error) {
+      toaster.toast({
+        title: "SDH-ludusavi settings failed",
+        body: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      setBusyLabel(null);
+    }
   };
 
   const runForceOperation = async (

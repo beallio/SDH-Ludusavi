@@ -7,6 +7,7 @@ FLATPAK_EXECUTABLES = (
     "/bin/flatpak",
     "/usr/local/bin/flatpak",
 )
+VERIFY_TIMEOUT_SECONDS = 5
 
 
 class LudusaviNotFoundError(Exception):
@@ -82,7 +83,13 @@ def _flatpak_commands() -> list[str]:
 def _verify(prefix: list[str]) -> bool:
     """Verify that the command prefix correctly calls Ludusavi."""
     try:
-        result = subprocess.run(prefix + ["--version"], capture_output=True, text=True, check=False)
+        result = subprocess.run(
+            prefix + ["--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=VERIFY_TIMEOUT_SECONDS,
+        )
         return result.returncode == 0
-    except (FileNotFoundError, PermissionError):
+    except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
         return False

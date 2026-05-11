@@ -33,5 +33,7 @@ existing verification command.
 ## Testing Strategy
 
 Add tests that simulate `flatpak` missing from `PATH` while `/usr/bin/flatpak` verifies,
-and update frontend static tests to require `ToggleField` and reject the raw checkbox
-control.
+verify that a broken `PATH` Flatpak falls through to absolute path candidates, verify
+that discovery failure remains explicit, ensure Ludusavi verification has a timeout, and
+update frontend static tests to require `ToggleField`, reject the raw checkbox control,
+and cover busy/error handling for the setting update.

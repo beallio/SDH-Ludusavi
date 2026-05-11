@@ -44,7 +44,17 @@ def test_frontend_uses_decky_toggle_for_automatic_sync() -> None:
     assert "ToggleField" in source
     assert 'label="Automatic Sync"' in source
     assert "checked={settings.auto_sync_enabled}" in source
+    assert "disabled={isBusy}" in source
+    assert "onChange={(enabled) => void toggleAutoSync(enabled)}" in source
     assert 'type="checkbox"' not in source
+
+
+def test_frontend_toggle_reports_busy_and_failures() -> None:
+    source = FRONTEND.read_text()
+
+    assert 'setBusyLabel("Updating settings")' in source
+    assert "await setAutoSyncEnabled(enabled)" in source
+    assert 'title: "SDH-ludusavi settings failed"' in source
 
 
 def test_frontend_initial_load_fetches_logs_after_refresh() -> None:
