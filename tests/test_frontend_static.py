@@ -74,15 +74,18 @@ def test_frontend_exposes_sdh_ludusavi_version_row() -> None:
     assert source.index("SDH-ludusavi:") < source.index("Ludusavi:")
 
 
-def test_frontend_renders_logs_inline_to_avoid_closing_qam() -> None:
+def test_frontend_uses_decky_log_modal() -> None:
     source = FRONTEND.read_text()
 
     for required_text in [
-        "const [showingLogs, setShowingLogs] = useState(false);",
-        "if (showingLogs) {",
-        '<PanelSection title="Plugin Logs">',
-        "onClick={() => setShowingLogs(false)}",
-        "Back",
+        "ConfirmModal",
+        "showModal",
+        "type LogModalProps",
+        "function LogModal",
+        "bAlertDialog={true}",
+        'strTitle="Plugin Logs"',
+        "onOK={closeModal}",
+        "onCancel={closeModal}",
         'maxHeight: "60vh"',
         'overflowY: "auto"',
         'fontFamily: "monospace"',
@@ -93,10 +96,9 @@ def test_frontend_renders_logs_inline_to_avoid_closing_qam() -> None:
         'borderRadius: "4px"',
         'userSelect: "text"',
         'logs.length === 0 ? "No recent logs" : logs.map(formatLogEntry).join("\\n")',
-        "onClick={() => setShowingLogs(true)}",
-        "Show Logs",
+        "showModal(<LogModal logs={logs} />)",
     ]:
         assert required_text in source
 
-    assert "showModal" not in source
-    assert "ConfirmModal" not in source
+    assert "showLogs" not in source
+    assert "setShowLogs" not in source

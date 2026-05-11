@@ -111,8 +111,10 @@ class SDHLudusaviService:
 
     def refresh_games(self, force: bool = False) -> dict[str, object]:
         if not force and self._games:
+            self._log("debug", "Returning cached game list", "refresh")
             return {"games": self._cached_games(), "dependency_error": None}
 
+        self._log("debug", f"Forcing refresh_games (force={force})", "refresh")
         try:
             games = self._run_locked("refresh", None, self._refresh_statuses_unlocked)
         except (
@@ -124,6 +126,7 @@ class SDHLudusaviService:
         return {"games": [game.to_dict() for game in games], "dependency_error": None}
 
     def handle_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+        self._log("debug", f"handle_game_start triggered for {game_name}", "start", game_name)
         del app_id
         if not self._auto_sync_enabled:
             return self._skip("start", game_name, "auto_sync_disabled")
@@ -136,6 +139,7 @@ class SDHLudusaviService:
         if not game.has_backup:
             return self._skip("start", game.name, "no_backup")
 
+        self._log("debug", f"Checking recency for {game.name}", "start", game.name)
         recency = self._ludusavi().compare_recency(game.name)
         if recency == "backup_newer":
             result = self._run_locked(
@@ -150,6 +154,7 @@ class SDHLudusaviService:
         return self._skip("start", game.name, "ambiguous_recency")
 
     def handle_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+        self._log("debug", f"handle_game_exit triggered for {game_name}", "exit", game_name)
         del app_id
         if not self._auto_sync_enabled:
             return self._skip("exit", game_name, "auto_sync_disabled")
@@ -217,6 +222,7 @@ class SDHLudusaviService:
             self._warn_state_load("state file must contain a JSON object")
             return
         self._auto_sync_enabled = bool(data.get("auto_sync_enabled", False))
+        self._log("debug", f"Loaded state: auto_sync_enabled={self._auto_sync_enabled}")
 
     def _save_state(self) -> None:
         self._state_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -227,6 +233,7 @@ class SDHLudusaviService:
                 encoding="utf-8",
             )
             os.replace(temp_path, self._state_path)
+            self._log("debug", f"Saved state to {self._state_path}")
         except OSError:
             temp_path.unlink(missing_ok=True)
             raise
@@ -253,8 +260,14 @@ class SDHLudusaviService:
     def _match_game(self, game_name: str) -> GameStatus | None:
         normalized = _normalize(game_name)
         if not self._games:
+            self._log("debug", f"_match_game triggering refresh for {game_name}", "refresh")
             self._refresh_statuses_unlocked()
-        return self._games.get(normalized)
+        game = self._games.get(normalized)
+        if game:
+            self._log("debug", f"Matched '{game_name}' to '{game.name}'")
+        else:
+            self._log("debug", f"Could not match game '{game_name}'")
+        return game
 
     def _run_locked(self, operation: str, game_name: str | None, callback: Any) -> Any:
         if self._operation.is_running or not self._operation_lock.acquire(blocking=False):
