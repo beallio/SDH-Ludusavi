@@ -125,7 +125,6 @@ function Content() {
     last_error: null
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [dependencyError, setDependencyError] = useState<string | null>(null);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
 
   const selectedStatus = useMemo(
@@ -155,7 +154,6 @@ function Content() {
       const loadedLogs = await getRecentLogs();
       setLogs(loadedLogs);
     } catch (error) {
-      setDependencyError(error instanceof Error ? error.message : String(error));
       setLogs(await getRecentLogs().catch(() => []));
     } finally {
       setBusyLabel(null);
@@ -164,7 +162,6 @@ function Content() {
 
   const applyRefreshResult = (result: RefreshResult) => {
     setGames(result.games);
-    setDependencyError(result.dependency_error);
     setSelectedGame((current) => {
       if (current && result.games.some((game) => game.name === current)) {
         return current;
