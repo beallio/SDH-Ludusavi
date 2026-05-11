@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -9,6 +8,14 @@ FLATPAK_ID = "com.github.mtkennerly.ludusavi"
 
 
 class PyludusaviAdapter:
+    """
+    A concrete implementation of LudusaviAdapter that uses the pyludusavi library.
+
+    This adapter discovers the user's Ludusavi executable (prioritizing the raw binary
+    extracted from the Flatpak to avoid DBUS initialization issues in the root context)
+    and proxies commands (backup, restore, versions) to it.
+    """
+
     def __init__(
         self,
         flatpak_id: str = FLATPAK_ID,
@@ -67,31 +74,14 @@ class PyludusaviAdapter:
         ludusavi = self._client.version()
         return {
             "ludusavi": ludusavi,
-            "rclone": self._rclone_version(),
         }
-
-    def _rclone_version(self) -> str:
-        command = _rclone_command_from_prefix(list(self._client.command_prefix))
-        if command is None:
-            return "unavailable"
-        try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=15,
-                check=True,
-            )
-        except (
-            FileNotFoundError,
-            subprocess.CalledProcessError,
-            subprocess.TimeoutExpired,
-        ) as exc:
-            return f"unavailable: {exc}"
-        return result.stdout.splitlines()[0] if result.stdout else "unavailable"
 
 
 def _games_from_output(output: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """
+    Extract the 'games' dictionary from pyludusavi's JSON output payload,
+    ensuring it is safely cast to a nested dictionary structure.
+    """
     games = output.get("games", {})
     if isinstance(games, Mapping):
         return {str(name): dict(game) for name, game in games.items() if isinstance(game, Mapping)}
@@ -99,6 +89,10 @@ def _games_from_output(output: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _game_error(game: dict[str, Any]) -> str | None:
+    """
+    Scan a game's 'files' and 'registry' output collections to see if Ludusavi
+    reported any specific failures, and return the first error message encountered.
+    """
     for collection in ("files", "registry"):
         items = game.get(collection, {})
         if not isinstance(items, dict):
@@ -107,28 +101,6 @@ def _game_error(game: dict[str, Any]) -> str | None:
             if isinstance(value, dict) and value.get("failed"):
                 error = value.get("error")
                 return str(error) if error else "Ludusavi reported a failed item"
-    return None
-
-
-def _rclone_command_from_prefix(command_prefix: list[str]) -> list[str] | None:
-    try:
-        run_index = command_prefix.index("run")
-        for app_index in range(run_index + 1, len(command_prefix)):
-            if not command_prefix[app_index].startswith("-"):
-                return command_prefix[:app_index] + [
-                    "--command=rclone",
-                    command_prefix[app_index],
-                    "version",
-                ]
-        return None
-    except ValueError:
-        pass
-
-    for i, part in enumerate(command_prefix):
-        if part.endswith("bin/ludusavi") or part == "ludusavi":
-            rclone_path = part.replace("ludusavi", "rclone")
-            return command_prefix[:i] + [rclone_path, "version"]
-
     return None
 
 

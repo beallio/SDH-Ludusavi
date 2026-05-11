@@ -251,7 +251,7 @@ function Content() {
               data: game.name
             }))}
             selectedOption={selectedGame}
-            onChange={(option) => setSelectedGame(option.data)}
+            onChange={(data: any) => setSelectedGame(data?.data ?? data)}
           />
         </PanelSectionRow>
 
@@ -301,7 +301,6 @@ function Content() {
           <div>
             <div>SDH-ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
             <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
-            <div>rclone: {versions.rclone ?? "Unknown"}</div>
           </div>
         </PanelSectionRow>
       </PanelSection>

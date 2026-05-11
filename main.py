@@ -15,6 +15,14 @@ STATE_FILE_NAME = "sdh_ludusavi.json"
 
 
 class Plugin:
+    """
+    The main entry point for the SDH-ludusavi Decky Loader plugin.
+
+    This class handles the lifecycle events triggered by Decky Loader
+    (like `_main`, `_unload`, and `_migration`) and provides an asynchronous
+    RPC wrapper around the synchronous `SDHLudusaviService` for the frontend.
+    """
+
     def __init__(self) -> None:
         self._backend: SDHLudusaviService | None = None
         self._backend_lock = threading.Lock()
@@ -94,6 +102,18 @@ class Plugin:
         )
 
     async def _call(self, operation: str, callback: Any) -> Any:
+        """
+        Execute a synchronous service method in a background thread to prevent
+        blocking the Decky Loader async event loop.
+
+        Args:
+            operation: A descriptive name for the operation (used in logs).
+            callback: The synchronous function to execute.
+
+        Returns:
+            The result of the callback, or a dictionary containing error details
+            if the operation failed or was blocked by the service lock.
+        """
         try:
             return await _run_blocking(callback)
         except OperationLockedError as exc:

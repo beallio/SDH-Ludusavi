@@ -34,6 +34,8 @@ class LudusaviAdapter(Protocol):
 
 @dataclass
 class GameStatus:
+    """Represents the parsed Ludusavi status for a single game."""
+
     name: str
     configured: bool
     has_backup: bool
@@ -58,6 +60,8 @@ class GameStatus:
 
 @dataclass
 class OperationState:
+    """Tracks the current active or last completed backend operation."""
+
     is_running: bool = False
     name: str | None = None
     game_name: str | None = None
@@ -70,6 +74,8 @@ class OperationState:
 
 @dataclass
 class LogEntry:
+    """A single diagnostic log entry held in the backend ring buffer."""
+
     level: str
     message: str
     operation: str | None = None
@@ -80,6 +86,14 @@ class LogEntry:
 
 
 class SDHLudusaviService:
+    """
+    The core synchronous backend service for SDH-ludusavi.
+
+    This service orchestrates all Ludusavi operations (backups, restores, statuses),
+    manages the internal game list cache, handles the plugin's configuration state,
+    and enforces a thread lock to ensure only one Ludusavi subprocess runs at a time.
+    """
+
     def __init__(
         self,
         adapter: LudusaviAdapter | None = None,
@@ -127,21 +141,37 @@ class SDHLudusaviService:
         return {"games": [game.to_dict() for game in games], "dependency_error": None}
 
     def handle_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
-        self._log("debug", f"handle_game_start triggered for {game_name}", "start", game_name)
+        self._log(
+            "debug",
+            f"handle_game_start triggered for game='{game_name}', app_id='{app_id}'",
+            "start",
+            game_name,
+        )
         del app_id
         if not self._auto_sync_enabled:
+            self._log("debug", "Skipping: auto_sync_enabled is False", "start", game_name)
             return self._skip("start", game_name, "auto_sync_disabled")
         if self._operation.is_running:
+            self._log(
+                "debug",
+                f"Skipping: another operation is running ({self._operation.name})",
+                "start",
+                game_name,
+            )
             return self._skip("start", game_name, "operation_running")
 
         game = self._match_game(game_name)
         if game is None:
+            self._log("debug", "Skipping: game not found in Ludusavi list", "start", game_name)
             return self._skip("start", game_name, "unmatched_game")
         if not game.has_backup:
+            self._log("debug", "Skipping: game has no existing backup", "start", game.name)
             return self._skip("start", game.name, "no_backup")
 
         self._log("debug", f"Checking recency for {game.name}", "start", game.name)
         recency = self._ludusavi().compare_recency(game.name)
+        self._log("debug", f"Recency result: {recency}", "start", game.name)
+
         if recency == "backup_newer":
             result = self._run_locked(
                 "restore",
@@ -155,15 +185,28 @@ class SDHLudusaviService:
         return self._skip("start", game.name, "ambiguous_recency")
 
     def handle_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
-        self._log("debug", f"handle_game_exit triggered for {game_name}", "exit", game_name)
+        self._log(
+            "debug",
+            f"handle_game_exit triggered for game='{game_name}', app_id='{app_id}'",
+            "exit",
+            game_name,
+        )
         del app_id
         if not self._auto_sync_enabled:
+            self._log("debug", "Skipping: auto_sync_enabled is False", "exit", game_name)
             return self._skip("exit", game_name, "auto_sync_disabled")
         if self._operation.is_running:
+            self._log(
+                "debug",
+                f"Skipping: another operation is running ({self._operation.name})",
+                "exit",
+                game_name,
+            )
             return self._skip("exit", game_name, "operation_running")
 
         game = self._match_game(game_name)
         if game is None:
+            self._log("debug", "Skipping: game not found in Ludusavi list", "exit", game_name)
             return self._skip("exit", game_name, "unmatched_game")
 
         result = self._run_locked("backup", game.name, lambda: self._ludusavi().backup(game.name))

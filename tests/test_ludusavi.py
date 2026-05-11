@@ -1,4 +1,3 @@
-import subprocess
 import sys
 import types
 
@@ -120,61 +119,3 @@ def test_compare_recency_remains_ambiguous_without_direct_recency_proof() -> Non
 
     assert adapter.compare_recency("Hades") == "ambiguous"
     assert client.requested_games == ["Hades"]
-
-
-def test_rclone_version_uses_pyludusavi_discovered_flatpak_prefix(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[list[str]] = []
-
-    class FakeCompletedProcess:
-        stdout = "rclone v1.66.0\n"
-
-    def fake_run(command: list[str], **kwargs: object) -> FakeCompletedProcess:
-        calls.append(command)
-        return FakeCompletedProcess()
-
-    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
-    adapter._client = types.SimpleNamespace(
-        command_prefix=[
-            "/usr/bin/env",
-            "HOME=/home/deck",
-            "XDG_DATA_HOME=/home/deck/.local/share",
-            "FLATPAK_USER_DIR=/home/deck/.local/share/flatpak",
-            "/usr/bin/flatpak",
-            "run",
-            "--user",
-            FLATPAK_ID,
-        ]
-    )
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
-    assert adapter._rclone_version() == "rclone v1.66.0"
-    assert calls == [
-        [
-            "/usr/bin/env",
-            "HOME=/home/deck",
-            "XDG_DATA_HOME=/home/deck/.local/share",
-            "FLATPAK_USER_DIR=/home/deck/.local/share/flatpak",
-            "/usr/bin/flatpak",
-            "run",
-            "--user",
-            "--command=rclone",
-            FLATPAK_ID,
-            "version",
-        ],
-    ]
-
-
-def test_rclone_command_from_prefix_supports_explicit_path() -> None:
-    from sdh_ludusavi.ludusavi import _rclone_command_from_prefix
-
-    assert _rclone_command_from_prefix(
-        ["/usr/bin/sudo", "-u", "deck", "/path/to/bin/ludusavi"]
-    ) == [
-        "/usr/bin/sudo",
-        "-u",
-        "deck",
-        "/path/to/bin/rclone",
-        "version",
-    ]
