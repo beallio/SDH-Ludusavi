@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from collections.abc import Mapping
 from typing import Any, cast
 
 
 FLATPAK_ID = "com.github.mtkennerly.ludusavi"
+FLATPAK_EXECUTABLES = (
+    "/usr/bin/flatpak",
+    "/bin/flatpak",
+    "/usr/local/bin/flatpak",
+)
 
 
 class PyludusaviAdapter:
@@ -55,17 +61,25 @@ class PyludusaviAdapter:
         }
 
     def _rclone_version(self) -> str:
-        try:
-            result = subprocess.run(
-                ["flatpak", "run", "--command=rclone", self._flatpak_id, "version"],
-                capture_output=True,
-                text=True,
-                timeout=15,
-                check=True,
-            )
-        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            return f"unavailable: {exc}"
-        return result.stdout.splitlines()[0] if result.stdout else "unavailable"
+        errors: list[str] = []
+        for flatpak in _flatpak_commands():
+            try:
+                result = subprocess.run(
+                    [flatpak, "run", "--command=rclone", self._flatpak_id, "version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=True,
+                )
+            except (
+                FileNotFoundError,
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+            ) as exc:
+                errors.append(str(exc))
+                continue
+            return result.stdout.splitlines()[0] if result.stdout else "unavailable"
+        return f"unavailable: {'; '.join(errors)}"
 
 
 def _games_from_output(output: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -85,3 +99,14 @@ def _game_error(game: dict[str, Any]) -> str | None:
                 error = value.get("error")
                 return str(error) if error else "Ludusavi reported a failed item"
     return None
+
+
+def _flatpak_commands() -> list[str]:
+    commands: list[str] = []
+    path_lookup = shutil.which("flatpak")
+    if path_lookup:
+        commands.append(path_lookup)
+    for command in FLATPAK_EXECUTABLES:
+        if command not in commands:
+            commands.append(command)
+    return commands

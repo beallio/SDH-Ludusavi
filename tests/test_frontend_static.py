@@ -38,6 +38,15 @@ def test_frontend_wires_backend_calls_and_toasts() -> None:
     assert "dependency_error" in source
 
 
+def test_frontend_uses_decky_toggle_for_automatic_sync() -> None:
+    source = FRONTEND.read_text()
+
+    assert "ToggleField" in source
+    assert 'label="Automatic Sync"' in source
+    assert "checked={settings.auto_sync_enabled}" in source
+    assert 'type="checkbox"' not in source
+
+
 def test_frontend_initial_load_fetches_logs_after_refresh() -> None:
     source = FRONTEND.read_text()
 

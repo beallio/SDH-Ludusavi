@@ -1,3 +1,8 @@
+import subprocess
+
+import pytest
+
+from sdh_ludusavi import ludusavi
 from sdh_ludusavi.ludusavi import FLATPAK_ID, PyludusaviAdapter, _game_error, _games_from_output
 
 
@@ -62,3 +67,27 @@ def test_compare_recency_remains_ambiguous_without_direct_recency_proof() -> Non
 
     assert adapter.compare_recency("Hades") == "ambiguous"
     assert client.requested_games == ["Hades"]
+
+
+def test_rclone_version_uses_absolute_flatpak_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+
+    class FakeCompletedProcess:
+        stdout = "rclone v1.66.0\n"
+
+    def fake_run(command: list[str], **kwargs: object) -> FakeCompletedProcess:
+        calls.append(command)
+        if command[0] == "flatpak":
+            raise FileNotFoundError("flatpak")
+        return FakeCompletedProcess()
+
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    adapter._flatpak_id = FLATPAK_ID
+    monkeypatch.setattr(ludusavi, "_flatpak_commands", lambda: ["flatpak", "/usr/bin/flatpak"])
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert adapter._rclone_version() == "rclone v1.66.0"
+    assert calls == [
+        ["flatpak", "run", "--command=rclone", FLATPAK_ID, "version"],
+        ["/usr/bin/flatpak", "run", "--command=rclone", FLATPAK_ID, "version"],
+    ]

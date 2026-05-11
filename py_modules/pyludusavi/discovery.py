@@ -2,6 +2,12 @@ import shutil
 import subprocess
 from typing import Optional
 
+FLATPAK_EXECUTABLES = (
+    "/usr/bin/flatpak",
+    "/bin/flatpak",
+    "/usr/local/bin/flatpak",
+)
+
 
 class LudusaviNotFoundError(Exception):
     """Raised when the Ludusavi executable or Flatpak could not be found."""
@@ -39,9 +45,10 @@ def find_ludusavi(
 
     # 2. Explicit Flatpak ID
     if explicit_flatpak_id:
-        prefix = ["flatpak", "run", explicit_flatpak_id]
-        if shutil.which("flatpak") and _verify(prefix):
-            return prefix
+        for flatpak in _flatpak_commands():
+            prefix = [flatpak, "run", explicit_flatpak_id]
+            if _verify(prefix):
+                return prefix
         raise LudusaviNotFoundError(
             f"Explicitly provided Ludusavi Flatpak ID not found or invalid: {explicit_flatpak_id}"
         )
@@ -53,13 +60,23 @@ def find_ludusavi(
             return [path_lookup]
 
     # 4. Flatpak ID lookup
-    flatpak_lookup = shutil.which("flatpak")
-    if flatpak_lookup:
-        prefix = ["flatpak", "run", flatpak_id]
+    for flatpak in _flatpak_commands():
+        prefix = [flatpak, "run", flatpak_id]
         if _verify(prefix):
             return prefix
 
     raise LudusaviNotFoundError("Ludusavi could not be found via PATH or Flatpak.")
+
+
+def _flatpak_commands() -> list[str]:
+    commands: list[str] = []
+    path_lookup = shutil.which("flatpak")
+    if path_lookup:
+        commands.append(path_lookup)
+    for command in FLATPAK_EXECUTABLES:
+        if command not in commands:
+            commands.append(command)
+    return commands
 
 
 def _verify(prefix: list[str]) -> bool:

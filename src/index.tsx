@@ -4,7 +4,8 @@ import {
   PanelSection,
   PanelSectionRow,
   showModal,
-  staticClasses
+  staticClasses,
+  ToggleField
 } from "@decky/ui";
 import {
   callable,
@@ -12,7 +13,6 @@ import {
   toaster
 } from "@decky/api";
 import { useEffect, useMemo, useState } from "react";
-import type { ChangeEvent } from "react";
 import { FaDatabase } from "react-icons/fa";
 
 type Settings = {
@@ -189,8 +189,8 @@ function Content() {
     }
   };
 
-  const toggleAutoSync = async (event: ChangeEvent<HTMLInputElement>) => {
-    const updated = await setAutoSyncEnabled(event.target.checked);
+  const toggleAutoSync = async (enabled: boolean) => {
+    const updated = await setAutoSyncEnabled(enabled);
     setSettings(updated);
   };
 
@@ -226,16 +226,12 @@ function Content() {
   return (
     <>
       <PanelSection title="Sync">
-        <PanelSectionRow>
-          <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span>Automatic Sync</span>
-            <input
-              type="checkbox"
-              checked={settings.auto_sync_enabled}
-              onChange={(event) => void toggleAutoSync(event)}
-            />
-          </label>
-        </PanelSectionRow>
+        <ToggleField
+          label="Automatic Sync"
+          checked={settings.auto_sync_enabled}
+          disabled={isBusy}
+          onChange={(enabled) => void toggleAutoSync(enabled)}
+        />
 
         <PanelSectionRow>
           <select
