@@ -95,6 +95,7 @@ class SDHLudusaviService:
         self._state_path = state_path or Path("/tmp/sdh_ludusavi/state.json")
         self._auto_sync_enabled = False
         self._games: dict[str, GameStatus] = {}
+        self._versions: dict[str, str] | None = None
         self._operation = OperationState()
         self._operation_lock = threading.Lock()
         self._logs: deque[LogEntry] = deque(maxlen=log_limit)
@@ -192,8 +193,14 @@ class SDHLudusaviService:
         return {"status": "restored", "game": game.name, "result": result}
 
     def get_versions(self) -> dict[str, str]:
+        if self._versions is not None:
+            self._log("debug", "Returning cached version list", "versions")
+            return self._versions
+
+        self._log("debug", "Fetching version list", "versions")
         versions = dict(self._run_locked("versions", None, lambda: self._ludusavi().get_versions()))
         versions["sdh_ludusavi"] = resolve_version()
+        self._versions = versions
         return versions
 
     def get_operation_status(self) -> dict[str, object]:
