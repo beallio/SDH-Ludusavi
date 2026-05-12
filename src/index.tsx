@@ -82,6 +82,8 @@ const getVersions = callable<[], Versions>("get_versions");
 const getOperationStatus = callable<[], OperationStatus>("get_operation_status");
 const getRecentLogs = callable<[], LogEntry[]>("get_recent_logs");
 const logCall = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
+const handleGameStartCall = callable<[gameName: string, app_id?: string], OperationResult>("handle_game_start");
+const handleGameExitCall = callable<[gameName: string, app_id?: string], OperationResult>("handle_game_exit");
 
 const log = (level: "info" | "debug" | "warning" | "error", message: string, operation?: string, gameName?: string) => {
   const prefix = `SDH-ludusavi${operation ? `:${operation}` : ""}${gameName ? ` [${gameName}]` : ""}`;
@@ -381,14 +383,23 @@ function Content() {
   );
 };
 
-function summarizeOperationResult(result: OperationResult, label: "Backup" | "Restore") {
+function summarizeOperationResult(result: OperationResult, label: string) {
   if (result.status === "skipped") {
-    return `${label} skipped: ${result.reason ?? "unknown reason"}`;
+    switch (result.reason) {
+      case "auto_sync_disabled": return `Auto-sync skipped: feature disabled`;
+      case "operation_running": return `Auto-sync skipped: another operation is running`;
+      case "unmatched_game": return `Auto-sync skipped: could not match game name`;
+      case "no_backup": return `Auto-sync skipped: no backup found for ${result.game}`;
+      case "local_current": return `Auto-sync skipped: local save is already current`;
+      case "ambiguous_recency": return `Auto-sync skipped: recency is ambiguous`;
+      default: return `${label} skipped: ${result.reason ?? "unknown reason"}`;
+    }
   }
   if (result.status === "failed") {
     return `${label} failed: ${result.message ?? "unknown error"}`;
   }
-  return `${label} ${result.status === "backed_up" ? "completed" : "completed"} for ${result.game}`;
+  const action = result.status === "backed_up" ? "Backup" : "Restore";
+  return `${action} completed for ${result.game}`;
 }
 
 function formatLogEntry(entry: LogEntry) {
@@ -399,12 +410,49 @@ function formatLogEntry(entry: LogEntry) {
 export default definePlugin(() => {
   console.log("SDH-ludusavi plugin initializing");
 
+  const appStateReg = (window as any).SteamClient?.Apps?.RegisterForAppRunningStateChanges(
+    async (unAppID: number, bIsRunning: boolean) => {
+      try {
+        const details = await (window as any).SteamClient?.Apps?.GetAppDetails(unAppID);
+        const gameName = details?.strName || `App ${unAppID}`;
+        const appIDStr = String(unAppID);
+
+        if (bIsRunning) {
+          // Game Start
+          const result = await handleGameStartCall(gameName, appIDStr);
+          if (result.status === "restored" || result.status === "failed") {
+            toaster.toast({
+              title: "SDH-ludusavi Auto-sync",
+              body: summarizeOperationResult(result, "Auto-sync")
+            });
+          }
+        } else {
+          // Game Exit
+          toaster.toast({
+            title: "SDH-ludusavi Auto-sync",
+            body: `Backing up saves for ${gameName}...`
+          });
+          const result = await handleGameExitCall(gameName, appIDStr);
+          if (result.status !== "skipped" || (result.reason !== "auto_sync_disabled" && result.reason !== "operation_running")) {
+            toaster.toast({
+              title: "SDH-ludusavi Auto-sync",
+              body: summarizeOperationResult(result, "Auto-sync")
+            });
+          }
+        }
+      } catch (error) {
+        console.error("SDH-ludusavi: app state change handler failed", error);
+      }
+    }
+  );
+
   return {
     name: "SDH-ludusavi",
     titleView: <div className={staticClasses.Title}>SDH-ludusavi</div>,
     content: <Content />,
     icon: <FaDatabase />,
     onDismount() {
+      appStateReg?.unregister();
       console.log("SDH-ludusavi unloading");
     },
   };
