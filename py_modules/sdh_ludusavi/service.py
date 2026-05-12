@@ -10,7 +10,7 @@ from collections.abc import Callable
 from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from ._version import resolve_version
 
@@ -26,9 +26,9 @@ class LudusaviAdapter(Protocol):
 
     def compare_recency(self, game_name: str) -> str: ...
 
-    def backup(self, game_name: str) -> dict[str, object]: ...
+    def backup(self, game_name: str, preview: bool = False) -> dict[str, object]: ...
 
-    def restore(self, game_name: str) -> dict[str, object]: ...
+    def restore(self, game_name: str, preview: bool = False) -> dict[str, object]: ...
 
     def get_versions(self) -> dict[str, str]: ...
 
@@ -249,6 +249,18 @@ class SDHLudusaviService:
                 game_name,
             )
             return self._skip("exit", game_name, "unmatched_game")
+
+        self.log("debug", f"Checking if backup is needed for {game.name}", "exit", game.name)
+        try:
+            preview = self._ludusavi().backup(game.name, preview=True)
+            game_output = cast(dict[str, Any], preview.get("games", {})).get(game.name, {})
+            change = cast(dict[str, Any], game_output).get("change")
+            self.log("debug", f"Backup preview result for {game.name}: {change}", "exit", game.name)
+
+            if change == "Same":
+                return self._skip("exit", game.name, "local_current")
+        except Exception as exc:
+            self.log("debug", f"Backup preview failed for {game.name}: {exc}", "exit", game.name)
 
         result = self._run_locked("backup", game.name, lambda: self._ludusavi().backup(game.name))
         self._refresh_statuses_unlocked()

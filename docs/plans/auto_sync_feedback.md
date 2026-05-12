@@ -1,53 +1,48 @@
-# Plan - Auto-Sync Feedback and Hooks
+# Plan - Auto-Sync Feedback and Hooks (Refined)
 
 ## Problem Definition
-The "Automatic Sync" feature in SDH-ludusavi is implemented in the backend but is not triggered by any automatic events in the frontend. Furthermore, there is insufficient logging to diagnose why sync might be skipped, and there are no toast notifications for automatic operations. 
-
-Users also want:
-1.  **Non-Steam Game Support:** Reliable matching for games added as non-Steam shortcuts.
-2.  **Launch Interception (if possible):** Delaying the game launch while checking/restoring saves.
-3.  **Refined Exit Logic:** Ensuring backups only happen if the local save is actually newer.
+The "Automatic Sync" feature needs to be more targeted and informative:
+1.  **Tracked Game Filtering:** Toast notifications should only appear for games Ludusavi is actually managing.
+2.  **Backup if Newer:** On game exit, only perform a backup if the local save is actually newer/different than the existing backup.
+3.  **Launch Feedback:** Perform check/restore immediately on launch.
 
 ## Architecture Overview
-1.  **Frontend Hook:** Register a listener for Steam app state changes to trigger sync.
-2.  **App Identification:** Use `SteamClient.Apps.GetAppDetails` to get game names, which works for both Steam and non-Steam shortcuts in the library.
-3.  **Sync Trigger:** Call `handle_game_start` and `handle_game_exit` RPC methods.
-4.  **Toasts:** Provide real-time feedback via Decky toasts.
-5.  **Logging:** Improve backend diagnostic logging.
+1.  **Frontend Hook:** Register a listener for Steam app state changes.
+2.  **Frontend Tracking:** Cache a list of tracked AppIDs and Game Names in the frontend to quickly filter toast notifications.
+3.  **Backend Logic:** 
+    - `handle_game_start`: Restore only if backup is newer.
+    - `handle_game_exit`: Backup only if local save is newer (via backup preview).
+4.  **Toasts:** Inform the user when operations start and finish, but only for tracked games.
 
 ## Proposed Solution
 
-### 1. Backend Logging & Logic Refinement (`py_modules/sdh_ludusavi/service.py`)
-- **Logging:** Upgrade key "skipped" logs to `info`. Add tracing to `_match_game`.
-- **Exit Logic:** The backend already calls `_ludusavi().backup(game.name)`. We will ensure `ludusavi.py` uses Ludusavi's internal logic which avoids redundant backups if files haven't changed.
-- **Start Logic:** We will keep the start logic conservative. Since Decky cannot easily *block* a launch without invasive Router hacks, we will perform the check/restore as quickly as possible upon the "Launching" state.
+### 1. Backend Logic Refinement (`py_modules/sdh_ludusavi/service.py`)
+- **`handle_game_exit`**: Before running the actual backup, perform a backup preview using `_ludusavi().backup(game.name, preview=True)`.
+    - Check the `overall` status or individual game `change` status.
+    - Only proceed with the full backup if the status is `New` or `Different`.
+    - Log "Skipping backup: local save is already current" if no changes detected.
 
-### 2. Frontend Game Hooks (`src/index.tsx`)
-- **Listener:** Use `SteamClient.Apps.RegisterForAppRunningStateChanges`.
-- **Game Name Lookup:** For every state change, fetch the game name using `SteamClient.Apps.GetAppDetails(unAppID)`. This name is passed to the backend, which already has normalization and fuzzy matching to bridge Steam names to Ludusavi names.
-- **Timing:** 
-    - When `bIsRunning` transitions to `true` (Launch): Trigger `handle_game_start`.
-    - When `bIsRunning` transitions to `false` (Exit): Trigger `handle_game_exit`.
-- **Toasts:**
-    - On start: "Auto-sync: Checking [Game Name]..."
-    - On exit: "Auto-sync: Backing up [Game Name]..."
-    - On result: Show result summary (Restored, Backed Up, or Skip reason if relevant).
-
-### 3. Backend Matching Improvements (`py_modules/sdh_ludusavi/service.py`)
-- Improve `_match_game` to better handle non-Steam names that might have suffixes or different casing.
+### 2. Frontend Hook & Filtering (`src/index.tsx`)
+- **State Management:** Add a global `trackedGames` state (sets of AppIDs and Names).
+- **Initialization:** Populate these sets during `loadInitial` and `applyRefreshResult` by extracting them from the `games` list returned by the backend.
+- **Hook Logic:**
+    - In `RegisterForAppRunningStateChanges`:
+        - Immediately check if the `unAppID` or `gameName` is in the tracked sets.
+        - Only show the "Checking..." or "Backing up..." toast if tracked.
+        - Always call the backend (to ensure logs are updated and fuzzy matching is handled), but the *initial* toast is filtered.
 
 ## Changes
 
 ### Backend (`py_modules/sdh_ludusavi/service.py`)
-- Increase log levels for auto-sync decisions.
-- Add debug logging for matching steps.
+- Refine `handle_game_exit` to include the "newer" check.
+- Update `handle_game_start` to ensure clear logging of recency results.
 
 ### Frontend (`src/index.tsx`)
-- Define `handleGameStartCall` and `handleGameExitCall`.
-- Register the app state listener in `definePlugin`.
-- Add toast logic for auto-sync.
+- Implement `trackedAppIDs` and `trackedNames` sets.
+- Update logic to filter initial toasts.
+- Refine `summarizeOperationResult` to handle "local_current" on exit.
 
 ## Verification & Testing
-- **TDD:** Add test cases for refined log levels and matching logic in `tests/test_service.py` and `tests/test_matching.py`.
-- **Manual:** Verify toasts and logs when starting/stopping games in the Decky environment.
+- **TDD:** Add a test case in `tests/test_service.py` for the refined exit logic (skipping backup if no changes).
+- **Manual:** Verify that starting/exiting a tracked game shows toasts, but an untracked game (like a random utility) does not.
 - **Build:** Ensure `pnpm run build` succeeds.

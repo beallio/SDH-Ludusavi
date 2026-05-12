@@ -105,11 +105,17 @@ class PyludusaviAdapter:
 
         return "ambiguous"
 
-    def backup(self, game_name: str) -> dict[str, object]:
-        return cast(dict[str, object], self._client.backup(games=[game_name], force=True).data)
+    def backup(self, game_name: str, preview: bool = False) -> dict[str, object]:
+        return cast(
+            dict[str, object],
+            self._client.backup(games=[game_name], preview=preview, force=True).data,
+        )
 
-    def restore(self, game_name: str) -> dict[str, object]:
-        return cast(dict[str, object], self._client.restore(games=[game_name], force=True).data)
+    def restore(self, game_name: str, preview: bool = False) -> dict[str, object]:
+        return cast(
+            dict[str, object],
+            self._client.restore(games=[game_name], preview=preview, force=True).data,
+        )
 
     def get_versions(self) -> dict[str, str]:
         ludusavi = self._client.version()
