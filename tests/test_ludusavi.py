@@ -87,20 +87,32 @@ class FakeResponse:
 
 
 class FakeLudusaviClient:
-    def __init__(self, backup_data: dict[str, object]) -> None:
+    def __init__(
+        self, backup_data: dict[str, object], restore_data: dict[str, object] | None = None
+    ) -> None:
         self.backup_data = backup_data
+        self.restore_data = restore_data or {}
         self.requested_games: list[str] | None = None
+        self.preview_requested: bool = False
 
     def backups_list(self, games: list[str] | None = None) -> FakeResponse:
         self.requested_games = games
         return FakeResponse(self.backup_data)
 
+    def restore(
+        self, games: list[str] | None = None, preview: bool = False, **kwargs: object
+    ) -> FakeResponse:
+        self.requested_games = games
+        self.preview_requested = preview
+        return FakeResponse(self.restore_data)
+
 
 def adapter_with_backups(
     backup_data: dict[str, object],
+    restore_data: dict[str, object] | None = None,
 ) -> tuple[PyludusaviAdapter, FakeLudusaviClient]:
     adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
-    client = FakeLudusaviClient(backup_data)
+    client = FakeLudusaviClient(backup_data, restore_data)
     adapter._client = client
     return adapter, client
 
@@ -112,10 +124,33 @@ def test_compare_recency_returns_no_backup_when_ludusavi_has_no_backup() -> None
     assert client.requested_games == ["Hades"]
 
 
-def test_compare_recency_remains_ambiguous_without_direct_recency_proof() -> None:
+def test_compare_recency_returns_backup_newer_when_restore_preview_shows_changes() -> None:
     adapter, client = adapter_with_backups(
-        {"games": {"Hades": {"backups": [{"when": "2026-05-10T00:00:00Z"}]}}}
+        backup_data={"games": {"Hades": {"backups": [{"when": "2026-05-10T00:00:00Z"}]}}},
+        restore_data={"games": {"Hades": {"change": "Different"}}},
     )
 
+    assert adapter.compare_recency("Hades") == "backup_newer"
+    assert client.preview_requested is True
+
+
+def test_compare_recency_returns_local_current_when_restore_preview_shows_same() -> None:
+    adapter, client = adapter_with_backups(
+        backup_data={"games": {"Hades": {"backups": [{"when": "2026-05-10T00:00:00Z"}]}}},
+        restore_data={"games": {"Hades": {"change": "Same"}}},
+    )
+
+    assert adapter.compare_recency("Hades") == "local_current"
+
+
+def test_compare_recency_remains_ambiguous_on_preview_error() -> None:
+    adapter, client = adapter_with_backups(
+        backup_data={"games": {"Hades": {"backups": [{"when": "2026-05-10T00:00:00Z"}]}}}
+    )
+
+    def fail_preview(*args: object, **kwargs: object) -> FakeResponse:
+        raise RuntimeError("preview failed")
+
+    client.restore = fail_preview
+
     assert adapter.compare_recency("Hades") == "ambiguous"
-    assert client.requested_games == ["Hades"]
