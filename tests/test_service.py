@@ -252,10 +252,30 @@ def test_exit_backs_up_only_when_auto_sync_enabled_and_matched(tmp_path: Path) -
     disabled = service.handle_game_exit("Hades")
     service.set_auto_sync_enabled(True)
     unmatched = service.handle_game_exit("Unknown Game")
+
+    # Mock backup preview to return "Same" for Hades first
+    original_backup = adapter.backup
+
+    def backup_with_preview(game_name: str, preview: bool = False) -> dict[str, object]:
+        if preview:
+            return {"games": {game_name: {"change": "Same"}}}
+        return original_backup(game_name)
+
+    adapter.backup = backup_with_preview
+    local_current = service.handle_game_exit("Hades")
+
+    # Now mock backup preview to return "Different"
+    def backup_with_changes(game_name: str, preview: bool = False) -> dict[str, object]:
+        if preview:
+            return {"games": {game_name: {"change": "Different"}}}
+        return original_backup(game_name)
+
+    adapter.backup = backup_with_changes
     backed_up = service.handle_game_exit("Hades")
 
     assert disabled["reason"] == "auto_sync_disabled"
     assert unmatched["reason"] == "unmatched_game"
+    assert local_current["reason"] == "local_current"
     assert backed_up["status"] == "backed_up"
     assert adapter.backups == ["Hades"]
 
