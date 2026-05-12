@@ -225,6 +225,9 @@ def test_start_skips_disabled_unmatched_local_current_and_ambiguous(tmp_path: Pa
     disabled = service.handle_game_start("Hades")
     service.set_auto_sync_enabled(True)
     unmatched = service.handle_game_start("Unknown Game")
+
+    # local_current requires preview logic mock if using real adapter,
+    # but FakeAdapter is static here.
     local_current = service.handle_game_start("Hades")
     adapter.recency["Hades"] = "ambiguous"
     ambiguous = service.handle_game_start("Hades")
@@ -234,6 +237,11 @@ def test_start_skips_disabled_unmatched_local_current_and_ambiguous(tmp_path: Pa
     assert local_current["reason"] == "local_current"
     assert ambiguous["reason"] == "ambiguous_recency"
     assert adapter.restores == []
+
+    # Verify log levels for skips are now 'info'
+    logs = service.get_recent_logs()
+    skip_logs = [log for log in logs if "Skipping" in log["message"] or "Skipped" in log["message"]]
+    assert all(log["level"] == "info" for log in skip_logs)
 
 
 def test_exit_backs_up_only_when_auto_sync_enabled_and_matched(tmp_path: Path) -> None:
