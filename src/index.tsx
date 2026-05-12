@@ -419,55 +419,63 @@ function formatLogEntry(entry: LogEntry) {
 export default definePlugin(() => {
   console.log("SDH-ludusavi plugin initializing");
 
-  const appStateReg = (window as any).SteamClient?.Apps?.RegisterForAppRunningStateChanges(
-    async (unAppID: number, bIsRunning: boolean) => {
-      try {
-        const details = await (window as any).SteamClient?.Apps?.GetAppDetails(unAppID);
-        const gameName = details?.strName || `App ${unAppID}`;
-        const appIDStr = String(unAppID);
-        const isTracked = trackedAppIDs.has(appIDStr) || trackedNames.has(gameName);
+  let appStateReg: any = undefined;
 
-        if (bIsRunning) {
-          // Game Start
-          if (isTracked) {
-            toaster.toast({
-              title: "SDH-ludusavi Auto-sync",
-              body: `Checking saves for ${gameName}...`
-            });
-          }
-          const result = await handleGameStartCall(gameName, appIDStr);
-          if (result.status === "restored" || result.status === "failed") {
-            toaster.toast({
-              title: "SDH-ludusavi Auto-sync",
-              body: summarizeOperationResult(result, "Auto-sync")
-            });
-          }
-        } else {
-          // Game Exit
-          if (isTracked) {
-            toaster.toast({
-              title: "SDH-ludusavi Auto-sync",
-              body: `Backing up saves for ${gameName}...`
-            });
-          }
-          const result = await handleGameExitCall(gameName, appIDStr);
-          if (result.status !== "skipped" || (result.reason !== "auto_sync_disabled" && result.reason !== "operation_running")) {
-            // If it was skipped because it was already current, don't show a success toast if we didn't show the initial one,
-            // but the logic here handles isTracked implicitly via result.reason === "unmatched_game" usually.
-            // For now, only show result toast if it did something or failed.
-            if (result.status !== "skipped" || result.reason === "local_current") {
-               toaster.toast({
-                title: "SDH-ludusavi Auto-sync",
-                body: summarizeOperationResult(result, "Auto-sync")
-              });
+  try {
+    const SC = (window as any).SteamClient;
+    if (SC && SC.Apps && SC.Apps.RegisterForAppRunningStateChanges) {
+      appStateReg = SC.Apps.RegisterForAppRunningStateChanges(
+        async (unAppID: number, bIsRunning: boolean) => {
+          try {
+            const details = await SC.Apps.GetAppDetails(unAppID);
+            const gameName = details?.strName || `App ${unAppID}`;
+            const appIDStr = String(unAppID);
+            const isTracked = trackedAppIDs.has(appIDStr) || trackedNames.has(gameName);
+
+            if (bIsRunning) {
+              // Game Start
+              if (isTracked) {
+                toaster.toast({
+                  title: "SDH-ludusavi Auto-sync",
+                  body: `Checking saves for ${gameName}...`
+                });
+              }
+              const result = await handleGameStartCall(gameName, appIDStr);
+              if (result.status === "restored" || result.status === "failed") {
+                toaster.toast({
+                  title: "SDH-ludusavi Auto-sync",
+                  body: summarizeOperationResult(result, "Auto-sync")
+                });
+              }
+            } else {
+              // Game Exit
+              if (isTracked) {
+                toaster.toast({
+                  title: "SDH-ludusavi Auto-sync",
+                  body: `Backing up saves for ${gameName}...`
+                });
+              }
+              const result = await handleGameExitCall(gameName, appIDStr);
+              if (result.status !== "skipped" || (result.reason !== "auto_sync_disabled" && result.reason !== "operation_running")) {
+                if (result.status !== "skipped" || result.reason === "local_current") {
+                  toaster.toast({
+                    title: "SDH-ludusavi Auto-sync",
+                    body: summarizeOperationResult(result, "Auto-sync")
+                  });
+                }
+              }
             }
+          } catch (error) {
+            console.error("SDH-ludusavi: app state change handler failed", error);
           }
         }
-      } catch (error) {
-        console.error("SDH-ludusavi: app state change handler failed", error);
-      }
+      );
+    } else {
+      console.warn("SDH-ludusavi: SteamClient.Apps.RegisterForAppRunningStateChanges not available");
     }
-  );
+  } catch (error) {
+    console.error("SDH-ludusavi: failed to initialize app state listener", error);
+  }
 
   return {
     name: "SDH-ludusavi",
@@ -475,7 +483,9 @@ export default definePlugin(() => {
     content: <Content />,
     icon: <FaDatabase />,
     onDismount() {
-      appStateReg?.unregister();
+      if (appStateReg && typeof appStateReg.unregister === 'function') {
+        appStateReg.unregister();
+      }
       console.log("SDH-ludusavi unloading");
     },
   };
