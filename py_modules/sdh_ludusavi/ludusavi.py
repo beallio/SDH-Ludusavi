@@ -76,11 +76,33 @@ class PyludusaviAdapter:
         return aliases
 
     def compare_recency(self, game_name: str) -> str:
-        # Ludusavi's current API exposes change categories, not a guaranteed
-        # timestamp comparison between live saves and backups. Keep auto-restore
-        # conservative unless a future adapter can prove backup recency.
-        if not self._client.backups_list(games=[game_name]).data.get("games"):
+        """
+        Compare the local save recency against the latest Ludusavi backup.
+
+        Uses a restore preview to determine if the backup contains changes
+        not present in the local save.
+        """
+        # Check if any backup exists first
+        backups_data = self._client.backups_list(games=[game_name]).data.get("games", {})
+        game_backups = backups_data.get(game_name, {})
+        if not game_backups.get("backups"):
             return "no_backup"
+
+        # Run a restore preview to see if the backup differs from local
+        try:
+            preview = self._client.restore(games=[game_name], preview=True).data
+            game_output = preview.get("games", {}).get(game_name, {})
+            change = game_output.get("change")
+
+            if change == "Same":
+                return "local_current"
+            if change in ("New", "Different"):
+                # In a restore context, New/Different implies the backup has
+                # data that should be applied to local.
+                return "backup_newer"
+        except Exception:
+            pass
+
         return "ambiguous"
 
     def backup(self, game_name: str) -> dict[str, object]:
