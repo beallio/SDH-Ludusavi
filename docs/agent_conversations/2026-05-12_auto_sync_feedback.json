@@ -16,7 +16,9 @@
     "Used SteamClient.Apps.RegisterForAppRunningStateChanges to trigger auto-sync without blocking launch.",
     "Upgraded auto-sync skip logs from debug to info for better visibility in the UI Log Modal.",
     "Refined compare_recency to use Ludusavi's restore preview for reliable 'backup_newer' detection.",
-    "Implemented toast notifications for all major auto-sync events (checking, backing up, results)."
+    "Implemented toast notifications for all major auto-sync events (checking, backing up, results).",
+    "Implemented frontend caching of tracked games (Names and AppIDs) to filter initial toast notifications, ensuring they only appear for games Ludusavi manages.",
+    "Refined handle_game_exit to perform a backup preview first, ensuring backups only occur when the local save is actually newer/different."
   ],
-  "results": "Automatic sync now provides real-time feedback via toasts and logs. The system correctly identifies when a backup needs to be restored upon launch and ensures backups are performed on exit."
+  "results": "Automatic sync now provides real-time, targeted feedback via toasts and logs. The system only notifies users for tracked games and intelligently skips redundant backups on exit."
 }
