@@ -15,8 +15,6 @@ from typing import Any, Protocol, cast
 from ._version import resolve_version
 
 LOGGER = logging.getLogger(__name__)
-LOGGER.info("SDH-ludusavi service module loaded")
-LOGGER.info(os.environ)
 
 
 class OperationLockedError(RuntimeError):
@@ -176,6 +174,8 @@ class SDHLudusaviService:
         self._logs: deque[LogEntry] = deque(maxlen=log_limit)
         self._setup_logging()
         self._load_state()
+        self.log("info", "SDH-ludusavi service initialized", "init")
+        self.log("debug", f"Environment variables: {os.environ}", "init")
 
     def _setup_logging(self) -> None:
         """Configure the standard logging library to route through our handler."""

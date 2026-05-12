@@ -55,11 +55,12 @@ def test_unified_logging_exposure(tmp_path: Path) -> None:
     service.log("info", "Second message", operation="op2")
 
     logs = service.get_recent_logs()
-    assert len(logs) == 2
+    # account for the 2 initialization logs + 2 test logs
+    assert len(logs) == 4
 
     # Chronological order: First should be at index 0
-    assert logs[0]["message"] == "First message"
-    assert logs[1]["message"] == "Second message"
+    assert logs[-2]["message"] == "First message"
+    assert logs[-1]["message"] == "Second message"
 
     # Assert timestamp presence
     assert "timestamp" in logs[0]
