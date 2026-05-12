@@ -59,8 +59,10 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
     assert names == set(module.iter_required_archive_names(Path.cwd()))
     assert all(name.startswith("SDH-ludusavi/") for name in names)
     assert "SDH-ludusavi/plugin.json" in names
-    assert plugin_metadata["version"] == "0.1.0"
-    assert package_metadata["version"] == "0.1.0"
+
+    # Version should start with 0.1.0 and may include a git hash
+    assert plugin_metadata["version"].startswith("0.1.0")
+    assert package_metadata["version"] == plugin_metadata["version"]
     assert "SDH-ludusavi/dist/index.js" in names
     assert "SDH-ludusavi/dist/index.js.map" in names
     assert "README.md" not in names

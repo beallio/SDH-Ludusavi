@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import zipfile
 from pathlib import Path
 
@@ -94,9 +95,25 @@ def _metadata_version(path: Path) -> str | None:
     return stripped or None
 
 
+def _get_git_hash() -> str | None:
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL
+            )
+            .decode("ascii")
+            .strip()
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
 def build_plugin_zip(project_root: Path, output_dir: Path) -> Path:
     validate_required_files(project_root)
-    validate_package_versions(project_root)
+    base_version = validate_package_versions(project_root)
+    git_hash = _get_git_hash()
+    version = f"{base_version}+{git_hash}" if git_hash else base_version
+
     plugin_paths = iter_required_plugin_paths(project_root)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -108,7 +125,15 @@ def build_plugin_zip(project_root: Path, output_dir: Path) -> Path:
 
     with zipfile.ZipFile(temporary_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for plugin_path in plugin_paths:
-            archive.write(project_root / plugin_path, f"{ARCHIVE_ROOT}/{plugin_path}")
+            full_path = project_root / plugin_path
+            archive_name = f"{ARCHIVE_ROOT}/{plugin_path}"
+
+            if plugin_path in ("plugin.json", "package.json"):
+                data = json.loads(full_path.read_text(encoding="utf-8"))
+                data["version"] = version
+                archive.writestr(archive_name, json.dumps(data, indent=2))
+            else:
+                archive.write(full_path, archive_name)
 
     temporary_zip_path.replace(zip_path)
     return zip_path
