@@ -141,6 +141,9 @@ function LogModal({ logs, closeModal }: LogModalProps) {
   );
 }
 
+let trackedAppIDs = new Set<string>();
+let trackedNames = new Set<string>();
+
 function Content() {
   const [settings, setSettings] = useState<Settings>({ auto_sync_enabled: false, selected_game: "" });
   const [games, setGames] = useState<GameStatus[]>([]);
@@ -201,6 +204,12 @@ function Content() {
   const applyRefreshResult = (result: RefreshResult, preferredGame?: string) => {
     log("debug", `Applying refresh result (${result.games.length} games)`);
     setGames(result.games);
+    
+    // Update global tracking sets for toast filtering
+    trackedAppIDs = new Set(result.games.map(g => (g as any).steam_id).filter(id => !!id) as string[]);
+    trackedNames = new Set(result.games.map(g => g.name));
+    log("debug", `Updated tracking: ${trackedNames.size} games, ${trackedAppIDs.size} Steam IDs`);
+
     setSelectedGame((current) => {
       const target = preferredGame || current;
       if (target && result.games.some((game) => game.name === target)) {
@@ -416,9 +425,16 @@ export default definePlugin(() => {
         const details = await (window as any).SteamClient?.Apps?.GetAppDetails(unAppID);
         const gameName = details?.strName || `App ${unAppID}`;
         const appIDStr = String(unAppID);
+        const isTracked = trackedAppIDs.has(appIDStr) || trackedNames.has(gameName);
 
         if (bIsRunning) {
           // Game Start
+          if (isTracked) {
+            toaster.toast({
+              title: "SDH-ludusavi Auto-sync",
+              body: `Checking saves for ${gameName}...`
+            });
+          }
           const result = await handleGameStartCall(gameName, appIDStr);
           if (result.status === "restored" || result.status === "failed") {
             toaster.toast({
@@ -428,16 +444,23 @@ export default definePlugin(() => {
           }
         } else {
           // Game Exit
-          toaster.toast({
-            title: "SDH-ludusavi Auto-sync",
-            body: `Backing up saves for ${gameName}...`
-          });
-          const result = await handleGameExitCall(gameName, appIDStr);
-          if (result.status !== "skipped" || (result.reason !== "auto_sync_disabled" && result.reason !== "operation_running")) {
+          if (isTracked) {
             toaster.toast({
               title: "SDH-ludusavi Auto-sync",
-              body: summarizeOperationResult(result, "Auto-sync")
+              body: `Backing up saves for ${gameName}...`
             });
+          }
+          const result = await handleGameExitCall(gameName, appIDStr);
+          if (result.status !== "skipped" || (result.reason !== "auto_sync_disabled" && result.reason !== "operation_running")) {
+            // If it was skipped because it was already current, don't show a success toast if we didn't show the initial one,
+            // but the logic here handles isTracked implicitly via result.reason === "unmatched_game" usually.
+            // For now, only show result toast if it did something or failed.
+            if (result.status !== "skipped" || result.reason === "local_current") {
+               toaster.toast({
+                title: "SDH-ludusavi Auto-sync",
+                body: summarizeOperationResult(result, "Auto-sync")
+              });
+            }
           }
         }
       } catch (error) {
