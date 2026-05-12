@@ -84,6 +84,7 @@ def test_refresh_reports_ludusavi_adapter_initialization_failure(tmp_path: Path)
 
     assert result == {
         "games": [],
+        "aliases": {},
         "dependency_error": "Ludusavi Flatpak is not available to Decky",
     }
     assert service.get_recent_logs()[-1]["level"] == "error"

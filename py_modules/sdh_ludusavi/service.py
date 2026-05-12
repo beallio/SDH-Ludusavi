@@ -227,18 +227,29 @@ class SDHLudusaviService:
         """
         if not force and self._games:
             self.log("debug", "Returning cached game list", "refresh")
-            return {"games": self._cached_games(), "dependency_error": None}
+            return {
+                "games": self._cached_games(),
+                "aliases": self._aliases,
+                "dependency_error": None,
+            }
 
         self.log("debug", f"Forcing refresh_games (force={force})", "refresh")
         try:
             games = self._run_locked("refresh", None, self._refresh_statuses_unlocked)
+            return {
+                "games": [game.to_dict() for game in games],
+                "aliases": self._aliases,
+                "dependency_error": None,
+            }
         except (
             Exception
         ) as exc:  # pragma: no cover - concrete exception types come from pyludusavi.
             message = str(exc)
-            return {"games": self._cached_games(), "dependency_error": message}
-
-        return {"games": [game.to_dict() for game in games], "dependency_error": None}
+            return {
+                "games": self._cached_games(),
+                "aliases": self._aliases,
+                "dependency_error": message,
+            }
 
     def handle_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """

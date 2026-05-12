@@ -7,7 +7,8 @@ import {
   showModal,
   staticClasses,
   ToggleField,
-  Spinner
+  Spinner,
+  Router
 } from "@decky/ui";
 import {
   callable,
@@ -33,6 +34,7 @@ type GameStatus = {
 
 type RefreshResult = {
   games: GameStatus[];
+  aliases: Record<string, string>;
   dependency_error: string | null;
 };
 
@@ -144,6 +146,20 @@ function LogModal({ logs, closeModal }: LogModalProps) {
 let trackedAppIDs = new Set<string>();
 let trackedNames = new Set<string>();
 
+/** Normalize a game name for fuzzy matching, mirroring backend _normalize. */
+function normalize(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9.-]+/g, " ").trim();
+}
+
+function showToast(title: string, body: string) {
+  try {
+    log("debug", `Showing toast: ${title} - ${body}`);
+    toaster.toast({ title, body });
+  } catch (err) {
+    log("error", `Failed to show toast: ${err}`);
+  }
+}
+
 function Content() {
   const [settings, setSettings] = useState<Settings>({ auto_sync_enabled: false, selected_game: "" });
   const [games, setGames] = useState<GameStatus[]>([]);
@@ -202,13 +218,21 @@ function Content() {
   };
 
   const applyRefreshResult = (result: RefreshResult, preferredGame?: string) => {
-    log("debug", `Applying refresh result (${result.games.length} games)`);
+    log("debug", `Applying refresh result (${result.games.length} games, ${Object.keys(result.aliases || {}).length} aliases)`);
     setGames(result.games);
     
     // Update global tracking sets for toast filtering
     trackedAppIDs = new Set(result.games.map(g => (g as any).steam_id).filter(id => !!id) as string[]);
-    trackedNames = new Set(result.games.map(g => g.name.toLowerCase()));
-    log("info", `Tracked games updated: ${result.games.map(g => g.name).join(", ")}`);
+    
+    const names = new Set<string>();
+    result.games.forEach(g => names.add(normalize(g.name)));
+    Object.entries(result.aliases || {}).forEach(([alias, target]) => {
+      names.add(normalize(alias));
+      names.add(normalize(target));
+    });
+    trackedNames = names;
+    
+    log("info", `Tracked ${trackedNames.size} game names/aliases`);
 
     setSelectedGame((current) => {
       const target = preferredGame || current;
@@ -419,72 +443,67 @@ function formatLogEntry(entry: LogEntry) {
 export default definePlugin(() => {
   console.log("SDH-ludusavi plugin initializing");
 
-  let appStateReg: any = undefined;
+  let previousAppID: string | null = null;
+  let previousAppName: string | null = null;
 
-  try {
-    const SC = (window as any).SteamClient;
-    if (SC && SC.Apps && SC.Apps.RegisterForAppRunningStateChanges) {
-      appStateReg = SC.Apps.RegisterForAppRunningStateChanges(
-        async (unAppID: number, bIsRunning: boolean) => {
-          try {
-            const details = await SC.Apps.GetAppDetails(unAppID);
-            const gameName = details?.strName || `App ${unAppID}`;
-            const appIDStr = String(unAppID);
-            
-            // Use normalized check (lowercase) to match tracked names
-            const isTracked = trackedAppIDs.has(appIDStr) || trackedNames.has(gameName.toLowerCase());
-            log("info", `App state change detected: ${gameName} (${appIDStr}) isRunning=${bIsRunning} isTracked=${isTracked}`);
+  const isTracked = (name: string, appID: string) => {
+    return trackedAppIDs.has(appID) || trackedNames.has(normalize(name));
+  };
 
-            // Diagnostic toast (temporary) to confirm hook activity
-            toaster.toast({
-              title: "SDH-ludusavi Hook",
-              body: `${gameName} isRunning=${bIsRunning}`
-            });
-
-            if (bIsRunning) {
-              // Game Start
-              if (isTracked) {
-                toaster.toast({
-                  title: "SDH-ludusavi Auto-sync",
-                  body: `Checking saves for ${gameName}...`
-                });
-              }
-              const result = await handleGameStartCall(gameName, appIDStr);
-              if (result.status === "restored" || result.status === "failed") {
-                toaster.toast({
-                  title: "SDH-ludusavi Auto-sync",
-                  body: summarizeOperationResult(result, "Auto-sync")
-                });
-              }
-            } else {
-              // Game Exit
-              if (isTracked) {
-                toaster.toast({
-                  title: "SDH-ludusavi Auto-sync",
-                  body: `Backing up saves for ${gameName}...`
-                });
-              }
-              const result = await handleGameExitCall(gameName, appIDStr);
-              if (result.status !== "skipped" || (result.reason !== "auto_sync_disabled" && result.reason !== "operation_running")) {
-                if (result.status !== "skipped" || result.reason === "local_current") {
-                  toaster.toast({
-                    title: "SDH-ludusavi Auto-sync",
-                    body: summarizeOperationResult(result, "Auto-sync")
-                  });
-                }
-              }
-            }
-          } catch (error) {
-            console.error("SDH-ludusavi: app state change handler failed", error);
-          }
-        }
-      );
-    } else {
-      console.warn("SDH-ludusavi: SteamClient.Apps.RegisterForAppRunningStateChanges not available");
+  const handleAppStart = async (name: string, appID: string) => {
+    const tracked = isTracked(name, appID);
+    log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
+    
+    if (tracked) {
+      showToast("SDH-ludusavi Auto-sync", `Checking saves for ${name}...`);
     }
-  } catch (error) {
-    console.error("SDH-ludusavi: failed to initialize app state listener", error);
-  }
+    
+    const result = await handleGameStartCall(name, appID);
+    if (result.status === "restored" || result.status === "failed") {
+      showToast("SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
+    }
+  };
+
+  const handleAppExit = async (name: string, appID: string) => {
+    const tracked = isTracked(name, appID);
+    log("info", `App exited: ${name} (${appID}) tracked=${tracked}`);
+    
+    if (tracked) {
+      showToast("SDH-ludusavi Auto-sync", `Backing up saves for ${name}...`);
+    }
+    
+    const result = await handleGameExitCall(name, appID);
+    if (result.status !== "skipped" || (result.reason !== "auto_sync_disabled" && result.reason !== "operation_running")) {
+      if (result.status !== "skipped" || result.reason === "local_current") {
+        showToast("SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
+      }
+    }
+  };
+
+  const checkMainApp = () => {
+    try {
+      const mainApp = (Router as any).MainRunningApp;
+      const currentAppID = mainApp?.appid ? String(mainApp.appid) : null;
+      const currentAppName = mainApp?.display_name || null;
+
+      if (currentAppID !== previousAppID) {
+        // Change detected
+        if (previousAppID && previousAppName) {
+          void handleAppExit(previousAppName, previousAppID);
+        }
+        if (currentAppID && currentAppName) {
+          void handleAppStart(currentAppName, currentAppID);
+        }
+        
+        previousAppID = currentAppID;
+        previousAppName = currentAppName;
+      }
+    } catch (err) {
+      console.error("SDH-ludusavi: watcher loop failed", err);
+    }
+  };
+
+  const intervalID = window.setInterval(checkMainApp, 1000);
 
   return {
     name: "SDH-ludusavi",
@@ -492,9 +511,7 @@ export default definePlugin(() => {
     content: <Content />,
     icon: <FaDatabase />,
     onDismount() {
-      if (appStateReg && typeof appStateReg.unregister === 'function') {
-        appStateReg.unregister();
-      }
+      window.clearInterval(intervalID);
       console.log("SDH-ludusavi unloading");
     },
   };
