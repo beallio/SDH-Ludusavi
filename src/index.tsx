@@ -433,7 +433,13 @@ export default definePlugin(() => {
             
             // Use normalized check (lowercase) to match tracked names
             const isTracked = trackedAppIDs.has(appIDStr) || trackedNames.has(gameName.toLowerCase());
-            log("debug", `App state change: ${gameName} (${appIDStr}) isRunning=${bIsRunning} isTracked=${isTracked}`);
+            log("info", `App state change detected: ${gameName} (${appIDStr}) isRunning=${bIsRunning} isTracked=${isTracked}`);
+
+            // Diagnostic toast (temporary) to confirm hook activity
+            toaster.toast({
+              title: "SDH-ludusavi Hook",
+              body: `${gameName} isRunning=${bIsRunning}`
+            });
 
             if (bIsRunning) {
               // Game Start

@@ -51,19 +51,9 @@ class Plugin:
         game_name: str | None = None,
     ) -> None:
         """
-        Route frontend logs to the backend service (LogModal) and decky.logger.
+        Route frontend logs to the backend service.
         """
         self._service().log(level, message, operation, game_name)
-        log_msg = f"{operation or 'frontend'}: {message}"
-        if game_name:
-            log_msg = f"[{game_name}] {log_msg}"
-
-        if level == "error":
-            decky.logger.error(log_msg)
-        elif level == "warning":
-            decky.logger.warning(log_msg)
-        else:
-            decky.logger.info(log_msg)
 
     async def refresh_games(self, force: bool = False) -> dict[str, object]:
         return await self._call("refresh_games", lambda: self._service().refresh_games(force))

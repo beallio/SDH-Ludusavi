@@ -21,6 +21,59 @@ class OperationLockedError(RuntimeError):
     """Raised when a global Ludusavi operation is already running."""
 
 
+class DeckyLogHandler(logging.Handler):
+    """
+    A logging handler that routes standard Python logs into the plugin's
+    internal LogModal buffer and the Decky Loader logger.
+    """
+
+    def __init__(self, service: SDHLudusaviService) -> None:
+        super().__init__()
+        self._service = service
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            # Map Python levels to our LogModal levels
+            level = record.levelname.lower()
+            if level == "warning":
+                level = "warning"
+            elif level == "error" or level == "critical":
+                level = "error"
+            elif level == "debug":
+                level = "debug"
+            else:
+                level = "info"
+
+            # Push to LogModal buffer
+            self._service._push_log_record(level, msg)
+
+            # Also push to decky.logger if available
+            _decky_log(level, msg)
+        except Exception:
+            self.handleError(record)
+
+
+def _decky_log(level: str, message: str) -> None:
+    """Helper to log to decky.logger if available."""
+    try:
+        import decky
+
+        logger = getattr(decky, "logger", None)
+        if logger:
+            if level == "error":
+                logger.error(message)
+            elif level == "warning":
+                logger.warning(message)
+            elif level == "debug":
+                # Prefix with [DEBUG] because Decky UI usually filters info only
+                logger.info(f"[DEBUG] {message}")
+            else:
+                logger.info(message)
+    except (ImportError, AttributeError):
+        pass
+
+
 class LudusaviAdapter(Protocol):
     def refresh_statuses(self) -> list[dict[str, object]]: ...
 
@@ -102,7 +155,7 @@ class SDHLudusaviService:
         adapter: LudusaviAdapter | None = None,
         adapter_factory: Callable[[], LudusaviAdapter] | None = None,
         state_path: Path | None = None,
-        log_limit: int = 50,
+        log_limit: int = 100,
     ) -> None:
         if adapter is not None and adapter_factory is not None:
             raise ValueError("adapter and adapter_factory cannot both be provided")
@@ -119,7 +172,31 @@ class SDHLudusaviService:
         self._operation = OperationState()
         self._operation_lock = threading.Lock()
         self._logs: deque[LogEntry] = deque(maxlen=log_limit)
+        self._setup_logging()
         self._load_state()
+
+    def _setup_logging(self) -> None:
+        """Configure the standard logging library to route through our handler."""
+        handler = DeckyLogHandler(self)
+        handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+
+        # Attach to our own package and pyludusavi
+        for name in ("sdh_ludusavi", "pyludusavi"):
+            logger = logging.getLogger(name)
+            logger.setLevel(logging.DEBUG)
+            # Remove existing handlers to avoid duplicates on reload
+            has_our_handler = False
+            for h in logger.handlers[:]:
+                if isinstance(h, DeckyLogHandler):
+                    has_our_handler = True
+                    continue
+                logger.removeHandler(h)
+
+            if not has_our_handler:
+                logger.addHandler(handler)
+
+            # Ensure propagation is enabled so pytest and other parent loggers work
+            logger.propagate = True
 
     def get_settings(self) -> dict[str, Any]:
         """Return the current plugin settings."""
@@ -504,7 +581,27 @@ class SDHLudusaviService:
         operation: str | None = None,
         game_name: str | None = None,
     ) -> None:
-        """Add an entry to the internal diagnostic log buffer."""
+        """
+        Add an entry to the internal diagnostic log buffer.
+
+        This method is primarily used by the frontend via RPC.
+        """
+        # If it's from the frontend, we still want it in the Decky log
+        log_msg = f"{operation or 'frontend'}: {message}"
+        if game_name:
+            log_msg = f"[{game_name}] {log_msg}"
+
+        _decky_log(level, log_msg)
+        self._push_log_record(level, message, operation, game_name)
+
+    def _push_log_record(
+        self,
+        level: str,
+        message: str,
+        operation: str | None = None,
+        game_name: str | None = None,
+    ) -> None:
+        """Internal helper to push a record into the ring buffer."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._logs.append(LogEntry(level, message, timestamp, operation, game_name))
 
