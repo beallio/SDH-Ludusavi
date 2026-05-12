@@ -51,10 +51,29 @@ class PyludusaviAdapter:
                 "configured": True,
                 "has_backup": bool(backup_games.get(name, {}).get("backups")),
                 "needs_first_backup": not bool(backup_games.get(name, {}).get("backups")),
+                "steam_id": str(preview_games.get(name, {}).get("steamId"))
+                if preview_games.get(name, {}).get("steamId")
+                else None,
                 "error": _game_error(preview_games.get(name, {})),
             }
             for name in names
         ]
+
+    def get_aliases(self) -> dict[str, str]:
+        """
+        Build a map of custom game names to their canonical titles.
+        """
+        aliases: dict[str, str] = {}
+        try:
+            config = self._client.config_show().data
+            for game in config.get("customGames", []):
+                name = game.get("name")
+                alias = game.get("alias")
+                if name and alias:
+                    aliases[name] = alias
+        except Exception:
+            pass
+        return aliases
 
     def compare_recency(self, game_name: str) -> str:
         # Ludusavi's current API exposes change categories, not a guaranteed

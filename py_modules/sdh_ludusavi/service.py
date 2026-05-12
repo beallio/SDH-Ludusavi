@@ -41,6 +41,7 @@ class GameStatus:
     configured: bool
     has_backup: bool
     needs_first_backup: bool
+    steam_id: str | None = None
     error: str | None = None
 
     @property
@@ -112,6 +113,8 @@ class SDHLudusaviService:
         self._auto_sync_enabled = False
         self._selected_game = ""
         self._games: dict[str, GameStatus] = {}
+        self._aliases: dict[str, str] = {}
+        self._ids: dict[str, str] = {}
         self._versions: dict[str, str] | None = None
         self._operation = OperationState()
         self._operation_lock = threading.Lock()
@@ -172,7 +175,6 @@ class SDHLudusaviService:
             "start",
             game_name,
         )
-        del app_id
         if not self._auto_sync_enabled:
             self.log("debug", "Skipping: auto_sync_enabled is False", "start", game_name)
             return self._skip("start", game_name, "auto_sync_disabled")
@@ -185,9 +187,14 @@ class SDHLudusaviService:
             )
             return self._skip("start", game_name, "operation_running")
 
-        game = self._match_game(game_name)
+        game = self._match_game(game_name, app_id=app_id)
         if game is None:
-            self.log("debug", "Skipping: game not found in Ludusavi list", "start", game_name)
+            self.log(
+                "info",
+                f"Skipping: game not found in Ludusavi list (app_id: {app_id})",
+                "start",
+                game_name,
+            )
             return self._skip("start", game_name, "unmatched_game")
         if not game.has_backup:
             self.log("debug", "Skipping: game has no existing backup", "start", game.name)
@@ -221,7 +228,6 @@ class SDHLudusaviService:
             "exit",
             game_name,
         )
-        del app_id
         if not self._auto_sync_enabled:
             self.log("debug", "Skipping: auto_sync_enabled is False", "exit", game_name)
             return self._skip("exit", game_name, "auto_sync_disabled")
@@ -234,9 +240,14 @@ class SDHLudusaviService:
             )
             return self._skip("exit", game_name, "operation_running")
 
-        game = self._match_game(game_name)
+        game = self._match_game(game_name, app_id=app_id)
         if game is None:
-            self.log("debug", "Skipping: game not found in Ludusavi list", "exit", game_name)
+            self.log(
+                "info",
+                f"Skipping: game not found in Ludusavi list (app_id: {app_id})",
+                "exit",
+                game_name,
+            )
             return self._skip("exit", game_name, "unmatched_game")
 
         result = self._run_locked("backup", game.name, lambda: self._ludusavi().backup(game.name))
@@ -358,8 +369,14 @@ class SDHLudusaviService:
                     "refresh",
                 )
 
-        self._games = {_normalize(game.name): game for game in games}
-        self.log("info", f"Refreshed {len(games)} Ludusavi games", "refresh")
+        self._games = {game.name: game for game in games}
+        self._aliases = getattr(self._ludusavi(), "get_aliases", lambda: {})()
+        self._ids = {game.steam_id: game.name for game in games if game.steam_id}
+        self.log(
+            "info",
+            f"Refreshed {len(games)} Ludusavi games ({len(self._aliases)} aliases, {len(self._ids)} Steam IDs)",
+            "refresh",
+        )
         return games
 
     def _coerce_game_status(self, data: dict[str, object]) -> GameStatus:
@@ -371,27 +388,61 @@ class SDHLudusaviService:
             configured=bool(data.get("configured", True)),
             has_backup=bool(data.get("has_backup", False)),
             needs_first_backup=bool(data.get("needs_first_backup", False)),
+            steam_id=str(data.get("steam_id")) if data.get("steam_id") else None,
             error=str(error) if error else None,
         )
 
     def _cached_games(self) -> list[dict[str, object]]:
         return [game.to_dict() for game in self._games.values()]
 
-    def _match_game(self, game_name: str) -> GameStatus | None:
+    def _match_game(self, game_name: str, app_id: str | None = None) -> GameStatus | None:
         """
-        Attempt to match a Steam game name to an entry in the Ludusavi
-        game list.
+        Attempt to match a Steam game name or ID to an entry in the Ludusavi
+        game list, with fallback to aliases and fuzzy matching.
         """
-        normalized = _normalize(game_name)
         if not self._games:
             self.log("debug", f"_match_game triggering refresh for {game_name}", "refresh")
             self._refresh_statuses_unlocked()
-        game = self._games.get(normalized)
-        if game:
-            self.log("debug", f"Matched '{game_name}' to '{game.name}'")
-        else:
-            self.log("debug", f"Could not match game '{game_name}'")
-        return game
+
+        # 1. Match by Steam ID (Highest Priority)
+        if app_id and app_id in self._ids:
+            target = self._ids[app_id]
+            game = self._games.get(target)
+            if game:
+                self.log("info", f"Matched '{game_name}' via Steam ID '{app_id}' to '{game.name}'")
+                return game
+
+        # 2. Match by Alias
+        if game_name in self._aliases:
+            target = self._aliases[game_name]
+            game = self._games.get(target)
+            if game:
+                self.log("info", f"Matched '{game_name}' via Ludusavi alias to '{game.name}'")
+                return game
+
+        # 3. Match by Normalized Name (Exact)
+        normalized_input = _normalize(game_name)
+        for game in self._games.values():
+            if _normalize(game.name) == normalized_input:
+                self.log(
+                    "info", f"Matched '{game_name}' via exact normalized name to '{game.name}'"
+                )
+                return game
+
+        # 4. Fuzzy Match (Substring)
+        for game in self._games.values():
+            normalized_target = _normalize(game.name)
+            if normalized_input in normalized_target or normalized_target in normalized_input:
+                # Minimum length check to avoid matching e.g. "A" to every game with "A"
+                if len(normalized_input) > 4 or len(normalized_target) > 4:
+                    self.log("info", f"Matched '{game_name}' via fuzzy substring to '{game.name}'")
+                    return game
+
+        self.log(
+            "info",
+            f"Could not match game '{game_name}' (app_id: {app_id}, normalized: '{normalized_input}')",
+        )
+        return None
 
     def _run_locked(self, operation: str, game_name: str | None, callback: Any) -> Any:
         """
@@ -451,7 +502,8 @@ class SDHLudusaviService:
 
 def _normalize(game_name: str) -> str:
     """Normalize a game name for easier matching."""
-    return re.sub(r"[^a-z0-9]+", " ", game_name.casefold()).strip()
+    # Retain dots and hyphens for better precision in non-steam titles
+    return re.sub(r"[^a-z0-9.-]+", " ", game_name.casefold()).strip()
 
 
 def _default_adapter_factory() -> LudusaviAdapter:
