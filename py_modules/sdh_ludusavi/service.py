@@ -15,6 +15,8 @@ from typing import Any, Protocol, cast
 from ._version import resolve_version
 
 LOGGER = logging.getLogger(__name__)
+LOGGER.info("SDH-ludusavi service module loaded")
+LOGGER.info(os.environ)
 
 
 class OperationLockedError(RuntimeError):

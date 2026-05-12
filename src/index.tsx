@@ -91,9 +91,7 @@ const log = (level: "info" | "debug" | "warning" | "error", message: string, ope
   const prefix = `SDH-ludusavi${operation ? `:${operation}` : ""}${gameName ? ` [${gameName}]` : ""}`;
   const fullMsg = `${prefix}: ${message}`;
   
-  if (level === "error") console.error(fullMsg);
-  else if (level === "warning") console.warn(fullMsg);
-  else console.log(fullMsg);
+  console.log(fullMsg);
 
   void logCall(level, message, operation, gameName);
 };
@@ -109,7 +107,7 @@ function SpinnerButton({ children, loading, ...props }: any) {
   return (
     <ButtonItem {...props} disabled={props.disabled || loading}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px" }}>
-        {loading && <Spinner style={{ width: "16px", height: "16px", color: "#1a9fff" }} />}
+        {loading && <Spinner style={{ width: "18px", height: "18px", color: "#1a9fff" }} />}
         {children}
       </div>
     </ButtonItem>
