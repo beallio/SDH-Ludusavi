@@ -170,17 +170,17 @@ class SDHLudusaviService:
         Checks if a restore is needed based on backup recency.
         """
         self.log(
-            "debug",
+            "info",
             f"handle_game_start triggered for game='{game_name}', app_id='{app_id}'",
             "start",
             game_name,
         )
         if not self._auto_sync_enabled:
-            self.log("debug", "Skipping: auto_sync_enabled is False", "start", game_name)
+            self.log("info", "Skipping: auto_sync_enabled is False", "start", game_name)
             return self._skip("start", game_name, "auto_sync_disabled")
         if self._operation.is_running:
             self.log(
-                "debug",
+                "info",
                 f"Skipping: another operation is running ({self._operation.name})",
                 "start",
                 game_name,
@@ -197,12 +197,12 @@ class SDHLudusaviService:
             )
             return self._skip("start", game_name, "unmatched_game")
         if not game.has_backup:
-            self.log("debug", "Skipping: game has no existing backup", "start", game.name)
+            self.log("info", "Skipping: game has no existing backup", "start", game.name)
             return self._skip("start", game.name, "no_backup")
 
         self.log("debug", f"Checking recency for {game.name}", "start", game.name)
         recency = self._ludusavi().compare_recency(game.name)
-        self.log("debug", f"Recency result: {recency}", "start", game.name)
+        self.log("info", f"Recency check result for {game.name}: {recency}", "start", game.name)
 
         if recency == "backup_newer":
             result = self._run_locked(
@@ -223,17 +223,17 @@ class SDHLudusaviService:
         Triggers an automatic backup if enabled.
         """
         self.log(
-            "debug",
+            "info",
             f"handle_game_exit triggered for game='{game_name}', app_id='{app_id}'",
             "exit",
             game_name,
         )
         if not self._auto_sync_enabled:
-            self.log("debug", "Skipping: auto_sync_enabled is False", "exit", game_name)
+            self.log("info", "Skipping: auto_sync_enabled is False", "exit", game_name)
             return self._skip("exit", game_name, "auto_sync_disabled")
         if self._operation.is_running:
             self.log(
-                "debug",
+                "info",
                 f"Skipping: another operation is running ({self._operation.name})",
                 "exit",
                 game_name,
@@ -400,6 +400,7 @@ class SDHLudusaviService:
         Attempt to match a Steam game name or ID to an entry in the Ludusavi
         game list, with fallback to aliases and fuzzy matching.
         """
+        self.log("debug", f"Attempting to match '{game_name}' (app_id: {app_id})")
         if not self._games:
             self.log("debug", f"_match_game triggering refresh for {game_name}", "refresh")
             self._refresh_statuses_unlocked()
@@ -411,6 +412,9 @@ class SDHLudusaviService:
             if game:
                 self.log("info", f"Matched '{game_name}' via Steam ID '{app_id}' to '{game.name}'")
                 return game
+            self.log(
+                "debug", f"AppID '{app_id}' found in IDs map but game '{target}' not in games map"
+            )
 
         # 2. Match by Alias
         if game_name in self._aliases:
@@ -419,9 +423,11 @@ class SDHLudusaviService:
             if game:
                 self.log("info", f"Matched '{game_name}' via Ludusavi alias to '{game.name}'")
                 return game
+            self.log("debug", f"Alias '{game_name}' found for '{target}' but game not in games map")
 
         # 3. Match by Normalized Name (Exact)
         normalized_input = _normalize(game_name)
+        self.log("debug", f"Checking exact normalized match for '{normalized_input}'")
         for game in self._games.values():
             if _normalize(game.name) == normalized_input:
                 self.log(
@@ -430,6 +436,7 @@ class SDHLudusaviService:
                 return game
 
         # 4. Fuzzy Match (Substring)
+        self.log("debug", f"Checking fuzzy substring match for '{normalized_input}'")
         for game in self._games.values():
             normalized_target = _normalize(game.name)
             if normalized_input in normalized_target or normalized_target in normalized_input:
