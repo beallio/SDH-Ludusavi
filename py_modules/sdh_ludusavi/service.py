@@ -406,7 +406,7 @@ class SDHLudusaviService:
         return [entry.to_dict() for entry in self._logs]
 
     def _load_state(self) -> None:
-        """Load the plugin settings from the persistent state file."""
+        """Load the plugin settings and game cache from the persistent state file."""
         if not self._state_path.exists():
             return
         try:
@@ -425,20 +425,43 @@ class SDHLudusaviService:
         if not isinstance(data, dict):
             self._warn_state_load("state file must contain a JSON object")
             return
+
         self._auto_sync_enabled = bool(data.get("auto_sync_enabled", False))
         self._selected_game = str(data.get("selected_game", ""))
+
+        # Load cached games
+        cached_games = data.get("games", [])
+        if isinstance(cached_games, list):
+            self._games = {}
+            for g in cached_games:
+                try:
+                    game = self._coerce_game_status(g)
+                    self._games[game.name] = game
+                except Exception:
+                    continue
+
+        # Load cached aliases and IDs
+        self._aliases = data.get("aliases", {})
+        self._ids = data.get("ids", {})
+
         self.log(
             "debug",
-            f"Loaded state: auto_sync_enabled={self._auto_sync_enabled}, selected_game={self._selected_game}",
+            f"Loaded state: auto_sync_enabled={self._auto_sync_enabled}, selected_game={self._selected_game}, {len(self._games)} games cached",
         )
 
     def _save_state(self) -> None:
-        """Persist the current plugin settings to the state file."""
+        """Persist the current plugin settings and game cache to the state file."""
         self._state_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         temp_path = self._state_path.with_name(f".{self._state_path.name}.tmp")
+
+        data = self.get_settings()
+        data["games"] = [game.to_dict() for game in self._games.values()]
+        data["aliases"] = self._aliases
+        data["ids"] = self._ids
+
         try:
             temp_path.write_text(
-                json.dumps(self.get_settings(), indent=2, sort_keys=True),
+                json.dumps(data, indent=2, sort_keys=True),
                 encoding="utf-8",
             )
             os.replace(temp_path, self._state_path)
@@ -477,6 +500,7 @@ class SDHLudusaviService:
             f"Refreshed {len(games)} Ludusavi games ({len(self._aliases)} aliases, {len(self._ids)} Steam IDs)",
             "refresh",
         )
+        self._save_state()
         return games
 
     def _coerce_game_status(self, data: dict[str, object]) -> GameStatus:
