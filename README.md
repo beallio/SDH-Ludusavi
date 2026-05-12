@@ -9,13 +9,15 @@ game status, operation status, and recent operation logs.
 
 ## Features
 
-- Automatic Sync toggle for conservative start/exit sync behavior.
-- Ludusavi game selector using Ludusavi game names as canonical IDs.
-- Refresh Games, Force Backup, and Force Restore actions.
-- Manual backup and restore remain available when Automatic Sync is disabled.
-- SDH-ludusavi, Ludusavi, and rclone version display.
-- Missing Flatpak, missing rclone, missing config, and command failures appear in
-  the panel and logs.
+- **Automatic Sync:** Automates save lifecycle management:
+  - **On Game Start:** Automatically restores your save if the backup is newer than the local files (e.g., after playing on another device).
+  - **On Game Exit:** Automatically performs a backup immediately after closing the game, including cloud synchronization if Ludusavi/rclone is configured.
+  - **Safety First:** Skips operations if results are ambiguous or if another operation is already running to prevent data corruption.
+- **Unified Logging:** Frontend and backend logs are consolidated into the Decky Loader system log and accessible via a "View Logs" modal with timestamps and chronological ordering.
+- **Persistent Settings:** Remembers your selected game and sync preferences across plugin reloads.
+- **Ludusavi Integration:** Direct selector for Ludusavi game entries with real-time status display (e.g., "Backup ready", "Needs first backup").
+- **Manual Overrides:** Refresh Games, Force Backup, and Force Restore actions are always available, even when Automatic Sync is disabled.
+- **Version Display:** SDH-ludusavi and Ludusavi version information.
 
 ## Requirements
 
