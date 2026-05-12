@@ -36,14 +36,14 @@ class DeckyLogHandler(logging.Handler):
             msg = self.format(record)
             # Map Python levels to our LogModal levels
             level = record.levelname.lower()
-            if level == "warning":
-                level = "warning"
-            elif level == "error" or level == "critical":
-                level = "error"
-            elif level == "debug":
-                level = "debug"
-            else:
-                level = "info"
+            log_modal_map = {
+                "warning": "warning",
+                "error": "error",
+                "critical": "error",
+                "debug": "debug",
+                "info": "info",
+            }
+            level = log_modal_map.get(level, "info")
 
             # Push to LogModal buffer
             self._service._push_log_record(level, msg)
@@ -61,15 +61,15 @@ def _decky_log(level: str, message: str) -> None:
 
         logger = getattr(decky, "logger", None)
         if logger:
-            if level == "error":
-                logger.error(message)
-            elif level == "warning":
-                logger.warning(message)
-            elif level == "debug":
-                # Prefix with [DEBUG] because Decky UI usually filters info only
-                logger.info(f"[DEBUG] {message}")
-            else:
-                logger.info(message)
+            logger_level_map = {
+                "warning": logger.warning,
+                "error": logger.error,
+                "debug": logger.info,  # Decky doesn't have a debug level, so route it to info with a prefix
+                "info": logger.info,
+            }
+            logger_level = logger_level_map.get(level, logger.info)
+            # Prefix with [DEBUG] because Decky UI usually filters info only
+            logger_level(f"[DEBUG] {message}" if level == "debug" else message)
     except (ImportError, AttributeError):
         pass
 
