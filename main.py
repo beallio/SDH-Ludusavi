@@ -158,23 +158,26 @@ def _state_path() -> Path:
     """
     Determine the optimal directory to store the plugin's persistent state file.
 
-    Checks DECKY_PLUGIN_SETTINGS_DIR and DECKY_SETTINGS_DIR, falling back to
-    a private folder in the user's home directory if neither are available.
+    Checks DECKY_PLUGIN_DATA_DIR (as requested for ~/homebrew/data/SDH-ludusavi/)
+    and falls back to standard settings directories if necessary.
     """
-    settings_dir = getattr(
-        decky, "DECKY_PLUGIN_SETTINGS_DIR", getattr(decky, "DECKY_SETTINGS_DIR", None)
+    data_dir = getattr(decky, "DECKY_PLUGIN_DATA_DIR", None) or os.environ.get(
+        "DECKY_PLUGIN_DATA_DIR"
     )
-    if not settings_dir:
-        settings_dir = os.environ.get("DECKY_PLUGIN_SETTINGS_DIR") or os.environ.get(
-            "DECKY_SETTINGS_DIR"
+    if not data_dir:
+        # Compatibility with older Decky or missing data dir env
+        data_dir = getattr(
+            decky, "DECKY_PLUGIN_SETTINGS_DIR", getattr(decky, "DECKY_SETTINGS_DIR", None)
         )
 
-    if settings_dir:
-        return Path(settings_dir) / STATE_FILE_NAME
+    if data_dir:
+        path = Path(data_dir)
+        _ensure_private_directory(path)
+        return path / STATE_FILE_NAME
 
     fallback_path = _fallback_state_path()
     decky.logger.warning(
-        "DECKY_PLUGIN_SETTINGS_DIR is unavailable; storing SDH-ludusavi settings at %s",
+        "DECKY_PLUGIN_SETTINGS_DIR/DECKY_PLUGIN_DATA_DIR is unavailable; storing SDH-ludusavi settings at %s",
         fallback_path,
     )
     return fallback_path

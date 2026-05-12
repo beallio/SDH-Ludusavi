@@ -207,8 +207,8 @@ function Content() {
     
     // Update global tracking sets for toast filtering
     trackedAppIDs = new Set(result.games.map(g => (g as any).steam_id).filter(id => !!id) as string[]);
-    trackedNames = new Set(result.games.map(g => g.name));
-    log("debug", `Updated tracking: ${trackedNames.size} games, ${trackedAppIDs.size} Steam IDs`);
+    trackedNames = new Set(result.games.map(g => g.name.toLowerCase()));
+    log("info", `Tracked games updated: ${result.games.map(g => g.name).join(", ")}`);
 
     setSelectedGame((current) => {
       const target = preferredGame || current;
@@ -430,7 +430,10 @@ export default definePlugin(() => {
             const details = await SC.Apps.GetAppDetails(unAppID);
             const gameName = details?.strName || `App ${unAppID}`;
             const appIDStr = String(unAppID);
-            const isTracked = trackedAppIDs.has(appIDStr) || trackedNames.has(gameName);
+            
+            // Use normalized check (lowercase) to match tracked names
+            const isTracked = trackedAppIDs.has(appIDStr) || trackedNames.has(gameName.toLowerCase());
+            log("debug", `App state change: ${gameName} (${appIDStr}) isRunning=${bIsRunning} isTracked=${isTracked}`);
 
             if (bIsRunning) {
               // Game Start
