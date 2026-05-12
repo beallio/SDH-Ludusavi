@@ -152,7 +152,15 @@ function normalize(name: string): string {
 function showToast(title: string, body: string) {
   try {
     log("debug", `Showing toast: ${title} - ${body}`);
-    toaster.toast({ title, body });
+    const toastObj = { title, body, duration: 5000 };
+    
+    // Attempt standard toaster
+    toaster.toast(toastObj);
+    
+    // Fallback to window.toaster if standard seems to fail (diagnostic)
+    if (!(window as any).toaster) {
+       log("debug", "window.toaster not found, relying on @decky/api toaster");
+    }
   } catch (err) {
     log("error", `Failed to show toast: ${err}`);
   }
@@ -445,7 +453,30 @@ export default definePlugin(() => {
   let previousAppName: string | null = null;
 
   const isTracked = (name: string, appID: string) => {
-    return trackedAppIDs.has(appID) || trackedNames.has(normalize(name));
+    if (trackedAppIDs.has(appID)) {
+      log("debug", `Match found via AppID: ${appID}`);
+      return true;
+    }
+    
+    const normalizedInput = normalize(name);
+    if (trackedNames.has(normalizedInput)) {
+      log("debug", `Match found via exact name: ${normalizedInput}`);
+      return true;
+    }
+
+    // Substring matching (mirroring backend fuzzy logic)
+    for (const trackedName of Array.from(trackedNames)) {
+      if (
+        (normalizedInput.length > 4 && trackedName.includes(normalizedInput)) ||
+        (trackedName.length > 4 && normalizedInput.includes(trackedName))
+      ) {
+        log("debug", `Match found via substring: ${normalizedInput} <-> ${trackedName}`);
+        return true;
+      }
+    }
+
+    log("debug", `No match for ${name} (${appID}) [normalized: ${normalizedInput}]`);
+    return false;
   };
 
   const handleAppStart = async (name: string, appID: string) => {
