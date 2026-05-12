@@ -157,10 +157,6 @@ function showToast(title: string, body: string) {
     // Attempt standard toaster
     toaster.toast(toastObj);
     
-    // Fallback to window.toaster if standard seems to fail (diagnostic)
-    if (!(window as any).toaster) {
-       log("debug", "window.toaster not found, relying on @decky/api toaster");
-    }
   } catch (err) {
     log("error", `Failed to show toast: ${err}`);
   }
@@ -488,7 +484,9 @@ export default definePlugin(() => {
     }
     
     const result = await handleGameStartCall(name, appID);
-    if (result.status === "restored" || result.status === "failed") {
+    // Show result toast for all outcomes (restored, failed, or skipped)
+    // unless auto-sync is completely disabled or another operation is running.
+    if (result.status !== "skipped" || (result.reason !== "auto_sync_disabled" && result.reason !== "operation_running")) {
       showToast("SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
     }
   };
