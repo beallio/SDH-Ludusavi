@@ -1,0 +1,22 @@
+{
+  "date": "2026-05-12",
+  "task_objective": "Implement automatic sync feedback with frontend hooks and toast notifications.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/service.py",
+    "py_modules/sdh_ludusavi/ludusavi.py",
+    "src/index.tsx",
+    "tests/test_ludusavi.py",
+    "tests/test_service.py"
+  ],
+  "tests_added": [
+    "Updated compare_recency tests in tests/test_ludusavi.py",
+    "Added log level verification in tests/test_service.py"
+  ],
+  "design_decisions": [
+    "Used SteamClient.Apps.RegisterForAppRunningStateChanges to trigger auto-sync without blocking launch.",
+    "Upgraded auto-sync skip logs from debug to info for better visibility in the UI Log Modal.",
+    "Refined compare_recency to use Ludusavi's restore preview for reliable 'backup_newer' detection.",
+    "Implemented toast notifications for all major auto-sync events (checking, backing up, results)."
+  ],
+  "results": "Automatic sync now provides real-time feedback via toasts and logs. The system correctly identifies when a backup needs to be restored upon launch and ensures backups are performed on exit."
+}
