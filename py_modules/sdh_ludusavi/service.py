@@ -85,6 +85,8 @@ class LudusaviAdapter(Protocol):
 
     def get_versions(self) -> dict[str, str]: ...
 
+    def get_log_path(self) -> Path | None: ...
+
 
 @dataclass
 class GameStatus:
@@ -396,8 +398,31 @@ class SDHLudusaviService:
         self.log("debug", "Fetching version list", "versions")
         versions = dict(self._run_locked("versions", None, lambda: self._ludusavi().get_versions()))
         versions["sdh_ludusavi"] = resolve_version()
+
+        # Ensure pyludusavi is in the version map if not already provided by adapter
+        if "pyludusavi" not in versions:
+            try:
+                import pyludusavi
+
+                versions["pyludusavi"] = getattr(pyludusavi, "__version__", "unknown")
+            except ImportError:
+                versions["pyludusavi"] = "unknown"
+
         self._versions = versions
         return versions
+
+    def get_ludusavi_logs(self) -> str:
+        """
+        Read and return the contents of the Ludusavi log file.
+        """
+        log_path = self._ludusavi().get_log_path()
+        if not log_path:
+            return "Ludusavi log file not found."
+
+        try:
+            return log_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            return f"Failed to read Ludusavi logs: {exc}"
 
     def get_operation_status(self) -> dict[str, object]:
         """Return information about the currently running or last completed operation."""

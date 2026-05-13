@@ -89,6 +89,9 @@ class Plugin:
     async def get_recent_logs(self) -> list[dict[str, object]]:
         return self._service().get_recent_logs()
 
+    async def get_ludusavi_logs(self) -> str:
+        return self._service().get_ludusavi_logs()
+
     async def _main(self) -> None:
         decky.logger.info("SDH-ludusavi backend loaded")
         self._service()

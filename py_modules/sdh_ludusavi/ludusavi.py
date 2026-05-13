@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import os
+from pathlib import Path
 from typing import Any, cast
 
 
@@ -125,6 +126,16 @@ class PyludusaviAdapter:
             "ludusavi": ludusavi,
             "pyludusavi": pyludusavi_version,
         }
+
+    def get_log_path(self) -> Path | None:
+        try:
+            config_path = Path(self._client.config_path())
+            log_path = config_path.parent / "ludusavi.log"
+            if log_path.exists():
+                return log_path
+        except Exception:
+            pass
+        return None
 
 
 def _games_from_output(output: Mapping[str, Any]) -> dict[str, dict[str, Any]]:

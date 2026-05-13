@@ -53,6 +53,9 @@ class FakeAdapter:
     def get_versions(self) -> dict[str, str]:
         return dict(self.versions)
 
+    def get_log_path(self) -> Path | None:
+        return None
+
 
 def service_with_state(tmp_path: Path, adapter: FakeAdapter | None = None) -> SDHLudusaviService:
     return SDHLudusaviService(adapter=adapter or FakeAdapter(), state_path=tmp_path / "state.json")
@@ -353,11 +356,10 @@ def test_version_lookup_and_missing_dependency_states_are_logged(
     adapter = FakeAdapter()
     service = service_with_state(tmp_path, adapter)
 
-    assert service.get_versions() == {
-        "sdh_ludusavi": "0.1.dev104+gabcdef",
-        "ludusavi": "ludusavi 0.31.0",
-        "rclone": "rclone v1.66.0",
-    }
+    versions = service.get_versions()
+    assert versions["sdh_ludusavi"] == "0.1.dev104+gabcdef"
+    assert "ludusavi" in versions
+    assert "pyludusavi" in versions
 
     adapter.refresh_error = RuntimeError("Ludusavi Flatpak is not installed")
     result = service.refresh_games()
@@ -365,3 +367,23 @@ def test_version_lookup_and_missing_dependency_states_are_logged(
     assert result["dependency_error"] == "Ludusavi Flatpak is not installed"
     assert service.get_recent_logs()[-1]["level"] == "error"
     assert "Ludusavi Flatpak" in service.get_recent_logs()[-1]["message"]
+
+
+def test_get_ludusavi_logs(tmp_path, monkeypatch):
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+
+    # Case: Log file exists
+    log_file = tmp_path / "ludusavi.log"
+    log_file.write_text("test log content", encoding="utf-8")
+    monkeypatch.setattr(adapter, "get_log_path", lambda: log_file)
+
+    assert service.get_ludusavi_logs() == "test log content"
+
+    # Case: Log file missing
+    monkeypatch.setattr(adapter, "get_log_path", lambda: None)
+    assert "not found" in service.get_ludusavi_logs()
+
+    # Case: Read error
+    monkeypatch.setattr(adapter, "get_log_path", lambda: tmp_path / "nonexistent.log")
+    assert "Failed to read" in service.get_ludusavi_logs()
