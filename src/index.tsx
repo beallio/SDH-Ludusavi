@@ -442,16 +442,6 @@ function Content() {
         </PanelSectionRow>
       </PanelSection>
 
-      <PanelSection title="Versions">
-        <PanelSectionRow>
-          <div style={{ color: "#cbd5e1", fontSize: "14px", display: "flex", flexDirection: "column", gap: "4px", padding: "12px", backgroundColor: "rgba(30, 41, 59, 0.3)", borderRadius: "4px" }}>
-            <div>SDH-ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
-            <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
-            <div>pyludusavi: {versions.pyludusavi ?? "Unknown"}</div>
-          </div>
-        </PanelSectionRow>
-      </PanelSection>
-
       <PanelSection title="Logs">
         <PanelSectionRow>
           <ButtonItem layout="below" onClick={() => showModal(<LogModal logs={logs} />)}>
@@ -462,6 +452,16 @@ function Content() {
           <ButtonItem layout="below" onClick={() => void showLudusaviLogs()}>
             View Ludusavi Logs
           </ButtonItem>
+        </PanelSectionRow>
+      </PanelSection>
+
+      <PanelSection title="Versions">
+        <PanelSectionRow>
+          <div style={{ color: "#cbd5e1", fontSize: "14px", display: "flex", flexDirection: "column", gap: "4px", padding: "12px", backgroundColor: "rgba(30, 41, 59, 0.3)", borderRadius: "4px" }}>
+            <div>SDH-ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
+            <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
+            <div>pyludusavi: {versions.pyludusavi ?? "Unknown"}</div>
+          </div>
         </PanelSectionRow>
       </PanelSection>
     </>
