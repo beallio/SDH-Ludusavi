@@ -177,6 +177,11 @@ class SDHLudusaviService:
         self._setup_logging()
         self._load_state()
         self.log("info", "SDH-ludusavi service initialized", "init")
+
+        import getpass
+
+        identity = f"uid={os.getuid()}, euid={os.geteuid()}, user={getpass.getuser()}"
+        self.log("debug", f"Process identity: {identity}", "init")
         self.log("debug", f"Environment variables: {os.environ}", "init")
 
     def _setup_logging(self) -> None:

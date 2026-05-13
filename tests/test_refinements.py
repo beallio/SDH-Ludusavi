@@ -55,8 +55,8 @@ def test_unified_logging_exposure(tmp_path: Path) -> None:
     service.log("info", "Second message", operation="op2")
 
     logs = service.get_recent_logs()
-    # account for the 2 initialization logs + 2 test logs
-    assert len(logs) == 4
+    # account for the 3 initialization logs (init message, identity, environment) + 2 test logs
+    assert len(logs) == 5
 
     # Chronological order: First should be at index 0
     assert logs[-2]["message"] == "First message"
