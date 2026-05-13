@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Literal, Any, Union
-from .discovery import find_ludusavi
+from .discovery import find_ludusavi, find_ludusavi_binary, find_ludusavi_config_dir
 from .core import LudusaviExecutor, LudusaviResponse
 from .models import LudusaviApiOutput, ApiConfig, ApiManifest
 
@@ -36,6 +36,15 @@ class Ludusavi:
             flatpak_user_home: Optional user home for per-user Flatpak discovery.
             flatpak_user: Optional username to run Flatpak via sudo -u.
         """
+        # If no explicit path is provided, try to find a raw binary first if we have a flatpak_id
+        if not explicit_path and flatpak_id:
+            explicit_path = find_ludusavi_binary(flatpak_id, flatpak_user_home)
+
+        # If we found a raw binary (either explicitly or via discovery) and no config_dir was provided,
+        # try to find the Flatpak config dir if applicable.
+        if explicit_path and not config_dir and flatpak_id:
+            config_dir = find_ludusavi_config_dir(flatpak_id, flatpak_user_home, explicit_path)
+
         self.command_prefix = find_ludusavi(
             explicit_path=explicit_path,
             explicit_flatpak_id=flatpak_id,

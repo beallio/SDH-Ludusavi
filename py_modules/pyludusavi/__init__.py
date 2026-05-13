@@ -1,6 +1,11 @@
 from .main import Ludusavi
 from .core import LudusaviResponse, LudusaviError, LudusaviExecutionError, LudusaviContractError
-from .discovery import find_ludusavi, LudusaviNotFoundError
+from .discovery import (
+    find_ludusavi,
+    find_ludusavi_binary,
+    find_ludusavi_config_dir,
+    LudusaviNotFoundError,
+)
 from ._version import __version__
 
 __all__ = [
@@ -10,6 +15,8 @@ __all__ = [
     "LudusaviExecutionError",
     "LudusaviContractError",
     "find_ludusavi",
+    "find_ludusavi_binary",
+    "find_ludusavi_config_dir",
     "LudusaviNotFoundError",
     "__version__",
 ]

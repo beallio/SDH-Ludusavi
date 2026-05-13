@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -72,6 +73,58 @@ def find_ludusavi(
             return prefix
 
     raise LudusaviNotFoundError("Ludusavi could not be found via PATH or Flatpak.")
+
+
+def find_ludusavi_binary(flatpak_id: str, user_home: Optional[str]) -> Optional[str]:
+    """
+    Search for the Ludusavi raw binary in standard locations and Flatpak-specific paths.
+
+    This is useful for performance and avoiding container overhead when running
+    outside the sandbox.
+    """
+    candidates: list[str] = []
+    if user_home:
+        user_home_path = Path(user_home).expanduser()
+        candidates.append(str(user_home_path / ".local" / "bin" / "ludusavi"))
+        candidates.append(
+            str(
+                user_home_path
+                / ".local"
+                / "share"
+                / "flatpak"
+                / "app"
+                / flatpak_id
+                / "current"
+                / "active"
+                / "files"
+                / "bin"
+                / "ludusavi"
+            )
+        )
+    candidates.append(f"/var/lib/flatpak/app/{flatpak_id}/current/active/files/bin/ludusavi")
+    candidates.append("/usr/bin/ludusavi")
+    candidates.append("/usr/local/bin/ludusavi")
+
+    for candidate in candidates:
+        path = Path(candidate)
+        if path.exists() and os.access(path, os.X_OK):
+            return str(path)
+    return None
+
+
+def find_ludusavi_config_dir(
+    flatpak_id: str, user_home: Optional[str], binary_path: str
+) -> Optional[str]:
+    """
+    Find the configuration directory for a Flatpak-based binary when running outside the sandbox.
+    """
+    if user_home and "flatpak" in binary_path:
+        candidate = (
+            Path(user_home).expanduser() / ".var" / "app" / flatpak_id / "config" / "ludusavi"
+        )
+        if candidate.exists():
+            return str(candidate)
+    return None
 
 
 def _flatpak_commands() -> list[str]:
