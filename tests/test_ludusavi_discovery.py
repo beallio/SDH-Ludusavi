@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -142,3 +144,44 @@ def test_verify_uses_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert discovery._verify(["/usr/bin/flatpak", "run", APP_ID]) is False
     assert seen_timeout == [5.0]
+
+
+def test_find_ludusavi_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    def exists(path: Path) -> bool:
+        return str(path) == "/usr/bin/ludusavi"
+
+    monkeypatch.setattr(Path, "exists", exists)
+    monkeypatch.setattr(os, "access", lambda path, mode: True)
+
+    assert discovery.find_ludusavi_binary(APP_ID, None) == "/usr/bin/ludusavi"
+
+
+def test_find_ludusavi_binary_flatpak(monkeypatch: pytest.MonkeyPatch) -> None:
+    expected = (
+        "/var/lib/flatpak/app/com.github.mtkennerly.ludusavi/current/active/files/bin/ludusavi"
+    )
+
+    def exists(path: Path) -> bool:
+        return str(path) == expected
+
+    monkeypatch.setattr(Path, "exists", exists)
+    monkeypatch.setattr(os, "access", lambda path, mode: True)
+
+    assert discovery.find_ludusavi_binary(APP_ID, None) == expected
+
+
+def test_find_ludusavi_config_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    expected = "/home/deck/.var/app/com.github.mtkennerly.ludusavi/config/ludusavi"
+
+    def exists(path: Path) -> bool:
+        return str(path) == expected
+
+    monkeypatch.setattr(Path, "exists", exists)
+
+    assert discovery.find_ludusavi_config_dir(APP_ID, "/home/deck", "flatpak-path") == expected
+
+
+def test_find_ludusavi_config_dir_returns_none_when_not_flatpak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert discovery.find_ludusavi_config_dir(APP_ID, "/home/deck", "/usr/bin/ludusavi") is None
