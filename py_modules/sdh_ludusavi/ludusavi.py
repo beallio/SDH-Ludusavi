@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import os
 from typing import Any, cast
 
 
@@ -24,12 +25,16 @@ class PyludusaviAdapter:
     ) -> None:
         from pyludusavi import Ludusavi
 
-        user_home = flatpak_user_home or _decky_user_home()
-        self._client = Ludusavi(
-            flatpak_id=flatpak_id,
-            flatpak_user_home=user_home,
-            flatpak_user=flatpak_user or _decky_user(),
-        )
+        # LD_LIBRARY_PATH = os.environ.get("LD_LIBRARY_PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = ""
+        self._client = Ludusavi()
+        # os.environ["LD_LIBRARY_PATH"] = LD_LIBRARY_PATH
+        # user_home = flatpak_user_home or _decky_user_home()
+        # self._client = Ludusavi(
+        #     flatpak_id=flatpak_id,
+        #     flatpak_user_home=user_home,
+        #     flatpak_user=flatpak_user or _decky_user(),
+        # )
 
     def refresh_statuses(self) -> list[dict[str, object]]:
         preview = self._client.backup(preview=True).data
