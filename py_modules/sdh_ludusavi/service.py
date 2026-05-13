@@ -85,7 +85,7 @@ class LudusaviAdapter(Protocol):
 
     def get_versions(self) -> dict[str, str]: ...
 
-    def get_log_path(self) -> Path | None: ...
+    def get_log_contents(self) -> str: ...
 
 
 @dataclass
@@ -415,14 +415,7 @@ class SDHLudusaviService:
         """
         Read and return the contents of the Ludusavi log file.
         """
-        log_path = self._ludusavi().get_log_path()
-        if not log_path:
-            return "Ludusavi log file not found."
-
-        try:
-            return log_path.read_text(encoding="utf-8")
-        except Exception as exc:
-            return f"Failed to read Ludusavi logs: {exc}"
+        return self._ludusavi().get_log_contents()
 
     def get_operation_status(self) -> dict[str, object]:
         """Return information about the currently running or last completed operation."""

@@ -753,9 +753,9 @@ class Ludusavi:
         Read the contents of the current Ludusavi log file.
 
         Returns:
-            str: The contents of ludusavi.log, or an empty string if it does not exist.
+            str: The contents of ludusavi_rCURRENT.log, or an empty string if it does not exist.
         """
-        path = os.path.join(self.log_dir(), "ludusavi.log")
+        path = os.path.join(self.log_dir(), "ludusavi_rCURRENT.log")
         if not os.path.exists(path):
             return ""
         with open(path, "r", encoding="utf-8") as f:

@@ -53,8 +53,8 @@ class FakeAdapter:
     def get_versions(self) -> dict[str, str]:
         return dict(self.versions)
 
-    def get_log_path(self) -> Path | None:
-        return None
+    def get_log_contents(self) -> str:
+        return ""
 
 
 def service_with_state(tmp_path: Path, adapter: FakeAdapter | None = None) -> SDHLudusaviService:
@@ -374,16 +374,9 @@ def test_get_ludusavi_logs(tmp_path, monkeypatch):
     service = service_with_state(tmp_path, adapter)
 
     # Case: Log file exists
-    log_file = tmp_path / "ludusavi.log"
-    log_file.write_text("test log content", encoding="utf-8")
-    monkeypatch.setattr(adapter, "get_log_path", lambda: log_file)
-
+    monkeypatch.setattr(adapter, "get_log_contents", lambda: "test log content")
     assert service.get_ludusavi_logs() == "test log content"
 
-    # Case: Log file missing
-    monkeypatch.setattr(adapter, "get_log_path", lambda: None)
-    assert "not found" in service.get_ludusavi_logs()
-
-    # Case: Read error
-    monkeypatch.setattr(adapter, "get_log_path", lambda: tmp_path / "nonexistent.log")
-    assert "Failed to read" in service.get_ludusavi_logs()
+    # Case: Log file missing or empty
+    monkeypatch.setattr(adapter, "get_log_contents", lambda: "")
+    assert service.get_ludusavi_logs() == ""
