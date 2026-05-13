@@ -1,0 +1,12 @@
+pyludusavi-0.2.1.dist-info/INSTALLER,sha256=5hhM4Q4mYTT9z6QB6PGpUAW81PGNFrYrdXMj4oM_6ak,2
+pyludusavi-0.2.1.dist-info/METADATA,sha256=0cDWonWALO8ZlOdp3g_L88yqfiUxMkWQ4MH5eEhnL3k,4395
+pyludusavi-0.2.1.dist-info/RECORD,,
+pyludusavi-0.2.1.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+pyludusavi-0.2.1.dist-info/WHEEL,sha256=QccIxa26bgl1E6uMy58deGWi-0aeIkkangHcxk2kWfw,87
+pyludusavi-0.2.1.dist-info/licenses/LICENSE,sha256=NFbGGRQm1k66gWimBacIxXUB0W1yMChaohH6rZLGtiw,1068
+pyludusavi/__init__.py,sha256=d50QYyRiAyWpftMRJMI_lSJ7nGqTUtefdTztBHoHFf0,422
+pyludusavi/_version.py,sha256=-gZxhfTq7IU_ud52gWM6LPDac9v2ZLPo6K0qp-rZJkA,168
+pyludusavi/core.py,sha256=V8su9lO4hMVgb6AiNeyflo0IKsusiQwS1mff2ozPz0M,3765
+pyludusavi/discovery.py,sha256=_mHLcspK2-3odHEXLsl1Yz8WT8Pzl_7Mklvln3sl6_c,2078
+pyludusavi/main.py,sha256=aHVmrWWvkwpu70eG8_vpk_cR8d8YU23WoiUsIoQjmh8,29208
+pyludusavi/models.py,sha256=QARcb6gfh_XU6bO1z7LjqX3aSZlrLJblDCWdyhSyWIo,2774

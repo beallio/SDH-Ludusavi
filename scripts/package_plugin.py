@@ -21,7 +21,7 @@ REQUIRED_RUNTIME_FILES = ("dist/index.js",)
 REQUIRED_DIRECTORIES = (
     "dist",
     "py_modules/pyludusavi",
-    "py_modules/pyludusavi-0.1.1.dist-info",
+    "py_modules/pyludusavi-0.2.1.dist-info",
     "py_modules/sdh_ludusavi",
 )
 EXCLUDED_PARTS = {"__pycache__"}

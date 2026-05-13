@@ -12,6 +12,10 @@ def test_flatpak_id_is_required_ludusavi_flatpak() -> None:
     assert FLATPAK_ID == "com.github.mtkennerly.ludusavi"
 
 
+def test_pyludusavi_version_is_current() -> None:
+    assert pyludusavi.__version__ == "0.2.1"
+
+
 def test_pyludusavi_constructor_accepts_flatpak_user_home(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

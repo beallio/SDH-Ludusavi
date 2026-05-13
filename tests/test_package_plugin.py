@@ -35,7 +35,7 @@ def test_package_script_defines_decky_runtime_files_only() -> None:
     assert module.REQUIRED_DIRECTORIES == (
         "dist",
         "py_modules/pyludusavi",
-        "py_modules/pyludusavi-0.1.1.dist-info",
+        "py_modules/pyludusavi-0.2.1.dist-info",
         "py_modules/sdh_ludusavi",
     )
 
