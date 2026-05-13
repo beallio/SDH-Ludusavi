@@ -1,3 +1,4 @@
+import getpass
 import os
 import shutil
 import subprocess
@@ -44,7 +45,7 @@ def find_ludusavi(
     # 1. Explicit path
     if explicit_path:
         prefix = [explicit_path]
-        if flatpak_user:
+        if _should_sudo(flatpak_user):
             prefix = ["/usr/bin/sudo", "-u", flatpak_user] + prefix
         if _verify(prefix):
             return prefix
@@ -143,7 +144,7 @@ def _flatpak_prefixes(
 ) -> list[list[str]]:
     prefixes: list[list[str]] = []
     for flatpak in _flatpak_commands():
-        if flatpak_user:
+        if _should_sudo(flatpak_user):
             prefixes.append(["/usr/bin/sudo", "-u", flatpak_user, flatpak, "run", flatpak_id])
         if flatpak_user_home:
             prefixes.append(
@@ -151,6 +152,18 @@ def _flatpak_prefixes(
             )
         prefixes.append([flatpak, "run", flatpak_id])
     return prefixes
+
+
+def _should_sudo(target_user: Optional[str]) -> bool:
+    """Check if sudo is necessary to run as the target user."""
+    if not target_user:
+        return False
+    try:
+        current_user = getpass.getuser()
+        return current_user != target_user
+    except Exception:
+        # Fallback to checking UID if getuser fails (e.g. if UID has no name)
+        return True
 
 
 def _flatpak_user_env(flatpak_user_home: str) -> list[str]:
