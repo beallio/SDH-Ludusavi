@@ -423,6 +423,10 @@ function Content() {
               <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Loading game list...</span>
             ) : isBusy && busyLabel === "Refreshing games" ? (
               <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Game refresh in progress...</span>
+            ) : isBusy && busyLabel === "Backup running" ? (
+              <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Backup in progress...</span>
+            ) : isBusy && busyLabel === "Restore running" ? (
+              <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Restore in progress...</span>
             ) : (
               selectedStatus ? statusLabels[selectedStatus.status] : "No Ludusavi games found"
             )}
