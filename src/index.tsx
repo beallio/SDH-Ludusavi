@@ -406,6 +406,7 @@ function Content() {
         <PanelSectionRow>
           <DropdownItem
             menuLabel="Select Game"
+            disabled={isBusy}
             rgOptions={games.map((game) => ({
               label: game.name,
               data: game.name
