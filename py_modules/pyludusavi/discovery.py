@@ -1,5 +1,5 @@
-import getpass
 import os
+import pwd
 import shutil
 import subprocess
 from pathlib import Path
@@ -158,11 +158,17 @@ def _should_sudo(target_user: Optional[str]) -> bool:
     """Check if sudo is necessary to run as the target user."""
     if not target_user:
         return False
+
+    # Get the ACTUAL UID of the process
+    current_uid = os.getuid()
+
     try:
-        current_user = getpass.getuser()
-        return current_user != target_user
-    except Exception:
-        # Fallback to checking UID if getuser fails (e.g. if UID has no name)
+        # Get the UID of the user we WANT to be
+        target_uid = pwd.getpwnam(target_user).pw_uid
+        # Only sudo if we aren't already that UID
+        return current_uid != target_uid
+    except (KeyError, AttributeError, ImportError):
+        # Fallback if user doesn't exist or we're on a non-Unix system
         return True
 
 
