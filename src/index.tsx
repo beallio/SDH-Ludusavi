@@ -421,6 +421,8 @@ function Content() {
             <span style={{ color: "#64748b", fontWeight: "bold", marginRight: "8px" }}>Status:</span>
             {isBusy && busyLabel === "Loading" ? (
               <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Loading game list...</span>
+            ) : isBusy && busyLabel === "Refreshing games" ? (
+              <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Game refresh in progress...</span>
             ) : (
               selectedStatus ? statusLabels[selectedStatus.status] : "No Ludusavi games found"
             )}
