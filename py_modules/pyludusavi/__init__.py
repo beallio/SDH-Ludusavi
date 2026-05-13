@@ -1,3 +1,5 @@
+import os
+import logging
 from .main import Ludusavi
 from .core import LudusaviResponse, LudusaviError, LudusaviExecutionError, LudusaviContractError
 from .discovery import (
@@ -7,6 +9,9 @@ from .discovery import (
     LudusaviNotFoundError,
 )
 from ._version import __version__
+
+logger = logging.getLogger(__name__)
+logger.info(f"pyludusavi version {__version__} loaded with environment: {dict(os.environ)}")
 
 __all__ = [
     "Ludusavi",
