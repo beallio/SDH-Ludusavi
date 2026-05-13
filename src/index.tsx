@@ -192,7 +192,7 @@ function showToast(title: string, body: string, logo?: any) {
       title, 
       body, 
       logo: logo ? React.cloneElement(logo, { size: 40 }) : undefined,
-      duration: 5000 
+      duration: 2000 
     };
     
     // Attempt standard toaster
@@ -299,7 +299,8 @@ function Content() {
       toaster.toast({
         title: "SDH-ludusavi",
         body: "Ludusavi game status refreshed",
-        logo: <IoMdRefresh size={40} />
+        logo: <IoMdRefresh size={40} />,
+        duration: 2000
       });
     } catch (error) {
       log("error", `Manual refresh failed: ${error}`);
@@ -318,7 +319,8 @@ function Content() {
       toaster.toast({
         title: "SDH-ludusavi",
         body: "Failed to fetch Ludusavi logs",
-        logo: <FaExclamationTriangle size={40} />
+        logo: <FaExclamationTriangle size={40} />,
+        duration: 2000
       });
     }
   };
@@ -334,7 +336,8 @@ function Content() {
       toaster.toast({
         title: "SDH-ludusavi settings failed",
         body: error instanceof Error ? error.message : String(error),
-        logo: <FaExclamationTriangle size={40} />
+        logo: <FaExclamationTriangle size={40} />,
+        duration: 2000
       });
     } finally {
       setBusyLabel(null);
@@ -366,7 +369,8 @@ function Content() {
     toaster.toast({ 
       title: `SDH-ludusavi ${label}`, 
       body: `${label} started for ${selectedGame}`,
-      logo: React.cloneElement(icon as any, { size: 40 })
+      logo: React.cloneElement(icon as any, { size: 40 }),
+      duration: 2000
     });
     try {
       const result = await operationCall(selectedGame);
@@ -375,7 +379,8 @@ function Content() {
       toaster.toast({
         title: `SDH-ludusavi ${label}`,
         body: summarizeOperationResult(result, label),
-        logo: React.cloneElement(resultIcon as any, { size: 40 })
+        logo: React.cloneElement(resultIcon as any, { size: 40 }),
+        duration: 2000
       });
       const refreshed = await refreshGamesCall(false);
       applyRefreshResult(refreshed);
@@ -386,7 +391,8 @@ function Content() {
       toaster.toast({
         title: `SDH-ludusavi ${label} failed`,
         body: error instanceof Error ? error.message : String(error),
-        logo: <FaExclamationTriangle size={40} />
+        logo: <FaExclamationTriangle size={40} />,
+        duration: 2000
       });
     } finally {
       setBusyLabel(null);
