@@ -400,7 +400,11 @@ function Content() {
         <PanelSectionRow>
           <div style={{ color: "#cbd5e1", fontSize: "14px", margin: "12px 0", padding: "0 4px" }}>
             <span style={{ color: "#64748b", fontWeight: "bold", marginRight: "8px" }}>Status:</span>
-            {selectedStatus ? statusLabels[selectedStatus.status] : "No Ludusavi games found"}
+            {isBusy && busyLabel === "Loading" ? (
+              <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Loading game list...</span>
+            ) : (
+              selectedStatus ? statusLabels[selectedStatus.status] : "No Ludusavi games found"
+            )}
           </div>
         </PanelSectionRow>
 
@@ -436,14 +440,6 @@ function Content() {
             Force Restore
           </SpinnerButton>
         </PanelSectionRow>
-
-        {isBusy && busyLabel === "Loading" ? (
-          <PanelSectionRow>
-            <div style={{ color: "#60a5fa", fontSize: "14px", marginTop: "12px", padding: "0 4px", fontWeight: 500 }}>
-              {busyLabel ?? `Running ${operation.name ?? "operation"}`}
-            </div>
-          </PanelSectionRow>
-        ) : null}
       </PanelSection>
 
       <PanelSection title="Versions">

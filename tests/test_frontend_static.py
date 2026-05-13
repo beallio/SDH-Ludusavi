@@ -119,3 +119,11 @@ def test_frontend_includes_verbose_logging() -> None:
     assert 'log("info", "Plugin mounted, starting initial load")' in source
     assert 'log("info", `Selected game changed to ${value}`)' in source
     assert 'log("error", `Initial load failed: ${error}`)' in source
+
+
+def test_frontend_has_loading_game_list_status() -> None:
+    source = FRONTEND.read_text()
+
+    assert "Loading game list..." in source
+    assert 'color: "#60a5fa"' in source
+    assert 'fontWeight: "bold"' in source

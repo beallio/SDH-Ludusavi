@@ -1,0 +1,17 @@
+{
+  "date": "2026-05-12",
+  "task_objective": "Move the 'Loading' status message to underneath the dropdown and update its text and formatting.",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py (test_frontend_has_loading_game_list_status)"
+  ],
+  "design_decisions": [
+    "Moved the initial 'Loading' message into the 'Status:' row for better visual integration.",
+    "Updated the loading text to 'Loading game list...' and applied bold blue formatting (#60a5fa).",
+    "Removed the redundant loading message at the bottom of the Sync section to avoid clutter."
+  ],
+  "results": "The loading UI is now more integrated and visually consistent with the rest of the plugin's status display."
+}
