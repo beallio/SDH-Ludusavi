@@ -167,6 +167,7 @@ class SDHLudusaviService:
         self._state_path = state_path or Path("/tmp/sdh_ludusavi/state.json")
         self._auto_sync_enabled = False
         self._selected_game = ""
+        self._ludusavi_launcher_shortcut_id = -1
         self._games: dict[str, GameStatus] = {}
         self._aliases: dict[str, str] = {}
         self._ids: dict[str, str] = {}
@@ -248,6 +249,56 @@ class SDHLudusaviService:
         self._save_state()
         self.log("debug", f"Selected game changed to {game_name}")
         return self.get_settings()
+
+    def get_ludusavi_launcher_shortcut_id(self) -> int:
+        """Return the saved shortcut app ID, or -1 if none exists."""
+        return self._ludusavi_launcher_shortcut_id
+
+    def set_ludusavi_launcher_shortcut_id(self, app_id: int) -> bool:
+        """Persist the shortcut app ID."""
+        self._ludusavi_launcher_shortcut_id = int(app_id)
+        self._save_state()
+        self.log("info", f"Saved Ludusavi launcher shortcut ID: {app_id}")
+        return True
+
+    def clear_ludusavi_launcher_shortcut_id(self) -> bool:
+        """Remove the saved shortcut app ID from config."""
+        self._ludusavi_launcher_shortcut_id = -1
+        self._save_state()
+        self.log("info", "Cleared Ludusavi launcher shortcut ID")
+        return True
+
+    def get_ludusavi_command(self) -> dict[str, object] | None:
+        """
+        Return the command path and args used by the plugin for GUI launching.
+        Returns None if Ludusavi is not found.
+        """
+        try:
+            from pyludusavi.discovery import find_ludusavi
+
+            # Use the same parameters as PyludusaviAdapter
+            from .ludusavi import FLATPAK_ID, _decky_user, _decky_user_home
+
+            user_home = _decky_user_home()
+            user = _decky_user()
+
+            # find_ludusavi returns a list[str] like ["/usr/bin/flatpak", "run", ...]
+            # or just ["/usr/bin/ludusavi"]
+            prefix = find_ludusavi(
+                flatpak_id=FLATPAK_ID, flatpak_user_home=user_home, flatpak_user=user
+            )
+
+            if not prefix:
+                return None
+
+            return {
+                "commandPath": prefix[0],
+                "args": prefix[1:],
+                "compatTool": "",  # Standard launcher doesn't need compat tool for native/flatpak
+            }
+        except Exception as exc:
+            self.log("error", f"Failed to discover Ludusavi command: {exc}")
+            return None
 
     def refresh_games(self, force: bool = False) -> dict[str, object]:
         """
@@ -474,6 +525,7 @@ class SDHLudusaviService:
 
         self._auto_sync_enabled = bool(data.get("auto_sync_enabled", False))
         self._selected_game = str(data.get("selected_game", ""))
+        self._ludusavi_launcher_shortcut_id = int(data.get("ludusaviLauncherShortcutAppId", -1))
 
         # Load cached games
         cached_games = data.get("games", [])
@@ -501,6 +553,7 @@ class SDHLudusaviService:
         temp_path = self._state_path.with_name(f".{self._state_path.name}.tmp")
 
         data = self.get_settings()
+        data["ludusaviLauncherShortcutAppId"] = self._ludusavi_launcher_shortcut_id
         data["games"] = [game.to_dict() for game in self._games.values()]
         data["aliases"] = self._aliases
         data["ids"] = self._ids

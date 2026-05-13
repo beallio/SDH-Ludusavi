@@ -125,6 +125,7 @@ def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
     assert json.loads((tmp_path / "state.json").read_text()) == {
         "auto_sync_enabled": True,
         "selected_game": "",
+        "ludusaviLauncherShortcutAppId": -1,
         "games": [],
         "aliases": {},
         "ids": {},

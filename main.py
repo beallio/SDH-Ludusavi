@@ -43,6 +43,18 @@ class Plugin:
     async def set_selected_game(self, game_name: str) -> dict[str, Any]:
         return self._service().set_selected_game(game_name)
 
+    async def get_ludusavi_launcher_shortcut_id(self) -> int:
+        return self._service().get_ludusavi_launcher_shortcut_id()
+
+    async def set_ludusavi_launcher_shortcut_id(self, app_id: int) -> bool:
+        return self._service().set_ludusavi_launcher_shortcut_id(app_id)
+
+    async def clear_ludusavi_launcher_shortcut_id(self) -> bool:
+        return self._service().clear_ludusavi_launcher_shortcut_id()
+
+    async def get_ludusavi_command(self) -> dict[str, Any] | None:
+        return self._service().get_ludusavi_command()
+
     async def log(
         self,
         level: str,

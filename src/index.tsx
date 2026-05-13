@@ -20,6 +20,8 @@ import { FaDatabase, FaSave, FaDownload, FaExclamationTriangle } from "react-ico
 import { IoMdRefresh } from "react-icons/io";
 import { LuDatabaseBackup } from "react-icons/lu";
 
+import { launchLudusavi, LudusaviLaunchCommand } from "./ludusaviLauncher";
+
 type Settings = {
   auto_sync_enabled: boolean;
   selected_game: string;
@@ -93,6 +95,7 @@ const getOperationStatus = callable<[], OperationStatus>("get_operation_status")
 const getRecentLogs = callable<[], LogEntry[]>("get_recent_logs");
 const getLudusaviLogs = callable<[], string>("get_ludusavi_logs");
 const logCall = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
+const getLudusaviCommandCall = callable<[], LudusaviLaunchCommand | null>("get_ludusavi_command");
 const handleGameStartCall = callable<[gameName: string, app_id?: string], OperationResult>("handle_game_start");
 const handleGameExitCall = callable<[gameName: string, app_id?: string], OperationResult>("handle_game_exit");
 
@@ -217,6 +220,7 @@ function Content() {
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  const [ludusaviCommand, setLudusaviCommand] = useState<LudusaviLaunchCommand | null>(null);
 
   const selectedStatus = useMemo(
     () => games.find((game) => game.name === selectedGame) ?? null,
@@ -233,16 +237,23 @@ function Content() {
     setBusyLabel("Loading");
     try {
       log("debug", "Fetching initial settings and versions");
-      const loadedSettings = await getSettings();
+      const [loadedSettings, loadedVersions, loadedCommand] = await Promise.all([
+        getSettings(),
+        getVersions(),
+        getLudusaviCommandCall()
+      ]);
+
       log("debug", `Loaded settings: ${JSON.stringify(loadedSettings)}`);
       setSettings(loadedSettings);
       if (loadedSettings.selected_game) {
         setSelectedGame(loadedSettings.selected_game);
       }
 
-      const loadedVersions = await getVersions();
       log("debug", `Loaded versions: ${JSON.stringify(loadedVersions)}`);
       setVersions(loadedVersions);
+
+      log("debug", `Loaded command: ${JSON.stringify(loadedCommand)}`);
+      setLudusaviCommand(loadedCommand);
 
       log("debug", "Initializing game list (cached)");
       const refreshed = await refreshGamesCall(false);
@@ -473,6 +484,8 @@ function Content() {
         </PanelSectionRow>
       </PanelSection>
 
+      <LudusaviPanel ludusaviCommand={ludusaviCommand} />
+
       <PanelSection title="Logs">
         <PanelSectionRow>
           <ButtonItem layout="below" onClick={() => showModal(<LogModal logs={logs} />)}>
@@ -521,6 +534,67 @@ function summarizeOperationResult(result: OperationResult, label: string) {
 function formatLogEntry(entry: LogEntry) {
   const game = entry.game_name ? ` ${entry.game_name}` : "";
   return `[${entry.timestamp}] [${entry.level}]${game} ${entry.message}`;
+}
+
+function LudusaviPanel({ 
+  ludusaviCommand 
+}: { 
+  ludusaviCommand: LudusaviLaunchCommand | null 
+}) {
+  const [status, setStatus] = useState<string | null>(null);
+  const [isLaunching, setIsLaunching] = useState(false);
+
+  async function onLaunch() {
+    try {
+      setIsLaunching(true);
+      setStatus("Launching Ludusavi...");
+
+      if (!ludusaviCommand) {
+        throw new Error("Ludusavi not found on system.");
+      }
+
+      await launchLudusavi(ludusaviCommand);
+
+      setStatus("Ludusavi launch requested.");
+      // Best-effort clear status after 3s
+      setTimeout(() => setStatus(null), 3000);
+    } catch (err) {
+      console.error(err);
+      setStatus(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsLaunching(false);
+    }
+  }
+
+  return (
+    <PanelSection title="Ludusavi">
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          onClick={onLaunch}
+          disabled={isLaunching || !ludusaviCommand}
+        >
+          Launch
+        </ButtonItem>
+      </PanelSectionRow>
+
+      {status && (
+        <PanelSectionRow>
+          <div style={{ color: "#60a5fa", fontSize: "14px", fontWeight: "bold", padding: "0 4px" }}>
+            {status}
+          </div>
+        </PanelSectionRow>
+      )}
+      
+      {!ludusaviCommand && !isLaunching && (
+        <PanelSectionRow>
+          <div style={{ color: "#ef4444", fontSize: "12px", padding: "0 4px" }}>
+            Ludusavi not found. Please install it via Flatpak or add to PATH.
+          </div>
+        </PanelSectionRow>
+      )}
+    </PanelSection>
+  );
 }
 
 export default definePlugin(() => {
