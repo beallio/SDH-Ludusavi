@@ -15,7 +15,7 @@ import {
   definePlugin,
   toaster
 } from "@decky/api";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { FaDatabase, FaSave, FaDownload, FaExclamationTriangle } from "react-icons/fa";
 import { IoMdRefresh } from "react-icons/io";
 import { LuDatabaseBackup } from "react-icons/lu";
@@ -188,7 +188,13 @@ function normalize(name: string): string {
 function showToast(title: string, body: string, logo?: any) {
   try {
     log("debug", `Showing toast: ${title} - ${body}`);
-    const toastObj = { title, body, logo, duration: 5000 };
+    const toastObj = { 
+      title, 
+      body, 
+      logo: logo ? React.cloneElement(logo, { size: 40 }) : undefined,
+      icon: logo, 
+      duration: 5000 
+    };
     
     // Attempt standard toaster
     toaster.toast(toastObj);
@@ -294,7 +300,8 @@ function Content() {
       toaster.toast({
         title: "SDH-ludusavi",
         body: "Ludusavi game status refreshed",
-        logo: <IoMdRefresh />
+        logo: <IoMdRefresh size={40} />,
+        icon: <IoMdRefresh />
       });
     } catch (error) {
       log("error", `Manual refresh failed: ${error}`);
@@ -313,7 +320,8 @@ function Content() {
       toaster.toast({
         title: "SDH-ludusavi",
         body: "Failed to fetch Ludusavi logs",
-        logo: <FaExclamationTriangle />
+        logo: <FaExclamationTriangle size={40} />,
+        icon: <FaExclamationTriangle />
       });
     }
   };
@@ -329,7 +337,8 @@ function Content() {
       toaster.toast({
         title: "SDH-ludusavi settings failed",
         body: error instanceof Error ? error.message : String(error),
-        logo: <FaExclamationTriangle />
+        logo: <FaExclamationTriangle size={40} />,
+        icon: <FaExclamationTriangle />
       });
     } finally {
       setBusyLabel(null);
@@ -361,15 +370,18 @@ function Content() {
     toaster.toast({ 
       title: `SDH-ludusavi ${label}`, 
       body: `${label} started for ${selectedGame}`,
-      logo: icon
+      logo: React.cloneElement(icon as any, { size: 40 }),
+      icon: icon
     });
     try {
       const result = await operationCall(selectedGame);
       log("info", `Force ${label} completed: ${JSON.stringify(result)}`, label, selectedGame);
+      const resultIcon = result.status === "failed" ? <FaExclamationTriangle /> : icon;
       toaster.toast({
         title: `SDH-ludusavi ${label}`,
         body: summarizeOperationResult(result, label),
-        logo: result.status === "failed" ? <FaExclamationTriangle /> : icon
+        logo: React.cloneElement(resultIcon as any, { size: 40 }),
+        icon: resultIcon
       });
       const refreshed = await refreshGamesCall(false);
       applyRefreshResult(refreshed);
@@ -380,7 +392,8 @@ function Content() {
       toaster.toast({
         title: `SDH-ludusavi ${label} failed`,
         body: error instanceof Error ? error.message : String(error),
-        logo: <FaExclamationTriangle />
+        logo: <FaExclamationTriangle size={40} />,
+        icon: <FaExclamationTriangle />
       });
     } finally {
       setBusyLabel(null);
