@@ -116,11 +116,14 @@ class PyludusaviAdapter:
         )
 
     def get_versions(self) -> dict[str, str]:
+        from pyludusavi import __version__ as pyludusavi_version
+
         ludusavi = self._client.version()
         # Normalize the Ludusavi version string to be lowercase and without the "ludusavi " prefix, if present.
         ludusavi = ludusavi.lower().replace("ludusavi", "").strip() if ludusavi else "unknown"
         return {
             "ludusavi": ludusavi,
+            "pyludusavi": pyludusavi_version,
         }
 
 
