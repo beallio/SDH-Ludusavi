@@ -182,7 +182,26 @@ class SDHLudusaviService:
 
         identity = f"uid={os.getuid()}, euid={os.geteuid()}, user={getpass.getuser()}"
         self.log("debug", f"Process identity: {identity}", "init")
-        self.log("debug", f"Environment variables: {os.environ}", "init")
+
+        # Log relevant environment variables at DEBUG level for troubleshooting.
+        _relevant_keys = {
+            "PATH",
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "SHELL",
+            "LANG",
+            "LD_LIBRARY_PATH",
+            "XDG_DATA_DIRS",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+        }
+        _filtered_env = {
+            k: v
+            for k, v in os.environ.items()
+            if k in _relevant_keys or k.startswith(("DECKY_", "FLATPAK_"))
+        }
+        self.log("debug", f"Filtered environment variables: {_filtered_env}", "init")
 
     def _setup_logging(self) -> None:
         """Configure the standard logging library to route through our handler."""
@@ -204,8 +223,10 @@ class SDHLudusaviService:
             if not has_our_handler:
                 logger.addHandler(handler)
 
-            # Ensure propagation is enabled so pytest and other parent loggers work
-            logger.propagate = True
+            # Disable propagation in Decky Loader to avoid double-logging,
+            # as our DeckyLogHandler already routes to decky.logger.
+            # Keep it enabled in other environments (e.g. tests) for capture.
+            logger.propagate = not bool(os.environ.get("DECKY_VERSION"))
 
     def get_settings(self) -> dict[str, Any]:
         """Return the current plugin settings."""
