@@ -1,0 +1,21 @@
+{
+  "date": "2026-05-13",
+  "task_objective": "Consolidate and merge redundant sudo fix, refined logging, and auto-push build process to main.",
+  "files_modified": [
+    "py_modules/pyludusavi/__init__.py",
+    "py_modules/pyludusavi/discovery.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "scripts/post_commit.sh",
+    "tests/test_pyludusavi_logging.py",
+    "tests/test_refinements.py",
+    "tests/test_sudo_logic.py"
+  ],
+  "design_decisions": [
+    "Implemented UID-based 'Smart Sudo' to prevent redundant sudo calls when running as the target user (UID 1000).",
+    "Refined logging to use DEBUG level and filtered environment keys (PATH, HOME, DECKY_*, etc.) to reduce noise.",
+    "Disabled log propagation in Decky Loader environment to eliminate duplicate log entries.",
+    "Updated the build process (post_commit.sh) to automatically scp the plugin zip to the Steam Deck (10.168.168.20).",
+    "Added a ping check to the build process to avoid hangs when the Deck is unreachable."
+  ],
+  "results": "All improvements merged to main. Redundant sudo calls are eliminated, logs are concise and single-entry, and the build-to-device workflow is automated."
+}
