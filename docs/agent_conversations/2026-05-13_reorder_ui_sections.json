@@ -1,0 +1,10 @@
+{
+  "date": "2026-05-13",
+  "task_objective": "Move the Versions section below the Logs section in the Decky plugin UI.",
+  "files_modified": [
+    "src/index.tsx"
+  ],
+  "tests_added": [],
+  "design_decisions": "Swapped the order of PanelSection components in the Content component's return statement to prioritize log access.",
+  "results": "Logs section now appears above the Versions section. Verified with build and protocol checks."
+}
