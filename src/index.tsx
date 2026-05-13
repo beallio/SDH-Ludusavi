@@ -16,7 +16,9 @@ import {
   toaster
 } from "@decky/api";
 import { useEffect, useMemo, useState } from "react";
-import { FaDatabase } from "react-icons/fa";
+import { FaDatabase, FaSave, FaDownload, FaExclamationTriangle } from "react-icons/fa";
+import { IoMdRefresh } from "react-icons/io";
+import { LuDatabaseBackup } from "react-icons/lu";
 
 type Settings = {
   auto_sync_enabled: boolean;
@@ -183,10 +185,10 @@ function normalize(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9.-]+/g, " ").trim();
 }
 
-function showToast(title: string, body: string) {
+function showToast(title: string, body: string, logo?: any) {
   try {
     log("debug", `Showing toast: ${title} - ${body}`);
-    const toastObj = { title, body, duration: 5000 };
+    const toastObj = { title, body, logo, duration: 5000 };
     
     // Attempt standard toaster
     toaster.toast(toastObj);
@@ -291,7 +293,8 @@ function Content() {
       setLogs(await getRecentLogs());
       toaster.toast({
         title: "SDH-ludusavi",
-        body: "Ludusavi game status refreshed"
+        body: "Ludusavi game status refreshed",
+        logo: <IoMdRefresh />
       });
     } catch (error) {
       log("error", `Manual refresh failed: ${error}`);
@@ -309,7 +312,8 @@ function Content() {
       log("error", `Failed to fetch Ludusavi logs: ${error}`);
       toaster.toast({
         title: "SDH-ludusavi",
-        body: "Failed to fetch Ludusavi logs"
+        body: "Failed to fetch Ludusavi logs",
+        logo: <FaExclamationTriangle />
       });
     }
   };
@@ -324,7 +328,8 @@ function Content() {
       log("error", `Failed to toggle auto-sync: ${error}`);
       toaster.toast({
         title: "SDH-ludusavi settings failed",
-        body: error instanceof Error ? error.message : String(error)
+        body: error instanceof Error ? error.message : String(error),
+        logo: <FaExclamationTriangle />
       });
     } finally {
       setBusyLabel(null);
@@ -352,13 +357,19 @@ function Content() {
     }
     log("info", `Triggering force ${label} for ${selectedGame}`, label, selectedGame);
     setBusyLabel(`${label} running`);
-    toaster.toast({ title: `SDH-ludusavi ${label}`, body: `${label} started for ${selectedGame}` });
+    const icon = label === "Backup" ? <FaSave /> : <FaDownload />;
+    toaster.toast({ 
+      title: `SDH-ludusavi ${label}`, 
+      body: `${label} started for ${selectedGame}`,
+      logo: icon
+    });
     try {
       const result = await operationCall(selectedGame);
       log("info", `Force ${label} completed: ${JSON.stringify(result)}`, label, selectedGame);
       toaster.toast({
         title: `SDH-ludusavi ${label}`,
-        body: summarizeOperationResult(result, label)
+        body: summarizeOperationResult(result, label),
+        logo: result.status === "failed" ? <FaExclamationTriangle /> : icon
       });
       const refreshed = await refreshGamesCall(false);
       applyRefreshResult(refreshed);
@@ -368,7 +379,8 @@ function Content() {
       log("error", `Force ${label} failed: ${error}`, label, selectedGame);
       toaster.toast({
         title: `SDH-ludusavi ${label} failed`,
-        body: error instanceof Error ? error.message : String(error)
+        body: error instanceof Error ? error.message : String(error),
+        logo: <FaExclamationTriangle />
       });
     } finally {
       setBusyLabel(null);
@@ -530,14 +542,19 @@ export default definePlugin(() => {
     log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
     
     if (tracked) {
-      showToast("SDH-ludusavi Auto-sync", `Checking saves for ${name}...`);
+      showToast("SDH-ludusavi Auto-sync", `Checking saves for ${name}...`, <FaDatabase />);
     }
     
     const result = await handleGameStartCall(name, appID);
     // Show result toast for all outcomes (restored, failed, or skipped)
     // unless auto-sync is completely disabled or another operation is running.
     if (result.status !== "skipped" || (result.reason !== "auto_sync_disabled" && result.reason !== "operation_running")) {
-      showToast("SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
+      let icon = <FaDatabase />;
+      if (result.status === "failed") icon = <FaExclamationTriangle />;
+      else if (result.status === "restored") icon = <FaDownload />;
+      else if (result.status === "backed_up") icon = <FaSave />;
+
+      showToast("SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), icon);
     }
   };
 
@@ -546,13 +563,14 @@ export default definePlugin(() => {
     log("info", `App exited: ${name} (${appID}) tracked=${tracked}`);
     
     if (tracked) {
-      showToast("SDH-ludusavi Auto-sync", `Backing up saves for ${name}...`);
+      showToast("SDH-ludusavi Auto-sync", `Backing up saves for ${name}...`, <FaSave />);
     }
     
     const result = await handleGameExitCall(name, appID);
     if (result.status !== "skipped" || (result.reason !== "auto_sync_disabled" && result.reason !== "operation_running")) {
       if (result.status !== "skipped" || result.reason === "local_current") {
-        showToast("SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
+        const icon = result.status === "failed" ? <FaExclamationTriangle /> : <FaSave />;
+        showToast("SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), icon);
       }
     }
   };
@@ -586,7 +604,7 @@ export default definePlugin(() => {
     name: "SDH-ludusavi",
     titleView: <div className={staticClasses.Title}>SDH-ludusavi</div>,
     content: <Content />,
-    icon: <FaDatabase />,
+    icon: <LuDatabaseBackup />,
     onDismount() {
       window.clearInterval(intervalID);
       console.log("SDH-ludusavi unloading");
