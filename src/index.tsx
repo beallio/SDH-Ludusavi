@@ -56,6 +56,7 @@ type OperationResult = {
 type Versions = {
   sdh_ludusavi?: string;
   ludusavi?: string;
+  pyludusavi?: string;
   rclone?: string;
   status?: string;
   message?: string;
@@ -74,6 +75,11 @@ type LogModalProps = {
   closeModal?: () => void;
 };
 
+type LudusaviLogModalProps = {
+  logs: string;
+  closeModal?: () => void;
+};
+
 const getSettings = callable<[], Settings>("get_settings");
 const setAutoSyncEnabled = callable<[enabled: boolean], Settings>("set_auto_sync_enabled");
 const setSelectedGameCall = callable<[gameName: string], Settings>("set_selected_game");
@@ -83,6 +89,7 @@ const forceRestoreCall = callable<[gameName: string], OperationResult>("force_re
 const getVersions = callable<[], Versions>("get_versions");
 const getOperationStatus = callable<[], OperationStatus>("get_operation_status");
 const getRecentLogs = callable<[], LogEntry[]>("get_recent_logs");
+const getLudusaviLogs = callable<[], string>("get_ludusavi_logs");
 const logCall = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
 const handleGameStartCall = callable<[gameName: string, app_id?: string], OperationResult>("handle_game_start");
 const handleGameExitCall = callable<[gameName: string, app_id?: string], OperationResult>("handle_game_exit");
@@ -136,6 +143,33 @@ function LogModal({ logs, closeModal }: LogModalProps) {
         }}
       >
         {logs.length === 0 ? "No recent logs" : logs.map(formatLogEntry).join("\n")}
+      </div>
+    </ConfirmModal>
+  );
+}
+
+function LudusaviLogModal({ logs, closeModal }: LudusaviLogModalProps) {
+  return (
+    <ConfirmModal
+      bAlertDialog={true}
+      strTitle="Ludusavi Logs"
+      onOK={closeModal}
+      onCancel={closeModal}
+    >
+      <div
+        style={{
+          maxHeight: "60vh",
+          overflowY: "auto",
+          fontFamily: "monospace",
+          fontSize: "12px",
+          whiteSpace: "pre-wrap",
+          backgroundColor: "rgba(0, 0, 0, 0.3)",
+          padding: "10px",
+          borderRadius: "4px",
+          userSelect: "text",
+        }}
+      >
+        {logs || "No Ludusavi logs available"}
       </div>
     </ConfirmModal>
   );
@@ -263,6 +297,20 @@ function Content() {
       log("error", `Manual refresh failed: ${error}`);
     } finally {
       setBusyLabel(null);
+    }
+  };
+
+  const showLudusaviLogs = async () => {
+    log("info", "Showing Ludusavi logs");
+    try {
+      const ludusaviLogs = await getLudusaviLogs();
+      showModal(<LudusaviLogModal logs={ludusaviLogs} />);
+    } catch (error) {
+      log("error", `Failed to fetch Ludusavi logs: ${error}`);
+      toaster.toast({
+        title: "SDH-ludusavi",
+        body: "Failed to fetch Ludusavi logs"
+      });
     }
   };
 
@@ -403,6 +451,7 @@ function Content() {
           <div style={{ color: "#cbd5e1", fontSize: "14px", display: "flex", flexDirection: "column", gap: "4px", padding: "12px", backgroundColor: "rgba(30, 41, 59, 0.3)", borderRadius: "4px" }}>
             <div>SDH-ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
             <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
+            <div>pyludusavi: {versions.pyludusavi ?? "Unknown"}</div>
           </div>
         </PanelSectionRow>
       </PanelSection>
@@ -411,6 +460,11 @@ function Content() {
         <PanelSectionRow>
           <ButtonItem layout="below" onClick={() => showModal(<LogModal logs={logs} />)}>
             View Logs
+          </ButtonItem>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem layout="below" onClick={() => void showLudusaviLogs()}>
+            View Ludusavi Logs
           </ButtonItem>
         </PanelSectionRow>
       </PanelSection>
