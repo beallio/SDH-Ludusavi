@@ -40,22 +40,16 @@ def test_adapter_passes_decky_user_home_to_pyludusavi(
         def __init__(self, **kwargs: object) -> None:
             captured.update(kwargs)
 
-    import sdh_ludusavi.ludusavi
-
     monkeypatch.setattr(pyludusavi, "Ludusavi", FakeLudusavi)
     monkeypatch.setitem(
         sys.modules,
         "decky",
         types.SimpleNamespace(DECKY_USER_HOME="/home/deck", DECKY_USER="deck"),
     )
-    monkeypatch.setattr(sdh_ludusavi.ludusavi, "_find_ludusavi_binary", lambda *args: None)
-    monkeypatch.setattr(sdh_ludusavi.ludusavi, "_find_ludusavi_config_dir", lambda *args: None)
 
     PyludusaviAdapter()
 
     assert captured == {
-        "explicit_path": None,
-        "config_dir": None,
         "flatpak_id": FLATPAK_ID,
         "flatpak_user_home": "/home/deck",
         "flatpak_user": "deck",

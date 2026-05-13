@@ -25,14 +25,7 @@ class PyludusaviAdapter:
         from pyludusavi import Ludusavi
 
         user_home = flatpak_user_home or _decky_user_home()
-        raw_binary = _find_ludusavi_binary(flatpak_id, user_home)
-
-        ludusavi_factory = cast(Any, Ludusavi)
-        self._client = ludusavi_factory(
-            explicit_path=raw_binary,
-            config_dir=_find_ludusavi_config_dir(flatpak_id, user_home, raw_binary)
-            if raw_binary
-            else None,
+        self._client = Ludusavi(
             flatpak_id=flatpak_id,
             flatpak_user_home=user_home,
             flatpak_user=flatpak_user or _decky_user(),
@@ -150,37 +143,6 @@ def _game_error(game: dict[str, Any]) -> str | None:
             if isinstance(value, dict) and value.get("failed"):
                 error = value.get("error")
                 return str(error) if error else "Ludusavi reported a failed item"
-    return None
-
-
-def _find_ludusavi_binary(flatpak_id: str, user_home: str | None) -> str | None:
-    import os
-
-    candidates: list[str] = []
-    if user_home:
-        candidates.append(f"{user_home}/.local/bin/ludusavi")
-        candidates.append(
-            f"{user_home}/.local/share/flatpak/app/{flatpak_id}/current/active/files/bin/ludusavi"
-        )
-    candidates.append(f"/var/lib/flatpak/app/{flatpak_id}/current/active/files/bin/ludusavi")
-    candidates.append("/usr/bin/ludusavi")
-    candidates.append("/usr/local/bin/ludusavi")
-
-    for candidate in candidates:
-        if os.path.exists(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    return None
-
-
-def _find_ludusavi_config_dir(
-    flatpak_id: str, user_home: str | None, raw_binary: str
-) -> str | None:
-    import os
-
-    if user_home and "flatpak" in raw_binary:
-        candidate = f"{user_home}/.var/app/{flatpak_id}/config/ludusavi"
-        if os.path.exists(candidate):
-            return candidate
     return None
 
 
