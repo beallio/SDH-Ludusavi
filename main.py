@@ -232,25 +232,12 @@ async def _run_blocking(callback: Any) -> Any:
     Helper to run a synchronous callback in a dedicated thread while
     maintaining the async event loop's responsiveness.
     """
-    context = contextvars.copy_context()
-    complete = threading.Event()
-    value: Any = None
-    error: BaseException | None = None
-
-    def runner() -> None:
-        nonlocal error, value
-        try:
-            value = context.run(callback)
-        except BaseException as exc:
-            error = exc
-        finally:
-            complete.set()
-
-    thread = threading.Thread(target=runner, name="sdh-ludusavi-worker", daemon=True)
-    thread.start()
-    while not complete.is_set():
-        await asyncio.sleep(0.01)
-    thread.join()
-    if error is not None:
-        raise error
-    return value
+    loop = asyncio.get_running_loop()
+    task = loop.run_in_executor(None, contextvars.copy_context().run, callback)
+    try:
+        return await task
+    except asyncio.CancelledError:
+        decky.logger.warning(
+            "SDH-ludusavi operation was cancelled while worker may still be running"
+        )
+        raise
