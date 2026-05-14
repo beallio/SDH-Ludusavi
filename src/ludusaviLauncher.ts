@@ -91,28 +91,58 @@ function getGameIdFromAppId(appId: number): SteamGameId | null {
   return overview.m_gameid;
 }
 
+/**
+ * Calculate the 64-bit GameID from the 32-bit AppID for non-Steam games.
+ */
+function calculateGameId(appId: number): SteamGameId {
+  // Lower 32 bits = appId
+  // Upper 32 bits = 0x02000000 (Shortcut flag)
+  // Logic: (BigInt(appId) | (BigInt(0x02) << 32n)).toString()
+  try {
+    const gameId = (BigInt(appId) | (BigInt(0x02) << 32n)).toString();
+    return gameId;
+  } catch (err) {
+    console.warn("SDH-ludusavi: BigInt calculation failed, falling back to string concat", err);
+    // Fallback if BigInt is somehow broken: appId + mask
+    return (appId + 0x0200000000).toString();
+  }
+}
+
 async function hideShortcutIfSupported(
   appId: number,
   gameId: SteamGameId
 ): Promise<void> {
   const steamClient = getSteamClient();
-  try {
-    if (typeof steamClient.Apps.SetAppHidden === "function") {
-      steamClient.Apps.SetAppHidden(gameId, true);
-      return;
+  const calculatedGameId = calculateGameId(appId);
+  
+  console.log(`SDH-ludusavi: Attempting to hide shortcut. appId=${appId}, gameId=${gameId}, calculatedGameId=${calculatedGameId}`);
+
+  /**
+   * Steam client internals vary. We try ALL available methods instead of returning early.
+   */
+  const tryHide = (methodName: string, id: any, val: boolean) => {
+    const fn = (steamClient.Apps as any)[methodName];
+    if (typeof fn === "function") {
+      try {
+        fn(id, val);
+        console.log(`SDH-ludusavi: Called ${methodName}(${id}, ${val})`);
+      } catch (err) {
+        console.warn(`SDH-ludusavi: Failed call to ${methodName}(${id}, ${val}):`, err);
+      }
     }
-    if (typeof steamClient.Apps.SetShortcutHidden === "function") {
-      steamClient.Apps.SetShortcutHidden(appId, true);
-      return;
-    }
-    if (typeof steamClient.Apps.SetHidden === "function") {
-      steamClient.Apps.SetHidden(gameId, true);
-      return;
-    }
-    console.warn("No supported SteamClient hide method found.");
-  } catch (err) {
-    console.warn("Failed to hide Ludusavi launcher shortcut:", err);
+  };
+
+  // 1. Try methods that expect GameID (64-bit)
+  for (const id of new Set([gameId, calculatedGameId])) {
+    if (!id) continue;
+    tryHide("SetAppHidden", id, true);
+    tryHide("SetHidden", id, true);
+    tryHide("SetAppIsHidden", id, true);
   }
+
+  // 2. Try methods that expect AppID (32-bit)
+  tryHide("SetShortcutHidden", appId, true);
+  tryHide("SetShortcutIsHidden", appId, true);
 }
 
 async function createHiddenLudusaviShortcut(): Promise<LauncherShortcutState> {

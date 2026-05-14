@@ -36,6 +36,8 @@ export interface SteamClientGlobal {
     SetAppHidden?: (gameId: SteamGameId, hidden: boolean) => void;
     SetShortcutHidden?: (appId: number, hidden: boolean) => void;
     SetHidden?: (gameId: SteamGameId, hidden: boolean) => void;
+    SetAppIsHidden?: (gameId: SteamGameId, hidden: boolean) => void;
+    SetShortcutIsHidden?: (appId: number, hidden: boolean) => void;
   };
 }
 
