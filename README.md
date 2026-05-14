@@ -73,8 +73,14 @@ The installable Decky plugin is built from these required files:
 Install frontend dependencies when needed:
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile --ignore-scripts
 ```
+
+The repository uses `pnpm-lock.yaml` as the canonical frontend lockfile. Do not
+use `npm install` or add `package-lock.json`. The pnpm store and heavy virtual
+store are configured under `/tmp/sdh_ludusavi`; the local `node_modules/`
+directory is ignored and contains only pnpm links/bin shims needed by package
+scripts.
 
 ## Usage
 
@@ -88,6 +94,12 @@ Build the Decky frontend:
 
 ```bash
 pnpm run build
+```
+
+Run frontend supply-chain checks:
+
+```bash
+pnpm run verify
 ```
 
 Create the Decky plugin zip:

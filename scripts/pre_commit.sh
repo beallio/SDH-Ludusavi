@@ -27,6 +27,12 @@ echo "Running tests..."
   exit 1
 }
 
+echo "Running frontend supply-chain checks..."
+pnpm run verify || {
+  echo "Frontend supply-chain checks failed."
+  exit 1
+}
+
 ./run.sh bash scripts/check_tdd.sh || {
   echo "TDD check failed."
   exit 1

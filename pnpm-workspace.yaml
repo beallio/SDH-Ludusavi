@@ -1,0 +1,14 @@
+minimumReleaseAge: 20160
+storeDir: /tmp/sdh_ludusavi/.pnpm-store
+virtualStoreDir: /tmp/sdh_ludusavi/pnpm-virtual-store
+sideEffectsCache: false
+
+packages:
+  - .
+
+overrides:
+  brace-expansion@^2.0.0: 2.0.3
+  minimatch@^3.0.0: 3.1.5
+  minimatch@^9.0.0: 9.0.9
+  picomatch@^2.0.0: 2.3.2
+  picomatch@^4.0.0: 4.0.4

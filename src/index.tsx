@@ -433,7 +433,7 @@ function Content() {
           label="Automatic Sync"
           checked={settings.auto_sync_enabled}
           disabled={isBusy}
-          onChange={(enabled) => void toggleAutoSync(enabled)}
+          onChange={(enabled: boolean) => void toggleAutoSync(enabled)}
         />
 
         <PanelSectionRow>

@@ -47,7 +47,7 @@ def test_frontend_uses_decky_toggle_for_automatic_sync() -> None:
     assert 'label="Automatic Sync"' in source
     assert "checked={settings.auto_sync_enabled}" in source
     assert "disabled={isBusy}" in source
-    assert "onChange={(enabled) => void toggleAutoSync(enabled)}" in source
+    assert "onChange={(enabled: boolean) => void toggleAutoSync(enabled)}" in source
     assert 'type="checkbox"' not in source
 
 

@@ -3,7 +3,9 @@ from unittest.mock import MagicMock
 from pyludusavi.main import Ludusavi
 
 
-def test_backup_default_timeout():
+def test_backup_default_timeout(monkeypatch):
+    monkeypatch.setattr("pyludusavi.main.find_ludusavi", lambda **_: ["ludusavi"])
+
     # Mock executor
     mock_executor = MagicMock()
     mock_executor.execute.return_value = MagicMock()
@@ -20,7 +22,9 @@ def test_backup_default_timeout():
     assert kwargs.get("timeout") == 60
 
 
-def test_restore_default_timeout():
+def test_restore_default_timeout(monkeypatch):
+    monkeypatch.setattr("pyludusavi.main.find_ludusavi", lambda **_: ["ludusavi"])
+
     mock_executor = MagicMock()
     mock_executor.execute.return_value = MagicMock()
 
