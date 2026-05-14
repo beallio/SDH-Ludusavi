@@ -387,3 +387,42 @@ def test_get_ludusavi_logs(tmp_path, monkeypatch):
     # Case: Log file missing or empty
     monkeypatch.setattr(adapter, "get_log_contents", lambda: "")
     assert service.get_ludusavi_logs() == ""
+
+
+def test_refresh_games_forces_scan_first_time_per_session(tmp_path: Path) -> None:
+    # Setup cache with a "ghost" game
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "games": [
+                    {
+                        "name": "Ghost Game",
+                        "configured": True,
+                        "has_backup": False,
+                        "needs_first_backup": True,
+                    }
+                ]
+            }
+        )
+    )
+
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+
+    # Ensure cache is loaded
+    assert "Ghost Game" in service._games
+    assert service._refreshed_once is False
+
+    # First call (even with force=False) should trigger a scan and clear the ghost game
+    # FakeAdapter only returns Hades and Celeste
+    result = service.refresh_games(force=False)
+
+    assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
+    assert "Ghost Game" not in service._games
+    assert service._refreshed_once is True
+
+    # Second call uses cache (we can verify this by temporarily failing the adapter)
+    adapter.refresh_error = RuntimeError("should not be called")
+    result = service.refresh_games(force=False)
+    assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
