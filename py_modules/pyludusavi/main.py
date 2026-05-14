@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 from typing import Optional, List, Dict, Literal, Any, Union
 from .discovery import find_ludusavi, find_ludusavi_binary, find_ludusavi_config_dir
 from .core import LudusaviExecutor, LudusaviResponse
@@ -751,7 +751,7 @@ class Ludusavi:
         Returns:
             str: The absolute path to the log directory.
         """
-        return os.path.dirname(self.config_path())
+        return str(Path(self.config_path()).parent)
 
     def log_show(self) -> str:
         """
@@ -760,11 +760,10 @@ class Ludusavi:
         Returns:
             str: The contents of ludusavi_rCURRENT.log, or an empty string if it does not exist.
         """
-        path = os.path.join(self.log_dir(), "ludusavi_rCURRENT.log")
-        if not os.path.exists(path):
+        path = Path(self.log_dir()) / "ludusavi_rCURRENT.log"
+        if not path.exists():
             return ""
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
+        return path.read_text(encoding="utf-8")
 
     def add_game_alias(self, name: str, alias: str) -> None:
         """
