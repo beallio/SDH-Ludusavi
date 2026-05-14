@@ -1,0 +1,21 @@
+{
+  "date": "2026-05-13",
+  "task_objective": "Ensure the plugin respects Ludusavi's backup list by filtering out games marked as Ignored or Cancelled.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/ludusavi.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "docs/plans/respect_backup_list.md",
+    "tests/test_backup_decision.py",
+    "tests/test_backup_list_filter.py"
+  ],
+  "tests_added": [
+    "tests/test_backup_decision.py",
+    "tests/test_backup_list_filter.py"
+  ],
+  "design_decisions": [
+    "Modified PyludusaviAdapter.refresh_statuses to filter out games based on the 'decision' field in Ludusavi's backup preview output.",
+    "Updated LudusaviService.handle_game_exit to perform a final check on the 'decision' field during the pre-backup preview, skipping backups for 'Ignored' or 'Cancelled' games.",
+    "Implemented a new 'not_processed' skip reason for logging when a game is skipped due to user deselection in Ludusavi."
+  ],
+  "results": "The plugin now strictly follows Ludusavi's game selection list, preventing unwanted backups for deselected games while still handling newly supported games correctly."
+}
