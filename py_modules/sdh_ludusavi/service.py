@@ -716,7 +716,7 @@ class SDHLudusaviService:
             normalized_target = _normalize(game.name)
             if normalized_input in normalized_target or normalized_target in normalized_input:
                 # Minimum length check to avoid matching e.g. "A" to every game with "A"
-                if len(normalized_input) > 4 or len(normalized_target) > 4:
+                if len(normalized_input) > 4 and len(normalized_target) > 4:
                     self.log("info", f"Matched '{game_name}' via fuzzy substring to '{game.name}'")
                     return game
 
