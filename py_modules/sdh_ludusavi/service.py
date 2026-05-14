@@ -636,15 +636,22 @@ class SDHLudusaviService:
             "debug", f"Retrieved {len(raw_statuses)} raw game statuses from Ludusavi", "refresh"
         )
 
+        from collections.abc import Mapping
+
         games = []
         for raw_game in raw_statuses:
             try:
-                game = self._coerce_game_status(raw_game)
+                if not isinstance(raw_game, Mapping):
+                    raise TypeError(
+                        f"status entry must be a mapping, got {type(raw_game).__name__}"
+                    )
+                game = self._coerce_game_status(dict(raw_game))
                 games.append(game)
             except Exception as exc:
+                raw_name = raw_game.get("name") if isinstance(raw_game, Mapping) else "<unknown>"
                 self.log(
                     "error",
-                    f"Failed to parse status for game {raw_game.get('name')}: {exc}",
+                    f"Failed to parse status for game {raw_name}: {exc}",
                     "refresh",
                 )
 
