@@ -10,8 +10,10 @@ export type LudusaviLaunchCommand = {
 export type LauncherShortcutState = {
   appId: number;
   gameId: string;
+  managed: boolean;
 };
 
+const USER_SHORTCUT_NAME = "Ludusavi";
 const LUDUSAVI_SHORTCUT_NAME = "[Plugin] Ludusavi Launcher";
 const LUDUSAVI_RUNNING_NAME = "[Plugin] Ludusavi";
 const PLACEHOLDER_EXE = "/usr/bin/ifyouseethisyoufoundabug";
@@ -32,8 +34,8 @@ function getSteamClient(): SteamClientGlobal {
  */
 function getAppStore(): AppStoreGlobal {
   const store = (globalThis as any).appStore ?? (window as any).appStore;
-  if (!store?.GetAppOverviewByAppID) {
-    throw new Error("appStore.GetAppOverviewByAppID is unavailable in this frontend context.");
+  if (!store?.GetAppOverviewByAppID || !store?.m_mapAppOverview) {
+    throw new Error("appStore is unavailable or incomplete in this frontend context.");
   }
   return store as AppStoreGlobal;
 }
@@ -89,6 +91,22 @@ function getGameIdFromAppId(appId: number): SteamGameId | null {
     return null;
   }
   return overview.m_gameid;
+}
+
+function findUserLudusaviShortcut(): LauncherShortcutState | null {
+  const store = getAppStore();
+  for (const overview of store.m_mapAppOverview.values()) {
+    if (overview.m_strDisplayName === USER_SHORTCUT_NAME) {
+      if (overview.m_gameid) {
+        return {
+          appId: overview.m_unAppID,
+          gameId: overview.m_gameid,
+          managed: false,
+        };
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -167,16 +185,24 @@ async function createHiddenLudusaviShortcut(): Promise<LauncherShortcutState> {
   }
 
   await hideShortcutIfSupported(appId, gameId);
-  return { appId, gameId };
+  return { appId, gameId, managed: true };
 }
 
 async function ensureLudusaviShortcut(): Promise<LauncherShortcutState> {
+  // 1. Priority: User-created shortcut named "Ludusavi"
+  const userShortcut = findUserLudusaviShortcut();
+  if (userShortcut) {
+    console.log(`SDH-ludusavi: Found user 'Ludusavi' shortcut: ${userShortcut.appId}. Prioritizing.`);
+    return userShortcut;
+  }
+
+  // 2. Fallback: Plugin-managed shortcut
   const savedAppId = await getSavedShortcutAppId();
   if (savedAppId > 0) {
     const gameId = getGameIdFromAppId(savedAppId);
     if (gameId) {
       await hideShortcutIfSupported(savedAppId, gameId);
-      return { appId: savedAppId, gameId };
+      return { appId: savedAppId, gameId, managed: true };
     }
     console.warn(
       `Saved Ludusavi launcher shortcut ${savedAppId} no longer exists. Recreating.`
@@ -192,12 +218,21 @@ export async function launchLudusavi(
     throw new Error("Ludusavi commandPath is required.");
   }
 
-  const { appId } = await ensureLudusaviShortcut();
+  const state = await ensureLudusaviShortcut();
+  const steamClient = getSteamClient();
+
+  if (!state.managed) {
+    // For user shortcuts, we just launch them as-is.
+    console.log(`SDH-ludusavi: Launching user shortcut ${state.appId} (${state.gameId})`);
+    steamClient.Apps.RunGame(state.gameId, "", -1, 100);
+    return;
+  }
+
+  const { appId } = state;
   const launchOptions = buildLaunchOptions(command.args);
   const exe = quoteExe(command.commandPath);
   const compatTool = command.compatTool ?? "";
 
-  const steamClient = getSteamClient();
   steamClient.Apps.SetShortcutName(appId, LUDUSAVI_RUNNING_NAME);
   steamClient.Apps.SetShortcutExe(appId, exe);
   steamClient.Apps.SetShortcutLaunchOptions(appId, launchOptions);
