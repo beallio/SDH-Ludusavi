@@ -584,7 +584,7 @@ class SDHLudusaviService:
 
         raw_shortcut_id = data.get("ludusaviLauncherShortcutAppId", -1)
         try:
-            self._ludusavi_launcher_shortcut_id = int(raw_shortcut_id)  # type: ignore
+            self._ludusavi_launcher_shortcut_id = int(raw_shortcut_id)
         except (TypeError, ValueError):
             self._warn_state_load("invalid ludusaviLauncherShortcutAppId; using -1")
             self._ludusavi_launcher_shortcut_id = -1
