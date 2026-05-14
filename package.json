@@ -8,7 +8,7 @@
   "scripts": {
     "build": "rollup -c",
     "typecheck": "tsc --noEmit",
-    "audit": "pnpm audit --audit-level high",
+    "audit": "pnpm audit --audit-level moderate",
     "test": "pnpm run typecheck",
     "verify": "bash scripts/check_frontend_supply_chain.sh",
     "watch": "rollup -c -w"
@@ -48,6 +48,7 @@
   },
   "pnpm": {
     "overrides": {
+      "brace-expansion@^1.1.7": "1.1.13",
       "brace-expansion@^2.0.0": "2.0.3",
       "minimatch@^3.0.0": "3.1.5",
       "minimatch@^9.0.0": "9.0.9",

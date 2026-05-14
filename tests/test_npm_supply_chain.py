@@ -48,7 +48,7 @@ def test_package_json_exposes_frontend_supply_chain_scripts() -> None:
     scripts = package["scripts"]
     assert isinstance(scripts, dict)
     assert scripts["typecheck"] == "tsc --noEmit"
-    assert scripts["audit"] == "pnpm audit --audit-level high"
+    assert scripts["audit"] == "pnpm audit --audit-level moderate"
     assert scripts["test"] == "pnpm run typecheck"
     assert scripts["verify"] == "bash scripts/check_frontend_supply_chain.sh"
 
@@ -77,6 +77,7 @@ def test_pnpm_workspace_contains_supply_chain_policy() -> None:
         "sideEffectsCache: false",
         "picomatch@^4.0.0: 4.0.4",
         "picomatch@^2.0.0: 2.3.2",
+        "brace-expansion@^1.1.7: 1.1.13",
         "brace-expansion@^2.0.0: 2.0.3",
         "minimatch@^3.0.0: 3.1.5",
         "minimatch@^9.0.0: 9.0.9",
@@ -117,7 +118,7 @@ packages:
 def test_frontend_supply_chain_script_runs_audit_before_install() -> None:
     source = (ROOT / "scripts" / "check_frontend_supply_chain.sh").read_text(encoding="utf-8")
 
-    pre_install_audit = source.index("pnpm audit --audit-level high")
+    pre_install_audit = source.index("pnpm audit --audit-level moderate")
     install = source.index("pnpm install --frozen-lockfile --ignore-scripts")
     assert pre_install_audit < install
     assert "scripts/check_pnpm_install_scripts.py pnpm-lock.yaml" in source

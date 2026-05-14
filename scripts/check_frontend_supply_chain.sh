@@ -32,7 +32,7 @@ for section in ("dependencies", "devDependencies"):
 PY
 
 echo "Running pre-install pnpm audit..."
-pnpm audit --audit-level high
+pnpm audit --audit-level moderate
 
 python scripts/check_pnpm_install_scripts.py pnpm-lock.yaml
 
@@ -40,7 +40,7 @@ echo "Installing frontend dependencies with frozen lockfile and scripts disabled
 pnpm install --frozen-lockfile --ignore-scripts
 
 echo "Running post-install pnpm audit..."
-pnpm audit --audit-level high
+pnpm audit --audit-level moderate
 
 if command -v npm >/dev/null 2>&1 && [ -f package-lock.json ]; then
   npm audit signatures
