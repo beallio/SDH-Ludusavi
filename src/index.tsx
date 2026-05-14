@@ -273,7 +273,18 @@ function Content() {
     }
   };
 
-  const applyRefreshResult = (result: RefreshResult, preferredGame?: string) => {
+  const applyRefreshResult = (result: RefreshResult, preferredGame?: string): boolean => {
+    if (result.dependency_error) {
+      log("error", `Ludusavi refresh failed: ${result.dependency_error}`, "refresh");
+      toaster.toast({
+        title: "SDH-ludusavi refresh failed",
+        body: result.dependency_error,
+        logo: <FaExclamationTriangle size={40} />,
+        duration: 4000
+      });
+      return false;
+    }
+
     log("debug", `Applying refresh result (${result.games.length} games, ${Object.keys(result.aliases || {}).length} aliases)`);
     setGames(result.games);
     
@@ -299,6 +310,8 @@ function Content() {
       log("debug", `Defaulting selected game to ${firstGame}`);
       return firstGame;
     });
+
+    return true;
   };
 
   const refreshGames = async () => {
@@ -306,15 +319,16 @@ function Content() {
     setBusyLabel("Refreshing games");
     try {
       const result = await refreshGamesCall(true);
-      applyRefreshResult(result);
-      setOperation(await getOperationStatus());
-      setLogs(await getRecentLogs());
-      toaster.toast({
-        title: "SDH-ludusavi",
-        body: "Ludusavi game status refreshed",
-        logo: <IoMdRefresh size={40} />,
-        duration: 2000
-      });
+      if (applyRefreshResult(result)) {
+        setOperation(await getOperationStatus());
+        setLogs(await getRecentLogs());
+        toaster.toast({
+          title: "SDH-ludusavi",
+          body: "Ludusavi game status refreshed",
+          logo: <IoMdRefresh size={40} />,
+          duration: 2000
+        });
+      }
     } catch (error) {
       log("error", `Manual refresh failed: ${error}`);
     } finally {
