@@ -34,8 +34,8 @@ function getSteamClient(): SteamClientGlobal {
  */
 function getAppStore(): AppStoreGlobal {
   const store = (globalThis as any).appStore ?? (window as any).appStore;
-  if (!store?.GetAppOverviewByAppID || !store?.m_mapAppOverview) {
-    throw new Error("appStore is unavailable or incomplete in this frontend context.");
+  if (!store?.GetAppOverviewByAppID) {
+    throw new Error("appStore.GetAppOverviewByAppID is unavailable in this frontend context.");
   }
   return store as AppStoreGlobal;
 }
@@ -94,18 +94,33 @@ function getGameIdFromAppId(appId: number): SteamGameId | null {
 }
 
 function findUserLudusaviShortcut(): LauncherShortcutState | null {
-  const store = getAppStore();
-  for (const overview of store.m_mapAppOverview.values()) {
-    if (overview.m_strDisplayName === USER_SHORTCUT_NAME) {
-      if (overview.m_gameid) {
-        return {
-          appId: overview.m_unAppID,
-          gameId: overview.m_gameid,
-          managed: false,
-        };
+  const store = getAppStore() as any;
+  // Try common internal property names for the app overview map/list.
+  const apps = store.m_mapAppOverview || store.m_mapApps || store.allApps;
+
+  if (!apps) {
+    console.warn("SDH-ludusavi: Could not find app list on appStore. Shortcut search disabled.");
+    return null;
+  }
+
+  try {
+    const iterable = typeof apps.values === "function" ? apps.values() : Object.values(apps);
+    for (const overview of iterable) {
+      const casted = overview as any;
+      if (casted?.m_strDisplayName === USER_SHORTCUT_NAME) {
+        if (casted?.m_gameid) {
+          return {
+            appId: casted.m_unAppID,
+            gameId: casted.m_gameid,
+            managed: false,
+          };
+        }
       }
     }
+  } catch (err) {
+    console.error("SDH-ludusavi: Failed to iterate appStore:", err);
   }
+
   return null;
 }
 
