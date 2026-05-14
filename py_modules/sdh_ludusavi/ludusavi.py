@@ -6,7 +6,16 @@ from typing import Any, cast
 
 
 FLATPAK_ID = "com.github.mtkennerly.ludusavi"
-os.environ["LD_LIBRARY_PATH"] = ""
+
+
+def _ludusavi_env() -> dict[str, str]:
+    """
+    Return a copy of the current environment with LD_LIBRARY_PATH cleared.
+    This avoids conflicts when running the Ludusavi binary extracted from Flatpak.
+    """
+    env = os.environ.copy()
+    env["LD_LIBRARY_PATH"] = ""
+    return env
 
 
 class PyludusaviAdapter:
@@ -31,6 +40,7 @@ class PyludusaviAdapter:
             flatpak_id=flatpak_id,
             flatpak_user_home=user_home,
             flatpak_user=flatpak_user or _decky_user(),
+            env=_ludusavi_env(),
         )
 
     def refresh_statuses(self) -> list[dict[str, object]]:

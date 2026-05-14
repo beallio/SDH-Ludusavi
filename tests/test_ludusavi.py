@@ -1,5 +1,6 @@
 import sys
 import types
+from typing import cast
 
 import pytest
 
@@ -52,11 +53,11 @@ def test_adapter_passes_decky_user_home_to_pyludusavi(
     )
 
     PyludusaviAdapter()
-    assert captured == {
-        "flatpak_id": FLATPAK_ID,
-        "flatpak_user_home": "/home/deck",
-        "flatpak_user": "deck",
-    }
+    assert captured["flatpak_id"] == FLATPAK_ID
+    assert captured["flatpak_user_home"] == "/home/deck"
+    assert captured["flatpak_user"] == "deck"
+    assert isinstance(captured.get("env"), dict)
+    assert cast(dict, captured["env"]).get("LD_LIBRARY_PATH") == ""
 
 
 def test_games_from_output_accepts_ludusavi_api_shape() -> None:

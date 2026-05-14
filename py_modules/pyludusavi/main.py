@@ -28,6 +28,7 @@ class Ludusavi:
         flatpak_id: Optional[str] = None,
         flatpak_user_home: Optional[str] = None,
         flatpak_user: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
     ):
         """
         Initialize the Ludusavi wrapper.
@@ -39,6 +40,7 @@ class Ludusavi:
             flatpak_id: Optional Flatpak app ID to run explicitly.
             flatpak_user_home: Optional user home for per-user Flatpak discovery.
             flatpak_user: Optional username to run Flatpak via sudo -u.
+            env: Optional environment variables for the Ludusavi subprocess.
         """
         # If no explicit path is provided, try to find a raw binary first if we have a flatpak_id
         if not explicit_path and flatpak_id:
@@ -63,7 +65,7 @@ class Ludusavi:
         if no_manifest_update:
             self.command_prefix.append("--no-manifest-update")
 
-        self.executor = LudusaviExecutor(self.command_prefix)
+        self.executor = LudusaviExecutor(self.command_prefix, env=env)
 
     # --- Metadata Group ---
 
