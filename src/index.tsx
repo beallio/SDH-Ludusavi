@@ -518,7 +518,9 @@ function summarizeOperationResult(result: OperationResult, label: string) {
       case "auto_sync_disabled": return `Auto-sync skipped: feature disabled`;
       case "operation_running": return `Auto-sync skipped: another operation is running`;
       case "unmatched_game": return `Auto-sync skipped: could not match game name`;
+      case "not_processed": return `Auto-sync skipped: game is deselected in Ludusavi`;
       case "no_backup": return `Auto-sync skipped: no backup found for ${result.game}`;
+
       case "local_current": return `Auto-sync skipped: local save is already current`;
       case "ambiguous_recency": return `Auto-sync skipped: recency is ambiguous`;
       default: return `${label} skipped: ${result.reason ?? "unknown reason"}`;
@@ -640,8 +642,10 @@ export default definePlugin(() => {
     
     const result = await handleGameStartCall(name, appID);
     // Show result toast for all outcomes (restored, failed, or skipped)
-    // unless auto-sync is completely disabled or another operation is running.
-    if (result.status !== "skipped" || (result.reason !== "auto_sync_disabled" && result.reason !== "operation_running")) {
+    // unless auto-sync is completely disabled, another operation is running,
+    // or the game simply isn't managed by Ludusavi (unmatched or ignored).
+    const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
+    if (result.status !== "skipped" || !silentReasons.includes(result.reason ?? "")) {
       let icon = <FaDatabase />;
       if (result.status === "failed") icon = <FaExclamationTriangle />;
       else if (result.status === "restored") icon = <FaDownload />;
@@ -660,7 +664,8 @@ export default definePlugin(() => {
     }
     
     const result = await handleGameExitCall(name, appID);
-    if (result.status !== "skipped" || (result.reason !== "auto_sync_disabled" && result.reason !== "operation_running")) {
+    const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
+    if (result.status !== "skipped" || !silentReasons.includes(result.reason ?? "")) {
       if (result.status !== "skipped" || result.reason === "local_current") {
         const icon = result.status === "failed" ? <FaExclamationTriangle /> : <FaSave />;
         showToast("SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), icon);
