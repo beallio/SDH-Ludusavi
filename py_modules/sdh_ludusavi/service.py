@@ -576,7 +576,13 @@ class SDHLudusaviService:
 
         self._auto_sync_enabled = bool(data.get("auto_sync_enabled", False))
         self._selected_game = str(data.get("selected_game", ""))
-        self._ludusavi_launcher_shortcut_id = int(data.get("ludusaviLauncherShortcutAppId", -1))
+
+        raw_shortcut_id = data.get("ludusaviLauncherShortcutAppId", -1)
+        try:
+            self._ludusavi_launcher_shortcut_id = int(raw_shortcut_id)  # type: ignore
+        except (TypeError, ValueError):
+            self._warn_state_load("invalid ludusaviLauncherShortcutAppId; using -1")
+            self._ludusavi_launcher_shortcut_id = -1
 
         # Load cached games
         cached_games = data.get("games", [])
