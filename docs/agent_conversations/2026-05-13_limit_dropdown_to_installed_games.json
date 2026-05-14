@@ -1,0 +1,12 @@
+{
+  "date": "2026-05-13",
+  "task_objective": "Limit the games shown in the drop down box to only installed games",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/ludusavi.py"
+  ],
+  "tests_added": [
+    "tests/test_installed_games_only.py"
+  ],
+  "design_decisions": "Modified refresh_statuses to use only games detected during the backup preview (scan) instead of the union of scanned games and games with existing backups. This ensures the UI dropdown reflects the current installation state of the system.",
+  "results": "The dropdown now correctly filters out uninstalled games even if they have backups. Verified with a new unit test and full suite pass. All type checks and linting are green."
+}

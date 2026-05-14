@@ -39,7 +39,7 @@ class PyludusaviAdapter:
         preview_games = _games_from_output(preview)
         backup_games = _games_from_output(backups)
 
-        names = sorted(set(preview_games) | set(backup_games), key=str.casefold)
+        names = sorted(preview_games.keys(), key=str.casefold)
         return [
             {
                 "name": name,

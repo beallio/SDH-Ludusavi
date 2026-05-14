@@ -369,6 +369,12 @@ class SDHLudusaviService:
             self.log("info", "Skipping: game has no existing backup", "start", game.name)
             return self._skip("start", game.name, "no_backup")
 
+        if game.error:
+            self.log(
+                "info", f"Skipping: game has a reported error: {game.error}", "start", game.name
+            )
+            return self._skip("start", game.name, "game_error")
+
         self.log("debug", f"Checking recency for {game.name}", "start", game.name)
         recency = self._ludusavi().compare_recency(game.name)
         self.log("info", f"Recency check result for {game.name}: {recency}", "start", game.name)
@@ -419,17 +425,50 @@ class SDHLudusaviService:
             )
             return self._skip("exit", game_name, "unmatched_game")
 
+        if game.error:
+            self.log(
+                "info", f"Skipping: game has a reported error: {game.error}", "exit", game.name
+            )
+            return self._skip("exit", game.name, "game_error")
+
         self.log("debug", f"Checking if backup is needed for {game.name}", "exit", game.name)
         try:
             preview = self._ludusavi().backup(game.name, preview=True)
-            game_output = cast(dict[str, Any], preview.get("games", {})).get(game.name, {})
-            change = cast(dict[str, Any], game_output).get("change")
+            games_output = cast(dict[str, Any], preview.get("games", {}))
+
+            if game.name not in games_output:
+                self.log(
+                    "info",
+                    "Skipping: game not found in backup preview (nothing to back up)",
+                    "exit",
+                    game.name,
+                )
+                return self._skip("exit", game.name, "not_in_preview")
+
+            game_output = cast(dict[str, Any], games_output.get(game.name, {}))
+
+            # Check if Ludusavi found anything to back up.
+            # Some games might be listed but have no files/registry entries found.
+            files = game_output.get("files", {})
+            registry = game_output.get("registry", {})
+            if not files and not registry:
+                self.log(
+                    "info",
+                    "Skipping: no files or registry entries found to back up",
+                    "exit",
+                    game.name,
+                )
+                return self._skip("exit", game.name, "no_files_found")
+
+            change = game_output.get("change")
             self.log("debug", f"Backup preview result for {game.name}: {change}", "exit", game.name)
 
             if change == "Same":
                 return self._skip("exit", game.name, "local_current")
         except Exception as exc:
             self.log("debug", f"Backup preview failed for {game.name}: {exc}", "exit", game.name)
+            # If preview fails, we skip to avoid potentially invalid or redundant backup attempts.
+            return self._skip("exit", game.name, "preview_failed")
 
         result = self._run_locked("backup", game.name, lambda: self._ludusavi().backup(game.name))
         self._refresh_statuses_unlocked()

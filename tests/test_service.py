@@ -266,7 +266,9 @@ def test_exit_backs_up_only_when_auto_sync_enabled_and_matched(tmp_path: Path) -
 
     def backup_with_preview(game_name: str, preview: bool = False) -> dict[str, object]:
         if preview:
-            return {"games": {game_name: {"change": "Same"}}}
+            return {
+                "games": {game_name: {"change": "Same", "files": {"save.dat": {}}, "registry": {}}}
+            }
         return original_backup(game_name)
 
     adapter.backup = backup_with_preview
@@ -275,7 +277,11 @@ def test_exit_backs_up_only_when_auto_sync_enabled_and_matched(tmp_path: Path) -
     # Now mock backup preview to return "Different"
     def backup_with_changes(game_name: str, preview: bool = False) -> dict[str, object]:
         if preview:
-            return {"games": {game_name: {"change": "Different"}}}
+            return {
+                "games": {
+                    game_name: {"change": "Different", "files": {"save.dat": {}}, "registry": {}}
+                }
+            }
         return original_backup(game_name)
 
     adapter.backup = backup_with_changes
