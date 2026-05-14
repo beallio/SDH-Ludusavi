@@ -241,10 +241,16 @@ class SDHLudusaviService:
 
     def set_selected_game(self, game_name: str) -> dict[str, Any]:
         """Update the currently selected game and persist it to disk."""
-        self._selected_game = str(game_name)
+        self._selected_game = self._sanitize_name(game_name)
         self._save_state()
-        self.log("debug", f"Selected game changed to {game_name}")
+        self.log("debug", f"Selected game changed to {self._selected_game}")
         return self.get_settings()
+
+    def _sanitize_name(self, name: str | None) -> str:
+        if not name:
+            return ""
+        # Remove control characters and newlines
+        return " ".join(str(name).split())
 
     def get_ludusavi_launcher_shortcut_id(self) -> int:
         """Return the saved shortcut app ID, or -1 if none exists."""
@@ -334,6 +340,7 @@ class SDHLudusaviService:
 
         Checks if a restore is needed based on backup recency.
         """
+        game_name = self._sanitize_name(game_name)
         self.log(
             "info",
             f"handle_game_start triggered for game='{game_name}', app_id='{app_id}'",
@@ -393,6 +400,7 @@ class SDHLudusaviService:
 
         Triggers an automatic backup if enabled.
         """
+        game_name = self._sanitize_name(game_name)
         self.log(
             "info",
             f"handle_game_exit triggered for game='{game_name}', app_id='{app_id}'",
@@ -484,6 +492,7 @@ class SDHLudusaviService:
 
     def force_backup(self, game_name: str) -> dict[str, object]:
         """Trigger a manual backup for the specified game."""
+        game_name = self._sanitize_name(game_name)
         game = self._match_game(game_name)
         if game is None:
             self.log("debug", "Skipping: game not found in Ludusavi list", "backup", game_name)
@@ -496,6 +505,7 @@ class SDHLudusaviService:
 
     def force_restore(self, game_name: str) -> dict[str, object]:
         """Trigger a manual restore for the specified game."""
+        game_name = self._sanitize_name(game_name)
         game = self._match_game(game_name)
         if game is None:
             self.log("debug", "Skipping: game not found in Ludusavi list", "restore", game_name)
@@ -683,6 +693,7 @@ class SDHLudusaviService:
         Attempt to match a Steam game name or ID to an entry in the Ludusavi
         game list, with fallback to aliases and fuzzy matching.
         """
+        game_name = self._sanitize_name(game_name)
         self.log("debug", f"Attempting to match '{game_name}' (app_id: {app_id})")
         if not self._refreshed_once or not self._games:
             self.log("debug", f"_match_game triggering refresh for {game_name}", "refresh")
