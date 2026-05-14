@@ -41,10 +41,12 @@ class PyludusaviAdapter:
 
         # Filter out games that have no files and no registry entries in the preview.
         # This ensures we only show games that Ludusavi actually found on the system.
+        # We also filter out games where the decision is 'Ignored' or 'Cancelled'.
         installed_games = {
             name: game
             for name, game in preview_games.items()
-            if game.get("files") or game.get("registry")
+            if (game.get("files") or game.get("registry"))
+            and game.get("decision") not in ("Ignored", "Cancelled")
         }
 
         names = sorted(installed_games.keys(), key=str.casefold)

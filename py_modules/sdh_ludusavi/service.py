@@ -448,6 +448,17 @@ class SDHLudusaviService:
 
             game_output = cast(dict[str, Any], games_output.get(game.name, {}))
 
+            # Check if Ludusavi decided to skip this game (e.g., it is deselected in the UI).
+            decision = game_output.get("decision")
+            if decision in ("Ignored", "Cancelled"):
+                self.log(
+                    "info",
+                    f"Skipping: game marked as {decision} in Ludusavi",
+                    "exit",
+                    game.name,
+                )
+                return self._skip("exit", game.name, "not_processed")
+
             # Check if Ludusavi found anything to back up.
             # Some games might be listed but have no files/registry entries found.
             files = game_output.get("files", {})
