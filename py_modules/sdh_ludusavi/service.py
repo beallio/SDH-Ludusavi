@@ -186,24 +186,19 @@ class SDHLudusaviService:
         self.log("debug", f"Process identity: {identity}", "init")
 
         # Log relevant environment variables at DEBUG level for troubleshooting.
-        _relevant_keys = {
-            "PATH",
-            "HOME",
-            "USER",
-            "LOGNAME",
-            "SHELL",
+        _allowed_env_keys = {
             "LANG",
-            "LD_LIBRARY_PATH",
-            "XDG_DATA_DIRS",
-            "XDG_CONFIG_HOME",
-            "XDG_DATA_HOME",
+            "DECKY_VERSION",
+            "DECKY_PLUGIN_RUNTIME_DIR",
+            "DECKY_PLUGIN_SETTINGS_DIR",
+            "FLATPAK_ID",
         }
         _filtered_env = {
-            k: v
-            for k, v in os.environ.items()
-            if k in _relevant_keys or k.startswith(("DECKY_", "FLATPAK_"))
+            key: ("<set>" if "DIR" in key or key.endswith("HOME") else value)
+            for key, value in os.environ.items()
+            if key in _allowed_env_keys
         }
-        self.log("debug", f"Filtered environment variables: {_filtered_env}", "init")
+        self.log("debug", f"Environment summary: {_filtered_env}", "init")
 
     def _setup_logging(self) -> None:
         """Configure the standard logging library to route through our handler."""
