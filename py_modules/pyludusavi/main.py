@@ -5,6 +5,9 @@ from .core import LudusaviExecutor, LudusaviResponse
 from .models import LudusaviApiOutput, ApiConfig, ApiManifest
 
 
+DEFAULT_OPERATION_TIMEOUT_SECONDS = 60
+
+
 def _validate_mutually_exclusive(
     first_name: str, first_value: bool, second_name: str, second_value: bool
 ) -> None:
@@ -177,7 +180,7 @@ class Ludusavi:
         include_disabled: bool = False,
         ask_downgrade: bool = False,
         no_force_cloud_conflict: bool = False,
-        timeout: Optional[float] = None,  # Operations default to no timeout
+        timeout: Optional[float] = DEFAULT_OPERATION_TIMEOUT_SECONDS,
     ) -> LudusaviResponse[LudusaviApiOutput]:
         """
         Back up data.
@@ -272,7 +275,7 @@ class Ludusavi:
         include_disabled: bool = False,
         ask_downgrade: bool = False,
         no_force_cloud_conflict: bool = False,
-        timeout: Optional[float] = None,
+        timeout: Optional[float] = DEFAULT_OPERATION_TIMEOUT_SECONDS,
     ) -> LudusaviResponse[LudusaviApiOutput]:
         """
         Restore data.
