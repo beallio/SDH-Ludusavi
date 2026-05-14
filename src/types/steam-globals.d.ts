@@ -1,15 +1,3 @@
-export {};
-
-declare global {
-  const SteamClient: SteamClientGlobal | undefined;
-  const appStore: AppStoreGlobal | undefined;
-
-  interface Window {
-    SteamClient?: SteamClientGlobal;
-    appStore?: AppStoreGlobal;
-  }
-}
-
 export type SteamGameId = string;
 
 export interface SteamClientGlobal {
@@ -50,4 +38,10 @@ export interface SteamAppOverview {
   m_gameid?: SteamGameId;
   m_unAppID: number;
   m_strDisplayName: string;
+}
+
+declare global {
+  interface Window {
+    SteamClient?: SteamClientGlobal;
+  }
 }
