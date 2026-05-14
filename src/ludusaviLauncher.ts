@@ -99,18 +99,23 @@ function findUserLudusaviShortcut(): LauncherShortcutState | null {
   const apps = store.m_mapAppOverview || store.m_mapApps || store.allApps;
 
   if (!apps) {
-    console.warn("SDH-ludusavi: Could not find app list on appStore. Shortcut search disabled.");
+    console.warn("SDH-ludusavi: Could not find app list on appStore. Available keys:", Object.keys(store));
     return null;
   }
 
   try {
-    const iterable = typeof apps.values === "function" ? apps.values() : Object.values(apps);
+    const iterable = typeof apps.values === "function" ? Array.from(apps.values()) : Object.values(apps);
+    console.log(`SDH-ludusavi: Searching ${iterable.length} apps for name "${USER_SHORTCUT_NAME}"`);
+
     for (const overview of iterable) {
       const casted = overview as any;
-      if (casted?.m_strDisplayName === USER_SHORTCUT_NAME) {
+      const name = casted?.m_strDisplayName || casted?.display_name || casted?.name;
+      
+      if (name === USER_SHORTCUT_NAME) {
+        console.log("SDH-ludusavi: Match found!", casted);
         if (casted?.m_gameid) {
           return {
-            appId: casted.m_unAppID,
+            appId: casted.m_unAppID || casted.appid || casted.m_nAppID,
             gameId: casted.m_gameid,
             managed: false,
           };
@@ -121,6 +126,7 @@ function findUserLudusaviShortcut(): LauncherShortcutState | null {
     console.error("SDH-ludusavi: Failed to iterate appStore:", err);
   }
 
+  console.log(`SDH-ludusavi: No shortcut named "${USER_SHORTCUT_NAME}" found in app list.`);
   return null;
 }
 
