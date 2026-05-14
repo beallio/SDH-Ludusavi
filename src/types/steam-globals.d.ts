@@ -43,8 +43,11 @@ export interface SteamClientGlobal {
 
 export interface AppStoreGlobal {
   GetAppOverviewByAppID(appId: number): SteamAppOverview | null | undefined;
+  m_mapAppOverview: Map<number, SteamAppOverview>;
 }
 
 export interface SteamAppOverview {
   m_gameid?: SteamGameId;
+  m_unAppID: number;
+  m_strDisplayName: string;
 }
