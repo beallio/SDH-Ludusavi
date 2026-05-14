@@ -182,6 +182,7 @@ function LudusaviLogModal({ logs, closeModal }: LudusaviLogModalProps) {
 
 let trackedAppIDs = new Set<string>();
 let trackedNames = new Set<string>();
+let cachedLudusaviCommand: LudusaviLaunchCommand | null = null;
 
 /** Normalize a game name for fuzzy matching, mirroring backend _normalize. */
 function normalize(name: string): string {
@@ -220,7 +221,7 @@ function Content() {
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
-  const [ludusaviCommand, setLudusaviCommand] = useState<LudusaviLaunchCommand | null>(null);
+  const [ludusaviCommand, setLudusaviCommand] = useState<LudusaviLaunchCommand | null>(cachedLudusaviCommand);
 
   const selectedStatus = useMemo(
     () => games.find((game) => game.name === selectedGame) ?? null,
@@ -253,6 +254,7 @@ function Content() {
       setVersions(loadedVersions);
 
       log("debug", `Loaded command: ${JSON.stringify(loadedCommand)}`);
+      cachedLudusaviCommand = loadedCommand;
       setLudusaviCommand(loadedCommand);
 
       log("debug", "Initializing game list (cached)");
@@ -484,7 +486,7 @@ function Content() {
         </PanelSectionRow>
       </PanelSection>
 
-      <LudusaviPanel ludusaviCommand={ludusaviCommand} />
+      <LudusaviPanel ludusaviCommand={ludusaviCommand} isLoading={busyLabel === "Loading"} />
 
       <PanelSection title="Logs">
         <PanelSectionRow>
@@ -539,9 +541,11 @@ function formatLogEntry(entry: LogEntry) {
 }
 
 function LudusaviPanel({ 
-  ludusaviCommand 
+  ludusaviCommand,
+  isLoading
 }: { 
-  ludusaviCommand: LudusaviLaunchCommand | null 
+  ludusaviCommand: LudusaviLaunchCommand | null,
+  isLoading: boolean
 }) {
   const [status, setStatus] = useState<string | null>(null);
   const [isLaunching, setIsLaunching] = useState(false);
@@ -588,7 +592,7 @@ function LudusaviPanel({
         </PanelSectionRow>
       )}
       
-      {!ludusaviCommand && !isLaunching && (
+      {!ludusaviCommand && !isLaunching && !isLoading && (
         <PanelSectionRow>
           <div style={{ color: "#ef4444", fontSize: "12px", padding: "0 4px" }}>
             Ludusavi not found. Please install it via Flatpak or add to PATH.
