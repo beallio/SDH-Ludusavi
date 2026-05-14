@@ -1,0 +1,12 @@
+{
+  "date": "2026-05-13",
+  "task_objective": "Fix the issue where the Ludusavi launcher Steam shortcut was not being hidden from the library.",
+  "files_modified": [
+    "src/ludusaviLauncher.ts",
+    "src/types/steam-globals.d.ts",
+    "docs/plans/fix_hidden_shortcut.md"
+  ],
+  "tests_added": [],
+  "design_decisions": "Implemented an exhaustive hiding strategy. Added manual 64-bit GameID calculation for non-Steam shortcuts. The helper now tries all known SteamClient.Apps hiding methods (SetAppHidden, SetHidden, SetAppIsHidden, SetShortcutHidden, SetShortcutIsHidden) using both provided and calculated IDs. Added console logging to trace detection and execution of these methods.",
+  "results": "The plugin is now much more likely to successfully hide the reusable shortcut across different Steam client versions. Verified with a successful build and all backend protocol checks."
+}
