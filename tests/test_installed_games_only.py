@@ -19,11 +19,17 @@ class FakeClient:
 
 
 def test_refresh_statuses_should_include_only_installed_games():
-    preview_data = {"games": {"Installed Game": {"change": "Same"}}}
+    preview_data = {
+        "games": {
+            "Installed Game": {"files": {"a": {}}, "change": "Same"},
+            "Empty Game": {"files": {}, "registry": {}, "change": "Unknown"},
+        }
+    }
     backups_data = {
         "games": {
             "Installed Game": {"backups": [{"name": "1"}]},
             "Uninstalled Game": {"backups": [{"name": "1"}]},
+            "Empty Game": {"backups": [{"name": "1"}]},
         }
     }
 
@@ -33,6 +39,7 @@ def test_refresh_statuses_should_include_only_installed_games():
     statuses = adapter.refresh_statuses()
     names = [s["name"] for s in statuses]
 
-    # We want ONLY installed games
+    # We want ONLY installed games (those with files or registry found)
     assert names == ["Installed Game"]
     assert "Uninstalled Game" not in names
+    assert "Empty Game" not in names

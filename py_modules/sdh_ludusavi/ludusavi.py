@@ -39,17 +39,25 @@ class PyludusaviAdapter:
         preview_games = _games_from_output(preview)
         backup_games = _games_from_output(backups)
 
-        names = sorted(preview_games.keys(), key=str.casefold)
+        # Filter out games that have no files and no registry entries in the preview.
+        # This ensures we only show games that Ludusavi actually found on the system.
+        installed_games = {
+            name: game
+            for name, game in preview_games.items()
+            if game.get("files") or game.get("registry")
+        }
+
+        names = sorted(installed_games.keys(), key=str.casefold)
         return [
             {
                 "name": name,
                 "configured": True,
                 "has_backup": bool(backup_games.get(name, {}).get("backups")),
                 "needs_first_backup": not bool(backup_games.get(name, {}).get("backups")),
-                "steam_id": str(preview_games.get(name, {}).get("steamId"))
-                if preview_games.get(name, {}).get("steamId")
+                "steam_id": str(installed_games.get(name, {}).get("steamId"))
+                if installed_games.get(name, {}).get("steamId")
                 else None,
-                "error": _game_error(preview_games.get(name, {})),
+                "error": _game_error(installed_games.get(name, {})),
             }
             for name in names
         ]

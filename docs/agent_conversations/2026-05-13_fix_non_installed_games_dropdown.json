@@ -1,0 +1,11 @@
+{
+  "date": "2026-05-13",
+  "task_objective": "Fix non-installed games appearing in the dropdown box",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/ludusavi.py",
+    "tests/test_installed_games_only.py"
+  ],
+  "tests_added": [],
+  "design_decisions": "Refined the game filtering in refresh_statuses to exclude games that Ludusavi scans but finds no files or registry entries for. This prevents empty placeholders (like uninstalled custom games) from appearing in the UI dropdown.",
+  "results": "The dropdown now correctly omits games with no detected data. Verified with an updated unit test and full suite pass. All quality checks (ruff, ty) are green."
+}
