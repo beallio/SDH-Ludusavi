@@ -573,7 +573,7 @@ function LudusaviPanel({
         throw new Error("Ludusavi not found on system.");
       }
 
-      await launchLudusavi(ludusaviCommand);
+      await launchLudusavi(ludusaviCommand, { logger: log });
 
       setStatus("Ludusavi launch requested.");
       // Best-effort clear status after 3s

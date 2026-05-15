@@ -13,7 +13,6 @@ export interface SteamClientGlobal {
     SetShortcutExe(appId: number, exe: string): void;
     SetShortcutLaunchOptions(appId: number, launchOptions: string): void;
     SpecifyCompatTool(appId: number, compatTool: string): void;
-    ClearCustomArtworkForApp(appId: number, assetType: number): void | Promise<void>;
     SetCustomArtworkForApp(
       appId: number,
       base64Data: string,

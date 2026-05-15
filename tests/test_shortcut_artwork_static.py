@@ -88,7 +88,6 @@ def test_shortcut_artwork_helper_uses_local_base64_and_steam_artwork_api() -> No
         "fetch(assetUrl)",
         "new FileReader()",
         "reader.readAsDataURL(blob)",
-        "ClearCustomArtworkForApp(appId, steamAssetType)",
         'SetCustomArtworkForApp(appId, base64Data, "png", steamAssetType)',
         "SaveCustomLogoPosition(appOverview",
         'pinnedPosition: "BottomLeft"',
@@ -97,9 +96,25 @@ def test_shortcut_artwork_helper_uses_local_base64_and_steam_artwork_api() -> No
     ]:
         assert required_text in source
 
-    assert source.index("ClearCustomArtworkForApp(appId, steamAssetType)") < source.index(
-        'SetCustomArtworkForApp(appId, base64Data, "png", steamAssetType)'
-    )
+    assert "ClearCustomArtworkForApp" not in source
+
+
+def test_shortcut_artwork_logs_through_backend_logger() -> None:
+    source = SHORTCUT_ARTWORK.read_text(encoding="utf-8")
+    launcher_source = LAUNCHER.read_text(encoding="utf-8")
+
+    for required_text in [
+        "export type ArtworkLogger",
+        "logger?.(",
+        "`Applying ${assetType} artwork to shortcut ${appId}`",
+        "`Applied ${assetType} artwork to shortcut ${appId}`",
+        "`Failed to apply ${assetType} artwork to shortcut ${appId}: ${formatArtworkError(error)}`",
+        '"artwork"',
+    ]:
+        assert required_text in source
+
+    assert "logger?: ArtworkLogger" in launcher_source
+    assert "logger: options?.logger" in launcher_source
 
 
 def test_launcher_applies_artwork_only_to_managed_shortcuts_after_overview() -> None:
@@ -108,7 +123,9 @@ def test_launcher_applies_artwork_only_to_managed_shortcuts_after_overview() -> 
     assert "applyLudusaviArtworkToShortcut" in source
     assert "if (state.managed)" in source
     assert "const appOverview = getAppOverview(appId);" in source
-    artwork_call = "await applyLudusaviArtworkToShortcut({ appId, appOverview });"
+    artwork_call = (
+        "await applyLudusaviArtworkToShortcut({ appId, appOverview, logger: options?.logger });"
+    )
     assert artwork_call in source
     assert source.index("const appOverview = getAppOverview(appId);") < source.index(artwork_call)
     assert source.index("if (!state.managed)") < source.index(artwork_call)
@@ -119,7 +136,6 @@ def test_steam_globals_declare_custom_artwork_and_logo_position_apis() -> None:
 
     for required_text in [
         "SetCustomArtworkForApp(",
-        "ClearCustomArtworkForApp(",
         "BIsShortcut?(): boolean;",
         "appDetailsStore?: AppDetailsStoreGlobal;",
         "GetCustomLogoPosition(",

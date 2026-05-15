@@ -1,6 +1,6 @@
 import { call } from "@decky/api";
 import { SteamClientGlobal, AppStoreGlobal, SteamGameId } from "./types/steam-globals";
-import { applyLudusaviArtworkToShortcut } from "./shortcutArtwork";
+import { applyLudusaviArtworkToShortcut, ArtworkLogger } from "./shortcutArtwork";
 
 export type LudusaviLaunchCommand = {
   commandPath: string;
@@ -12,6 +12,10 @@ export type LauncherShortcutState = {
   appId: number;
   gameId: string;
   managed: boolean;
+};
+
+export type LaunchLudusaviOptions = {
+  logger?: ArtworkLogger;
 };
 
 const USER_SHORTCUT_NAME = "Ludusavi";
@@ -238,7 +242,8 @@ async function ensureLudusaviShortcut(): Promise<LauncherShortcutState> {
 }
 
 export async function launchLudusavi(
-  command: LudusaviLaunchCommand
+  command: LudusaviLaunchCommand,
+  options?: LaunchLudusaviOptions
 ): Promise<void> {
   if (!command.commandPath || !command.commandPath.trim()) {
     throw new Error("Ludusavi commandPath is required.");
@@ -276,11 +281,21 @@ export async function launchLudusavi(
     const appOverview = getAppOverview(appId);
     if (appOverview) {
       try {
-        await applyLudusaviArtworkToShortcut({ appId, appOverview });
+        await applyLudusaviArtworkToShortcut({ appId, appOverview, logger: options?.logger });
       } catch (err) {
+        options?.logger?.(
+          "warning",
+          `Continuing launch after artwork failure for shortcut ${appId}: ${err instanceof Error ? err.message : String(err)}`,
+          "artwork"
+        );
         console.warn("SDH-ludusavi: Continuing launch after artwork failure:", err);
       }
     } else {
+      options?.logger?.(
+        "warning",
+        `Skipping artwork for shortcut ${appId}; app overview unavailable.`,
+        "artwork"
+      );
       console.warn(`SDH-ludusavi: Skipping artwork for shortcut ${appId}; app overview unavailable.`);
     }
   }
