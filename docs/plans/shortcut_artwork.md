@@ -22,17 +22,17 @@ plugin has been built and installed.
 ## Core Data Structures
 
 - `LUDUSAVI_ARTWORK`: manifest of bundled asset URLs keyed by `grid_p`, `grid_l`,
-  and `hero`.
+  `hero`, and `logo`.
 - `LOCAL_ARTWORK_ASSET_TYPES`: frontend mapping from manifest keys to Steam artwork
-  type IDs: `grid_p=0`, `hero=1`, `grid_l=3`.
+  type IDs: `grid_p=0`, `hero=1`, `logo=2`, `grid_l=3`.
 - `LauncherShortcutState`: existing shortcut state continues to distinguish managed
   plugin shortcuts from user-created shortcuts.
 
 ## Public Interfaces
 
 - No new backend RPCs or settings.
-- Extend frontend Steam ambient types for `SetCustomArtworkForApp` and shortcut
-  detection.
+- Extend frontend Steam ambient types for `SetCustomArtworkForApp`, logo positioning,
+  and shortcut detection.
 - Add frontend-only functions for applying one bundled asset and all Ludusavi shortcut
   artwork.
 

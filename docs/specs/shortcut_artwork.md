@@ -29,6 +29,7 @@ assets/
       grid_p.png      # portrait capsule / library capsule
       grid_l.png      # wide capsule / recent-game capsule
       hero.png        # hero / library background
+      logo.png        # logo overlay
 ```
 
 SteamGridDB Decky maps these asset types as:
@@ -36,6 +37,7 @@ SteamGridDB Decky maps these asset types as:
 ```ts
 grid_p -> 0
 hero   -> 1
+logo   -> 2
 grid_l -> 3
 ```
 
@@ -55,7 +57,7 @@ The same reference plugin defines readable asset names for Capsule, Wide Capsule
 SteamClient.Apps.SetCustomArtworkForApp(appId, base64Data, 'png', assetType);
 ```
 
-The plugin applies bundled artwork directly with `SetCustomArtworkForApp(appId, data, 'png', assetType)`. The logo overlay is intentionally not applied.
+The plugin applies bundled artwork directly with `SetCustomArtworkForApp(appId, data, 'png', assetType)`. The logo overlay is applied with asset type `2` and positioned upper-left with the project-defined custom logo position.
 
 ---
 
@@ -210,6 +212,7 @@ export async function applyLudusaviArtworkToShortcut(params: {
     'grid_p',
     'grid_l',
     'hero',
+    'logo',
   ];
 
   for (const assetType of assetTypes) {
@@ -314,8 +317,8 @@ The implementation is complete when:
 [ ] Runtime code contains no steamgriddb.com image fetches.
 [ ] Runtime code contains no SteamGridDB API calls for this artwork.
 [ ] Runtime code does not use the SGDB Decky plugin API key.
-[ ] grid_p, grid_l, and hero are applied to the temporary shortcut.
-[ ] No logo overlay is applied to the temporary shortcut.
+[ ] grid_p, grid_l, hero, and logo are applied to the temporary shortcut.
+[ ] The logo overlay is positioned upper-left with nWidthPct=100 and nHeightPct=0.01.
 [ ] The plugin still works offline after build/install.
 [ ] Removing network access does not prevent artwork from applying.
 ```
@@ -332,6 +335,7 @@ The implementation is complete when:
    * portrait capsule
    * wide capsule
    * hero background
+   * upper-left logo overlay
 5. Restart Steam / return to Gaming Mode.
 6. Confirm the artwork persists.
 7. Confirm logs show no runtime request to SteamGridDB.

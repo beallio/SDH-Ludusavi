@@ -19,6 +19,7 @@ export interface SteamClientGlobal {
       imageType: "png",
       assetType: number
     ): void | Promise<void>;
+    SetCustomLogoPositionForApp?(appId: number, logoPosition: string): void | Promise<void>;
 
     RunGame(
       gameId: SteamGameId,
@@ -47,8 +48,27 @@ export interface SteamAppOverview {
   BIsShortcut?(): boolean;
 }
 
+export type LogoPosition = {
+  pinnedPosition: "UpperLeft" | string;
+  nWidthPct: number;
+  nHeightPct: number;
+};
+
+export type LogoPositionForApp = {
+  nVersion: 1;
+  logoPosition: LogoPosition;
+};
+
+export interface AppDetailsStoreGlobal {
+  SaveCustomLogoPosition(
+    appOverview: SteamAppOverview,
+    position: LogoPosition
+  ): void | Promise<void>;
+}
+
 declare global {
   interface Window {
     SteamClient?: SteamClientGlobal;
+    appDetailsStore?: AppDetailsStoreGlobal;
   }
 }

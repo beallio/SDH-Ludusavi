@@ -1,0 +1,28 @@
+{
+  "date": "2026-05-15",
+  "task_objective": "Restore the Ludusavi shortcut logo asset and apply it to plugin-managed shortcuts with the requested upper-left positioning.",
+  "files_modified": [
+    "README.md",
+    "assets/steamgrid/ludusavi/logo.png",
+    "docs/agent_conversations/2026-05-15_restore_shortcut_logo.json",
+    "docs/plans/restore_shortcut_logo.md",
+    "docs/plans/shortcut_artwork.md",
+    "docs/specs/shortcut_artwork.md",
+    "src/assets/ludusaviArtwork.ts",
+    "src/shortcutArtwork.ts",
+    "src/types/steam-globals.d.ts",
+    "tests/test_package_plugin.py",
+    "tests/test_shortcut_artwork_static.py"
+  ],
+  "tests_added": [
+    "tests/test_shortcut_artwork_static.py logo asset, transparency, mapping, positioning, and Steam type assertions",
+    "tests/test_package_plugin.py packaged logo asset assertion"
+  ],
+  "design_decisions": [
+    "Restored logo.png from existing git history instead of introducing a new external asset.",
+    "Applied logo artwork only in the existing plugin-managed shortcut artwork path.",
+    "Used SteamClient.Apps.SetCustomLogoPositionForApp when available, with appDetailsStore.SaveCustomLogoPosition as a compatibility fallback.",
+    "Kept runtime artwork fully local and did not modify upstream or vendored packages."
+  ],
+  "results": "Focused artwork/package tests, frontend typecheck/verify/build, Python lint/type/full tests, and package creation passed. Frontend verification required network escalation for pnpm audit after sandbox DNS failed."
+}

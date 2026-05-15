@@ -17,7 +17,8 @@ game status, operation status, and recent operation logs.
 - **Persistent Settings:** Remembers your selected game and sync preferences across plugin reloads.
 - **Ludusavi Integration:** Direct selector for Ludusavi game entries with real-time status display (e.g., "Backup ready", "Needs first backup").
 - **Manual Overrides:** Refresh Games, Force Backup, and Force Restore actions are always available, even when Automatic Sync is disabled.
-- **Shortcut Artwork:** The plugin-managed Ludusavi launcher shortcut uses bundled local artwork and does not fetch SteamGridDB assets at runtime.
+- **Shortcut Artwork:** The plugin-managed Ludusavi launcher shortcut uses bundled local
+  capsule, hero, and logo artwork and does not fetch SteamGridDB assets at runtime.
 - **Version Display:** SDH-ludusavi and Ludusavi version information.
 
 ## Requirements

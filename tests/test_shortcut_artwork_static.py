@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ARTWORK_DIR = Path("assets/steamgrid/ludusavi")
-REQUIRED_ARTWORK = ("grid_p.png", "grid_l.png", "hero.png")
+REQUIRED_ARTWORK = ("grid_p.png", "grid_l.png", "hero.png", "logo.png")
 RUNTIME_SOURCE_ROOTS = (Path("src"),)
 RUNTIME_SOURCE_SUFFIXES = (".ts", ".tsx")
 SHORTCUT_ARTWORK = Path("src/shortcutArtwork.ts")
@@ -57,6 +57,12 @@ def test_required_ludusavi_artwork_png_assets_exist() -> None:
         assert data.startswith(b"\x89PNG\r\n\x1a\n"), filename
 
 
+def test_ludusavi_logo_asset_preserves_transparency() -> None:
+    data = (ARTWORK_DIR / "logo.png").read_bytes()
+
+    assert _png_has_alpha(data)
+
+
 def test_runtime_sources_do_not_fetch_steamgriddb_artwork() -> None:
     source = _runtime_source_text()
 
@@ -71,24 +77,27 @@ def test_runtime_sources_do_not_fetch_steamgriddb_artwork() -> None:
 
 def test_shortcut_artwork_helper_uses_local_base64_and_steam_artwork_api() -> None:
     source = SHORTCUT_ARTWORK.read_text(encoding="utf-8")
-    artwork_source = Path("src/assets/ludusaviArtwork.ts").read_text(encoding="utf-8")
 
     for required_text in [
         "export const LOCAL_ARTWORK_ASSET_TYPES",
         "grid_p: 0",
         "hero: 1",
+        "logo: 2",
         "grid_l: 3",
         "async function localAssetUrlToBase64(assetUrl: string): Promise<string>",
         "fetch(assetUrl)",
         "new FileReader()",
         "reader.readAsDataURL(blob)",
         'SetCustomArtworkForApp(appId, base64Data, "png", steamAssetType)',
+        "SetCustomLogoPositionForApp(appId, JSON.stringify(LUDUSAVI_LOGO_POSITIONING))",
+        "nVersion: 1",
+        'pinnedPosition: "UpperLeft"',
+        "nWidthPct: 100",
+        "nHeightPct: 0.01",
     ]:
         assert required_text in source
 
     assert "ClearCustomArtworkForApp" not in source
-    assert "logo" not in source
-    assert "logo" not in artwork_source
 
 
 def test_shortcut_artwork_logs_through_backend_logger() -> None:
@@ -128,10 +137,11 @@ def test_steam_globals_declare_custom_artwork_and_logo_position_apis() -> None:
 
     for required_text in [
         "SetCustomArtworkForApp(",
+        "SetCustomLogoPositionForApp?",
         "BIsShortcut?(): boolean;",
+        "export type LogoPosition",
+        "export type LogoPositionForApp",
     ]:
         assert required_text in source
 
-    assert "appDetailsStore" not in source
     assert "GetCustomLogoPosition" not in source
-    assert "SaveCustomLogoPosition" not in source
