@@ -29,7 +29,6 @@ assets/
       grid_p.png      # portrait capsule / library capsule
       grid_l.png      # wide capsule / recent-game capsule
       hero.png        # hero / library background
-      logo.png        # transparent logo overlay
 ```
 
 SteamGridDB Decky maps these asset types as:
@@ -37,7 +36,6 @@ SteamGridDB Decky maps these asset types as:
 ```ts
 grid_p -> 0
 hero   -> 1
-logo   -> 2
 grid_l -> 3
 ```
 
@@ -57,7 +55,7 @@ The same reference plugin defines readable asset names for Capsule, Wide Capsule
 SteamClient.Apps.SetCustomArtworkForApp(appId, base64Data, 'png', assetType);
 ```
 
-The reference plugin applies non-icon artwork by clearing any prior asset, then calling `SetCustomArtworkForApp(appId, data, 'png', assetType)`. It also applies a default logo position for Non-Steam shortcuts when no position JSON exists, preventing blank shortcut logos. ([GitHub][4])
+The plugin applies bundled artwork directly with `SetCustomArtworkForApp(appId, data, 'png', assetType)`. The logo overlay is intentionally not applied.
 
 ---
 
@@ -81,40 +79,13 @@ The plugin should apply a fixed local artwork set for the temporary shortcut.
 
 The agent should copy the behavior pattern, not necessarily the exact code structure, from this function:
 
-```ts
-const changeAsset: SGDBContextType['changeAsset'] = useCallback(async (data, assetType) => {
-  assetType = getAmbiguousAssetType(assetType);
-  try {
-    await clearAsset(assetType);
-    await SteamClient.Apps.SetCustomArtworkForApp(appId, data, 'png', assetType);
-
-    if (assetType === ASSET_TYPE.logo && appOverview?.BIsShortcut()) {
-      const logoPos = await getCustomLogoPosition(appId);
-      if (!logoPos) {
-        await window.appDetailsStore.SaveCustomLogoPosition(appOverview, {
-          pinnedPosition: 'BottomLeft',
-          nWidthPct: 50,
-          nHeightPct: 50,
-        });
-      }
-    }
-  } catch (error) {
-    log(error);
-  }
-}, [appId, appOverview, clearAsset]);
-```
-
 Key behaviors to preserve:
 
 ```text
 - normalize the asset type
-- clear the existing artwork first
 - apply artwork through SteamClient.Apps.SetCustomArtworkForApp
-- for logo on Non-Steam shortcuts, ensure a custom logo position exists
 - log errors without crashing the plugin
 ```
-
-The reference plugin’s `getCustomLogoPosition` uses `window.appDetailsStore.GetCustomLogoPosition` after resolving the app overview and waits briefly for the value to become available. ([GitHub][5])
 
 ---
 
@@ -130,13 +101,11 @@ Create a file like:
 import gridP from '../../assets/grid_p.png';
 import gridL from '../../assets/grid_l.png';
 import hero from '../../assets/hero.png';
-import logo from '../../assets/logo.png';
 
 export const LUDUSAVI_ARTWORK = {
   grid_p: gridP,
   grid_l: gridL,
   hero,
-  logo,
 } as const;
 ```
 
@@ -210,29 +179,15 @@ export async function applyLocalArtworkAsset(params: {
   appId: number;
   appOverview: AppStoreAppOverview;
   assetType: LocalArtworkAssetType;
-  clearAsset: (assetType: SGDBAssetType | eAssetType) => Promise<void>;
 }): Promise<void> {
-  const { appId, appOverview, assetType, clearAsset } = params;
+  const { appId, assetType } = params;
   const steamAssetType = getAmbiguousAssetType(assetType);
 
   try {
     const localAssetUrl = LUDUSAVI_ARTWORK[assetType];
     const base64Data = await localAssetUrlToBase64(localAssetUrl);
 
-    await clearAsset(steamAssetType);
     await SteamClient.Apps.SetCustomArtworkForApp(appId, base64Data, 'png', steamAssetType);
-
-    if (steamAssetType === ASSET_TYPE.logo && appOverview?.BIsShortcut()) {
-      const logoPos = await getCustomLogoPosition(appId);
-
-      if (!logoPos) {
-        await window.appDetailsStore.SaveCustomLogoPosition(appOverview, {
-          pinnedPosition: 'BottomLeft',
-          nWidthPct: 50,
-          nHeightPct: 50,
-        });
-      }
-    }
   } catch (error) {
     log(error);
     throw error;
@@ -250,13 +205,11 @@ The temporary shortcut should receive all artwork after the shortcut exists and 
 export async function applyLudusaviArtworkToShortcut(params: {
   appId: number;
   appOverview: AppStoreAppOverview;
-  clearAsset: (assetType: SGDBAssetType | eAssetType) => Promise<void>;
 }): Promise<void> {
   const assetTypes: LocalArtworkAssetType[] = [
     'grid_p',
     'grid_l',
     'hero',
-    'logo',
   ];
 
   for (const assetType of assetTypes) {
@@ -288,21 +241,19 @@ https://www.steamgriddb.com/game/5360951
 - Grids: portrait capsule -> grid_p.png
 - Grids: wide capsule -> grid_l.png
 - Heroes -> hero.png
-- Logos -> logo.png
 ```
 
 3. Prefer static PNG files.
 4. Avoid animated assets.
-5. Preserve transparency for `logo.png`.
-6. Save files under:
+5. Save files under:
 
 ```text
 assets/steamgrid/ludusavi/
 ```
 
-7. Do not leave any code path that depends on the original remote URL.
-8. Do not add the SteamGridDB API key from the reference plugin.
-9. Add a small manifest comment with source attribution:
+6. Do not leave any code path that depends on the original remote URL.
+7. Do not add the SteamGridDB API key from the reference plugin.
+8. Add a small manifest comment with source attribution:
 
 ```ts
 // Artwork source: SteamGridDB game 5360951, downloaded at build/development time.
@@ -324,11 +275,10 @@ const appOverview = await getAppOverview(shortcutAppId);
 await applyLudusaviArtworkToShortcut({
   appId: shortcutAppId,
   appOverview,
-  clearAsset,
 });
 ```
 
-Do not apply artwork before `appOverview` is available, because the logo-position fix depends on detecting `appOverview.BIsShortcut()`.
+Do not apply artwork before `appOverview` is available.
 
 ---
 
@@ -342,7 +292,6 @@ The implementation must handle these cases:
 - failed base64 conversion
 - SteamClient artwork call failure
 - app overview unavailable
-- logo position unavailable
 ```
 
 Expected behavior:
@@ -365,10 +314,8 @@ The implementation is complete when:
 [ ] Runtime code contains no steamgriddb.com image fetches.
 [ ] Runtime code contains no SteamGridDB API calls for this artwork.
 [ ] Runtime code does not use the SGDB Decky plugin API key.
-[ ] grid_p, grid_l, hero, and logo are applied to the temporary shortcut.
-[ ] Existing artwork is cleared before replacement.
-[ ] Logo artwork displays on the shortcut without a blank-logo issue.
-[ ] Logo position defaults to BottomLeft, 50% width, 50% height when missing.
+[ ] grid_p, grid_l, and hero are applied to the temporary shortcut.
+[ ] No logo overlay is applied to the temporary shortcut.
 [ ] The plugin still works offline after build/install.
 [ ] Removing network access does not prevent artwork from applying.
 ```
@@ -385,7 +332,6 @@ The implementation is complete when:
    * portrait capsule
    * wide capsule
    * hero background
-   * logo overlay
 5. Restart Steam / return to Gaming Mode.
 6. Confirm the artwork persists.
 7. Confirm logs show no runtime request to SteamGridDB.

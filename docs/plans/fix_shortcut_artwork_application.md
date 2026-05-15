@@ -18,8 +18,7 @@ behavior if artwork application fails.
 
 ## Core Data Structures
 
-- `LudusaviArtworkAsset`: the local asset keys `grid_p`, `grid_l`, `hero`, and
-  `logo`.
+- `LudusaviArtworkAsset`: the local asset keys `grid_p`, `grid_l`, and `hero`.
 - `ArtworkLogger`: a frontend logging callback with the same shape as the
   existing panel `log` helper.
 

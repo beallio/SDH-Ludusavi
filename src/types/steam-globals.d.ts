@@ -47,25 +47,8 @@ export interface SteamAppOverview {
   BIsShortcut?(): boolean;
 }
 
-export type CustomLogoPosition = {
-  pinnedPosition: "BottomLeft" | string;
-  nWidthPct: number;
-  nHeightPct: number;
-};
-
-export interface AppDetailsStoreGlobal {
-  GetCustomLogoPosition(
-    appOverview: SteamAppOverview
-  ): CustomLogoPosition | null | Promise<CustomLogoPosition | null>;
-  SaveCustomLogoPosition(
-    appOverview: SteamAppOverview,
-    position: CustomLogoPosition
-  ): void | Promise<void>;
-}
-
 declare global {
   interface Window {
     SteamClient?: SteamClientGlobal;
-    appDetailsStore?: AppDetailsStoreGlobal;
   }
 }

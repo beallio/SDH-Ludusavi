@@ -69,9 +69,9 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
         "SDH-ludusavi/dist/assets/grid_p-",
         "SDH-ludusavi/dist/assets/grid_l-",
         "SDH-ludusavi/dist/assets/hero-",
-        "SDH-ludusavi/dist/assets/logo-",
     ]:
         assert any(name.startswith(asset_prefix) and name.endswith(".png") for name in names)
+    assert not any(name.startswith("SDH-ludusavi/dist/assets/logo-") for name in names)
     assert "README.md" not in names
     assert "SDH-ludusavi/README.md" not in names
     assert "src/index.tsx" not in names

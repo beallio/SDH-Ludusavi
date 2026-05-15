@@ -1,14 +1,9 @@
 import { LUDUSAVI_ARTWORK, LudusaviArtworkAsset } from "./assets/ludusaviArtwork";
-import type {
-  AppDetailsStoreGlobal,
-  SteamAppOverview,
-  SteamClientGlobal,
-} from "./types/steam-globals";
+import type { SteamAppOverview, SteamClientGlobal } from "./types/steam-globals";
 
 export const LOCAL_ARTWORK_ASSET_TYPES: Record<LudusaviArtworkAsset, number> = {
   grid_p: 0,
   hero: 1,
-  logo: 2,
   grid_l: 3,
 };
 
@@ -18,9 +13,6 @@ export type ArtworkLogger = (
   operation?: string,
   gameName?: string
 ) => void;
-
-const LOGO_POSITION_WAIT_ATTEMPTS = 5;
-const LOGO_POSITION_WAIT_MS = 100;
 
 type ApplyLocalArtworkAssetParams = {
   appId: number;
@@ -41,10 +33,6 @@ function getSteamClient(): SteamClientGlobal {
     throw new Error("SteamClient.Apps is unavailable in this frontend context.");
   }
   return client as SteamClientGlobal;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function localAssetUrlToBase64(assetUrl: string): Promise<string> {
@@ -86,26 +74,8 @@ function formatArtworkError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function getCustomLogoPosition(appOverview: SteamAppOverview): Promise<unknown | null> {
-  const appDetailsStore = (window as any).appDetailsStore as AppDetailsStoreGlobal | undefined;
-  if (!appDetailsStore?.GetCustomLogoPosition) {
-    return null;
-  }
-
-  for (let attempt = 0; attempt < LOGO_POSITION_WAIT_ATTEMPTS; attempt += 1) {
-    const logoPosition = await appDetailsStore.GetCustomLogoPosition(appOverview);
-    if (logoPosition) {
-      return logoPosition;
-    }
-    await sleep(LOGO_POSITION_WAIT_MS);
-  }
-
-  return null;
-}
-
 export async function applyLocalArtworkAsset({
   appId,
-  appOverview,
   assetType,
   logger,
 }: ApplyLocalArtworkAssetParams): Promise<void> {
@@ -118,21 +88,6 @@ export async function applyLocalArtworkAsset({
 
     await steamClient.Apps.SetCustomArtworkForApp(appId, base64Data, "png", steamAssetType);
     logger?.("info", `Applied ${assetType} artwork to shortcut ${appId}`, "artwork");
-
-    if (steamAssetType === LOCAL_ARTWORK_ASSET_TYPES.logo && appOverview.BIsShortcut?.()) {
-      const logoPosition = await getCustomLogoPosition(appOverview);
-
-      if (!logoPosition) {
-        const appDetailsStore = (window as any).appDetailsStore as
-          | AppDetailsStoreGlobal
-          | undefined;
-        await appDetailsStore?.SaveCustomLogoPosition(appOverview, {
-          pinnedPosition: "BottomLeft",
-          nWidthPct: 50,
-          nHeightPct: 50,
-        });
-      }
-    }
   } catch (error) {
     logger?.(
       "error",
@@ -149,7 +104,7 @@ export async function applyLudusaviArtworkToShortcut({
   appOverview,
   logger,
 }: ApplyLudusaviArtworkParams): Promise<void> {
-  const assetTypes: LudusaviArtworkAsset[] = ["grid_p", "grid_l", "hero", "logo"];
+  const assetTypes: LudusaviArtworkAsset[] = ["grid_p", "grid_l", "hero"];
 
   for (const assetType of assetTypes) {
     await applyLocalArtworkAsset({
