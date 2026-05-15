@@ -13,6 +13,13 @@ export interface SteamClientGlobal {
     SetShortcutExe(appId: number, exe: string): void;
     SetShortcutLaunchOptions(appId: number, launchOptions: string): void;
     SpecifyCompatTool(appId: number, compatTool: string): void;
+    ClearCustomArtworkForApp(appId: number, assetType: number): void | Promise<void>;
+    SetCustomArtworkForApp(
+      appId: number,
+      base64Data: string,
+      imageType: "png",
+      assetType: number
+    ): void | Promise<void>;
 
     RunGame(
       gameId: SteamGameId,
@@ -38,10 +45,28 @@ export interface SteamAppOverview {
   m_gameid?: SteamGameId;
   m_unAppID: number;
   m_strDisplayName: string;
+  BIsShortcut?(): boolean;
+}
+
+export type CustomLogoPosition = {
+  pinnedPosition: "BottomLeft" | string;
+  nWidthPct: number;
+  nHeightPct: number;
+};
+
+export interface AppDetailsStoreGlobal {
+  GetCustomLogoPosition(
+    appOverview: SteamAppOverview
+  ): CustomLogoPosition | null | Promise<CustomLogoPosition | null>;
+  SaveCustomLogoPosition(
+    appOverview: SteamAppOverview,
+    position: CustomLogoPosition
+  ): void | Promise<void>;
 }
 
 declare global {
   interface Window {
     SteamClient?: SteamClientGlobal;
+    appDetailsStore?: AppDetailsStoreGlobal;
   }
 }

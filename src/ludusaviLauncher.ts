@@ -1,5 +1,6 @@
 import { call } from "@decky/api";
 import { SteamClientGlobal, AppStoreGlobal, SteamGameId } from "./types/steam-globals";
+import { applyLudusaviArtworkToShortcut } from "./shortcutArtwork";
 
 export type LudusaviLaunchCommand = {
   commandPath: string;
@@ -84,9 +85,13 @@ async function saveShortcutAppId(appId: number): Promise<void> {
   }
 }
 
-function getGameIdFromAppId(appId: number): SteamGameId | null {
+function getAppOverview(appId: number) {
   const store = getAppStore();
-  const overview = store.GetAppOverviewByAppID(appId);
+  return store.GetAppOverviewByAppID(appId);
+}
+
+function getGameIdFromAppId(appId: number): SteamGameId | null {
+  const overview = getAppOverview(appId);
   if (!overview || !overview.m_gameid) {
     return null;
   }
@@ -267,5 +272,17 @@ export async function launchLudusavi(
   }
 
   await hideShortcutIfSupported(appId, refreshedGameId);
+  if (state.managed) {
+    const appOverview = getAppOverview(appId);
+    if (appOverview) {
+      try {
+        await applyLudusaviArtworkToShortcut({ appId, appOverview });
+      } catch (err) {
+        console.warn("SDH-ludusavi: Continuing launch after artwork failure:", err);
+      }
+    } else {
+      console.warn(`SDH-ludusavi: Skipping artwork for shortcut ${appId}; app overview unavailable.`);
+    }
+  }
   steamClient.Apps.RunGame(refreshedGameId, "", -1, 100);
 }

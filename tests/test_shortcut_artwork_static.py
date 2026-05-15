@@ -7,6 +7,9 @@ ARTWORK_DIR = Path("assets/steamgrid/ludusavi")
 REQUIRED_ARTWORK = ("grid_p.png", "grid_l.png", "hero.png", "logo.png")
 RUNTIME_SOURCE_ROOTS = (Path("src"),)
 RUNTIME_SOURCE_SUFFIXES = (".ts", ".tsx")
+SHORTCUT_ARTWORK = Path("src/shortcutArtwork.ts")
+LAUNCHER = Path("src/ludusaviLauncher.ts")
+STEAM_GLOBALS = Path("src/types/steam-globals.d.ts")
 
 
 def _png_chunks(data: bytes) -> list[tuple[bytes, bytes]]:
@@ -70,3 +73,56 @@ def test_runtime_sources_do_not_fetch_steamgriddb_artwork() -> None:
         "read_file_as_base64",
     ]:
         assert forbidden not in source
+
+
+def test_shortcut_artwork_helper_uses_local_base64_and_steam_artwork_api() -> None:
+    source = SHORTCUT_ARTWORK.read_text(encoding="utf-8")
+
+    for required_text in [
+        "export const LOCAL_ARTWORK_ASSET_TYPES",
+        "grid_p: 0",
+        "hero: 1",
+        "logo: 2",
+        "grid_l: 3",
+        "async function localAssetUrlToBase64(assetUrl: string): Promise<string>",
+        "fetch(assetUrl)",
+        "new FileReader()",
+        "reader.readAsDataURL(blob)",
+        "ClearCustomArtworkForApp(appId, steamAssetType)",
+        'SetCustomArtworkForApp(appId, base64Data, "png", steamAssetType)',
+        "SaveCustomLogoPosition(appOverview",
+        'pinnedPosition: "BottomLeft"',
+        "nWidthPct: 50",
+        "nHeightPct: 50",
+    ]:
+        assert required_text in source
+
+    assert source.index("ClearCustomArtworkForApp(appId, steamAssetType)") < source.index(
+        'SetCustomArtworkForApp(appId, base64Data, "png", steamAssetType)'
+    )
+
+
+def test_launcher_applies_artwork_only_to_managed_shortcuts_after_overview() -> None:
+    source = LAUNCHER.read_text(encoding="utf-8")
+
+    assert "applyLudusaviArtworkToShortcut" in source
+    assert "if (state.managed)" in source
+    assert "const appOverview = getAppOverview(appId);" in source
+    artwork_call = "await applyLudusaviArtworkToShortcut({ appId, appOverview });"
+    assert artwork_call in source
+    assert source.index("const appOverview = getAppOverview(appId);") < source.index(artwork_call)
+    assert source.index("if (!state.managed)") < source.index(artwork_call)
+
+
+def test_steam_globals_declare_custom_artwork_and_logo_position_apis() -> None:
+    source = STEAM_GLOBALS.read_text(encoding="utf-8")
+
+    for required_text in [
+        "SetCustomArtworkForApp(",
+        "ClearCustomArtworkForApp(",
+        "BIsShortcut?(): boolean;",
+        "appDetailsStore?: AppDetailsStoreGlobal;",
+        "GetCustomLogoPosition(",
+        "SaveCustomLogoPosition(",
+    ]:
+        assert required_text in source
