@@ -1,8 +1,9 @@
 import subprocess
 import json
 import logging
-from typing import Any, Optional, Literal, Dict, TypeVar, Generic
+from typing import Any, Optional, Literal, Dict, TypeVar, Generic, Mapping
 from dataclasses import dataclass
+from ._environment import resolve_environment
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,9 @@ class LudusaviResponse(Generic[T]):
 class LudusaviExecutor:
     """Engine for executing Ludusavi commands across different modes."""
 
-    def __init__(self, command_prefix: list[str]):
+    def __init__(self, command_prefix: list[str], env: Optional[Mapping[str, str]] = None):
         self.command_prefix = command_prefix
+        self.env = resolve_environment(env)
 
     def execute(
         self,
@@ -79,8 +81,10 @@ class LudusaviExecutor:
 
         logger.debug(f"Executing Ludusavi command: {full_cmd}")
 
+        subprocess_env = self.env if env is None else resolve_environment(env)
+
         if mode == "SPAWN":
-            subprocess.Popen(full_cmd, env=env)
+            subprocess.Popen(full_cmd, env=subprocess_env)
             return None
 
         stdin_content = None
@@ -94,7 +98,7 @@ class LudusaviExecutor:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                env=env,
+                env=subprocess_env,
             )
         except subprocess.TimeoutExpired as e:
             raise LudusaviError(f"Ludusavi command timed out after {timeout}s: {full_cmd}") from e

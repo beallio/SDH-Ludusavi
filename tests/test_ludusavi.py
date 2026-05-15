@@ -1,9 +1,15 @@
-from typing import cast
+import os
 
 import pytest
 
 import pyludusavi
-from sdh_ludusavi.ludusavi import FLATPAK_ID, PyludusaviAdapter, _game_error, _games_from_output
+from sdh_ludusavi.ludusavi import (
+    FLATPAK_ID,
+    PyludusaviAdapter,
+    _game_error,
+    _games_from_output,
+    _ludusavi_env,
+)
 
 
 def test_flatpak_id_is_required_ludusavi_flatpak() -> None:
@@ -11,10 +17,10 @@ def test_flatpak_id_is_required_ludusavi_flatpak() -> None:
 
 
 def test_pyludusavi_version_is_current() -> None:
-    assert pyludusavi.__version__ == "0.2.2"
+    assert pyludusavi.__version__ == "0.2.3"
 
 
-def test_adapter_uses_upstream_pyludusavi_constructor_only(
+def test_adapter_passes_upstream_env_to_pyludusavi_constructor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -33,44 +39,34 @@ def test_adapter_uses_upstream_pyludusavi_constructor_only(
     PyludusaviAdapter()
 
     assert captured["flatpak_id"] == FLATPAK_ID
+    assert isinstance(captured["env"], dict)
     assert "flatpak_user_home" not in captured
     assert "flatpak_user" not in captured
-    assert "env" not in captured
     assert instances
     assert instances[0].executor is not None
 
 
-def test_adapter_injects_ld_library_path_from_sdh_executor(
+def test_ludusavi_env_uses_flatpak_defaults_without_mutating_os_environ(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    seen_env: dict[str, str] | None = None
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "decky-runtime-value")
 
-    class FakeExecutor:
-        def execute(
-            self,
-            args: list[str],
-            *,
-            mode: str = "JSON",
-            env: dict[str, str] | None = None,
-            **kwargs: object,
-        ) -> object:
-            nonlocal seen_env
-            seen_env = env
-            return object()
+    env = _ludusavi_env()
 
-    class FakeLudusavi:
-        command_prefix = ["/usr/bin/flatpak", "run", FLATPAK_ID]
+    assert env["XDG_RUNTIME_DIR"] == "/run/user/1000"
+    assert env["LD_LIBRARY_PATH"] == ""
+    assert os.environ["LD_LIBRARY_PATH"] == "decky-runtime-value"
 
-        def __init__(self, **kwargs: object) -> None:
-            self.executor = FakeExecutor()
 
-    monkeypatch.setattr(pyludusavi, "Ludusavi", FakeLudusavi)
+def test_ludusavi_env_preserves_existing_xdg_runtime_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1234")
+    monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
 
-    adapter = PyludusaviAdapter()
-    adapter._client.executor.execute(["--version"], mode="TEXT")
+    env = _ludusavi_env()
 
-    assert isinstance(seen_env, dict)
-    assert cast(dict[str, str], seen_env)["LD_LIBRARY_PATH"] == ""
+    assert env["XDG_RUNTIME_DIR"] == "/run/user/1234"
+    assert "LD_LIBRARY_PATH" not in env
 
 
 def test_games_from_output_accepts_ludusavi_api_shape() -> None:

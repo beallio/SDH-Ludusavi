@@ -17,6 +17,7 @@ def test_find_ludusavi_signature_is_clean_upstream() -> None:
         "explicit_path",
         "explicit_flatpak_id",
         "flatpak_id",
+        "env",
     ]
     assert not hasattr(discovery, "_should_sudo")
     assert not hasattr(discovery, "_flatpak_user_env")
@@ -43,8 +44,9 @@ def test_explicit_flatpak_id_uses_path_flatpak_only(
             return "flatpak"
         return None
 
-    def verify(prefix: list[str]) -> bool:
+    def verify(prefix: list[str], env: dict[str, str] | None = None) -> bool:
         calls.append(prefix)
+        assert env is None
         return prefix == ["flatpak", "run", APP_ID]
 
     monkeypatch.setattr(shutil, "which", which)
@@ -61,8 +63,9 @@ def test_default_flatpak_lookup_raises_when_all_candidates_fail(
 
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
-    def verify(prefix: list[str]) -> bool:
+    def verify(prefix: list[str], env: dict[str, str] | None = None) -> bool:
         calls.append(prefix)
+        assert env is None
         return False
 
     monkeypatch.setattr(discovery, "_verify", verify)

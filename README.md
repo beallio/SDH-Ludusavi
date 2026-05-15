@@ -27,10 +27,9 @@ game status, operation status, and recent operation logs.
 - Frontend dependencies from `package.json`.
 
 The backend locates Ludusavi through the vendored `pyludusavi` package. It constructs
-`pyludusavi.Ludusavi(flatpak_id="com.github.mtkennerly.ludusavi")`; discovery first
-checks Decky's user Flatpak installation with `flatpak run --user` using
-`DECKY_USER_HOME` for `HOME`, `XDG_DATA_HOME`, and `FLATPAK_USER_DIR`, then falls back
-to default/system Flatpak candidates.
+`pyludusavi.Ludusavi(flatpak_id="com.github.mtkennerly.ludusavi", env=...)` with
+Deck-compatible environment overrides. The overrides provide `XDG_RUNTIME_DIR` when
+Decky omits it and clear `LD_LIBRARY_PATH` for Ludusavi subprocesses.
 
 ## Development Setup
 

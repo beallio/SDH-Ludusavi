@@ -57,7 +57,8 @@ def test_get_ludusavi_command(service, monkeypatch):
     assert cmd is not None
     assert cmd["commandPath"] == "/usr/bin/flatpak"
     assert cmd["args"] == ["run", "com.github.mtkennerly.ludusavi"]
-    assert captured == {"explicit_flatpak_id": "com.github.mtkennerly.ludusavi"}
+    assert captured["explicit_flatpak_id"] == "com.github.mtkennerly.ludusavi"
+    assert isinstance(captured["env"], dict)
 
 
 def test_get_ludusavi_command_not_found(service, monkeypatch):

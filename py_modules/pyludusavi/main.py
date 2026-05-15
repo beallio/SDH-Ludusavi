@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
-from typing import Optional, List, Dict, Literal, Any, Union
+from typing import Optional, List, Dict, Literal, Any, Union, Mapping
+from ._environment import resolve_environment
 from .discovery import find_ludusavi
 from .core import LudusaviExecutor, LudusaviResponse
 from .models import LudusaviApiOutput, ApiConfig, ApiManifest
@@ -24,6 +25,7 @@ class Ludusavi:
         config_dir: Optional[str] = None,
         no_manifest_update: bool = False,
         flatpak_id: Optional[str] = None,
+        env: Optional[Mapping[str, str]] = None,
     ):
         """
         Initialize the Ludusavi wrapper.
@@ -33,10 +35,13 @@ class Ludusavi:
             config_dir: Optional --config directory for Ludusavi.
             no_manifest_update: If True, appends --no-manifest-update to all calls.
             flatpak_id: Optional Flatpak app ID to run explicitly.
+            env: Environment overrides to merge onto the current process environment.
         """
+        self.env = resolve_environment(env)
         self.command_prefix = find_ludusavi(
             explicit_path=explicit_path,
             explicit_flatpak_id=flatpak_id,
+            env=self.env,
         )
 
         # Add global options to prefix if they apply to the binary call
@@ -46,7 +51,7 @@ class Ludusavi:
         if no_manifest_update:
             self.command_prefix.append("--no-manifest-update")
 
-        self.executor = LudusaviExecutor(self.command_prefix)
+        self.executor = LudusaviExecutor(self.command_prefix, env=self.env)
 
     # --- Metadata Group ---
 

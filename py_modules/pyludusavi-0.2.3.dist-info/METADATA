@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: pyludusavi
-Version: 0.2.2
+Version: 0.2.3
 Summary: A robust, type-safe Python wrapper for the Ludusavi game backup tool.
 Project-URL: Homepage, https://github.com/beallio/pyludusavi
 Project-URL: Repository, https://github.com/beallio/pyludusavi
@@ -104,6 +104,15 @@ lud = Ludusavi(flatpak_id="com.github.mtkennerly.ludusavi")
 #### Custom Config Directory
 ```python
 lud = Ludusavi(config_dir="/home/user/my-ludusavi-config")
+```
+
+#### Custom Environment
+Pass environment overrides when Ludusavi needs a different `PATH`, `HOME`, or
+launcher-specific variable. Overrides are merged onto the current process environment
+and used for both discovery and command execution.
+
+```python
+lud = Ludusavi(env={"PATH": "/opt/ludusavi/bin:/usr/bin", "HOME": "/home/deck"})
 ```
 
 #### Bulk API

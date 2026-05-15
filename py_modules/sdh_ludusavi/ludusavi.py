@@ -1,36 +1,30 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import logging
 import os
 from typing import Any, cast
 
 
 FLATPAK_ID = "com.github.mtkennerly.ludusavi"
+LOGGER = logging.getLogger(__name__)
 
 
 def _ludusavi_env() -> dict[str, str]:
     """
-    Return a copy of the current environment with LD_LIBRARY_PATH cleared.
-    This avoids conflicts when running the Ludusavi binary extracted from Flatpak.
+    Return Ludusavi subprocess environment overrides.
+
+    pyludusavi merges these values onto the current process environment, so
+    LD_LIBRARY_PATH must be set to an empty string to clear it for subprocesses.
     """
-    env = os.environ.copy()
-    env["LD_LIBRARY_PATH"] = ""
+    env: dict[str, str] = {}
+    if "XDG_RUNTIME_DIR" not in os.environ:
+        env["XDG_RUNTIME_DIR"] = "/run/user/1000"
+    else:
+        env["XDG_RUNTIME_DIR"] = os.environ["XDG_RUNTIME_DIR"]
+    if "LD_LIBRARY_PATH" in os.environ:
+        env["LD_LIBRARY_PATH"] = ""
     return env
-
-
-class LudusaviExecutorEnvironment:
-    """Proxy a pyludusavi executor while injecting SDH-ludusavi subprocess env."""
-
-    def __init__(self, executor: Any, env: Mapping[str, str]) -> None:
-        self._executor = executor
-        self._env = dict(env)
-
-    def execute(self, *args: Any, **kwargs: Any) -> Any:
-        kwargs.setdefault("env", self._env)
-        return self._executor.execute(*args, **kwargs)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._executor, name)
 
 
 class PyludusaviAdapter:
@@ -48,10 +42,9 @@ class PyludusaviAdapter:
     ) -> None:
         from pyludusavi import Ludusavi
 
-        self._client = Ludusavi(flatpak_id=flatpak_id)
-        cast(Any, self._client).executor = LudusaviExecutorEnvironment(
-            self._client.executor, _ludusavi_env()
-        )
+        env = _ludusavi_env()
+        LOGGER.debug("Using Ludusavi environment overrides: %s", env)
+        self._client = Ludusavi(flatpak_id=flatpak_id, env=env)
 
     def refresh_statuses(self) -> list[dict[str, object]]:
         preview = self._client.backup(preview=True).data

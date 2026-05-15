@@ -10,14 +10,13 @@ JavaScript package name is `sdh-ludusavi`.
 The backend constructs `pyludusavi.Ludusavi` with:
 
 ```python
-Ludusavi(flatpak_id="com.github.mtkennerly.ludusavi")
+Ludusavi(flatpak_id="com.github.mtkennerly.ludusavi", env=_ludusavi_env())
 ```
 
-The adapter passes Decky's `DECKY_USER_HOME` into the vendored `pyludusavi` discovery
-layer when available. `pyludusavi` prefers `flatpak run --user` candidates with
-`HOME`, `XDG_DATA_HOME`, and `FLATPAK_USER_DIR` pointed at that user home, then falls
-back to default/system Flatpak candidates. rclone version probing reuses the discovered
-Flatpak command prefix instead of performing a separate Flatpak lookup.
+The adapter passes Deck-compatible environment overrides into `pyludusavi`. It provides
+`XDG_RUNTIME_DIR=/run/user/1000` when Decky omits that variable and clears
+`LD_LIBRARY_PATH` for Ludusavi subprocesses without mutating the plugin process
+environment. Launcher discovery uses the same environment helper.
 
 Ludusavi game names are canonical game IDs. Steam app IDs are optional metadata.
 
