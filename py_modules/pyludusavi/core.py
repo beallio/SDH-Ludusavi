@@ -45,9 +45,8 @@ class LudusaviResponse(Generic[T]):
 class LudusaviExecutor:
     """Engine for executing Ludusavi commands across different modes."""
 
-    def __init__(self, command_prefix: list[str], env: Optional[Dict[str, str]] = None):
+    def __init__(self, command_prefix: list[str]):
         self.command_prefix = command_prefix
-        self.env = env
 
     def execute(
         self,
@@ -66,7 +65,7 @@ class LudusaviExecutor:
             mode: Execution mode (JSON, TEXT, SPAWN, STDIN_JSON).
             input_data: Dictionary to be sent via stdin (only for STDIN_JSON).
             timeout: Maximum time to wait for the process.
-            env: Environment variables for the subprocess. If None, uses self.env.
+            env: Environment variables for the subprocess.
             auto_api: If True, automatically appends --api to JSON/STDIN_JSON modes.
 
         Returns:
@@ -80,10 +79,8 @@ class LudusaviExecutor:
 
         logger.debug(f"Executing Ludusavi command: {full_cmd}")
 
-        actual_env = env if env is not None else self.env
-
         if mode == "SPAWN":
-            subprocess.Popen(full_cmd, env=actual_env)
+            subprocess.Popen(full_cmd, env=env)
             return None
 
         stdin_content = None
@@ -97,7 +94,7 @@ class LudusaviExecutor:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                env=actual_env,
+                env=env,
             )
         except subprocess.TimeoutExpired as e:
             raise LudusaviError(f"Ludusavi command timed out after {timeout}s: {full_cmd}") from e

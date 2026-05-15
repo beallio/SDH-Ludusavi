@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: pyludusavi
-Version: 0.2.1
+Version: 0.2.2
 Summary: A robust, type-safe Python wrapper for the Ludusavi game backup tool.
 Project-URL: Homepage, https://github.com/beallio/pyludusavi
 Project-URL: Repository, https://github.com/beallio/pyludusavi

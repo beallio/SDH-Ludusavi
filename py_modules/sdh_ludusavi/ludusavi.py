@@ -18,6 +18,21 @@ def _ludusavi_env() -> dict[str, str]:
     return env
 
 
+class LudusaviExecutorEnvironment:
+    """Proxy a pyludusavi executor while injecting SDH-ludusavi subprocess env."""
+
+    def __init__(self, executor: Any, env: Mapping[str, str]) -> None:
+        self._executor = executor
+        self._env = dict(env)
+
+    def execute(self, *args: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault("env", self._env)
+        return self._executor.execute(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._executor, name)
+
+
 class PyludusaviAdapter:
     """
     A concrete implementation of LudusaviAdapter that uses the pyludusavi library.
@@ -30,17 +45,12 @@ class PyludusaviAdapter:
     def __init__(
         self,
         flatpak_id: str = FLATPAK_ID,
-        flatpak_user_home: str | None = None,
-        flatpak_user: str | None = None,
     ) -> None:
         from pyludusavi import Ludusavi
 
-        user_home = flatpak_user_home or _decky_user_home()
-        self._client = Ludusavi(
-            flatpak_id=flatpak_id,
-            flatpak_user_home=user_home,
-            flatpak_user=flatpak_user or _decky_user(),
-            env=_ludusavi_env(),
+        self._client = Ludusavi(flatpak_id=flatpak_id)
+        cast(Any, self._client).executor = LudusaviExecutorEnvironment(
+            self._client.executor, _ludusavi_env()
         )
 
     def refresh_statuses(self) -> list[dict[str, object]]:
@@ -175,35 +185,3 @@ def _game_error(game: dict[str, Any]) -> str | None:
                 error = value.get("error")
                 return str(error) if error else "Ludusavi reported a failed item"
     return None
-
-
-def _decky_user_home() -> str | None:
-    import os
-
-    env_home = os.environ.get("DECKY_USER_HOME")
-    if env_home:
-        return env_home
-
-    try:
-        import decky
-    except ImportError:
-        return None
-
-    user_home = getattr(decky, "DECKY_USER_HOME", None)
-    return str(user_home) if user_home else None
-
-
-def _decky_user() -> str | None:
-    import os
-
-    env_user = os.environ.get("DECKY_USER")
-    if env_user:
-        return env_user
-
-    try:
-        import decky
-    except ImportError:
-        return None
-
-    user = getattr(decky, "DECKY_USER", None)
-    return str(user) if user else None

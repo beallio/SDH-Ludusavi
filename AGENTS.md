@@ -39,6 +39,8 @@ STATUS: READY
 
 If any field cannot be confirmed, pause and resolve it before implementation.
 
+Do NOT modify upstream packages. Only change project files.
+
 ---
 
 # 2. Project Root Enforcement

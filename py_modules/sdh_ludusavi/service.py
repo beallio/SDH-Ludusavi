@@ -278,17 +278,11 @@ class SDHLudusaviService:
         try:
             from pyludusavi.discovery import find_ludusavi
 
-            # Use the same parameters as PyludusaviAdapter
-            from .ludusavi import FLATPAK_ID, _decky_user, _decky_user_home
-
-            user_home = _decky_user_home()
-            user = _decky_user()
+            from .ludusavi import FLATPAK_ID
 
             # find_ludusavi returns a list[str] like ["/usr/bin/flatpak", "run", ...]
             # or just ["/usr/bin/ludusavi"]
-            prefix = find_ludusavi(
-                flatpak_id=FLATPAK_ID, flatpak_user_home=user_home, flatpak_user=user
-            )
+            prefix = find_ludusavi(explicit_flatpak_id=FLATPAK_ID)
 
             if not prefix:
                 return None

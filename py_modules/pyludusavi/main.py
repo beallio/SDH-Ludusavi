@@ -1,11 +1,9 @@
+import json
 from pathlib import Path
 from typing import Optional, List, Dict, Literal, Any, Union
-from .discovery import find_ludusavi, find_ludusavi_binary, find_ludusavi_config_dir
+from .discovery import find_ludusavi
 from .core import LudusaviExecutor, LudusaviResponse
 from .models import LudusaviApiOutput, ApiConfig, ApiManifest
-
-
-DEFAULT_OPERATION_TIMEOUT_SECONDS = 60
 
 
 def _validate_mutually_exclusive(
@@ -26,9 +24,6 @@ class Ludusavi:
         config_dir: Optional[str] = None,
         no_manifest_update: bool = False,
         flatpak_id: Optional[str] = None,
-        flatpak_user_home: Optional[str] = None,
-        flatpak_user: Optional[str] = None,
-        env: Optional[Dict[str, str]] = None,
     ):
         """
         Initialize the Ludusavi wrapper.
@@ -38,24 +33,10 @@ class Ludusavi:
             config_dir: Optional --config directory for Ludusavi.
             no_manifest_update: If True, appends --no-manifest-update to all calls.
             flatpak_id: Optional Flatpak app ID to run explicitly.
-            flatpak_user_home: Optional user home for per-user Flatpak discovery.
-            flatpak_user: Optional username to run Flatpak via sudo -u.
-            env: Optional environment variables for the Ludusavi subprocess.
         """
-        # If no explicit path is provided, try to find a raw binary first if we have a flatpak_id
-        if not explicit_path and flatpak_id:
-            explicit_path = find_ludusavi_binary(flatpak_id, flatpak_user_home)
-
-        # If we found a raw binary (either explicitly or via discovery) and no config_dir was provided,
-        # try to find the Flatpak config dir if applicable.
-        if explicit_path and not config_dir and flatpak_id:
-            config_dir = find_ludusavi_config_dir(flatpak_id, flatpak_user_home, explicit_path)
-
         self.command_prefix = find_ludusavi(
             explicit_path=explicit_path,
             explicit_flatpak_id=flatpak_id,
-            flatpak_user_home=flatpak_user_home,
-            flatpak_user=flatpak_user,
         )
 
         # Add global options to prefix if they apply to the binary call
@@ -65,7 +46,7 @@ class Ludusavi:
         if no_manifest_update:
             self.command_prefix.append("--no-manifest-update")
 
-        self.executor = LudusaviExecutor(self.command_prefix, env=env)
+        self.executor = LudusaviExecutor(self.command_prefix)
 
     # --- Metadata Group ---
 
@@ -182,7 +163,7 @@ class Ludusavi:
         include_disabled: bool = False,
         ask_downgrade: bool = False,
         no_force_cloud_conflict: bool = False,
-        timeout: Optional[float] = DEFAULT_OPERATION_TIMEOUT_SECONDS,
+        timeout: Optional[float] = None,  # Operations default to no timeout
     ) -> LudusaviResponse[LudusaviApiOutput]:
         """
         Back up data.
@@ -277,7 +258,7 @@ class Ludusavi:
         include_disabled: bool = False,
         ask_downgrade: bool = False,
         no_force_cloud_conflict: bool = False,
-        timeout: Optional[float] = DEFAULT_OPERATION_TIMEOUT_SECONDS,
+        timeout: Optional[float] = None,
     ) -> LudusaviResponse[LudusaviApiOutput]:
         """
         Restore data.
@@ -776,9 +757,7 @@ class Ludusavi:
             name: The custom name for the game.
             alias: The official title of the game as it appears in the manifest.
         """
-        import json
-
-        path = self.config_path()
+        path = Path(self.config_path())
         response = self.config_show()
         config = response.data
 
@@ -796,8 +775,7 @@ class Ludusavi:
         if not any(g.get("name") == name for g in custom_games):
             custom_games.append(new_custom)
 
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
+        path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
     def get_game_alias(self, name: str) -> Optional[str]:
         """

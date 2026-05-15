@@ -44,8 +44,11 @@ def test_launcher_shortcut_id_persistence(service, tmp_path):
 
 
 def test_get_ludusavi_command(service, monkeypatch):
+    captured = {}
+
     # Mock find_ludusavi to simulate success
     def mock_find_ludusavi(**kwargs):
+        captured.update(kwargs)
         return ["/usr/bin/flatpak", "run", "com.github.mtkennerly.ludusavi"]
 
     monkeypatch.setattr("pyludusavi.discovery.find_ludusavi", mock_find_ludusavi)
@@ -54,6 +57,7 @@ def test_get_ludusavi_command(service, monkeypatch):
     assert cmd is not None
     assert cmd["commandPath"] == "/usr/bin/flatpak"
     assert cmd["args"] == ["run", "com.github.mtkennerly.ludusavi"]
+    assert captured == {"explicit_flatpak_id": "com.github.mtkennerly.ludusavi"}
 
 
 def test_get_ludusavi_command_not_found(service, monkeypatch):

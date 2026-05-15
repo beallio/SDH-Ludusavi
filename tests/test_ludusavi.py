@@ -1,11 +1,8 @@
-import sys
-import types
 from typing import cast
 
 import pytest
 
 import pyludusavi
-from pyludusavi import main as pyludusavi_main
 from sdh_ludusavi.ludusavi import FLATPAK_ID, PyludusaviAdapter, _game_error, _games_from_output
 
 
@@ -14,50 +11,66 @@ def test_flatpak_id_is_required_ludusavi_flatpak() -> None:
 
 
 def test_pyludusavi_version_is_current() -> None:
-    assert pyludusavi.__version__ == "0.2.1"
+    assert pyludusavi.__version__ == "0.2.2"
 
 
-def test_pyludusavi_constructor_accepts_flatpak_user_home(
+def test_adapter_uses_upstream_pyludusavi_constructor_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
-
-    def find_ludusavi(**kwargs: object) -> list[str]:
-        captured.update(kwargs)
-        return ["/usr/bin/flatpak", "run", FLATPAK_ID]
-
-    monkeypatch.setattr(pyludusavi_main, "find_ludusavi", find_ludusavi)
-
-    pyludusavi_main.Ludusavi(flatpak_id=FLATPAK_ID, flatpak_user_home="/home/deck")
-
-    assert captured["explicit_flatpak_id"] == FLATPAK_ID
-    assert captured["flatpak_user_home"] == "/home/deck"
-
-
-def test_adapter_passes_decky_user_home_to_pyludusavi(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
+    instances: list[object] = []
 
     class FakeLudusavi:
         command_prefix = ["/usr/bin/flatpak", "run", FLATPAK_ID]
 
         def __init__(self, **kwargs: object) -> None:
             captured.update(kwargs)
+            self.executor = object()
+            instances.append(self)
 
     monkeypatch.setattr(pyludusavi, "Ludusavi", FakeLudusavi)
-    monkeypatch.setitem(
-        sys.modules,
-        "decky",
-        types.SimpleNamespace(DECKY_USER_HOME="/home/deck", DECKY_USER="deck"),
-    )
 
     PyludusaviAdapter()
+
     assert captured["flatpak_id"] == FLATPAK_ID
-    assert captured["flatpak_user_home"] == "/home/deck"
-    assert captured["flatpak_user"] == "deck"
-    assert isinstance(captured.get("env"), dict)
-    assert cast(dict, captured["env"]).get("LD_LIBRARY_PATH") == ""
+    assert "flatpak_user_home" not in captured
+    assert "flatpak_user" not in captured
+    assert "env" not in captured
+    assert instances
+    assert instances[0].executor is not None
+
+
+def test_adapter_injects_ld_library_path_from_sdh_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_env: dict[str, str] | None = None
+
+    class FakeExecutor:
+        def execute(
+            self,
+            args: list[str],
+            *,
+            mode: str = "JSON",
+            env: dict[str, str] | None = None,
+            **kwargs: object,
+        ) -> object:
+            nonlocal seen_env
+            seen_env = env
+            return object()
+
+    class FakeLudusavi:
+        command_prefix = ["/usr/bin/flatpak", "run", FLATPAK_ID]
+
+        def __init__(self, **kwargs: object) -> None:
+            self.executor = FakeExecutor()
+
+    monkeypatch.setattr(pyludusavi, "Ludusavi", FakeLudusavi)
+
+    adapter = PyludusaviAdapter()
+    adapter._client.executor.execute(["--version"], mode="TEXT")
+
+    assert isinstance(seen_env, dict)
+    assert cast(dict[str, str], seen_env)["LD_LIBRARY_PATH"] == ""
 
 
 def test_games_from_output_accepts_ludusavi_api_shape() -> None:
