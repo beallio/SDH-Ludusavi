@@ -36,3 +36,18 @@ def test_readme_enumerates_status_messages() -> None:
         "`Unknown`",
     ]:
         assert text in source
+
+
+def test_readme_documents_visible_ludusavi_shortcut() -> None:
+    source = README.read_text()
+    compact_source = " ".join(source.split())
+
+    for text in ["## Ludusavi Launcher Shortcut", "does not hide the shortcut"]:
+        assert text in source
+
+    for text in [
+        "## Ludusavi Launcher Shortcut",
+        'visible non-Steam shortcut named `"Ludusavi"`',
+        "adopts the matching shortcut and refreshes its cached AppID",
+    ]:
+        assert text in compact_source

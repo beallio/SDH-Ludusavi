@@ -116,6 +116,19 @@ The package is written to `out/SDH-ludusavi.zip` and contains a top-level
 `scripts/post_commit.sh`, which rebuilds `dist/` and recreates that zip after each
 commit.
 
+## Ludusavi Launcher Shortcut
+
+When launching the Ludusavi GUI, the plugin uses a visible non-Steam shortcut named
+`"Ludusavi"`. The plugin searches Steam's app list by that exact name before using the
+cached AppID. If a matching shortcut already exists, the plugin adopts the matching
+shortcut and refreshes its cached AppID instead of creating a duplicate.
+
+If no named shortcut exists, the plugin validates the cached AppID and renames that
+shortcut to `"Ludusavi"` when it is still present. If the cache points to a deleted
+shortcut, the plugin creates a new visible `"Ludusavi"` shortcut, stores the new AppID,
+and updates its executable, launch options, compatibility tool, and bundled artwork
+before launch. The plugin does not hide the shortcut.
+
 ## Status Messages
 
 Game status values:

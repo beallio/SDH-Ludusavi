@@ -1,13 +1,12 @@
 # Plan: Ludusavi Shortcut Management
 
 ## Objective
-Implement the changes specified in `docs/plans/ludusavi_shortcut_management_spec.md` to unify the shortcut name to "Ludusavi", cache the AppID with robust conflict resolution, remove shortcut hiding logic, and update documentation.
+Implement the changes specified in `docs/specs/ludusavi_shortcut_management.md` to unify the shortcut name to "Ludusavi", cache the AppID with robust conflict resolution, remove shortcut hiding logic, and update documentation.
 
 ## Key Files & Context
 - `src/ludusaviLauncher.ts`: Primary file for shortcut management and launch logic.
 - `py_modules/sdh_ludusavi/service.py`: Backend service for persisting the shortcut AppID.
 - `README.md`: Project documentation.
-- `docs/specs/sdh_ludusavi_launcher.md`: (If exists) Internal launcher specification.
 
 ## Implementation Steps
 
@@ -41,7 +40,6 @@ Implement the changes specified in `docs/plans/ludusavi_shortcut_management_spec
 
 ### 2. Documentation Updates
 - **README.md:** Update to mention the visible "Ludusavi" shortcut and its behavior.
-- **Internal Specs:** Synchronize any existing launcher specs with the new behavior.
 
 ## Verification & Testing
 

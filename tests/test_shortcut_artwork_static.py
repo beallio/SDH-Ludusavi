@@ -118,18 +118,64 @@ def test_shortcut_artwork_logs_through_backend_logger() -> None:
     assert "logger: options?.logger" in launcher_source
 
 
-def test_launcher_applies_artwork_only_to_managed_shortcuts_after_overview() -> None:
+def test_launcher_applies_artwork_to_resolved_shortcut_after_overview() -> None:
     source = LAUNCHER.read_text(encoding="utf-8")
 
     assert "applyLudusaviArtworkToShortcut" in source
-    assert "if (state.managed)" in source
     assert "const appOverview = getAppOverview(appId);" in source
     artwork_call = (
         "await applyLudusaviArtworkToShortcut({ appId, appOverview, logger: options?.logger });"
     )
     assert artwork_call in source
     assert source.index("const appOverview = getAppOverview(appId);") < source.index(artwork_call)
-    assert source.index("if (!state.managed)") < source.index(artwork_call)
+    assert "state.managed" not in source
+
+
+def test_ludusavi_launcher_uses_visible_name_first_shortcut_flow() -> None:
+    source = LAUNCHER.read_text(encoding="utf-8")
+
+    for forbidden_text in [
+        "LUDUSAVI_SHORTCUT_NAME",
+        "LUDUSAVI_RUNNING_NAME",
+        "createHiddenLudusaviShortcut",
+        "hideShortcutIfSupported",
+        "calculateGameId",
+        "SetAppHidden",
+        "SetShortcutHidden",
+        "SetHidden",
+        "SetAppIsHidden",
+        "SetShortcutIsHidden",
+    ]:
+        assert forbidden_text not in source
+
+    for required_text in [
+        'const SHORTCUT_NAME = "Ludusavi";',
+        "async function createLudusaviShortcut(): Promise<LauncherShortcutState>",
+        "async function ensureLudusaviShortcut(): Promise<LauncherShortcutState>",
+        "const namedShortcut = findLudusaviShortcutByName();",
+        "const savedAppId = await getSavedShortcutAppId();",
+        "await saveShortcutAppId(namedShortcut.appId);",
+        "return { appId: savedAppId, gameId };",
+        "return await createLudusaviShortcut();",
+    ]:
+        assert required_text in source
+
+    assert source.index("const namedShortcut = findLudusaviShortcutByName();") < source.index(
+        "const savedAppId = await getSavedShortcutAppId();"
+    )
+
+
+def test_ludusavi_launcher_logs_shortcut_resolution_decisions() -> None:
+    source = LAUNCHER.read_text(encoding="utf-8")
+
+    for required_text in [
+        'SDH-ludusavi: Found "Ludusavi" shortcut by name',
+        "Cache was",
+        "SDH-ludusavi: Cached shortcut",
+        'SDH-ludusavi: No "Ludusavi" shortcut found. Created new shortcut',
+        "updated cache",
+    ]:
+        assert required_text in source
 
 
 def test_steam_globals_declare_custom_artwork_and_logo_position_apis() -> None:
