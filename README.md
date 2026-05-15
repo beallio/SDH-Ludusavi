@@ -17,6 +17,7 @@ game status, operation status, and recent operation logs.
 - **Persistent Settings:** Remembers your selected game and sync preferences across plugin reloads.
 - **Ludusavi Integration:** Direct selector for Ludusavi game entries with real-time status display (e.g., "Backup ready", "Needs first backup").
 - **Manual Overrides:** Refresh Games, Force Backup, and Force Restore actions are always available, even when Automatic Sync is disabled.
+- **Shortcut Artwork:** The plugin-managed Ludusavi launcher shortcut uses bundled local artwork and does not fetch SteamGridDB assets at runtime.
 - **Version Display:** SDH-ludusavi and Ludusavi version information.
 
 ## Requirements
@@ -65,8 +66,10 @@ The installable Decky plugin is built from these required files:
 - `py_modules/sdh_ludusavi/`: Python backend modules on Decky's runtime import path.
 - `py_modules/pyludusavi/`: vendored pure-Python Ludusavi adapter dependency.
 - `src/index.tsx`: TypeScript frontend source.
-- `dist/`: generated frontend bundle, source map, and any built frontend assets from
-  `pnpm run build`.
+- `assets/steamgrid/ludusavi/`: bundled local artwork source files for the
+  plugin-managed Ludusavi launcher shortcut.
+- `dist/`: generated frontend bundle, source map, and built frontend assets from
+  `pnpm run build`, including hashed artwork files emitted from the local assets.
 - `LICENSE`: redistributable license text.
 
 Install frontend dependencies when needed:
