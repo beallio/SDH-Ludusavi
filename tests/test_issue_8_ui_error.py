@@ -8,7 +8,7 @@ def test_frontend_handles_refresh_dependency_error():
 
     # Check that applyRefreshResult returns a boolean
     assert (
-        "const applyRefreshResult = (result: RefreshResult, preferredGame?: string): boolean =>"
+        "const applyRefreshResult = (result: RpcResult<RefreshResult>, preferredGame?: string): boolean =>"
         in source
     )
 

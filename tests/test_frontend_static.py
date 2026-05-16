@@ -127,3 +127,33 @@ def test_frontend_has_loading_game_list_status() -> None:
     assert "Loading game list..." in source
     assert 'color: "#60a5fa"' in source
     assert 'fontWeight: "bold"' in source
+
+
+def test_frontend_models_rpc_status_results_for_call_wrapped_methods() -> None:
+    source = FRONTEND.read_text()
+
+    assert "type RpcStatus = {" in source
+    assert "type RpcResult<T> = T | RpcStatus;" in source
+    assert (
+        'const refreshGamesCall = callable<[force: boolean], RpcResult<RefreshResult>>("refresh_games");'
+        in source
+    )
+    assert 'const getVersions = callable<[], RpcResult<Versions>>("get_versions");' in source
+    assert (
+        "const handleGameStartCall = callable<[gameName: string, app_id?: string], "
+        'RpcResult<OperationResult>>("handle_game_start");'
+    ) in source
+    assert (
+        "const handleGameExitCall = callable<[gameName: string, app_id?: string], "
+        'RpcResult<OperationResult>>("handle_game_exit");'
+    ) in source
+
+
+def test_frontend_guards_refresh_and_version_rpc_status_payloads() -> None:
+    source = FRONTEND.read_text()
+
+    assert "function isRpcStatus<T>(result: RpcResult<T>): result is RpcStatus" in source
+    assert "if (isRpcStatus(loadedVersions))" in source
+    assert "if (isRpcStatus(result))" in source
+    assert 'logRpcStatus(result, "refresh")' in source
+    assert 'logRpcStatus(loadedVersions, "versions")' in source

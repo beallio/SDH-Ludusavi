@@ -57,6 +57,14 @@ type OperationResult = {
   message?: string;
 };
 
+type RpcStatus = {
+  status: "skipped" | "failed";
+  reason?: string;
+  message?: string;
+};
+
+type RpcResult<T> = T | RpcStatus;
+
 type Versions = {
   sdh_ludusavi?: string;
   ludusavi?: string;
@@ -87,17 +95,17 @@ type LudusaviLogModalProps = {
 const getSettings = callable<[], Settings>("get_settings");
 const setAutoSyncEnabled = callable<[enabled: boolean], Settings>("set_auto_sync_enabled");
 const setSelectedGameCall = callable<[gameName: string], Settings>("set_selected_game");
-const refreshGamesCall = callable<[force: boolean], RefreshResult>("refresh_games");
-const forceBackupCall = callable<[gameName: string], OperationResult>("force_backup");
-const forceRestoreCall = callable<[gameName: string], OperationResult>("force_restore");
-const getVersions = callable<[], Versions>("get_versions");
+const refreshGamesCall = callable<[force: boolean], RpcResult<RefreshResult>>("refresh_games");
+const forceBackupCall = callable<[gameName: string], RpcResult<OperationResult>>("force_backup");
+const forceRestoreCall = callable<[gameName: string], RpcResult<OperationResult>>("force_restore");
+const getVersions = callable<[], RpcResult<Versions>>("get_versions");
 const getOperationStatus = callable<[], OperationStatus>("get_operation_status");
 const getRecentLogs = callable<[], LogEntry[]>("get_recent_logs");
 const getLudusaviLogs = callable<[], string>("get_ludusavi_logs");
 const logCall = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
 const getLudusaviCommandCall = callable<[], LudusaviLaunchCommand | null>("get_ludusavi_command");
-const handleGameStartCall = callable<[gameName: string, app_id?: string], OperationResult>("handle_game_start");
-const handleGameExitCall = callable<[gameName: string, app_id?: string], OperationResult>("handle_game_exit");
+const handleGameStartCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("handle_game_start");
+const handleGameExitCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("handle_game_exit");
 
 const log = (level: "info" | "debug" | "warning" | "error", message: string, operation?: string, gameName?: string) => {
   const prefix = `SDH-ludusavi${operation ? `:${operation}` : ""}${gameName ? ` [${gameName}]` : ""}`;
@@ -207,6 +215,22 @@ function showToast(title: string, body: string, logo?: any) {
   }
 }
 
+function isRpcStatus<T>(result: RpcResult<T>): result is RpcStatus {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    "status" in result &&
+    ((result as RpcStatus).status === "skipped" || (result as RpcStatus).status === "failed")
+  );
+}
+
+function logRpcStatus(result: RpcStatus, operation: string) {
+  const level = result.status === "failed" ? "error" : "warning";
+  const reason = result.reason ? ` (${result.reason})` : "";
+  const message = result.message ?? `${operation} ${result.status}${reason}`;
+  log(level, message, operation);
+}
+
 function Content() {
   const [settings, setSettings] = useState<Settings>({ auto_sync_enabled: false, selected_game: "" });
   const [games, setGames] = useState<GameStatus[]>([]);
@@ -251,7 +275,11 @@ function Content() {
       }
 
       log("debug", `Loaded versions: ${JSON.stringify(loadedVersions)}`);
-      setVersions(loadedVersions);
+      if (isRpcStatus(loadedVersions)) {
+        logRpcStatus(loadedVersions, "versions");
+      } else {
+        setVersions(loadedVersions);
+      }
 
       log("debug", `Loaded command: ${JSON.stringify(loadedCommand)}`);
       cachedLudusaviCommand = loadedCommand;
@@ -273,7 +301,12 @@ function Content() {
     }
   };
 
-  const applyRefreshResult = (result: RefreshResult, preferredGame?: string): boolean => {
+  const applyRefreshResult = (result: RpcResult<RefreshResult>, preferredGame?: string): boolean => {
+    if (isRpcStatus(result)) {
+      logRpcStatus(result, "refresh");
+      return false;
+    }
+
     if (result.dependency_error) {
       log("error", `Ludusavi refresh failed: ${result.dependency_error}`, "refresh");
       toaster.toast({
@@ -385,7 +418,7 @@ function Content() {
 
   const runForceOperation = async (
     label: "Backup" | "Restore",
-    operationCall: (gameName: string) => Promise<OperationResult>
+    operationCall: (gameName: string) => Promise<RpcResult<OperationResult>>
   ) => {
     if (!selectedGame) {
       return;

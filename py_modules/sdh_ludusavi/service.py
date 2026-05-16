@@ -16,6 +16,13 @@ from ._version import resolve_version
 
 LOGGER = logging.getLogger(__name__)
 
+try:
+    import decky
+
+    _DECKY_LOGGER = getattr(decky, "logger", None)
+except (ImportError, AttributeError):
+    _DECKY_LOGGER = None
+
 
 class OperationLockedError(RuntimeError):
     """Raised when a global Ludusavi operation is already running."""
@@ -56,22 +63,17 @@ class DeckyLogHandler(logging.Handler):
 
 def _decky_log(level: str, message: str) -> None:
     """Helper to log to decky.logger if available."""
-    try:
-        import decky
+    if not _DECKY_LOGGER:
+        return
 
-        logger = getattr(decky, "logger", None)
-        if logger:
-            logger_level_map = {
-                "warning": logger.warning,
-                "error": logger.error,
-                "debug": logger.info,  # Decky doesn't have a debug level, so route it to info with a prefix
-                "info": logger.info,
-            }
-            logger_level = logger_level_map.get(level, logger.info)
-            # Prefix with [DEBUG] because Decky UI usually filters info only
-            logger_level(f"[DEBUG] {message}" if level == "debug" else message)
-    except (ImportError, AttributeError):
-        pass
+    logger_level_map = {
+        "warning": _DECKY_LOGGER.warning,
+        "error": _DECKY_LOGGER.error,
+        "debug": _DECKY_LOGGER.info,  # Decky doesn't have a debug level.
+        "info": _DECKY_LOGGER.info,
+    }
+    logger_level = logger_level_map.get(level, _DECKY_LOGGER.info)
+    logger_level(f"[DEBUG] {message}" if level == "debug" else message)
 
 
 class LudusaviAdapter(Protocol):

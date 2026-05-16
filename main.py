@@ -4,7 +4,6 @@ import asyncio
 import contextvars
 import os
 from pathlib import Path
-import queue
 import threading
 from typing import Any
 
@@ -233,30 +232,56 @@ async def _run_blocking(callback: Any) -> Any:
     Helper to run a synchronous callback in a dedicated thread while
     maintaining the async event loop's responsiveness.
     """
-    result_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
     context = contextvars.copy_context()
+    wake_reader, wake_writer = os.pipe()
+    os.set_blocking(wake_reader, False)
+    os.set_blocking(wake_writer, False)
+
+    def drain_wake() -> None:
+        try:
+            while os.read(wake_reader, 1024):
+                pass
+        except BlockingIOError:
+            pass
+
+    def wake_loop() -> None:
+        try:
+            os.write(wake_writer, b"\0")
+        except OSError:
+            pass
+
+    loop.add_reader(wake_reader, drain_wake)
+
+    def set_result(payload: Any) -> None:
+        if not future.cancelled():
+            future.set_result(payload)
+
+    def set_exception(exc: BaseException) -> None:
+        if not future.cancelled():
+            future.set_exception(exc)
 
     def worker() -> None:
         try:
-            result_queue.put(("result", context.run(callback)))
+            result = context.run(callback)
         except BaseException as exc:
-            result_queue.put(("error", exc))
+            loop.call_soon_threadsafe(set_exception, exc)
+            wake_loop()
+            return
+        loop.call_soon_threadsafe(set_result, result)
+        wake_loop()
 
     threading.Thread(target=worker, name="sdh-ludusavi-worker", daemon=True).start()
 
     try:
-        while True:
-            try:
-                kind, payload = result_queue.get_nowait()
-            except queue.Empty:
-                await asyncio.sleep(0.05)
-                continue
-
-            if kind == "error":
-                raise payload
-            return payload
+        return await future
     except asyncio.CancelledError:
         decky.logger.warning(
             "SDH-ludusavi operation was cancelled while worker may still be running"
         )
         raise
+    finally:
+        loop.remove_reader(wake_reader)
+        os.close(wake_reader)
+        os.close(wake_writer)

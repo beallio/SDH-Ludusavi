@@ -147,12 +147,12 @@ export async function applyLudusaviArtworkToShortcut({
 }: ApplyLudusaviArtworkParams): Promise<void> {
   const assetTypes: LudusaviArtworkAsset[] = ["grid_p", "grid_l", "hero", "logo"];
 
-  for (const assetType of assetTypes) {
-    await applyLocalArtworkAsset({
+  await Promise.all(
+    assetTypes.map((assetType) => applyLocalArtworkAsset({
       appId,
       appOverview,
       assetType,
       logger,
-    });
-  }
+    }))
+  );
 }

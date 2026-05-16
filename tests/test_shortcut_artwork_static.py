@@ -118,6 +118,15 @@ def test_shortcut_artwork_logs_through_backend_logger() -> None:
     assert "logger: options?.logger" in launcher_source
 
 
+def test_shortcut_artwork_applies_local_assets_in_parallel() -> None:
+    source = SHORTCUT_ARTWORK.read_text(encoding="utf-8")
+    function_body = source.split("export async function applyLudusaviArtworkToShortcut", 1)[1]
+
+    assert "await Promise.all(" in function_body
+    assert "assetTypes.map((assetType)" in function_body
+    assert "for (const assetType of assetTypes)" not in function_body
+
+
 def test_launcher_applies_artwork_to_resolved_shortcut_after_overview() -> None:
     source = LAUNCHER.read_text(encoding="utf-8")
 

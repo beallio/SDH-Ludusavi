@@ -1,0 +1,28 @@
+{
+  "date": "2026-05-15",
+  "task_objective": "Implement review plans for RPC result typing, Decky logging import overhead, shortcut artwork parallelization, and _run_blocking polling removal.",
+  "files_modified": [
+    "main.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "src/index.tsx",
+    "src/shortcutArtwork.ts",
+    "tests/test_frontend_static.py",
+    "tests/test_main.py",
+    "tests/test_service.py",
+    "tests/test_shortcut_artwork_static.py"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py RPC status typing and guard assertions",
+    "tests/test_main.py _run_blocking Future signaling assertion",
+    "tests/test_service.py cached Decky logger assertion",
+    "tests/test_shortcut_artwork_static.py Promise.all artwork assertion"
+  ],
+  "design_decisions": [
+    "Represent backend _call status dictionaries as RpcResult<T> in the frontend.",
+    "Guard refresh and version payloads before reading successful payload fields.",
+    "Resolve decky.logger once at service module import time and reuse the cached logger reference.",
+    "Signal _run_blocking completion through loop.call_soon_threadsafe and an asyncio Future.",
+    "Apply independent shortcut artwork assets concurrently with Promise.all."
+  ],
+  "results": "Targeted red tests failed before implementation and passed after implementation; full validation was run through ./run.sh."
+}

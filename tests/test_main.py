@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import importlib.util
 import sys
 import threading
@@ -62,6 +63,22 @@ def import_main(monkeypatch: pytest.MonkeyPatch, decky: types.SimpleNamespace) -
     sys.modules["main"] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_run_blocking_awaits_threadsafe_future_without_polling() -> None:
+    tree = ast.parse(Path("main.py").read_text(encoding="utf-8"))
+    run_blocking = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_run_blocking"
+    )
+    names = {node.id for node in ast.walk(run_blocking) if isinstance(node, ast.Name)}
+    attributes = {node.attr for node in ast.walk(run_blocking) if isinstance(node, ast.Attribute)}
+
+    assert "queue" not in names
+    assert "sleep" not in attributes
+    assert "call_soon_threadsafe" in attributes
+    assert "create_future" in attributes
 
 
 def test_call_does_not_block_event_loop_while_callback_runs(
