@@ -108,11 +108,14 @@ def _get_git_hash() -> str | None:
         return None
 
 
-def build_plugin_zip(project_root: Path, output_dir: Path) -> Path:
+def build_plugin_zip(project_root: Path, output_dir: Path, is_release: bool = False) -> Path:
     validate_required_files(project_root)
     base_version = validate_package_versions(project_root)
-    git_hash = _get_git_hash()
-    version = f"{base_version}+{git_hash}" if git_hash else base_version
+    if is_release:
+        version = base_version
+    else:
+        git_hash = _get_git_hash()
+        version = f"{base_version}+{git_hash}" if git_hash else base_version
 
     plugin_paths = iter_required_plugin_paths(project_root)
 
@@ -153,6 +156,11 @@ def parse_args() -> argparse.Namespace:
         default=Path("out"),
         help="Directory where SDH-ludusavi.zip will be written.",
     )
+    parser.add_argument(
+        "--release",
+        action="store_true",
+        help="Omit the git hash from the version string for release builds.",
+    )
     return parser.parse_args()
 
 
@@ -163,7 +171,7 @@ def main() -> None:
     if not output_dir.is_absolute():
         output_dir = project_root / output_dir
 
-    zip_path = build_plugin_zip(project_root, output_dir)
+    zip_path = build_plugin_zip(project_root, output_dir, is_release=args.release)
     print(f"Created {zip_path}")
 
 

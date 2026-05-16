@@ -404,7 +404,15 @@ parameter in README image URLs so images refresh immediately.
 
 ---
 
-# 14. Agent Session Logging
+# 14. Release & Packaging Protocol
+
+For local development and testing, the packaging script (`scripts/package_plugin.py`) will automatically append the current git commit hash to the version string to distinguish local builds. 
+
+For official production releases, the `--release` flag MUST be used when invoking the packaging script to omit the git hash and use the strict version number defined in `package.json` / `plugin.json`. This process is automated via the GitHub Actions workflow (`.github/workflows/release.yml`) which runs when a release is published via the GitHub UI or `gh` CLI.
+
+---
+
+# 15. Agent Session Logging
 
 For implementation tasks, record a session summary in:
 
@@ -431,7 +439,7 @@ docs/agent_conversations/2026-05-07_update_agent_protocol.json
 
 ---
 
-# 15. Definition of Done
+# 16. Definition of Done
 
 A modifying task is complete only if:
 
@@ -448,7 +456,7 @@ A modifying task is complete only if:
 
 ---
 
-# 16. Failure Recovery Protocol
+# 17. Failure Recovery Protocol
 
 If execution fails:
 
@@ -462,7 +470,7 @@ Blind retries are forbidden.
 
 ---
 
-# 17. Required Confirmation
+# 18. Required Confirmation
 
 After reviewing this file, confirm:
 
