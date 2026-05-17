@@ -62,6 +62,11 @@ class FakeAdapter:
         return self.config_mtime_ns
 
 
+class RaisingConfigMarkerAdapter(FakeAdapter):
+    def get_config_mtime_ns(self) -> int | None:
+        raise RuntimeError("config marker unavailable")
+
+
 def service_with_state(tmp_path: Path, adapter: FakeAdapter | None = None) -> SDHLudusaviService:
     return SDHLudusaviService(adapter=adapter or FakeAdapter(), state_path=tmp_path / "state.json")
 
@@ -132,6 +137,47 @@ def test_ludusavi_adapter_factory_is_reused_after_success(tmp_path: Path) -> Non
     service.get_versions()
 
     assert calls == 1
+
+
+def test_ludusavi_adapter_initialization_is_thread_safe(tmp_path: Path) -> None:
+    calls = 0
+    factory_entered = threading.Event()
+    release_factory = threading.Event()
+
+    def factory() -> FakeAdapter:
+        nonlocal calls
+        calls += 1
+        factory_entered.set()
+        release_factory.wait(timeout=1)
+        return FakeAdapter()
+
+    service = SDHLudusaviService(
+        adapter_factory=factory,
+        state_path=tmp_path / "state.json",
+    )
+    adapters: list[FakeAdapter] = []
+    errors: list[BaseException] = []
+
+    def initialize_adapter() -> None:
+        try:
+            adapters.append(service._ludusavi())
+        except BaseException as exc:
+            errors.append(exc)
+
+    first = threading.Thread(target=initialize_adapter)
+    second = threading.Thread(target=initialize_adapter)
+    first.start()
+    assert factory_entered.wait(timeout=1)
+    second.start()
+    release_factory.set()
+    first.join(timeout=1)
+    second.join(timeout=1)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert calls == 1
+    assert len({id(adapter) for adapter in adapters}) == 1
 
 
 def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
@@ -455,6 +501,45 @@ def test_refresh_games_cache_invalidation_via_app_ids(tmp_path: Path) -> None:
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
 
 
+def test_refresh_games_normalizes_installed_app_ids_before_persisting(
+    tmp_path: Path,
+) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+
+    result = service.refresh_games(force=False, installed_app_ids="3,1,3,2")
+
+    assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
+    assert service._installed_app_ids == "1,2,3"
+    saved_state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert saved_state["installed_app_ids"] == "1,2,3"
+
+
+def test_refresh_games_rejects_malformed_installed_app_ids(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+
+    result = service.refresh_games(force=False, installed_app_ids="1,not-a-number,2")
+
+    assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
+    assert service._installed_app_ids is None
+    saved_state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert saved_state["installed_app_ids"] is None
+
+
+def test_refresh_games_rejects_oversized_installed_app_ids(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    oversized = ",".join(str(index) for index in range(10000))
+
+    result = service.refresh_games(force=False, installed_app_ids=oversized)
+
+    assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
+    assert service._installed_app_ids is None
+    saved_state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert saved_state["installed_app_ids"] is None
+
+
 def test_refresh_games_cache_invalidation_via_ludusavi_config_mtime(
     tmp_path: Path,
 ) -> None:
@@ -520,5 +605,70 @@ def test_failed_refresh_does_not_persist_pending_cache_markers(tmp_path: Path) -
     assert result["dependency_error"] == "refresh failed"
     assert service._installed_app_ids == "1,2,3"
     assert service._ludusavi_config_mtime_ns == 100
-    assert service._pending_installed_app_ids is None
-    assert service._pending_ludusavi_config_mtime_ns is None
+
+
+def test_concurrent_refresh_does_not_overwrite_first_refresh_cache_markers(
+    tmp_path: Path,
+) -> None:
+    adapter = FakeAdapter()
+    adapter.config_mtime_ns = 100
+    refresh_entered = threading.Event()
+    release_refresh = threading.Event()
+    original_refresh = adapter.refresh_statuses
+
+    def slow_refresh() -> list[dict[str, object]]:
+        refresh_entered.set()
+        release_refresh.wait(timeout=1)
+        return original_refresh()
+
+    adapter.refresh_statuses = slow_refresh
+    service = service_with_state(tmp_path, adapter)
+    first_result: list[dict[str, object]] = []
+
+    def first_refresh() -> None:
+        first_result.append(service.refresh_games(force=False, installed_app_ids="3,1"))
+
+    first = threading.Thread(target=first_refresh)
+    first.start()
+    assert refresh_entered.wait(timeout=1)
+
+    rejected = service.refresh_games(force=False, installed_app_ids="9")
+    release_refresh.set()
+    first.join(timeout=1)
+
+    assert not first.is_alive()
+    assert rejected["dependency_error"] == "refresh is already running"
+    assert [game["name"] for game in first_result[0]["games"]] == ["Hades", "Celeste"]
+    assert service._installed_app_ids == "1,3"
+    assert service._ludusavi_config_mtime_ns == 100
+
+
+def test_config_marker_read_failure_forces_refresh_instead_of_cache_hit(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "games": [
+                    {
+                        "name": "Ghost Game",
+                        "configured": True,
+                        "has_backup": False,
+                        "needs_first_backup": True,
+                    }
+                ],
+                "installed_app_ids": "1,2,3",
+                "ludusavi_config_mtime_ns": 100,
+            }
+        ),
+        encoding="utf-8",
+    )
+    adapter = RaisingConfigMarkerAdapter()
+    service = service_with_state(tmp_path, adapter)
+
+    result = service.refresh_games(force=False, installed_app_ids="1,2,3")
+
+    assert [game["name"] for game in result["games"]] == ["Hades", "Celeste"]
+    assert service._installed_app_ids == "1,2,3"
+    assert service._ludusavi_config_mtime_ns is None

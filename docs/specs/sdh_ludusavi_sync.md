@@ -31,11 +31,15 @@ provides that directory. If Decky does not provide it, the backend uses a privat
 `0700` fallback under `DECKY_USER_HOME/.config/sdh-ludusavi/`, then the current user's
 home config directory if `DECKY_USER_HOME` is unavailable.
 
-The persisted state includes settings, cached game metadata, Steam app membership
-metadata, and a backend-owned Ludusavi config modification marker. The cache is valid
-for fast QAM open only when the Steam app marker and Ludusavi config marker still match
-the current runtime state. The Ludusavi marker is based on the active config file's
-`st_mtime_ns` value from `pyludusavi.Ludusavi.config_path()`.
+The persisted state includes settings, cached game metadata, normalized Steam app
+membership metadata, and a backend-owned Ludusavi config modification marker. The cache
+is valid for fast QAM open only when the Steam app marker and Ludusavi config marker
+still match the current runtime state. The Ludusavi marker is based on the active config
+file's `st_mtime_ns` value from `pyludusavi.Ludusavi.config_path()`.
+
+`installed_app_ids` is treated as frontend-provided input. The backend must bound,
+parse, deduplicate, and sort it before comparison or persistence. Malformed or oversized
+values are ignored and are never saved raw to state.
 
 External backup status changes are not cache invalidators. Backup and restore operation
 paths must validate current Ludusavi state before acting; stale backup-status display

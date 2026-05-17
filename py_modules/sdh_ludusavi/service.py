@@ -15,6 +15,9 @@ from typing import Any, Protocol, cast
 from ._version import resolve_version
 
 LOGGER = logging.getLogger(__name__)
+MAX_INSTALLED_APP_IDS_BYTES = 16_384
+_CONFIG_MARKER_READ_FAILED = object()
+_CACHE_MARKER_UNCHANGED = object()
 
 try:
     import decky
@@ -167,6 +170,7 @@ class SDHLudusaviService:
             raise ValueError("adapter and adapter_factory cannot both be provided")
 
         self._adapter = adapter
+        self._adapter_lock = threading.Lock()
         self._adapter_factory = adapter_factory or _default_adapter_factory
         self._state_path = state_path or Path("/tmp/sdh_ludusavi/state.json")
         self._auto_sync_enabled = False
@@ -177,9 +181,7 @@ class SDHLudusaviService:
         self._ids: dict[str, str] = {}
         self._versions: dict[str, str] | None = None
         self._installed_app_ids: str | None = None
-        self._pending_installed_app_ids: str | None = None
         self._ludusavi_config_mtime_ns: int | None = None
-        self._pending_ludusavi_config_mtime_ns: int | None = None
         self._operation = OperationState()
         self._operation_lock = threading.Lock()
         self._logs: deque[LogEntry] = deque(maxlen=log_limit)
@@ -311,15 +313,23 @@ class SDHLudusaviService:
 
         If force is False, returns the cached game list if available.
         """
+        normalized_installed_app_ids = _normalize_installed_app_ids(installed_app_ids)
         config_mtime_ns = self._current_ludusavi_config_mtime_ns()
         needs_refresh = force or not self._games
 
-        if not force and installed_app_ids is not None:
-            if self._installed_app_ids != installed_app_ids:
+        if not force and normalized_installed_app_ids is not None:
+            if self._installed_app_ids != normalized_installed_app_ids:
                 needs_refresh = True
                 self.log("debug", "installed_app_ids changed, forcing refresh", "refresh")
 
-        if not force and self._ludusavi_config_mtime_ns != config_mtime_ns:
+        if config_mtime_ns is _CONFIG_MARKER_READ_FAILED:
+            needs_refresh = True
+            committed_config_mtime_ns = None
+            self.log("debug", "Ludusavi config marker unavailable, forcing refresh", "refresh")
+        else:
+            committed_config_mtime_ns = cast(int | None, config_mtime_ns)
+
+        if not force and self._ludusavi_config_mtime_ns != committed_config_mtime_ns:
             needs_refresh = True
             self.log("debug", "Ludusavi config changed, forcing refresh", "refresh")
 
@@ -332,12 +342,16 @@ class SDHLudusaviService:
             }
 
         self.log("debug", f"Forcing refresh_games (force={force})", "refresh")
-        if installed_app_ids is not None:
-            self._pending_installed_app_ids = installed_app_ids
-        self._pending_ludusavi_config_mtime_ns = config_mtime_ns
 
         try:
-            games = self._run_locked("refresh", None, self._refresh_statuses_unlocked)
+            games = self._run_locked(
+                "refresh",
+                None,
+                lambda: self._refresh_statuses_unlocked(
+                    normalized_installed_app_ids,
+                    committed_config_mtime_ns,
+                ),
+            )
             return {
                 "games": [game.to_dict() for game in games],
                 "aliases": self._aliases,
@@ -346,8 +360,6 @@ class SDHLudusaviService:
         except (
             Exception
         ) as exc:  # pragma: no cover - concrete exception types come from pyludusavi.
-            self._pending_installed_app_ids = None
-            self._pending_ludusavi_config_mtime_ns = None
             message = str(exc)
             return {
                 "games": self._cached_games(),
@@ -659,7 +671,11 @@ class SDHLudusaviService:
             temp_path.unlink(missing_ok=True)
             raise
 
-    def _refresh_statuses_unlocked(self) -> list[GameStatus]:
+    def _refresh_statuses_unlocked(
+        self,
+        installed_app_ids: str | None | object = _CACHE_MARKER_UNCHANGED,
+        ludusavi_config_mtime_ns: int | None | object = _CACHE_MARKER_UNCHANGED,
+    ) -> list[GameStatus]:
         """
         Internal implementation of status refresh, executed within
         the operation lock.
@@ -692,11 +708,10 @@ class SDHLudusaviService:
         self._aliases = getattr(self._ludusavi(), "get_aliases", lambda: {})()
         self._ids = {game.steam_id: game.name for game in games if game.steam_id}
 
-        if self._pending_installed_app_ids is not None:
-            self._installed_app_ids = self._pending_installed_app_ids
-            self._pending_installed_app_ids = None
-        self._ludusavi_config_mtime_ns = self._pending_ludusavi_config_mtime_ns
-        self._pending_ludusavi_config_mtime_ns = None
+        if installed_app_ids is not _CACHE_MARKER_UNCHANGED:
+            self._installed_app_ids = cast(str | None, installed_app_ids)
+        if ludusavi_config_mtime_ns is not _CACHE_MARKER_UNCHANGED:
+            self._ludusavi_config_mtime_ns = cast(int | None, ludusavi_config_mtime_ns)
 
         self.log(
             "info",
@@ -851,25 +866,39 @@ class SDHLudusaviService:
     def _ludusavi(self) -> LudusaviAdapter:
         """Lazy initializer for the Ludusavi adapter."""
         if self._adapter is None:
-            self._adapter = self._adapter_factory()
+            with self._adapter_lock:
+                if self._adapter is None:
+                    self._adapter = self._adapter_factory()
         return self._adapter
 
-    def _current_ludusavi_config_mtime_ns(self) -> int | None:
+    def _current_ludusavi_config_mtime_ns(self) -> int | None | object:
         try:
             return self._ludusavi().get_config_mtime_ns()
         except Exception as exc:
             self.log(
                 "debug",
-                f"Unable to read Ludusavi config marker; preserving cached marker: {exc}",
+                f"Unable to read Ludusavi config marker; forcing refresh: {exc}",
                 "refresh",
             )
-            return self._ludusavi_config_mtime_ns
+            return _CONFIG_MARKER_READ_FAILED
 
 
 def _normalize(game_name: str) -> str:
     """Normalize a game name for easier matching."""
     # Retain dots and hyphens for better precision in non-steam titles
     return re.sub(r"[^a-z0-9.-]+", " ", game_name.casefold()).strip()
+
+
+def _normalize_installed_app_ids(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    if len(raw) > MAX_INSTALLED_APP_IDS_BYTES:
+        return None
+    tokens = raw.split(",")
+    if any(not token.isdecimal() for token in tokens):
+        return None
+    app_ids = sorted({int(token) for token in tokens})
+    return ",".join(str(app_id) for app_id in app_ids)
 
 
 def _default_adapter_factory() -> LudusaviAdapter:

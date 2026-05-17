@@ -1,0 +1,31 @@
+{
+  "date": "2026-05-17",
+  "task_objective": "Address critical review findings for cache marker concurrency, installed app ID validation, and Ludusavi config marker failure handling.",
+  "files_modified": [
+    "docs/agent_conversations/2026-05-17_cache_marker_review_hardening.json",
+    "docs/plans/cache_marker_review_hardening.md",
+    "docs/plans/fast_qam_open_caching.md",
+    "docs/review/2026-05-17_remaining_cache_review_suggestions.md",
+    "docs/specs/sdh_ludusavi_sync.md",
+    "py_modules/sdh_ludusavi/service.py",
+    "tests/test_service.py"
+  ],
+  "tests_added": [
+    "tests/test_service.py::test_ludusavi_adapter_initialization_is_thread_safe",
+    "tests/test_service.py::test_refresh_games_normalizes_installed_app_ids_before_persisting",
+    "tests/test_service.py::test_refresh_games_rejects_malformed_installed_app_ids",
+    "tests/test_service.py::test_refresh_games_rejects_oversized_installed_app_ids",
+    "tests/test_service.py::test_concurrent_refresh_does_not_overwrite_first_refresh_cache_markers",
+    "tests/test_service.py::test_config_marker_read_failure_forces_refresh_instead_of_cache_hit"
+  ],
+  "design_decisions": [
+    "Use a dedicated adapter initialization lock instead of the operation lock.",
+    "Normalize installed app IDs in the backend by bounding, parsing unsigned integers, deduplicating, and sorting.",
+    "Ignore malformed or oversized installed app markers rather than persisting raw frontend input.",
+    "Pass cache markers into the refresh callback executed under the operation lock instead of staging shared pending marker fields.",
+    "Use a private sentinel so config marker read failures force a refresh instead of producing a false cache hit."
+  ],
+  "results": [
+    "Focused service tests passed after implementation."
+  ]
+}

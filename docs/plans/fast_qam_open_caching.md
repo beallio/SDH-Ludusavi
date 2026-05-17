@@ -12,7 +12,7 @@ If we simply trust the `state.json` cache on startup, we risk showing stale data
 We will track the list of currently installed Steam games and a backend-owned Ludusavi config modification marker. The frontend has rapid access to Steam's list of installed apps. It can extract the App IDs, sort them, and send this list as a string to the backend during the `refresh_games` call. The backend independently reads Ludusavi's active config path through `pyludusavi` and stores the config file's `st_mtime_ns` value with the cached game list.
 
 1.  **Frontend App ID Tracking:** On QAM mount, the frontend uses `SteamClient.Apps.GetInstalledApps()` to fetch the currently installed apps, extracts the `appid` from each, sorts them numerically, and joins them into a comma-separated string (e.g., `"220,730,4000"`).
-2.  **Backend Cache Validation:** The backend stores this `installed_app_ids` string and the Ludusavi config mtime marker in its `state.json` alongside the game cache. When `refresh_games(force=False, installed_app_ids)` is called:
+2.  **Backend Cache Validation:** The backend normalizes the frontend `installed_app_ids` string before comparison or persistence, then stores the normalized marker and the Ludusavi config mtime marker in its `state.json` alongside the game cache. When `refresh_games(force=False, installed_app_ids)` is called:
     *   If `installed_app_ids` matches the saved string and the current Ludusavi config mtime marker matches the saved marker, the backend **instantly returns the cached game list** (even on the first open after a reboot).
     *   If `installed_app_ids` differs, the Ludusavi config marker differs, or `force=True`, the backend performs the slow `refresh_statuses` scan, updates the cache, updates its stored markers, and saves `state.json`.
 
@@ -40,7 +40,8 @@ This plugin is scoped to SteamOS Game Mode and Steam-visible games or shortcuts.
 ### 3. Backend: State Management
 *   **File:** `py_modules/sdh_ludusavi/service.py`
 *   **Changes:**
-    *   Add `self._installed_app_ids: str | None = None`, `self._pending_installed_app_ids: str | None = None`, `self._ludusavi_config_mtime_ns: int | None = None`, and `self._pending_ludusavi_config_mtime_ns: int | None = None` to `__init__`.
+    *   Add `self._installed_app_ids: str | None = None` and `self._ludusavi_config_mtime_ns: int | None = None` to `__init__`.
+    *   Add a dedicated adapter initialization lock so concurrent RPC calls cannot create multiple Ludusavi adapters.
     *   In `_load_state`, load `self._installed_app_ids = data.get("installed_app_ids")`.
     *   In `_load_state`, load `self._ludusavi_config_mtime_ns` from `ludusavi_config_mtime_ns` when it is an integer.
     *   In `_save_state`, save `data["installed_app_ids"] = self._installed_app_ids` and `data["ludusavi_config_mtime_ns"] = self._ludusavi_config_mtime_ns`.
@@ -50,10 +51,11 @@ This plugin is scoped to SteamOS Game Mode and Steam-visible games or shortcuts.
 *   **File:** `py_modules/sdh_ludusavi/service.py`
 *   **Changes:**
     *   Update `refresh_games(self, force: bool = False, installed_app_ids: str | None = None) -> dict[str, object]`.
-    *   Determine if a refresh is needed: `force` is True, OR `installed_app_ids` is provided and differs from `self._installed_app_ids`, OR the current Ludusavi config mtime marker differs from `self._ludusavi_config_mtime_ns`, OR `not self._games`.
+    *   Normalize and bound `installed_app_ids` at the backend boundary. Oversized or malformed values are ignored and are not persisted.
+    *   Determine if a refresh is needed: `force` is True, OR normalized `installed_app_ids` is provided and differs from `self._installed_app_ids`, OR the current Ludusavi config mtime marker differs from `self._ludusavi_config_mtime_ns`, OR the config marker cannot be read, OR `not self._games`.
     *   Remove the strict reliance on `self._refreshed_once` to block using the cache on first boot.
-    *   If a refresh is required, set pending cache markers before calling `_run_locked(...)`.
-    *   In `_refresh_statuses_unlocked`, transfer pending cache markers to their persisted fields right before calling `_save_state()`.
+    *   Bind cache markers to the specific refresh operation by passing them into the callback executed under `_run_locked(...)`.
+    *   In `_refresh_statuses_unlocked`, commit the operation-bound cache markers right before calling `_save_state()`.
 
 ### 5. Backend: Unit Tests
 *   **File:** `tests/test_service.py`
@@ -62,6 +64,7 @@ This plugin is scoped to SteamOS Game Mode and Steam-visible games or shortcuts.
     *   Add a test verifying that a subsequent call with `installed_app_ids="1,2,3"` returns the cache without calling the ludusavi adapter.
     *   Add a test verifying that a call with `installed_app_ids="1,2,3,4"` triggers a fresh adapter call.
     *   Add a test verifying that unchanged `installed_app_ids` still triggers a refresh when the Ludusavi config mtime marker changes.
+    *   Add tests for malformed, oversized, unsorted, duplicate, and concurrent cache marker inputs.
 
 ## Verification & Testing
 1.  Run `ty check py_modules/sdh_ludusavi/` and `ruff check .`
