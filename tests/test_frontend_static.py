@@ -59,6 +59,31 @@ def test_frontend_toggle_reports_busy_and_failures() -> None:
     assert 'title: "SDH-ludusavi settings failed"' in source
 
 
+def test_frontend_silences_lifecycle_toasts_when_auto_sync_is_disabled() -> None:
+    source = FRONTEND.read_text()
+
+    assert "let autoSyncNotificationsEnabled = false;" in source
+    assert "autoSyncNotificationsEnabled = loadedSettings.auto_sync_enabled;" in source
+    assert "autoSyncNotificationsEnabled = updated.auto_sync_enabled;" in source
+    assert source.count("if (tracked && autoSyncNotificationsEnabled)") == 2
+
+    start_toast = (
+        'showToast("SDH-ludusavi Auto-sync", `Checking saves for ${name}...`, <FaDatabase />);'
+    )
+    exit_toast = (
+        'showToast("SDH-ludusavi Auto-sync", `Backing up saves for ${name}...`, <FaSave />);'
+    )
+    assert start_toast in source
+    assert exit_toast in source
+
+    assert source.index(start_toast) < source.index(
+        "const result = await handleGameStartCall(name, appID);"
+    )
+    assert source.index(exit_toast) < source.index(
+        "const result = await handleGameExitCall(name, appID);"
+    )
+
+
 def test_frontend_initial_load_fetches_logs_after_refresh() -> None:
     source = FRONTEND.read_text()
 

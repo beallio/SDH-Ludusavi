@@ -191,6 +191,7 @@ function LudusaviLogModal({ logs, closeModal }: LudusaviLogModalProps) {
 let trackedAppIDs = new Set<string>();
 let trackedNames = new Set<string>();
 let cachedLudusaviCommand: LudusaviLaunchCommand | null = null;
+let autoSyncNotificationsEnabled = false;
 
 /** Normalize a game name for fuzzy matching, mirroring backend _normalize. */
 function normalize(name: string): string {
@@ -270,6 +271,7 @@ function Content() {
 
       log("debug", `Loaded settings: ${JSON.stringify(loadedSettings)}`);
       setSettings(loadedSettings);
+      autoSyncNotificationsEnabled = loadedSettings.auto_sync_enabled;
       if (loadedSettings.selected_game) {
         setSelectedGame(loadedSettings.selected_game);
       }
@@ -391,6 +393,7 @@ function Content() {
     try {
       const updated = await setAutoSyncEnabled(enabled);
       setSettings(updated);
+      autoSyncNotificationsEnabled = updated.auto_sync_enabled;
     } catch (error) {
       log("error", `Failed to toggle auto-sync: ${error}`);
       toaster.toast({
@@ -411,6 +414,7 @@ function Content() {
     try {
       const updated = await setSelectedGameCall(value);
       setSettings(updated);
+      autoSyncNotificationsEnabled = updated.auto_sync_enabled;
     } catch (error) {
       log("error", `Failed to persist selected game: ${error}`);
     }
@@ -687,7 +691,7 @@ export default definePlugin(() => {
     const tracked = isTracked(name, appID);
     log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
     
-    if (tracked) {
+    if (tracked && autoSyncNotificationsEnabled) {
       showToast("SDH-ludusavi Auto-sync", `Checking saves for ${name}...`, <FaDatabase />);
     }
     
@@ -710,7 +714,7 @@ export default definePlugin(() => {
     const tracked = isTracked(name, appID);
     log("info", `App exited: ${name} (${appID}) tracked=${tracked}`);
     
-    if (tracked) {
+    if (tracked && autoSyncNotificationsEnabled) {
       showToast("SDH-ludusavi Auto-sync", `Backing up saves for ${name}...`, <FaSave />);
     }
     
