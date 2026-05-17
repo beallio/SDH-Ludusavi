@@ -41,6 +41,7 @@ type GameOperationHistory = {
   last_restore: GameOperationHistoryEntry | null;
   last_skip: GameOperationHistoryEntry | null;
   last_failure: GameOperationHistoryEntry | null;
+  last_operation: GameOperationHistoryEntry | null;
 };
 
 type GameStatus = {
@@ -305,8 +306,7 @@ function Content() {
   );
   const selectedHistory = useMemo(() => {
     const history = gameHistory[selectedGame];
-    if (!history) return null;
-    return history.last_failure || history.last_backup || history.last_restore || history.last_skip;
+    return history?.last_operation ?? null;
   }, [gameHistory, selectedGame]);
   const isBusy = operation.is_running || busyLabel !== null;
 

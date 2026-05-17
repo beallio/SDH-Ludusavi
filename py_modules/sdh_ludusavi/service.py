@@ -306,6 +306,64 @@ class SDHLudusaviService:
             self.log("error", f"Failed to discover Ludusavi command: {exc}")
             return None
 
+    def _coerce_history_entry(self, entry: Any) -> dict[str, Any] | None:
+        """Validate and sanitize a history entry dictionary."""
+        if not isinstance(entry, dict):
+            return None
+
+        # Required fields and their expected types
+        schema = {
+            "operation": str,
+            "trigger": str,
+            "status": str,
+            "timestamp": str,
+        }
+
+        # Optional fields and their expected types
+        optional = {
+            "reason": (str, type(None)),
+            "message": (str, type(None)),
+        }
+
+        coerced = {}
+        for field, expected_type in schema.items():
+            val = entry.get(field)
+            if not isinstance(val, expected_type):
+                return None
+            coerced[field] = val
+
+        # Validate basic enums to prevent arbitrary data injection
+        if coerced["status"] not in ("backed_up", "restored", "skipped", "failed"):
+            return None
+        if coerced["operation"] not in ("backup", "restore", "start", "exit"):
+            return None
+
+        for field, expected_types in optional.items():
+            val = entry.get(field)
+            if isinstance(val, expected_types):
+                coerced[field] = val
+            else:
+                coerced[field] = None
+
+        return coerced
+
+    def _update_last_operation(self, history: dict[str, Any]) -> None:
+        """Compute the last_operation field based on the newest timestamp."""
+        entries = [
+            history.get("last_backup"),
+            history.get("last_restore"),
+            history.get("last_skip"),
+            history.get("last_failure"),
+        ]
+        valid_entries = [e for e in entries if isinstance(e, dict) and e.get("timestamp")]
+        if not valid_entries:
+            history["last_operation"] = None
+            return
+
+        # Simple string comparison works for "YYYY-MM-DD HH:MM:SS"
+        valid_entries.sort(key=lambda x: str(x["timestamp"]), reverse=True)
+        history["last_operation"] = valid_entries[0]
+
     def _record_history(
         self,
         game_name: str,
@@ -316,22 +374,29 @@ class SDHLudusaviService:
         message: str | None = None,
     ) -> None:
         """Record a history entry for a specific game and persist state."""
-        entry = {
-            "operation": operation,
-            "trigger": trigger,
-            "status": status,
-            "reason": reason,
-            "message": message,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
+        entry = self._coerce_history_entry(
+            {
+                "operation": operation,
+                "trigger": trigger,
+                "status": status,
+                "reason": reason,
+                "message": message,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+        if entry is None:
+            return
+
         if game_name not in self._game_history:
             self._game_history[game_name] = {
                 "last_backup": None,
                 "last_restore": None,
                 "last_skip": None,
                 "last_failure": None,
+                "last_operation": None,
             }
 
+        history = self._game_history[game_name]
         if status == "backed_up":
             field = "last_backup"
         elif status == "restored":
@@ -341,7 +406,8 @@ class SDHLudusaviService:
         else:
             field = "last_skip"
 
-        self._game_history[game_name][field] = entry
+        history[field] = entry
+        self._update_last_operation(history)
         self._save_state()
 
     def refresh_games(
@@ -569,12 +635,18 @@ class SDHLudusaviService:
             result = self._run_locked(
                 "backup", game.name, lambda: self._ludusavi().backup(game.name)
             )
+            # Record success immediately before the potentially failing refresh.
+            self._record_history(game.name, "backup", "auto_exit", "backed_up")
         except Exception as exc:
             self._record_history(game.name, "backup", "auto_exit", "failed", message=str(exc))
             raise
-        self._refresh_statuses_unlocked()
+
+        try:
+            self._refresh_statuses_unlocked()
+        except Exception as exc:
+            self.log("warning", f"Post-backup status refresh failed: {exc}", "backup", game.name)
+
         self.log("info", f"Backed up {game.name} after exit", "backup", game.name)
-        self._record_history(game.name, "backup", "auto_exit", "backed_up")
         return {"status": "backed_up", "game": game.name, "result": result}
 
     def force_backup(self, game_name: str) -> dict[str, object]:
@@ -589,12 +661,18 @@ class SDHLudusaviService:
             result = self._run_locked(
                 "backup", game.name, lambda: self._ludusavi().backup(game.name)
             )
+            # Record success immediately before the potentially failing refresh.
+            self._record_history(game.name, "backup", "manual_backup", "backed_up")
         except Exception as exc:
             self._record_history(game.name, "backup", "manual_backup", "failed", message=str(exc))
             raise
-        self._refresh_statuses_unlocked()
+
+        try:
+            self._refresh_statuses_unlocked()
+        except Exception as exc:
+            self.log("warning", f"Post-backup status refresh failed: {exc}", "backup", game.name)
+
         self.log("info", f"Backed up {game.name}", "backup", game.name)
-        self._record_history(game.name, "backup", "manual_backup", "backed_up")
         return {"status": "backed_up", "game": game.name, "result": result}
 
     def force_restore(self, game_name: str) -> dict[str, object]:
@@ -721,7 +799,9 @@ class SDHLudusaviService:
                 validated_history = {}
                 for field in ("last_backup", "last_restore", "last_skip", "last_failure"):
                     val = history.get(field)
-                    validated_history[field] = val if isinstance(val, dict) else None
+                    validated_history[field] = self._coerce_history_entry(val)
+
+                self._update_last_operation(validated_history)
                 self._game_history[str(game_name)] = validated_history
 
         self.log(

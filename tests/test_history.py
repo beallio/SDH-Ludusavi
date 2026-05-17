@@ -76,25 +76,6 @@ def test_history_global_auto_sync_disabled_no_history(tmp_path: Path) -> None:
     assert "Hades" not in refresh["history"] or refresh["history"]["Hades"]["last_skip"] is None
 
 
-def test_history_auto_exit_skip_records_last_skip(tmp_path: Path) -> None:
-    class FakeAdapterNoBackup(FakeAdapter):
-        def backup(self, game_name: str) -> dict[str, object]:
-            return {"ok": False, "game": game_name, "error": "some_error"}
-
-    service = service_with_state(tmp_path, adapter=FakeAdapterNoBackup())
-    service.set_auto_sync_enabled(True)
-    service.refresh_games()
-
-    # FakeAdapterNoBackup will just error, but let's test a skip case.
-    # Auto-exit skip happens if auto-sync is disabled (tested above) or if unmatched.
-    # Wait, auto exit doesn't have a "local_current" check right now. It just backs up.
-    pass  # Wait, if auto exit backs up, when does it skip? Unmatched game skips, but we don't record unmatched.
-    # Is there a matched-game auto-exit skip? Yes, if it is matched but `auto_sync` is false (global), which we don't record.
-    # Actually, in service.py: `auto_sync_enabled` is checked first. Then `get_matched_game`.
-    # Wait, if `auto_sync_enabled` is false, it's checked globally. If matched, it's backed up.
-    # Does auto_exit skip? Let's check `service.py` later. If not, maybe we just test what we can.
-
-
 def test_history_game_scoped_failure_records_last_failure(tmp_path: Path) -> None:
     class ErrorAdapter(FakeAdapter):
         def backup(self, game_name: str) -> dict[str, object]:

@@ -228,6 +228,7 @@ def test_frontend_displays_durable_operation_history() -> None:
 
     assert "type GameOperationHistoryEntry = {" in source
     assert "type GameOperationHistory = {" in source
+    assert "last_operation: GameOperationHistoryEntry | null;" in source
     assert "history: Record<string, GameOperationHistory>;" in source
     assert (
         "const [gameHistory, setGameHistory] = useState<Record<string, GameOperationHistory>>({});"
