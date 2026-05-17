@@ -29,12 +29,17 @@ operation lock.
 Runtime state is stored as `sdh_ludusavi.json` in `DECKY_SETTINGS_DIR` when Decky
 provides that directory. If Decky does not provide it, the backend uses a private
 `0700` fallback under `DECKY_USER_HOME/.config/sdh-ludusavi/`, then the current user's
-home config directory if `DECKY_USER_HOME` is unavailable. The persisted JSON schema is
-unchanged:
+home config directory if `DECKY_USER_HOME` is unavailable.
 
-```json
-{"auto_sync_enabled": true}
-```
+The persisted state includes settings, cached game metadata, Steam app membership
+metadata, and a backend-owned Ludusavi config modification marker. The cache is valid
+for fast QAM open only when the Steam app marker and Ludusavi config marker still match
+the current runtime state. The Ludusavi marker is based on the active config file's
+`st_mtime_ns` value from `pyludusavi.Ludusavi.config_path()`.
+
+External backup status changes are not cache invalidators. Backup and restore operation
+paths must validate current Ludusavi state before acting; stale backup-status display
+can be corrected by refresh.
 
 Empty, corrupt, unreadable, or non-object state files are ignored with a warning and
 default to `auto_sync_enabled: false`.

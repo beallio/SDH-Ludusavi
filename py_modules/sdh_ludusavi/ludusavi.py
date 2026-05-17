@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 import logging
 import os
+from pathlib import Path
 from typing import Any, cast
 
 
@@ -151,6 +152,13 @@ class PyludusaviAdapter:
             return self._client.log_show()
         except Exception:
             return ""
+
+    def get_config_mtime_ns(self) -> int | None:
+        try:
+            return Path(self._client.config_path()).stat().st_mtime_ns
+        except Exception:
+            LOGGER.debug("Unable to stat Ludusavi config path", exc_info=True)
+            return None
 
 
 def _games_from_output(output: Mapping[str, Any]) -> dict[str, dict[str, Any]]:

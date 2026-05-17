@@ -34,6 +34,7 @@ class FakeAdapter:
         self.restores: list[str] = []
         self.versions = {"ludusavi": "ludusavi 0.31.0", "rclone": "rclone v1.66.0"}
         self.refresh_error: Exception | None = None
+        self.config_mtime_ns: int | None = 100
 
     def refresh_statuses(self) -> list[dict[str, object]]:
         if self.refresh_error:
@@ -56,6 +57,9 @@ class FakeAdapter:
 
     def get_log_contents(self) -> str:
         return ""
+
+    def get_config_mtime_ns(self) -> int | None:
+        return self.config_mtime_ns
 
 
 def service_with_state(tmp_path: Path, adapter: FakeAdapter | None = None) -> SDHLudusaviService:
@@ -147,6 +151,7 @@ def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
         "aliases": {},
         "ids": {},
         "installed_app_ids": None,
+        "ludusavi_config_mtime_ns": None,
     }
 
 
@@ -422,6 +427,7 @@ def test_refresh_games_cache_invalidation_via_app_ids(tmp_path: Path) -> None:
                     }
                 ],
                 "installed_app_ids": "1,2,3",
+                "ludusavi_config_mtime_ns": 100,
             }
         )
     )
@@ -447,3 +453,72 @@ def test_refresh_games_cache_invalidation_via_app_ids(tmp_path: Path) -> None:
     adapter.refresh_error = RuntimeError("should not be called")
     result = service.refresh_games(force=False)
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
+
+
+def test_refresh_games_cache_invalidation_via_ludusavi_config_mtime(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "games": [
+                    {
+                        "name": "Ghost Game",
+                        "configured": True,
+                        "has_backup": False,
+                        "needs_first_backup": True,
+                    }
+                ],
+                "installed_app_ids": "1,2,3",
+                "ludusavi_config_mtime_ns": 100,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    adapter = FakeAdapter()
+    adapter.config_mtime_ns = 101
+    service = service_with_state(tmp_path, adapter)
+
+    result = service.refresh_games(force=False, installed_app_ids="1,2,3")
+
+    assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
+    assert service._installed_app_ids == "1,2,3"
+    assert service._ludusavi_config_mtime_ns == 101
+    saved_state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert saved_state["ludusavi_config_mtime_ns"] == 101
+
+
+def test_failed_refresh_does_not_persist_pending_cache_markers(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "games": [
+                    {
+                        "name": "Ghost Game",
+                        "configured": True,
+                        "has_backup": False,
+                        "needs_first_backup": True,
+                    }
+                ],
+                "installed_app_ids": "1,2,3",
+                "ludusavi_config_mtime_ns": 100,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    adapter = FakeAdapter()
+    adapter.config_mtime_ns = 101
+    adapter.refresh_error = RuntimeError("refresh failed")
+    service = service_with_state(tmp_path, adapter)
+
+    result = service.refresh_games(force=False, installed_app_ids="1,2,3,4")
+
+    assert result["dependency_error"] == "refresh failed"
+    assert service._installed_app_ids == "1,2,3"
+    assert service._ludusavi_config_mtime_ns == 100
+    assert service._pending_installed_app_ids is None
+    assert service._pending_ludusavi_config_mtime_ns is None

@@ -89,6 +89,8 @@ class LudusaviAdapter(Protocol):
 
     def get_log_contents(self) -> str: ...
 
+    def get_config_mtime_ns(self) -> int | None: ...
+
 
 @dataclass
 class GameStatus:
@@ -176,6 +178,8 @@ class SDHLudusaviService:
         self._versions: dict[str, str] | None = None
         self._installed_app_ids: str | None = None
         self._pending_installed_app_ids: str | None = None
+        self._ludusavi_config_mtime_ns: int | None = None
+        self._pending_ludusavi_config_mtime_ns: int | None = None
         self._operation = OperationState()
         self._operation_lock = threading.Lock()
         self._logs: deque[LogEntry] = deque(maxlen=log_limit)
@@ -307,12 +311,17 @@ class SDHLudusaviService:
 
         If force is False, returns the cached game list if available.
         """
+        config_mtime_ns = self._current_ludusavi_config_mtime_ns()
         needs_refresh = force or not self._games
 
         if not force and installed_app_ids is not None:
             if self._installed_app_ids != installed_app_ids:
                 needs_refresh = True
                 self.log("debug", "installed_app_ids changed, forcing refresh", "refresh")
+
+        if not force and self._ludusavi_config_mtime_ns != config_mtime_ns:
+            needs_refresh = True
+            self.log("debug", "Ludusavi config changed, forcing refresh", "refresh")
 
         if not needs_refresh:
             self.log("debug", "Returning cached game list", "refresh")
@@ -325,6 +334,7 @@ class SDHLudusaviService:
         self.log("debug", f"Forcing refresh_games (force={force})", "refresh")
         if installed_app_ids is not None:
             self._pending_installed_app_ids = installed_app_ids
+        self._pending_ludusavi_config_mtime_ns = config_mtime_ns
 
         try:
             games = self._run_locked("refresh", None, self._refresh_statuses_unlocked)
@@ -336,6 +346,8 @@ class SDHLudusaviService:
         except (
             Exception
         ) as exc:  # pragma: no cover - concrete exception types come from pyludusavi.
+            self._pending_installed_app_ids = None
+            self._pending_ludusavi_config_mtime_ns = None
             message = str(exc)
             return {
                 "games": self._cached_games(),
@@ -614,6 +626,9 @@ class SDHLudusaviService:
         self._ids = data.get("ids", {})
 
         self._installed_app_ids = data.get("installed_app_ids")
+        raw_config_mtime_ns = data.get("ludusavi_config_mtime_ns")
+        if isinstance(raw_config_mtime_ns, int):
+            self._ludusavi_config_mtime_ns = raw_config_mtime_ns
 
         self.log(
             "debug",
@@ -631,6 +646,7 @@ class SDHLudusaviService:
         data["aliases"] = self._aliases
         data["ids"] = self._ids
         data["installed_app_ids"] = self._installed_app_ids
+        data["ludusavi_config_mtime_ns"] = self._ludusavi_config_mtime_ns
 
         try:
             temp_path.write_text(
@@ -679,6 +695,8 @@ class SDHLudusaviService:
         if self._pending_installed_app_ids is not None:
             self._installed_app_ids = self._pending_installed_app_ids
             self._pending_installed_app_ids = None
+        self._ludusavi_config_mtime_ns = self._pending_ludusavi_config_mtime_ns
+        self._pending_ludusavi_config_mtime_ns = None
 
         self.log(
             "info",
@@ -835,6 +853,17 @@ class SDHLudusaviService:
         if self._adapter is None:
             self._adapter = self._adapter_factory()
         return self._adapter
+
+    def _current_ludusavi_config_mtime_ns(self) -> int | None:
+        try:
+            return self._ludusavi().get_config_mtime_ns()
+        except Exception as exc:
+            self.log(
+                "debug",
+                f"Unable to read Ludusavi config marker; preserving cached marker: {exc}",
+                "refresh",
+            )
+            return self._ludusavi_config_mtime_ns
 
 
 def _normalize(game_name: str) -> str:
