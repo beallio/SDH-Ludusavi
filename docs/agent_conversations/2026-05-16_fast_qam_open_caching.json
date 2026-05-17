@@ -1,0 +1,23 @@
+{
+  "date": "2026-05-16",
+  "task_objective": "Eliminate the unconditional 3-5 second Ludusavi refresh on the first Quick Access Menu (QAM) open after a Deck reboot by caching the installed Steam App IDs.",
+  "files_modified": [
+    "docs/plans/fast_qam_open_caching.md",
+    "py_modules/sdh_ludusavi/service.py",
+    "src/index.tsx",
+    "src/types/steam-globals.d.ts",
+    "tests/test_frontend_static.py",
+    "tests/test_service.py"
+  ],
+  "tests_added": [
+    "test_refresh_games_cache_invalidation_via_app_ids"
+  ],
+  "design_decisions": [
+    "Instead of using a generic hash, the frontend extracts the Steam App IDs using SteamClient.Apps.GetInstalledApps(), sorts them numerically, and passes them as a comma-separated string.",
+    "The backend stores this string in state.json as 'installed_app_ids'.",
+    "When refresh_games is called, if the provided installed_app_ids string matches the one in state.json, the backend instantly returns the cached game list.",
+    "If the installed_app_ids string differs, or if a manual refresh is requested, the backend performs a full ludusavi statuses refresh and updates the stored installed_app_ids.",
+    "The _refreshed_once property was completely removed from the Python backend, simplifying state management and allowing cache use on the very first boot."
+  ],
+  "results": "The QAM now opens instantly even on the first use after a system reboot, relying on the robust app ID tracking to invalidate the cache only when new games are installed or removed."
+}
