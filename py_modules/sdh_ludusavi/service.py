@@ -174,10 +174,11 @@ class SDHLudusaviService:
         self._aliases: dict[str, str] = {}
         self._ids: dict[str, str] = {}
         self._versions: dict[str, str] | None = None
+        self._installed_app_ids: str | None = None
+        self._pending_installed_app_ids: str | None = None
         self._operation = OperationState()
         self._operation_lock = threading.Lock()
         self._logs: deque[LogEntry] = deque(maxlen=log_limit)
-        self._refreshed_once = False
         self._setup_logging()
         self._load_state()
         self.log("info", "SDH-ludusavi service initialized", "init")
@@ -298,13 +299,22 @@ class SDHLudusaviService:
             self.log("error", f"Failed to discover Ludusavi command: {exc}")
             return None
 
-    def refresh_games(self, force: bool = False) -> dict[str, object]:
+    def refresh_games(
+        self, force: bool = False, installed_app_ids: str | None = None
+    ) -> dict[str, object]:
         """
         Refresh the list of games and their backup status from Ludusavi.
 
         If force is False, returns the cached game list if available.
         """
-        if not force and self._refreshed_once and self._games:
+        needs_refresh = force or not self._games
+
+        if not force and installed_app_ids is not None:
+            if self._installed_app_ids != installed_app_ids:
+                needs_refresh = True
+                self.log("debug", "installed_app_ids changed, forcing refresh", "refresh")
+
+        if not needs_refresh:
             self.log("debug", "Returning cached game list", "refresh")
             return {
                 "games": self._cached_games(),
@@ -313,6 +323,9 @@ class SDHLudusaviService:
             }
 
         self.log("debug", f"Forcing refresh_games (force={force})", "refresh")
+        if installed_app_ids is not None:
+            self._pending_installed_app_ids = installed_app_ids
+
         try:
             games = self._run_locked("refresh", None, self._refresh_statuses_unlocked)
             return {
@@ -600,6 +613,8 @@ class SDHLudusaviService:
         self._aliases = data.get("aliases", {})
         self._ids = data.get("ids", {})
 
+        self._installed_app_ids = data.get("installed_app_ids")
+
         self.log(
             "debug",
             f"Loaded state: auto_sync_enabled={self._auto_sync_enabled}, selected_game={self._selected_game}, {len(self._games)} games cached",
@@ -615,6 +630,7 @@ class SDHLudusaviService:
         data["games"] = [game.to_dict() for game in self._games.values()]
         data["aliases"] = self._aliases
         data["ids"] = self._ids
+        data["installed_app_ids"] = self._installed_app_ids
 
         try:
             temp_path.write_text(
@@ -659,7 +675,11 @@ class SDHLudusaviService:
         self._games = {game.name: game for game in games}
         self._aliases = getattr(self._ludusavi(), "get_aliases", lambda: {})()
         self._ids = {game.steam_id: game.name for game in games if game.steam_id}
-        self._refreshed_once = True
+
+        if self._pending_installed_app_ids is not None:
+            self._installed_app_ids = self._pending_installed_app_ids
+            self._pending_installed_app_ids = None
+
         self.log(
             "info",
             f"Refreshed {len(games)} Ludusavi games ({len(self._aliases)} aliases, {len(self._ids)} Steam IDs)",
@@ -691,7 +711,7 @@ class SDHLudusaviService:
         """
         game_name = self._sanitize_name(game_name)
         self.log("debug", f"Attempting to match '{game_name}' (app_id: {app_id})")
-        if not self._refreshed_once or not self._games:
+        if not self._games:
             self.log("debug", f"_match_game triggering refresh for {game_name}", "refresh")
             self._refresh_statuses_unlocked()
 

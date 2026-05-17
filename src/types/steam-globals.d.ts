@@ -21,6 +21,8 @@ export interface SteamClientGlobal {
     ): void | Promise<void>;
     SetCustomLogoPositionForApp?(appId: number, logoPosition: string): void | Promise<void>;
 
+    GetInstalledApps?(): any[] | Promise<any[]>;
+
     RunGame(
       gameId: SteamGameId,
       launchOptions: string,

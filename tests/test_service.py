@@ -146,6 +146,7 @@ def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
         "games": [],
         "aliases": {},
         "ids": {},
+        "installed_app_ids": None,
     }
 
 
@@ -406,8 +407,8 @@ def test_get_ludusavi_logs(tmp_path, monkeypatch):
     assert service.get_ludusavi_logs() == ""
 
 
-def test_refresh_games_forces_scan_first_time_per_session(tmp_path: Path) -> None:
-    # Setup cache with a "ghost" game
+def test_refresh_games_cache_invalidation_via_app_ids(tmp_path: Path) -> None:
+    # Setup cache with a "ghost" game and an initial app IDs string
     state_path = tmp_path / "state.json"
     state_path.write_text(
         json.dumps(
@@ -419,7 +420,8 @@ def test_refresh_games_forces_scan_first_time_per_session(tmp_path: Path) -> Non
                         "has_backup": False,
                         "needs_first_backup": True,
                     }
-                ]
+                ],
+                "installed_app_ids": "1,2,3",
             }
         )
     )
@@ -429,17 +431,19 @@ def test_refresh_games_forces_scan_first_time_per_session(tmp_path: Path) -> Non
 
     # Ensure cache is loaded
     assert "Ghost Game" in service._games
-    assert service._refreshed_once is False
 
-    # First call (even with force=False) should trigger a scan and clear the ghost game
-    # FakeAdapter only returns Hades and Celeste
-    result = service.refresh_games(force=False)
+    # Call with the same installed_app_ids should use the cache
+    adapter.refresh_error = RuntimeError("should not be called")
+    result = service.refresh_games(force=False, installed_app_ids="1,2,3")
+    assert [g["name"] for g in result["games"]] == ["Ghost Game"]
 
+    # Call with a DIFFERENT installed_app_ids should invalidate cache and trigger scan
+    adapter.refresh_error = None  # allow it to succeed
+    result = service.refresh_games(force=False, installed_app_ids="1,2,3,4")
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
-    assert "Ghost Game" not in service._games
-    assert service._refreshed_once is True
+    assert service._installed_app_ids == "1,2,3,4"
 
-    # Second call uses cache (we can verify this by temporarily failing the adapter)
+    # Call with NO installed_app_ids should also trigger scan if cache was empty, but since it's populated it will just use cache
     adapter.refresh_error = RuntimeError("should not be called")
     result = service.refresh_games(force=False)
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]

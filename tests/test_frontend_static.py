@@ -199,7 +199,7 @@ def test_frontend_models_rpc_status_results_for_call_wrapped_methods() -> None:
     assert "type RpcStatus = {" in source
     assert "type RpcResult<T> = T | RpcStatus;" in source
     assert (
-        'const refreshGamesCall = callable<[force: boolean], RpcResult<RefreshResult>>("refresh_games");'
+        'const refreshGamesCall = callable<[force: boolean, installed_app_ids?: string], RpcResult<RefreshResult>>("refresh_games");'
         in source
     )
     assert 'const getVersions = callable<[], RpcResult<Versions>>("get_versions");' in source

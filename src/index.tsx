@@ -106,7 +106,7 @@ type LudusaviLogModalProps = {
 const getSettings = callable<[], Settings>("get_settings");
 const setAutoSyncEnabled = callable<[enabled: boolean], Settings>("set_auto_sync_enabled");
 const setSelectedGameCall = callable<[gameName: string], Settings>("set_selected_game");
-const refreshGamesCall = callable<[force: boolean], RpcResult<RefreshResult>>("refresh_games");
+const refreshGamesCall = callable<[force: boolean, installed_app_ids?: string], RpcResult<RefreshResult>>("refresh_games");
 const forceBackupCall = callable<[gameName: string], RpcResult<OperationResult>>("force_backup");
 const forceRestoreCall = callable<[gameName: string], RpcResult<OperationResult>>("force_restore");
 const getVersions = callable<[], RpcResult<Versions>>("get_versions");
@@ -117,6 +117,28 @@ const logCall = callable<[level: string, message: string, operation?: string, ga
 const getLudusaviCommandCall = callable<[], LudusaviLaunchCommand | null>("get_ludusavi_command");
 const handleGameStartCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("handle_game_start");
 const handleGameExitCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("handle_game_exit");
+
+const getInstalledAppIdsString = async (): Promise<string | undefined> => {
+  try {
+    const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
+    if (!steamClient?.Apps?.GetInstalledApps) {
+      return undefined;
+    }
+    const appsResult = steamClient.Apps.GetInstalledApps();
+    const apps = appsResult instanceof Promise ? await appsResult : appsResult;
+    
+    if (!Array.isArray(apps)) return undefined;
+    
+    const appIds = apps
+      .map((app: any) => parseInt(app?.appid ?? app?.nAppID ?? app?.unAppID ?? app?.id, 10))
+      .filter((id: number) => !isNaN(id));
+      
+    appIds.sort((a, b) => a - b);
+    return appIds.join(",");
+  } catch (err) {
+    return undefined;
+  }
+};
 
 const log = (level: "info" | "debug" | "warning" | "error", message: string, operation?: string, gameName?: string) => {
   const prefix = `SDH-ludusavi${operation ? `:${operation}` : ""}${gameName ? ` [${gameName}]` : ""}`;
@@ -299,7 +321,8 @@ function Content() {
       setLudusaviCommand(loadedCommand);
 
       log("debug", "Initializing game list (cached)");
-      const refreshed = await refreshGamesCall(false);
+      const installedAppIds = await getInstalledAppIdsString();
+      const refreshed = await refreshGamesCall(false, installedAppIds);
       applyRefreshResult(refreshed, loadedSettings.selected_game);
 
       const loadedOperation = await getOperationStatus();
@@ -364,7 +387,8 @@ function Content() {
     log("info", "Manual refresh triggered");
     setBusyLabel("Refreshing games");
     try {
-      const result = await refreshGamesCall(true);
+      const installedAppIds = await getInstalledAppIdsString();
+      const result = await refreshGamesCall(true, installedAppIds);
       if (applyRefreshResult(result)) {
         setOperation(await getOperationStatus());
         setLogs(await getRecentLogs());
