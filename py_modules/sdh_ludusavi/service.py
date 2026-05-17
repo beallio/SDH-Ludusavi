@@ -182,6 +182,7 @@ class SDHLudusaviService:
         self._versions: dict[str, str] | None = None
         self._installed_app_ids: str | None = None
         self._ludusavi_config_mtime_ns: int | None = None
+        self._game_history: dict[str, dict[str, Any]] = {}
         self._operation = OperationState()
         self._operation_lock = threading.Lock()
         self._logs: deque[LogEntry] = deque(maxlen=log_limit)
@@ -305,6 +306,44 @@ class SDHLudusaviService:
             self.log("error", f"Failed to discover Ludusavi command: {exc}")
             return None
 
+    def _record_history(
+        self,
+        game_name: str,
+        operation: str,
+        trigger: str,
+        status: str,
+        reason: str | None = None,
+        message: str | None = None,
+    ) -> None:
+        """Record a history entry for a specific game and persist state."""
+        entry = {
+            "operation": operation,
+            "trigger": trigger,
+            "status": status,
+            "reason": reason,
+            "message": message,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        if game_name not in self._game_history:
+            self._game_history[game_name] = {
+                "last_backup": None,
+                "last_restore": None,
+                "last_skip": None,
+                "last_failure": None,
+            }
+
+        if status == "backed_up":
+            field = "last_backup"
+        elif status == "restored":
+            field = "last_restore"
+        elif status == "failed":
+            field = "last_failure"
+        else:
+            field = "last_skip"
+
+        self._game_history[game_name][field] = entry
+        self._save_state()
+
     def refresh_games(
         self, force: bool = False, installed_app_ids: str | None = None
     ) -> dict[str, object]:
@@ -338,6 +377,7 @@ class SDHLudusaviService:
             return {
                 "games": self._cached_games(),
                 "aliases": self._aliases,
+                "history": self._game_history,
                 "dependency_error": None,
             }
 
@@ -355,6 +395,7 @@ class SDHLudusaviService:
             return {
                 "games": [game.to_dict() for game in games],
                 "aliases": self._aliases,
+                "history": self._game_history,
                 "dependency_error": None,
             }
         except (
@@ -364,6 +405,7 @@ class SDHLudusaviService:
             return {
                 "games": self._cached_games(),
                 "aliases": self._aliases,
+                "history": self._game_history,
                 "dependency_error": message,
             }
 
@@ -416,12 +458,17 @@ class SDHLudusaviService:
         self.log("info", f"Recency check result for {game.name}: {recency}", "start", game.name)
 
         if recency == "backup_newer":
-            result = self._run_locked(
-                "restore",
-                game.name,
-                lambda: self._ludusavi().restore(game.name),
-            )
+            try:
+                result = self._run_locked(
+                    "restore",
+                    game.name,
+                    lambda: self._ludusavi().restore(game.name),
+                )
+            except Exception as exc:
+                self._record_history(game.name, "restore", "auto_start", "failed", message=str(exc))
+                raise
             self.log("info", f"Restored {game.name} before launch", "restore", game.name)
+            self._record_history(game.name, "restore", "auto_start", "restored")
             return {"status": "restored", "game": game.name, "result": result}
         if recency == "local_current":
             return self._skip("start", game.name, "local_current")
@@ -518,9 +565,16 @@ class SDHLudusaviService:
             # If preview fails, we skip to avoid potentially invalid or redundant backup attempts.
             return self._skip("exit", game.name, "preview_failed")
 
-        result = self._run_locked("backup", game.name, lambda: self._ludusavi().backup(game.name))
+        try:
+            result = self._run_locked(
+                "backup", game.name, lambda: self._ludusavi().backup(game.name)
+            )
+        except Exception as exc:
+            self._record_history(game.name, "backup", "auto_exit", "failed", message=str(exc))
+            raise
         self._refresh_statuses_unlocked()
         self.log("info", f"Backed up {game.name} after exit", "backup", game.name)
+        self._record_history(game.name, "backup", "auto_exit", "backed_up")
         return {"status": "backed_up", "game": game.name, "result": result}
 
     def force_backup(self, game_name: str) -> dict[str, object]:
@@ -531,9 +585,16 @@ class SDHLudusaviService:
             self.log("debug", "Skipping: game not found in Ludusavi list", "backup", game_name)
             return self._skip("backup", game_name, "unmatched_game")
 
-        result = self._run_locked("backup", game.name, lambda: self._ludusavi().backup(game.name))
+        try:
+            result = self._run_locked(
+                "backup", game.name, lambda: self._ludusavi().backup(game.name)
+            )
+        except Exception as exc:
+            self._record_history(game.name, "backup", "manual_backup", "failed", message=str(exc))
+            raise
         self._refresh_statuses_unlocked()
         self.log("info", f"Backed up {game.name}", "backup", game.name)
+        self._record_history(game.name, "backup", "manual_backup", "backed_up")
         return {"status": "backed_up", "game": game.name, "result": result}
 
     def force_restore(self, game_name: str) -> dict[str, object]:
@@ -547,8 +608,15 @@ class SDHLudusaviService:
             self.log("debug", "Skipping: game has no backup to restore", "restore", game.name)
             return self._skip("restore", game.name, "no_backup")
 
-        result = self._run_locked("restore", game.name, lambda: self._ludusavi().restore(game.name))
+        try:
+            result = self._run_locked(
+                "restore", game.name, lambda: self._ludusavi().restore(game.name)
+            )
+        except Exception as exc:
+            self._record_history(game.name, "restore", "manual_restore", "failed", message=str(exc))
+            raise
         self.log("info", f"Restored {game.name}", "restore", game.name)
+        self._record_history(game.name, "restore", "manual_restore", "restored")
         return {"status": "restored", "game": game.name, "result": result}
 
     def get_versions(self) -> dict[str, str]:
@@ -642,6 +710,20 @@ class SDHLudusaviService:
         if isinstance(raw_config_mtime_ns, int):
             self._ludusavi_config_mtime_ns = raw_config_mtime_ns
 
+        raw_history = data.get("game_history", {})
+        if isinstance(raw_history, dict):
+            self._game_history = {}
+            for game_name, history in raw_history.items():
+                if not isinstance(history, dict):
+                    continue
+
+                # Sanitize inner fields: each must be a dict or None
+                validated_history = {}
+                for field in ("last_backup", "last_restore", "last_skip", "last_failure"):
+                    val = history.get(field)
+                    validated_history[field] = val if isinstance(val, dict) else None
+                self._game_history[str(game_name)] = validated_history
+
         self.log(
             "debug",
             f"Loaded state: auto_sync_enabled={self._auto_sync_enabled}, selected_game={self._selected_game}, {len(self._games)} games cached",
@@ -659,6 +741,7 @@ class SDHLudusaviService:
         data["ids"] = self._ids
         data["installed_app_ids"] = self._installed_app_ids
         data["ludusavi_config_mtime_ns"] = self._ludusavi_config_mtime_ns
+        data["game_history"] = self._game_history
 
         try:
             temp_path.write_text(
@@ -826,6 +909,18 @@ class SDHLudusaviService:
     def _skip(self, operation: str, game_name: str, reason: str) -> dict[str, object]:
         """Record a skipped operation status."""
         self.log("info", f"Skipped {operation} for {game_name}: {reason}", operation, game_name)
+
+        if reason not in ("auto_sync_disabled", "operation_running", "unmatched_game"):
+            if operation in ("backup", "restore"):
+                trigger = f"manual_{operation}"
+            elif operation == "start":
+                trigger = "auto_start"
+            elif operation == "exit":
+                trigger = "auto_exit"
+            else:
+                trigger = "unknown"
+            self._record_history(game_name, operation, trigger, "skipped", reason=reason)
+
         return {"status": "skipped", "game": game_name, "reason": reason}
 
     def log(

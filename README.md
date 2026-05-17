@@ -154,6 +154,13 @@ Skip reasons:
 - `local_current`: On game start, Ludusavi data indicated the local save is already current.
 - `ambiguous_recency`: On game start, the plugin could not prove that the backup is newer than the local save, so it skipped automatic restore.
 
+Durable History entries:
+
+- `last_backup`: The latest successful backup for the game.
+- `last_restore`: The latest successful restore for the game.
+- `last_skip`: The latest intentional skip for the game (e.g., local files already current).
+- `last_failure`: The latest game-scoped exception during a backup or restore.
+
 Operation status fields:
 
 - `is_running`: `true` while the global operation lock is held.

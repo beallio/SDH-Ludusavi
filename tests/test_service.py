@@ -114,6 +114,7 @@ def test_refresh_reports_ludusavi_adapter_initialization_failure(tmp_path: Path)
     assert result == {
         "games": [],
         "aliases": {},
+        "history": {},
         "dependency_error": "Ludusavi Flatpak is not available to Decky",
     }
     assert service.get_recent_logs()[-1]["level"] == "error"
@@ -198,6 +199,7 @@ def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
         "ids": {},
         "installed_app_ids": None,
         "ludusavi_config_mtime_ns": None,
+        "game_history": {},
     }
 
 

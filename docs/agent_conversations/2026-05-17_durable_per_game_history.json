@@ -1,0 +1,23 @@
+{
+  "date": "2026-05-17",
+  "task_objective": "Implement durable per-game operation history",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/service.py",
+    "src/index.tsx",
+    "tests/test_service.py",
+    "tests/test_frontend_static.py",
+    "README.md"
+  ],
+  "tests_added": [
+    "tests/test_history.py",
+    "tests/test_frontend_static.py (new case)"
+  ],
+  "design_decisions": [
+    "Added `_game_history` to backend state, persisting last backup, restore, skip, and failure per game.",
+    "Updated `refresh_games` to return history in all result payloads.",
+    "Added `gameHistory` state to frontend and rendered a compact 'Last Operation' row for the selected game.",
+    "Implemented robust history loading and sanitization to handle malformed state.",
+    "Used `_record_history` helper to centralize history updates and persistence."
+  ],
+  "results": "All 140 tests passing (including 12 new history tests). Backend and frontend successfully integrated. UI shows compact history row."
+}

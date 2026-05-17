@@ -221,3 +221,17 @@ def test_frontend_guards_refresh_and_version_rpc_status_payloads() -> None:
     assert "if (isRpcStatus(result))" in source
     assert 'logRpcStatus(result, "refresh")' in source
     assert 'logRpcStatus(loadedVersions, "versions")' in source
+
+
+def test_frontend_displays_durable_operation_history() -> None:
+    source = FRONTEND.read_text()
+
+    assert "type GameOperationHistoryEntry = {" in source
+    assert "type GameOperationHistory = {" in source
+    assert "history: Record<string, GameOperationHistory>;" in source
+    assert (
+        "const [gameHistory, setGameHistory] = useState<Record<string, GameOperationHistory>>({});"
+        in source
+    )
+    assert "setGameHistory(result.history ?? {});" in source
+    assert "Last Operation:" in source

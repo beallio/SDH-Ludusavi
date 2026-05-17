@@ -27,6 +27,22 @@ type Settings = {
   selected_game: string;
 };
 
+type GameOperationHistoryEntry = {
+  operation: "backup" | "restore" | "start" | "exit";
+  trigger: "manual_backup" | "manual_restore" | "auto_start" | "auto_exit";
+  status: "backed_up" | "restored" | "skipped" | "failed";
+  reason: string | null;
+  message: string | null;
+  timestamp: string;
+};
+
+type GameOperationHistory = {
+  last_backup: GameOperationHistoryEntry | null;
+  last_restore: GameOperationHistoryEntry | null;
+  last_skip: GameOperationHistoryEntry | null;
+  last_failure: GameOperationHistoryEntry | null;
+};
+
 type GameStatus = {
   name: string;
   configured: boolean;
@@ -39,6 +55,7 @@ type GameStatus = {
 type RefreshResult = {
   games: GameStatus[];
   aliases: Record<string, string>;
+  history: Record<string, GameOperationHistory>;
   dependency_error: string | null;
 };
 
@@ -268,6 +285,7 @@ function logRpcStatus(result: RpcStatus, operation: string) {
 function Content() {
   const [settings, setSettings] = useState<Settings>({ auto_sync_enabled: false, selected_game: "" });
   const [games, setGames] = useState<GameStatus[]>([]);
+  const [gameHistory, setGameHistory] = useState<Record<string, GameOperationHistory>>({});
   const [selectedGame, setSelectedGame] = useState("");
   const [versions, setVersions] = useState<Versions>({});
   const [operation, setOperation] = useState<OperationStatus>({
@@ -285,6 +303,11 @@ function Content() {
     () => games.find((game) => game.name === selectedGame) ?? null,
     [games, selectedGame]
   );
+  const selectedHistory = useMemo(() => {
+    const history = gameHistory[selectedGame];
+    if (!history) return null;
+    return history.last_failure || history.last_backup || history.last_restore || history.last_skip;
+  }, [gameHistory, selectedGame]);
   const isBusy = operation.is_running || busyLabel !== null;
 
   useEffect(() => {
@@ -356,6 +379,7 @@ function Content() {
 
     log("debug", `Applying refresh result (${result.games.length} games, ${Object.keys(result.aliases || {}).length} aliases)`);
     setGames(result.games);
+    setGameHistory(result.history ?? {});
     
     // Update global tracking sets for toast filtering
     trackedAppIDs = new Set(result.games.map(g => (g as any).steam_id).filter(id => !!id) as string[]);
@@ -537,6 +561,27 @@ function Content() {
             )}
           </div>
         </PanelSectionRow>
+
+        {selectedHistory && !isBusy && (
+          <PanelSectionRow>
+            <div style={{ display: "flex", justifyContent: "space-between", color: "#94a3b8", fontSize: "12px", padding: "0 4px", opacity: 0.8, marginBottom: "8px" }}>
+              <div style={{ fontWeight: "bold" }}>Last Operation:</div>
+              <div style={{ textAlign: "right" }}>
+                <span style={{ 
+                  color: selectedHistory.status === "failed" ? "#f87171" : "#94a3b8" 
+                }}>
+                  {selectedHistory.status === "failed" ? "Failed" : 
+                   selectedHistory.status === "backed_up" ? "Backed up" :
+                   selectedHistory.status === "restored" ? "Restored" :
+                   `Skipped${selectedHistory.reason ? ` (${selectedHistory.reason.replace(/_/g, " ")})` : ""}`}
+                </span>
+                <span style={{ marginLeft: "8px", fontSize: "10px", opacity: 0.6 }}>
+                  {selectedHistory.timestamp.split(" ")[1]}
+                </span>
+              </div>
+            </div>
+          </PanelSectionRow>
+        )}
 
         <PanelSectionRow>
           <SpinnerButton 
