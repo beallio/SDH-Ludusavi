@@ -67,8 +67,12 @@ class Plugin:
         """
         self._service().log(level, message, operation, game_name)
 
-    async def refresh_games(self, force: bool = False) -> dict[str, object]:
-        return await self._call("refresh_games", lambda: self._service().refresh_games(force))
+    async def refresh_games(
+        self, force: bool = False, installed_app_ids: str | None = None
+    ) -> dict[str, object]:
+        return await self._call(
+            "refresh_games", lambda: self._service().refresh_games(force, installed_app_ids)
+        )
 
     async def handle_game_start(
         self, game_name: str, app_id: str | None = None
