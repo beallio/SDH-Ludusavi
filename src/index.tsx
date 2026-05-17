@@ -57,6 +57,17 @@ type OperationResult = {
   message?: string;
 };
 
+type AppLifetimeNotification = {
+  unAppID: number;
+  nInstanceID: number;
+  bRunning: boolean;
+};
+
+type RunningSession = {
+  appID: string;
+  name: string;
+};
+
 type RpcStatus = {
   status: "skipped" | "failed";
   reason?: string;
@@ -657,8 +668,11 @@ function LudusaviPanel({
 export default definePlugin(() => {
   console.log("SDH-ludusavi plugin initializing");
 
-  let previousAppID: string | null = null;
-  let previousAppName: string | null = null;
+  const activeSessions = new Map<number, RunningSession>();
+  let fallbackIntervalID: number | null = null;
+  let fallbackPreviousAppID: string | null = null;
+  let fallbackPreviousAppName: string | null = null;
+  let lifecycleRegistration: unknown = null;
 
   const isTracked = (name: string, appID: string) => {
     if (trackedAppIDs.has(appID)) {
@@ -728,30 +742,195 @@ export default definePlugin(() => {
     }
   };
 
+  const sessionFromAppOverview = (app: any): RunningSession | null => {
+    const appID = app?.appid ? String(app.appid) : null;
+    const name = app?.display_name || null;
+    if (!appID || !name) {
+      return null;
+    }
+    return { appID, name };
+  };
+
+  const getMainRunningSession = (): RunningSession | null => {
+    return sessionFromAppOverview((Router as any).MainRunningApp);
+  };
+
+  const findRunningSessionByAppID = (appID: string): RunningSession | null => {
+    // Router.RunningApps lets Steam app lifetime events recover the display name.
+    const runningApps = (Router as any).RunningApps;
+    if (Array.isArray(runningApps)) {
+      for (const app of runningApps) {
+        const session = sessionFromAppOverview(app);
+        if (session?.appID === appID) {
+          return session;
+        }
+      }
+    }
+
+    const mainSession = getMainRunningSession();
+    if (mainSession?.appID === appID) {
+      return mainSession;
+    }
+
+    return null;
+  };
+
+  const findStartupSession = (notification: AppLifetimeNotification): RunningSession | null => {
+    const startupSession = activeSessions.get(-1) ?? null;
+    if (!startupSession) {
+      return null;
+    }
+    if (notification.unAppID === 0 || startupSession.appID === String(notification.unAppID)) {
+      return startupSession;
+    }
+    return null;
+  };
+
+  const resolveLifetimeSession = (notification: AppLifetimeNotification): RunningSession | null => {
+    const existingSession = activeSessions.get(notification.nInstanceID);
+    if (existingSession) {
+      return existingSession;
+    }
+
+    if (!notification.bRunning) {
+      const startupSession = findStartupSession(notification);
+      if (startupSession) {
+        return startupSession;
+      }
+    }
+
+    if (notification.unAppID > 0) {
+      const appID = String(notification.unAppID);
+      const runningSession = findRunningSessionByAppID(appID);
+      if (runningSession) {
+        return runningSession;
+      }
+      return { appID, name: "" };
+    }
+
+    // unAppID may be 0 for non-Steam shortcuts, so fall back to Router state.
+    return getMainRunningSession();
+  };
+
+  const handleLifetimeNotification = (notification: AppLifetimeNotification) => {
+    try {
+      const session = resolveLifetimeSession(notification);
+      if (!session?.name) {
+        log(
+          "warning",
+          `Could not resolve app lifetime notification: ${JSON.stringify(notification)}`,
+          "lifecycle"
+        );
+        return;
+      }
+
+      if (notification.bRunning) {
+        const startupSession = findStartupSession(notification);
+        if (startupSession?.appID === session.appID) {
+          activeSessions.delete(-1);
+          activeSessions.set(notification.nInstanceID, session);
+          log(
+            "debug",
+            `Promoted startup session for ${session.name} (${session.appID})`,
+            "lifecycle",
+            session.name
+          );
+          return;
+        }
+
+        if (activeSessions.has(notification.nInstanceID)) {
+          log(
+            "debug",
+            `Duplicate app start ignored for ${session.name} (${session.appID})`,
+            "lifecycle",
+            session.name
+          );
+          return;
+        }
+
+        activeSessions.set(notification.nInstanceID, session);
+        void handleAppStart(session.name, session.appID);
+        return;
+      }
+
+      activeSessions.delete(notification.nInstanceID);
+      const startupSession = activeSessions.get(-1);
+      if (startupSession?.appID === session.appID) {
+        activeSessions.delete(-1);
+      }
+      void handleAppExit(session.name, session.appID);
+    } catch (err) {
+      console.error("SDH-ludusavi: app lifetime notification failed", err);
+    }
+  };
+
   const checkMainApp = () => {
     try {
       const mainApp = (Router as any).MainRunningApp;
       const currentAppID = mainApp?.appid ? String(mainApp.appid) : null;
       const currentAppName = mainApp?.display_name || null;
 
-      if (currentAppID !== previousAppID) {
+      if (currentAppID !== fallbackPreviousAppID) {
         // Change detected
-        if (previousAppID && previousAppName) {
-          void handleAppExit(previousAppName, previousAppID);
+        if (fallbackPreviousAppID && fallbackPreviousAppName) {
+          void handleAppExit(fallbackPreviousAppName, fallbackPreviousAppID);
         }
         if (currentAppID && currentAppName) {
           void handleAppStart(currentAppName, currentAppID);
         }
         
-        previousAppID = currentAppID;
-        previousAppName = currentAppName;
+        fallbackPreviousAppID = currentAppID;
+        fallbackPreviousAppName = currentAppName;
       }
     } catch (err) {
       console.error("SDH-ludusavi: watcher loop failed", err);
     }
   };
 
-  const intervalID = window.setInterval(checkMainApp, 1000);
+  const startFallbackPolling = () => {
+    log("warning", "Steam app lifetime notifications unavailable; using Router polling", "lifecycle");
+    fallbackIntervalID = window.setInterval(checkMainApp, 1000);
+  };
+
+  const reconcileStartupSession = () => {
+    const session = getMainRunningSession();
+    if (!session) {
+      return;
+    }
+
+    activeSessions.set(-1, session);
+    void handleAppStart(session.name, session.appID);
+  };
+
+  const unregisterLifecycleNotifications = () => {
+    const registration = lifecycleRegistration as
+      | { unregister?: () => void; Unregister?: () => void }
+      | (() => void)
+      | null;
+    if (!registration) {
+      return;
+    }
+
+    if (typeof registration === "function") {
+      registration();
+    } else if (typeof registration.unregister === "function") {
+      registration.unregister();
+    } else if (typeof registration.Unregister === "function") {
+      registration.Unregister();
+    }
+  };
+
+  const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
+  const gameSessions = steamClient?.GameSessions;
+  const registerLifetime = gameSessions?.RegisterForAppLifetimeNotifications;
+  if (typeof registerLifetime === "function") {
+    lifecycleRegistration = registerLifetime.call(gameSessions, (notification: AppLifetimeNotification) => {
+      handleLifetimeNotification(notification);
+    });
+    reconcileStartupSession();
+  } else {
+    startFallbackPolling();
+  }
 
   return {
     name: "SDH-ludusavi",
@@ -759,7 +938,11 @@ export default definePlugin(() => {
     content: <Content />,
     icon: <LuDatabaseBackup />,
     onDismount() {
-      window.clearInterval(intervalID);
+      unregisterLifecycleNotifications();
+      if (fallbackIntervalID !== null) {
+        window.clearInterval(fallbackIntervalID);
+      }
+      activeSessions.clear();
       console.log("SDH-ludusavi unloading");
     },
   };

@@ -84,6 +84,45 @@ def test_frontend_silences_lifecycle_toasts_when_auto_sync_is_disabled() -> None
     )
 
 
+def test_frontend_uses_app_lifetime_notifications_for_lifecycle_detection() -> None:
+    source = FRONTEND.read_text()
+
+    assert "RegisterForAppLifetimeNotifications" in source
+    assert "RegisterForGameActionEnd" not in source
+    assert "type AppLifetimeNotification" in source
+    assert "type RunningSession" in source
+    assert "const activeSessions = new Map<number, RunningSession>();" in source
+    assert "notification.nInstanceID" in source
+    assert "notification.bRunning" in source
+    assert "handleLifetimeNotification" in source
+    assert "void handleAppStart(session.name, session.appID);" in source
+    assert "void handleAppExit(session.name, session.appID);" in source
+
+
+def test_frontend_lifecycle_polling_is_fallback_only() -> None:
+    source = FRONTEND.read_text()
+
+    assert "startFallbackPolling" in source
+    assert "RegisterForAppLifetimeNotifications" in source
+    assert "registerLifetime" in source
+    assert 'if (typeof registerLifetime === "function")' in source
+    assert "window.setInterval(checkMainApp, 1000)" in source
+    assert source.index("window.setInterval(checkMainApp, 1000)") > source.index(
+        "const startFallbackPolling = () => {"
+    )
+    assert "const intervalID = window.setInterval(checkMainApp, 1000);" not in source
+
+
+def test_frontend_lifecycle_resolution_handles_non_steam_shortcuts() -> None:
+    source = FRONTEND.read_text()
+
+    assert "notification.unAppID > 0" in source
+    assert "Router.RunningApps" in source
+    assert "unAppID may be 0 for non-Steam shortcuts" in source
+    assert "resolveLifetimeSession" in source
+    assert "activeSessions.get(notification.nInstanceID)" in source
+
+
 def test_frontend_initial_load_fetches_logs_after_refresh() -> None:
     source = FRONTEND.read_text()
 
