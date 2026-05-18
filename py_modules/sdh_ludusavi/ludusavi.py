@@ -46,6 +46,7 @@ class PyludusaviAdapter:
         env = _ludusavi_env()
         LOGGER.debug("Using Ludusavi environment overrides: %s", env)
         self._client = Ludusavi(flatpak_id=flatpak_id, env=env)
+        self._cached_config_path: str | None = None
 
     def refresh_statuses(self) -> list[dict[str, object]]:
         preview = self._client.backup(preview=True).data
@@ -148,16 +149,17 @@ class PyludusaviAdapter:
         }
 
     def get_log_contents(self) -> str:
-        try:
-            return self._client.log_show()
-        except Exception:
-            return ""
+        return self._client.log_show()
 
     def get_config_mtime_ns(self) -> int | None:
         try:
-            return Path(self._client.config_path()).stat().st_mtime_ns
+            if self._cached_config_path is None:
+                self._cached_config_path = self._client.config_path()
+            return Path(self._cached_config_path).stat().st_mtime_ns
         except Exception:
-            LOGGER.debug("Unable to stat Ludusavi config path", exc_info=True)
+            LOGGER.debug(
+                "Unable to stat Ludusavi config path: %s", self._cached_config_path, exc_info=True
+            )
             return None
 
 

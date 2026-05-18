@@ -64,7 +64,7 @@ def test_frontend_silences_lifecycle_toasts_when_auto_sync_is_disabled() -> None
 
     assert "let autoSyncNotificationsEnabled = false;" in source
     assert "autoSyncNotificationsEnabled = loadedSettings.auto_sync_enabled;" in source
-    assert "autoSyncNotificationsEnabled = updated.auto_sync_enabled;" in source
+    assert "autoSyncNotificationsEnabled = result.auto_sync_enabled;" in source
     assert source.count("if (tracked && autoSyncNotificationsEnabled)") == 2
 
     start_toast = (
@@ -231,7 +231,7 @@ def test_frontend_displays_durable_operation_history() -> None:
     assert "last_operation: GameOperationHistoryEntry | null;" in source
     assert "history: Record<string, GameOperationHistory>;" in source
     assert (
-        "const [gameHistory, setGameHistory] = useState<Record<string, GameOperationHistory>>({});"
+        "const [gameHistory, setGameHistory] = useState<Record<string, GameOperationHistory>>(globalGameHistory ?? {});"
         in source
     )
     assert "setGameHistory(result.history ?? {});" in source

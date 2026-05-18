@@ -121,18 +121,18 @@ type LudusaviLogModalProps = {
   closeModal?: () => void;
 };
 
-const getSettings = callable<[], Settings>("get_settings");
-const setAutoSyncEnabled = callable<[enabled: boolean], Settings>("set_auto_sync_enabled");
-const setSelectedGameCall = callable<[gameName: string], Settings>("set_selected_game");
+const getSettings = callable<[], RpcResult<Settings>>("get_settings");
+const setAutoSyncEnabled = callable<[enabled: boolean], RpcResult<Settings>>("set_auto_sync_enabled");
+const setSelectedGameCall = callable<[gameName: string], RpcResult<Settings>>("set_selected_game");
 const refreshGamesCall = callable<[force: boolean, installed_app_ids?: string], RpcResult<RefreshResult>>("refresh_games");
 const forceBackupCall = callable<[gameName: string], RpcResult<OperationResult>>("force_backup");
 const forceRestoreCall = callable<[gameName: string], RpcResult<OperationResult>>("force_restore");
 const getVersions = callable<[], RpcResult<Versions>>("get_versions");
 const getOperationStatus = callable<[], OperationStatus>("get_operation_status");
 const getRecentLogs = callable<[], LogEntry[]>("get_recent_logs");
-const getLudusaviLogs = callable<[], string>("get_ludusavi_logs");
+const getLudusaviLogs = callable<[], RpcResult<string>>("get_ludusavi_logs");
 const logCall = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
-const getLudusaviCommandCall = callable<[], LudusaviLaunchCommand | null>("get_ludusavi_command");
+const getLudusaviCommandCall = callable<[], RpcResult<LudusaviLaunchCommand | null>>("get_ludusavi_command");
 const handleGameStartCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("handle_game_start");
 const handleGameExitCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("handle_game_exit");
 
@@ -241,7 +241,6 @@ function LudusaviLogModal({ logs, closeModal }: LudusaviLogModalProps) {
 
 let trackedAppIDs = new Set<string>();
 let trackedNames = new Set<string>();
-let cachedLudusaviCommand: LudusaviLaunchCommand | null = null;
 let autoSyncNotificationsEnabled = false;
 
 /** Normalize a game name for fuzzy matching, mirroring backend _normalize. */
@@ -283,12 +282,18 @@ function logRpcStatus(result: RpcStatus, operation: string) {
   log(level, message, operation);
 }
 
+let globalSettings: Settings | null = null;
+let globalGames: GameStatus[] | null = null;
+let globalGameHistory: Record<string, GameOperationHistory> | null = null;
+let globalVersions: Versions | null = null;
+let globalLudusaviCommand: LudusaviLaunchCommand | null = null;
+
 function Content() {
-  const [settings, setSettings] = useState<Settings>({ auto_sync_enabled: false, selected_game: "" });
-  const [games, setGames] = useState<GameStatus[]>([]);
-  const [gameHistory, setGameHistory] = useState<Record<string, GameOperationHistory>>({});
-  const [selectedGame, setSelectedGame] = useState("");
-  const [versions, setVersions] = useState<Versions>({});
+  const [settings, setSettings] = useState<Settings>(globalSettings ?? { auto_sync_enabled: false, selected_game: "" });
+  const [games, setGames] = useState<GameStatus[]>(globalGames ?? []);
+  const [gameHistory, setGameHistory] = useState<Record<string, GameOperationHistory>>(globalGameHistory ?? {});
+  const [selectedGame, setSelectedGame] = useState(globalSettings?.selected_game ?? "");
+  const [versions, setVersions] = useState<Versions>(globalVersions ?? {});
   const [operation, setOperation] = useState<OperationStatus>({
     is_running: false,
     name: null,
@@ -298,7 +303,7 @@ function Content() {
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
-  const [ludusaviCommand, setLudusaviCommand] = useState<LudusaviLaunchCommand | null>(cachedLudusaviCommand);
+  const [ludusaviCommand, setLudusaviCommand] = useState<LudusaviLaunchCommand | null>(globalLudusaviCommand);
 
   const selectedStatus = useMemo(
     () => games.find((game) => game.name === selectedGame) ?? null,
@@ -316,9 +321,13 @@ function Content() {
   }, []);
 
   const loadInitial = async () => {
-    setBusyLabel("Loading");
+    const isWarmed = globalSettings !== null && globalGames !== null;
+    if (!isWarmed) {
+      setBusyLabel("Loading");
+    }
+
     try {
-      log("debug", "Fetching initial settings and versions");
+      log("debug", `Starting initial load (warmed=${isWarmed})`);
       const [loadedSettings, loadedVersions, loadedCommand] = await Promise.all([
         getSettings(),
         getVersions(),
@@ -326,10 +335,15 @@ function Content() {
       ]);
 
       log("debug", `Loaded settings: ${JSON.stringify(loadedSettings)}`);
-      setSettings(loadedSettings);
-      autoSyncNotificationsEnabled = loadedSettings.auto_sync_enabled;
-      if (loadedSettings.selected_game) {
-        setSelectedGame(loadedSettings.selected_game);
+      if (isRpcStatus(loadedSettings)) {
+        logRpcStatus(loadedSettings, "settings");
+      } else {
+        setSettings(loadedSettings);
+        globalSettings = loadedSettings;
+        autoSyncNotificationsEnabled = loadedSettings.auto_sync_enabled;
+        if (loadedSettings.selected_game) {
+          setSelectedGame(loadedSettings.selected_game);
+        }
       }
 
       log("debug", `Loaded versions: ${JSON.stringify(loadedVersions)}`);
@@ -337,16 +351,22 @@ function Content() {
         logRpcStatus(loadedVersions, "versions");
       } else {
         setVersions(loadedVersions);
+        globalVersions = loadedVersions;
       }
 
       log("debug", `Loaded command: ${JSON.stringify(loadedCommand)}`);
-      cachedLudusaviCommand = loadedCommand;
-      setLudusaviCommand(loadedCommand);
+      if (isRpcStatus(loadedCommand)) {
+        // If discovery failed, keep existing cached command if any.
+        logRpcStatus(loadedCommand, "command discovery");
+      } else {
+        globalLudusaviCommand = loadedCommand;
+        setLudusaviCommand(loadedCommand);
+      }
 
       log("debug", "Initializing game list (cached)");
       const installedAppIds = await getInstalledAppIdsString();
       const refreshed = await refreshGamesCall(false, installedAppIds);
-      applyRefreshResult(refreshed, loadedSettings.selected_game);
+      applyRefreshResult(refreshed, isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game);
 
       const loadedOperation = await getOperationStatus();
       setOperation(loadedOperation);
@@ -380,6 +400,8 @@ function Content() {
     log("debug", `Applying refresh result (${result.games.length} games, ${Object.keys(result.aliases || {}).length} aliases)`);
     setGames(result.games);
     setGameHistory(result.history ?? {});
+    globalGames = result.games;
+    globalGameHistory = result.history ?? {};
     
     // Update global tracking sets for toast filtering
     trackedAppIDs = new Set(result.games.map(g => (g as any).steam_id).filter(id => !!id) as string[]);
@@ -433,8 +455,9 @@ function Content() {
   const showLudusaviLogs = async () => {
     log("info", "Showing Ludusavi logs");
     try {
-      const ludusaviLogs = await getLudusaviLogs();
-      showModal(<LudusaviLogModal logs={ludusaviLogs} />);
+      const result = await getLudusaviLogs();
+      const logs = typeof result === "string" ? result : result.message || `Failed to fetch logs: ${result.status}`;
+      showModal(<LudusaviLogModal logs={logs} />);
     } catch (error) {
       log("error", `Failed to fetch Ludusavi logs: ${error}`);
       toaster.toast({
@@ -448,13 +471,26 @@ function Content() {
 
   const toggleAutoSync = async (enabled: boolean) => {
     log("info", `Toggling auto-sync to ${enabled}`);
+    const previous = settings.auto_sync_enabled;
     setBusyLabel("Updating settings");
+    
+    // Optimistic update
+    setSettings(s => ({ ...s, auto_sync_enabled: enabled }));
+    autoSyncNotificationsEnabled = enabled;
+
     try {
-      const updated = await setAutoSyncEnabled(enabled);
-      setSettings(updated);
-      autoSyncNotificationsEnabled = updated.auto_sync_enabled;
+      const result = await setAutoSyncEnabled(enabled);
+      if (isRpcStatus(result)) {
+        throw new Error(result.message || result.status);
+      }
+      setSettings(result);
+      globalSettings = result;
+      autoSyncNotificationsEnabled = result.auto_sync_enabled;
     } catch (error) {
       log("error", `Failed to toggle auto-sync: ${error}`);
+      // Rollback
+      setSettings(s => ({ ...s, auto_sync_enabled: previous }));
+      autoSyncNotificationsEnabled = previous;
       toaster.toast({
         title: "SDH-ludusavi settings failed",
         body: error instanceof Error ? error.message : String(error),
@@ -469,13 +505,31 @@ function Content() {
   const onGameChange = async (data: any) => {
     const value = typeof data === 'object' ? data?.data : data;
     log("info", `Selected game changed to ${value}`);
+    const previous = selectedGame;
+    setBusyLabel("Updating settings");
+    
+    // Optimistic update
     setSelectedGame(value);
+
     try {
-      const updated = await setSelectedGameCall(value);
-      setSettings(updated);
-      autoSyncNotificationsEnabled = updated.auto_sync_enabled;
+      const result = await setSelectedGameCall(value);
+      if (isRpcStatus(result)) {
+        throw new Error(result.message || result.status);
+      }
+      setSettings(result);
+      globalSettings = result;
     } catch (error) {
       log("error", `Failed to persist selected game: ${error}`);
+      // Rollback
+      setSelectedGame(previous);
+      toaster.toast({
+        title: "SDH-ludusavi settings failed",
+        body: error instanceof Error ? error.message : String(error),
+        logo: <FaExclamationTriangle size={40} />,
+        duration: 2000
+      });
+    } finally {
+      setBusyLabel(null);
     }
   };
 

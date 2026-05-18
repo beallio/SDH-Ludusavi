@@ -68,9 +68,30 @@ function buildLaunchOptions(args?: string[]): string {
   return args.map(escapeLaunchArg).join(" ");
 }
 
+type RpcStatus = {
+  status: "skipped" | "failed";
+  reason?: string;
+  message?: string;
+};
+
+type RpcResult<T> = T | RpcStatus;
+
+function isRpcStatus<T>(result: RpcResult<T>): result is RpcStatus {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    "status" in result &&
+    ((result as RpcStatus).status === "skipped" || (result as RpcStatus).status === "failed")
+  );
+}
+
 async function getSavedShortcutAppId(): Promise<number> {
   try {
-    const appId = await call<[], number>("get_ludusavi_launcher_shortcut_id");
+    const appId = await call<[], RpcResult<number>>("get_ludusavi_launcher_shortcut_id");
+    if (isRpcStatus(appId)) {
+      console.error("Failed to get saved shortcut ID:", appId.message || appId.status);
+      return -1;
+    }
     return typeof appId === "number" ? appId : -1;
   } catch (err) {
     console.error("Failed to get saved shortcut ID:", err);
@@ -80,7 +101,10 @@ async function getSavedShortcutAppId(): Promise<number> {
 
 async function saveShortcutAppId(appId: number): Promise<void> {
   try {
-    await call<[appId: number], boolean>("set_ludusavi_launcher_shortcut_id", appId);
+    const result = await call<[appId: number], RpcResult<boolean>>("set_ludusavi_launcher_shortcut_id", appId);
+    if (isRpcStatus(result)) {
+      console.error("Failed to save shortcut ID:", result.message || result.status);
+    }
   } catch (err) {
     console.error("Failed to save shortcut ID:", err);
   }

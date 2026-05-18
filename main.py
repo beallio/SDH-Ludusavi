@@ -35,25 +35,35 @@ class Plugin:
         return self._backend
 
     async def get_settings(self) -> dict[str, Any]:
-        return self._service().get_settings()
+        return await self._call("get_settings", self._service().get_settings)
 
     async def set_auto_sync_enabled(self, enabled: bool) -> dict[str, Any]:
-        return self._service().set_auto_sync_enabled(enabled)
+        return await self._call(
+            "set_auto_sync_enabled", lambda: self._service().set_auto_sync_enabled(enabled)
+        )
 
     async def set_selected_game(self, game_name: str) -> dict[str, Any]:
-        return self._service().set_selected_game(game_name)
+        return await self._call(
+            "set_selected_game", lambda: self._service().set_selected_game(game_name)
+        )
 
     async def get_ludusavi_launcher_shortcut_id(self) -> int:
         return self._service().get_ludusavi_launcher_shortcut_id()
 
     async def set_ludusavi_launcher_shortcut_id(self, app_id: int) -> bool:
-        return self._service().set_ludusavi_launcher_shortcut_id(app_id)
+        return await self._call(
+            "set_ludusavi_launcher_shortcut_id",
+            lambda: self._service().set_ludusavi_launcher_shortcut_id(app_id),
+        )
 
     async def clear_ludusavi_launcher_shortcut_id(self) -> bool:
-        return self._service().clear_ludusavi_launcher_shortcut_id()
+        return await self._call(
+            "clear_ludusavi_launcher_shortcut_id",
+            self._service().clear_ludusavi_launcher_shortcut_id,
+        )
 
     async def get_ludusavi_command(self) -> dict[str, Any] | None:
-        return self._service().get_ludusavi_command()
+        return await self._call("get_ludusavi_command", self._service().get_ludusavi_command)
 
     async def log(
         self,
@@ -106,7 +116,7 @@ class Plugin:
         return self._service().get_recent_logs()
 
     async def get_ludusavi_logs(self) -> str:
-        return self._service().get_ludusavi_logs()
+        return await self._call("get_ludusavi_logs", self._service().get_ludusavi_logs)
 
     async def _main(self) -> None:
         decky.logger.info("SDH-ludusavi backend loaded")
