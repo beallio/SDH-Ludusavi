@@ -22,9 +22,21 @@ import { LuDatabaseBackup } from "react-icons/lu";
 
 import { launchLudusavi, LudusaviLaunchCommand } from "./ludusaviLauncher";
 
+type NotificationSettings = {
+  enabled: boolean;
+  auto_sync_progress: boolean;
+  auto_sync_results: boolean;
+  manual_operations: boolean;
+  refresh_status: boolean;
+  failures_errors: boolean;
+};
+
+type NotificationCategory = keyof Omit<NotificationSettings, "enabled">;
+
 type Settings = {
   auto_sync_enabled: boolean;
   selected_game: string;
+  notifications: NotificationSettings;
 };
 
 type GameOperationHistoryEntry = {
@@ -123,6 +135,7 @@ type LudusaviLogModalProps = {
 
 const getSettings = callable<[], RpcResult<Settings>>("get_settings");
 const setAutoSyncEnabled = callable<[enabled: boolean], RpcResult<Settings>>("set_auto_sync_enabled");
+const setNotificationSettings = callable<[settings: NotificationSettings], RpcResult<Settings>>("set_notification_settings");
 const setSelectedGameCall = callable<[gameName: string], RpcResult<Settings>>("set_selected_game");
 const refreshGamesCall = callable<[force: boolean, installed_app_ids?: string], RpcResult<RefreshResult>>("refresh_games");
 const forceBackupCall = callable<[gameName: string], RpcResult<OperationResult>>("force_backup");
@@ -173,6 +186,39 @@ const statusLabels: Record<GameStatus["status"], string> = {
   needs_first_backup: "Needs first backup",
   error: "Error"
 };
+
+const defaultNotificationSettings: NotificationSettings = {
+  enabled: true,
+  auto_sync_progress: true,
+  auto_sync_results: true,
+  manual_operations: true,
+  refresh_status: true,
+  failures_errors: true
+};
+
+const defaultSettings = (): Settings => ({
+  auto_sync_enabled: false,
+  selected_game: "",
+  notifications: { ...defaultNotificationSettings }
+});
+
+function normalizeNotificationSettings(settings?: Partial<NotificationSettings>): NotificationSettings {
+  return {
+    enabled: typeof settings?.enabled === "boolean" ? settings.enabled : true,
+    auto_sync_progress: typeof settings?.auto_sync_progress === "boolean" ? settings.auto_sync_progress : true,
+    auto_sync_results: typeof settings?.auto_sync_results === "boolean" ? settings.auto_sync_results : true,
+    manual_operations: typeof settings?.manual_operations === "boolean" ? settings.manual_operations : true,
+    refresh_status: typeof settings?.refresh_status === "boolean" ? settings.refresh_status : true,
+    failures_errors: typeof settings?.failures_errors === "boolean" ? settings.failures_errors : true
+  };
+}
+
+function normalizeSettings(settings: Settings): Settings {
+  return {
+    ...settings,
+    notifications: normalizeNotificationSettings(settings.notifications)
+  };
+}
 
 function SpinnerButton({ children, loading, ...props }: any) {
   return (
@@ -242,13 +288,21 @@ function LudusaviLogModal({ logs, closeModal }: LudusaviLogModalProps) {
 let trackedAppIDs = new Set<string>();
 let trackedNames = new Set<string>();
 let autoSyncNotificationsEnabled = false;
+let notificationSettingsMirror: NotificationSettings = { ...defaultNotificationSettings };
 
 /** Normalize a game name for fuzzy matching, mirroring backend _normalize. */
 function normalize(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9.-]+/g, " ").trim();
 }
 
-function showToast(title: string, body: string, logo?: any) {
+function shouldShowNotification(category: NotificationCategory): boolean {
+  return notificationSettingsMirror.enabled && notificationSettingsMirror[category];
+}
+
+function notify(category: NotificationCategory, title: string, body: string, logo?: any) {
+  if (!shouldShowNotification(category)) {
+    return;
+  }
   try {
     log("debug", `Showing toast: ${title} - ${body}`);
     const toastObj = { 
@@ -289,7 +343,7 @@ let globalVersions: Versions | null = null;
 let globalLudusaviCommand: LudusaviLaunchCommand | null = null;
 
 function Content() {
-  const [settings, setSettings] = useState<Settings>(globalSettings ?? { auto_sync_enabled: false, selected_game: "" });
+  const [settings, setSettings] = useState<Settings>(globalSettings ?? defaultSettings());
   const [games, setGames] = useState<GameStatus[]>(globalGames ?? []);
   const [gameHistory, setGameHistory] = useState<Record<string, GameOperationHistory>>(globalGameHistory ?? {});
   const [selectedGame, setSelectedGame] = useState(globalSettings?.selected_game ?? "");
@@ -305,6 +359,15 @@ function Content() {
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [backgroundRefreshBusy, setBackgroundRefreshBusy] = useState(false);
   const [ludusaviCommand, setLudusaviCommand] = useState<LudusaviLaunchCommand | null>(globalLudusaviCommand);
+
+  const applySettings = (nextSettings: Settings) => {
+    const normalized = normalizeSettings(nextSettings);
+    setSettings(normalized);
+    globalSettings = normalized;
+    autoSyncNotificationsEnabled = normalized.auto_sync_enabled;
+    notificationSettingsMirror = normalized.notifications;
+    return normalized;
+  };
 
   const syncSelectedGameCache = (nextSelectedGame: string) => {
     setSettings((current) => {
@@ -350,11 +413,9 @@ function Content() {
       if (isRpcStatus(loadedSettings)) {
         logRpcStatus(loadedSettings, "settings");
       } else {
-        setSettings(loadedSettings);
-        globalSettings = loadedSettings;
-        autoSyncNotificationsEnabled = loadedSettings.auto_sync_enabled;
-        if (loadedSettings.selected_game) {
-          setSelectedGame(loadedSettings.selected_game);
+        const normalizedSettings = applySettings(loadedSettings);
+        if (normalizedSettings.selected_game) {
+          setSelectedGame(normalizedSettings.selected_game);
         }
       }
 
@@ -401,12 +462,7 @@ function Content() {
 
     if (result.dependency_error) {
       log("error", `Ludusavi refresh failed: ${result.dependency_error}`, "refresh");
-      toaster.toast({
-        title: "SDH-ludusavi refresh failed",
-        body: result.dependency_error,
-        logo: <FaExclamationTriangle size={40} />,
-        duration: 4000
-      });
+      notify("failures_errors", "SDH-ludusavi refresh failed", result.dependency_error, <FaExclamationTriangle />);
       return false;
     }
 
@@ -452,12 +508,7 @@ function Content() {
       if (applyRefreshResult(result)) {
         setOperation(await getOperationStatus());
         setLogs(await getRecentLogs());
-        toaster.toast({
-          title: "SDH-ludusavi",
-          body: "Ludusavi game status refreshed",
-          logo: <IoMdRefresh size={40} />,
-          duration: 2000
-        });
+        notify("refresh_status", "SDH-ludusavi", "Ludusavi game status refreshed", <IoMdRefresh />);
       }
     } catch (error) {
       log("error", `Manual refresh failed: ${error}`);
@@ -474,12 +525,7 @@ function Content() {
       showModal(<LudusaviLogModal logs={logs} />);
     } catch (error) {
       log("error", `Failed to fetch Ludusavi logs: ${error}`);
-      toaster.toast({
-        title: "SDH-ludusavi",
-        body: "Failed to fetch Ludusavi logs",
-        logo: <FaExclamationTriangle size={40} />,
-        duration: 2000
-      });
+      notify("failures_errors", "SDH-ludusavi", "Failed to fetch Ludusavi logs", <FaExclamationTriangle />);
     }
   };
 
@@ -497,20 +543,37 @@ function Content() {
       if (isRpcStatus(result)) {
         throw new Error(result.message || result.status);
       }
-      setSettings(result);
-      globalSettings = result;
-      autoSyncNotificationsEnabled = result.auto_sync_enabled;
+      applySettings(result);
     } catch (error) {
       log("error", `Failed to toggle auto-sync: ${error}`);
       // Rollback
       setSettings(s => ({ ...s, auto_sync_enabled: previous }));
       autoSyncNotificationsEnabled = previous;
-      toaster.toast({
-        title: "SDH-ludusavi settings failed",
-        body: error instanceof Error ? error.message : String(error),
-        logo: <FaExclamationTriangle size={40} />,
-        duration: 2000
-      });
+      notify("failures_errors", "SDH-ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+    } finally {
+      setBusyLabel(null);
+    }
+  };
+
+  const toggleNotificationSetting = async (key: keyof NotificationSettings, enabled: boolean) => {
+    log("info", `Toggling notification setting ${key} to ${enabled}`);
+    const previous = settings.notifications;
+    const nextNotifications = { ...previous, [key]: enabled };
+    setBusyLabel("Updating settings");
+    setSettings(s => ({ ...s, notifications: nextNotifications }));
+    notificationSettingsMirror = nextNotifications;
+
+    try {
+      const result = await setNotificationSettings(nextNotifications);
+      if (isRpcStatus(result)) {
+        throw new Error(result.message || result.status);
+      }
+      applySettings(result);
+    } catch (error) {
+      log("error", `Failed to update notification settings: ${error}`);
+      setSettings(s => ({ ...s, notifications: previous }));
+      notificationSettingsMirror = previous;
+      notify("failures_errors", "SDH-ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
       setBusyLabel(null);
     }
@@ -530,20 +593,13 @@ function Content() {
       if (isRpcStatus(result)) {
         throw new Error(result.message || result.status);
       }
-      setSettings(result);
-      globalSettings = result;
+      applySettings(result);
       setSelectedGame(result.selected_game);
-      autoSyncNotificationsEnabled = result.auto_sync_enabled;
     } catch (error) {
       log("error", `Failed to persist selected game: ${error}`);
       // Rollback
       setSelectedGame(previous);
-      toaster.toast({
-        title: "SDH-ludusavi settings failed",
-        body: error instanceof Error ? error.message : String(error),
-        logo: <FaExclamationTriangle size={40} />,
-        duration: 2000
-      });
+      notify("failures_errors", "SDH-ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
       setBusyLabel(null);
     }
@@ -559,34 +615,20 @@ function Content() {
     log("info", `Triggering force ${label} for ${selectedGame}`, label, selectedGame);
     setBusyLabel(`${label} running`);
     const icon = label === "Backup" ? <FaSave /> : <FaDownload />;
-    toaster.toast({ 
-      title: `SDH-ludusavi ${label}`, 
-      body: `${label} started for ${selectedGame}`,
-      logo: React.cloneElement(icon as any, { size: 40 }),
-      duration: 2000
-    });
+    notify("manual_operations", `SDH-ludusavi ${label}`, `${label} started for ${selectedGame}`, icon);
     try {
       const result = await operationCall(selectedGame);
       log("info", `Force ${label} completed: ${JSON.stringify(result)}`, label, selectedGame);
       const resultIcon = result.status === "failed" ? <FaExclamationTriangle /> : icon;
-      toaster.toast({
-        title: `SDH-ludusavi ${label}`,
-        body: summarizeOperationResult(result, label),
-        logo: React.cloneElement(resultIcon as any, { size: 40 }),
-        duration: 2000
-      });
+      const category = result.status === "failed" ? "failures_errors" : "manual_operations";
+      notify(category, `SDH-ludusavi ${label}`, summarizeOperationResult(result, label), resultIcon);
       const refreshed = await refreshGamesCall(false);
       applyRefreshResult(refreshed);
       setOperation(await getOperationStatus());
       setLogs(await getRecentLogs());
     } catch (error) {
       log("error", `Force ${label} failed: ${error}`, label, selectedGame);
-      toaster.toast({
-        title: `SDH-ludusavi ${label} failed`,
-        body: error instanceof Error ? error.message : String(error),
-        logo: <FaExclamationTriangle size={40} />,
-        duration: 2000
-      });
+      notify("failures_errors", `SDH-ludusavi ${label} failed`, error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
       setBusyLabel(null);
     }
@@ -685,6 +727,45 @@ function Content() {
             Force Restore
           </SpinnerButton>
         </PanelSectionRow>
+      </PanelSection>
+
+      <PanelSection title="Notifications">
+        <ToggleField
+          label="All Notifications"
+          checked={settings.notifications.enabled}
+          disabled={isBusy}
+          onChange={(enabled: boolean) => void toggleNotificationSetting("enabled", enabled)}
+        />
+        <ToggleField
+          label="Auto-sync Progress"
+          checked={settings.notifications.auto_sync_progress}
+          disabled={!settings.notifications.enabled || isBusy}
+          onChange={(enabled: boolean) => void toggleNotificationSetting("auto_sync_progress", enabled)}
+        />
+        <ToggleField
+          label="Auto-sync Results"
+          checked={settings.notifications.auto_sync_results}
+          disabled={!settings.notifications.enabled || isBusy}
+          onChange={(enabled: boolean) => void toggleNotificationSetting("auto_sync_results", enabled)}
+        />
+        <ToggleField
+          label="Manual Operations"
+          checked={settings.notifications.manual_operations}
+          disabled={!settings.notifications.enabled || isBusy}
+          onChange={(enabled: boolean) => void toggleNotificationSetting("manual_operations", enabled)}
+        />
+        <ToggleField
+          label="Refresh Status"
+          checked={settings.notifications.refresh_status}
+          disabled={!settings.notifications.enabled || isBusy}
+          onChange={(enabled: boolean) => void toggleNotificationSetting("refresh_status", enabled)}
+        />
+        <ToggleField
+          label="Failures and Errors"
+          checked={settings.notifications.failures_errors}
+          disabled={!settings.notifications.enabled || isBusy}
+          onChange={(enabled: boolean) => void toggleNotificationSetting("failures_errors", enabled)}
+        />
       </PanelSection>
 
       <LudusaviPanel ludusaviCommand={ludusaviCommand} isLoading={busyLabel === "Loading"} />
@@ -845,7 +926,7 @@ export default definePlugin(() => {
     log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
     
     if (tracked && autoSyncNotificationsEnabled) {
-      showToast("SDH-ludusavi Auto-sync", `Checking saves for ${name}...`, <FaDatabase />);
+      notify("auto_sync_progress", "SDH-ludusavi Auto-sync", `Checking saves for ${name}...`, <FaDatabase />);
     }
     
     const result = await handleGameStartCall(name, appID);
@@ -859,7 +940,8 @@ export default definePlugin(() => {
       else if (result.status === "restored") icon = <FaDownload />;
       else if (result.status === "backed_up") icon = <FaSave />;
 
-      showToast("SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), icon);
+      const category = result.status === "failed" ? "failures_errors" : "auto_sync_results";
+      notify(category, "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), icon);
     }
   };
 
@@ -868,7 +950,7 @@ export default definePlugin(() => {
     log("info", `App exited: ${name} (${appID}) tracked=${tracked}`);
     
     if (tracked && autoSyncNotificationsEnabled) {
-      showToast("SDH-ludusavi Auto-sync", `Backing up saves for ${name}...`, <FaSave />);
+      notify("auto_sync_progress", "SDH-ludusavi Auto-sync", `Backing up saves for ${name}...`, <FaSave />);
     }
     
     const result = await handleGameExitCall(name, appID);
@@ -876,7 +958,8 @@ export default definePlugin(() => {
     if (result.status !== "skipped" || !silentReasons.includes(result.reason ?? "")) {
       if (result.status !== "skipped" || result.reason === "local_current") {
         const icon = result.status === "failed" ? <FaExclamationTriangle /> : <FaSave />;
-        showToast("SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), icon);
+        const category = result.status === "failed" ? "failures_errors" : "auto_sync_results";
+        notify(category, "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), icon);
       }
     }
   };

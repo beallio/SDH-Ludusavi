@@ -71,6 +71,29 @@ def service_with_state(tmp_path: Path, adapter: FakeAdapter | None = None) -> SD
     return SDHLudusaviService(adapter=adapter or FakeAdapter(), state_path=tmp_path / "state.json")
 
 
+DEFAULT_NOTIFICATIONS = {
+    "enabled": True,
+    "auto_sync_progress": True,
+    "auto_sync_results": True,
+    "manual_operations": True,
+    "refresh_status": True,
+    "failures_errors": True,
+}
+
+
+def expected_settings(
+    *,
+    auto_sync_enabled: bool = False,
+    selected_game: str = "",
+    notifications: dict[str, bool] | None = None,
+) -> dict[str, object]:
+    return {
+        "auto_sync_enabled": auto_sync_enabled,
+        "selected_game": selected_game,
+        "notifications": notifications or dict(DEFAULT_NOTIFICATIONS),
+    }
+
+
 def test_decky_log_uses_cached_module_level_logger() -> None:
     tree = ast.parse(Path("py_modules/sdh_ludusavi/service.py").read_text(encoding="utf-8"))
     decky_log = next(
@@ -96,8 +119,63 @@ def test_settings_do_not_initialize_ludusavi_adapter(tmp_path: Path) -> None:
         state_path=tmp_path / "state.json",
     )
 
-    assert service.get_settings() == {"auto_sync_enabled": False, "selected_game": ""}
-    assert service.set_auto_sync_enabled(True) == {"auto_sync_enabled": True, "selected_game": ""}
+    assert service.get_settings() == expected_settings()
+    assert service.set_auto_sync_enabled(True) == expected_settings(auto_sync_enabled=True)
+
+
+def test_notification_settings_default_to_enabled_and_persist(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+
+    assert service.get_settings() == expected_settings()
+
+    updated = service.set_notification_settings(
+        {
+            "enabled": False,
+            "auto_sync_progress": False,
+            "manual_operations": False,
+        }
+    )
+
+    expected_notifications = {
+        **DEFAULT_NOTIFICATIONS,
+        "enabled": False,
+        "auto_sync_progress": False,
+        "manual_operations": False,
+    }
+    assert updated == expected_settings(notifications=expected_notifications)
+
+    reloaded = service_with_state(tmp_path)
+    assert reloaded.get_settings() == expected_settings(notifications=expected_notifications)
+
+
+def test_notification_settings_load_legacy_and_malformed_state_safely(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "auto_sync_enabled": True,
+                "selected_game": "Hades",
+                "notifications": {
+                    "enabled": False,
+                    "auto_sync_progress": "yes",
+                    "unknown": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = service_with_state(tmp_path)
+
+    expected_notifications = {
+        **DEFAULT_NOTIFICATIONS,
+        "enabled": False,
+    }
+    assert service.get_settings() == expected_settings(
+        auto_sync_enabled=True,
+        selected_game="Hades",
+        notifications=expected_notifications,
+    )
 
 
 def test_refresh_reports_ludusavi_adapter_initialization_failure(tmp_path: Path) -> None:
@@ -184,15 +262,16 @@ def test_ludusavi_adapter_initialization_is_thread_safe(tmp_path: Path) -> None:
 def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
 
-    assert service.get_settings() == {"auto_sync_enabled": False, "selected_game": ""}
-    assert service.set_auto_sync_enabled(True) == {"auto_sync_enabled": True, "selected_game": ""}
+    assert service.get_settings() == expected_settings()
+    assert service.set_auto_sync_enabled(True) == expected_settings(auto_sync_enabled=True)
 
     reloaded = service_with_state(tmp_path)
 
-    assert reloaded.get_settings() == {"auto_sync_enabled": True, "selected_game": ""}
+    assert reloaded.get_settings() == expected_settings(auto_sync_enabled=True)
     assert json.loads((tmp_path / "state.json").read_text()) == {
         "auto_sync_enabled": True,
         "selected_game": "",
+        "notifications": DEFAULT_NOTIFICATIONS,
         "ludusaviLauncherShortcutAppId": -1,
         "games": [],
         "aliases": {},
@@ -240,7 +319,7 @@ def test_invalid_state_files_load_defaults_and_log_warning(
     with caplog.at_level(logging.WARNING, logger="sdh_ludusavi.service"):
         service = service_with_state(tmp_path)
 
-    assert service.get_settings() == {"auto_sync_enabled": False, "selected_game": ""}
+    assert service.get_settings() == expected_settings()
     assert "Ignoring SDH-ludusavi state" in caplog.text
 
 
@@ -263,7 +342,7 @@ def test_unreadable_state_file_loads_defaults_and_logs_warning(
     with caplog.at_level(logging.WARNING, logger="sdh_ludusavi.service"):
         service = service_with_state(tmp_path)
 
-    assert service.get_settings() == {"auto_sync_enabled": False, "selected_game": ""}
+    assert service.get_settings() == expected_settings()
     assert "permission denied" in caplog.text
 
 
@@ -373,7 +452,7 @@ def test_force_operations_work_when_auto_sync_disabled(tmp_path: Path) -> None:
     backup = service.force_backup("Hades")
     restore = service.force_restore("Hades")
 
-    assert service.get_settings() == {"auto_sync_enabled": False, "selected_game": ""}
+    assert service.get_settings() == expected_settings()
     assert backup["status"] == "backed_up"
     assert restore["status"] == "restored"
     assert adapter.backups == ["Hades"]

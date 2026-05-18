@@ -47,6 +47,12 @@ class Plugin:
             "set_selected_game", lambda: self._service().set_selected_game(game_name)
         )
 
+    async def set_notification_settings(self, settings: dict[str, object]) -> dict[str, Any]:
+        return await self._call(
+            "set_notification_settings",
+            lambda: self._service().set_notification_settings(settings),
+        )
+
     async def get_ludusavi_launcher_shortcut_id(self) -> int:
         return self._service().get_ludusavi_launcher_shortcut_id()
 

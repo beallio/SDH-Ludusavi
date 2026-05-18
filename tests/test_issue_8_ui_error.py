@@ -14,10 +14,11 @@ def test_frontend_handles_refresh_dependency_error():
 
     # Check that it checks for dependency_error
     assert "if (result.dependency_error) {" in source
-    assert 'title: "SDH-ludusavi refresh failed"' in source
-    assert "body: result.dependency_error" in source
+    assert (
+        'notify("failures_errors", "SDH-ludusavi refresh failed", result.dependency_error' in source
+    )
 
     # Check that success toast is conditional
     # It should look something like: if (applyRefreshResult(result)) { ... success toast ... }
     assert "if (applyRefreshResult(result)) {" in source
-    assert 'body: "Ludusavi game status refreshed"' in source
+    assert 'notify("refresh_status", "SDH-ludusavi", "Ludusavi game status refreshed"' in source

@@ -24,6 +24,7 @@ def test_frontend_wires_backend_calls_and_toasts() -> None:
     for callable_name in [
         '"get_settings"',
         '"set_auto_sync_enabled"',
+        '"set_notification_settings"',
         '"set_selected_game"',
         '"refresh_games"',
         '"force_backup"',
@@ -38,6 +39,45 @@ def test_frontend_wires_backend_calls_and_toasts() -> None:
     assert "toaster.toast" in source
     assert "is_running" in source
     assert "dependency_error" in source
+
+
+def test_frontend_exposes_notification_preferences_panel() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        'PanelSection title="Notifications"',
+        'label="All Notifications"',
+        'label="Auto-sync Progress"',
+        'label="Auto-sync Results"',
+        'label="Manual Operations"',
+        'label="Refresh Status"',
+        'label="Failures and Errors"',
+        "settings.notifications.enabled",
+        "disabled={!settings.notifications.enabled || isBusy}",
+        "onChange={(enabled: boolean) => void toggleNotificationSetting",
+    ]:
+        assert required_text in source
+
+    assert source.index('PanelSection title="Notifications"') < source.index("<LudusaviPanel")
+
+
+def test_frontend_centralizes_notification_aware_toasts() -> None:
+    source = FRONTEND.read_text()
+
+    assert "type NotificationCategory =" in source
+    assert "let notificationSettingsMirror" in source
+    assert "function notify(" in source
+    assert "shouldShowNotification(category)" in source
+    assert "toaster.toast" in source
+    assert source.count("toaster.toast") == 1
+    for category in [
+        '"auto_sync_progress"',
+        '"auto_sync_results"',
+        '"manual_operations"',
+        '"refresh_status"',
+        '"failures_errors"',
+    ]:
+        assert category in source
 
 
 def test_frontend_uses_decky_toggle_for_automatic_sync() -> None:
@@ -56,23 +96,19 @@ def test_frontend_toggle_reports_busy_and_failures() -> None:
 
     assert 'setBusyLabel("Updating settings")' in source
     assert "await setAutoSyncEnabled(enabled)" in source
-    assert 'title: "SDH-ludusavi settings failed"' in source
+    assert '"SDH-ludusavi settings failed"' in source
+    assert 'notify("failures_errors", "SDH-ludusavi settings failed"' in source
 
 
 def test_frontend_silences_lifecycle_toasts_when_auto_sync_is_disabled() -> None:
     source = FRONTEND.read_text()
 
     assert "let autoSyncNotificationsEnabled = false;" in source
-    assert "autoSyncNotificationsEnabled = loadedSettings.auto_sync_enabled;" in source
-    assert "autoSyncNotificationsEnabled = result.auto_sync_enabled;" in source
+    assert "autoSyncNotificationsEnabled = normalized.auto_sync_enabled;" in source
     assert source.count("if (tracked && autoSyncNotificationsEnabled)") == 2
 
-    start_toast = (
-        'showToast("SDH-ludusavi Auto-sync", `Checking saves for ${name}...`, <FaDatabase />);'
-    )
-    exit_toast = (
-        'showToast("SDH-ludusavi Auto-sync", `Backing up saves for ${name}...`, <FaSave />);'
-    )
+    start_toast = 'notify("auto_sync_progress", "SDH-ludusavi Auto-sync", `Checking saves for ${name}...`, <FaDatabase />);'
+    exit_toast = 'notify("auto_sync_progress", "SDH-ludusavi Auto-sync", `Backing up saves for ${name}...`, <FaSave />);'
     assert start_toast in source
     assert exit_toast in source
 
@@ -251,8 +287,8 @@ def test_frontend_applies_backend_selected_game_after_persisting() -> None:
     source = FRONTEND.read_text()
 
     assert "const result = await setSelectedGameCall(value);" in source
+    assert "applySettings(result);" in source
     assert "setSelectedGame(result.selected_game);" in source
-    assert "autoSyncNotificationsEnabled = result.auto_sync_enabled;" in source
 
 
 def test_frontend_syncs_warmed_settings_cache_when_refresh_defaults_selected_game() -> None:

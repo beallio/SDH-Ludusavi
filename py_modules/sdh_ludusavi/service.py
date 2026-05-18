@@ -18,6 +18,14 @@ LOGGER = logging.getLogger(__name__)
 MAX_INSTALLED_APP_IDS_BYTES = 16_384
 _CONFIG_MARKER_READ_FAILED = object()
 _CACHE_MARKER_UNCHANGED = object()
+DEFAULT_NOTIFICATION_SETTINGS: dict[str, bool] = {
+    "enabled": True,
+    "auto_sync_progress": True,
+    "auto_sync_results": True,
+    "manual_operations": True,
+    "refresh_status": True,
+    "failures_errors": True,
+}
 
 try:
     import decky
@@ -175,6 +183,7 @@ class SDHLudusaviService:
         self._state_path = state_path or Path("/tmp/sdh_ludusavi/state.json")
         self._auto_sync_enabled = False
         self._selected_game = ""
+        self._notification_settings = dict(DEFAULT_NOTIFICATION_SETTINGS)
         self._ludusavi_launcher_shortcut_id = -1
         self._games: dict[str, GameStatus] = {}
         self._aliases: dict[str, str] = {}
@@ -240,6 +249,7 @@ class SDHLudusaviService:
         return {
             "auto_sync_enabled": self._auto_sync_enabled,
             "selected_game": self._selected_game,
+            "notifications": dict(self._notification_settings),
         }
 
     def set_auto_sync_enabled(self, enabled: bool) -> dict[str, Any]:
@@ -256,11 +266,29 @@ class SDHLudusaviService:
         self.log("debug", f"Selected game changed to {self._selected_game}")
         return self.get_settings()
 
+    def set_notification_settings(self, settings: dict[str, object]) -> dict[str, Any]:
+        """Update notification preferences and persist them to disk."""
+        self._notification_settings = self._coerce_notification_settings(settings)
+        self._save_state()
+        self.log("info", "Notification settings updated")
+        return self.get_settings()
+
     def _sanitize_name(self, name: str | None) -> str:
         if not name:
             return ""
         # Remove control characters and newlines
         return " ".join(str(name).split())
+
+    def _coerce_notification_settings(self, settings: object) -> dict[str, bool]:
+        coerced = dict(DEFAULT_NOTIFICATION_SETTINGS)
+        if not isinstance(settings, dict):
+            return coerced
+        typed_settings = cast(dict[str, object], settings)
+        for key in DEFAULT_NOTIFICATION_SETTINGS:
+            value = typed_settings.get(key)
+            if isinstance(value, bool):
+                coerced[key] = value
+        return coerced
 
     def get_ludusavi_launcher_shortcut_id(self) -> int:
         """Return the saved shortcut app ID, or -1 if none exists."""
@@ -766,6 +794,9 @@ class SDHLudusaviService:
 
         self._auto_sync_enabled = bool(data.get("auto_sync_enabled", False))
         self._selected_game = str(data.get("selected_game", ""))
+        self._notification_settings = self._coerce_notification_settings(
+            data.get("notifications", {})
+        )
 
         raw_shortcut_id = data.get("ludusaviLauncherShortcutAppId", -1)
         try:
