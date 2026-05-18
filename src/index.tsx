@@ -306,6 +306,16 @@ function Content() {
   const [backgroundRefreshBusy, setBackgroundRefreshBusy] = useState(false);
   const [ludusaviCommand, setLudusaviCommand] = useState<LudusaviLaunchCommand | null>(globalLudusaviCommand);
 
+  const syncSelectedGameCache = (nextSelectedGame: string) => {
+    setSettings((current) => {
+      const nextSettings = { ...current, selected_game: nextSelectedGame };
+      globalSettings = globalSettings
+        ? { ...globalSettings, selected_game: nextSelectedGame }
+        : nextSettings;
+      return nextSettings;
+    });
+  };
+
   const selectedStatus = useMemo(
     () => games.find((game) => game.name === selectedGame) ?? null,
     [games, selectedGame]
@@ -419,15 +429,16 @@ function Content() {
     
     log("info", `Tracked ${trackedNames.size} game names/aliases`);
 
-    setSelectedGame((current) => {
-      const target = preferredGame || current;
-      if (target && result.games.some((game) => game.name === target)) {
-        return target;
-      }
+    const target = preferredGame || selectedGame;
+    if (target && result.games.some((game) => game.name === target)) {
+      setSelectedGame(target);
+      syncSelectedGameCache(target);
+    } else {
       const firstGame = result.games[0]?.name ?? "";
       log("debug", `Defaulting selected game to ${firstGame}`);
-      return firstGame;
-    });
+      setSelectedGame(firstGame);
+      syncSelectedGameCache(firstGame);
+    }
 
     return true;
   };

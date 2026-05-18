@@ -253,3 +253,12 @@ def test_frontend_applies_backend_selected_game_after_persisting() -> None:
     assert "const result = await setSelectedGameCall(value);" in source
     assert "setSelectedGame(result.selected_game);" in source
     assert "autoSyncNotificationsEnabled = result.auto_sync_enabled;" in source
+
+
+def test_frontend_syncs_warmed_settings_cache_when_refresh_defaults_selected_game() -> None:
+    source = FRONTEND.read_text()
+
+    assert "const syncSelectedGameCache = (nextSelectedGame: string) => {" in source
+    assert "selected_game: nextSelectedGame" in source
+    assert "syncSelectedGameCache(target);" in source
+    assert "syncSelectedGameCache(firstGame);" in source
