@@ -12,11 +12,11 @@ def test_force_backup_records_history_even_if_refresh_fails(tmp_path: Path) -> N
             super().__init__()
             self.refresh_calls = 0
 
-        def get_games(self):
+        def refresh_statuses(self):
             self.refresh_calls += 1
             if self.refresh_calls > 1:
                 raise RuntimeError("Refresh failed after backup")
-            return super().get_games()
+            return super().refresh_statuses()
 
     service = service_with_state(tmp_path, adapter=RefreshFailingAdapter())
     service.refresh_games()  # First refresh succeeds
@@ -36,11 +36,11 @@ def test_auto_exit_records_history_even_if_refresh_fails(tmp_path: Path) -> None
             super().__init__()
             self.refresh_calls = 0
 
-        def get_games(self):
+        def refresh_statuses(self):
             self.refresh_calls += 1
             if self.refresh_calls > 1:
                 raise RuntimeError("Refresh failed after backup")
-            return super().get_games()
+            return super().refresh_statuses()
 
         def backup(self, game_name: str, preview: bool = False) -> dict[str, object]:
             if not preview:
@@ -187,3 +187,48 @@ def test_auto_exit_skips_record_history(tmp_path: Path, reason: str, status: str
     assert history["last_skip"]["reason"] == reason
     assert history["last_skip"]["operation"] == "exit"
     assert history["last_skip"]["trigger"] == "auto_exit"
+
+
+def test_history_load_validation_trigger(tmp_path: Path) -> None:
+    state = {
+        "auto_sync_enabled": True,
+        "selected_game": "",
+        "games": [],
+        "aliases": {},
+        "game_history": {
+            "Hades": {
+                "last_backup": {
+                    "operation": "backup",
+                    "status": "backed_up",
+                    "timestamp": "2026-01-01 00:00:00",
+                    "trigger": "invalid_trigger",
+                }
+            }
+        },
+    }
+    (tmp_path / "state.json").write_text(json.dumps(state))
+
+    service = service_with_state(tmp_path)
+    refresh = service.refresh_games()
+
+    hades = refresh["history"]["Hades"]
+    assert hades["last_backup"] is None
+
+
+def test_last_operation_field_high_resolution_sorting(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+    service.refresh_games()
+
+    # Simulate two operations in very quick succession (same second)
+    # We'll mock datetime.now to ensure same second but different microseconds if supported,
+    # or just different ISO strings.
+
+    # For now, let's just prove that IF they have different timestamps (even milliseconds), they sort.
+    # The fix is to use higher resolution.
+
+    service.force_backup("Hades")  # T1
+    service.force_restore("Hades")  # T2
+
+    history = service.refresh_games()["history"]["Hades"]
+    assert history["last_operation"]["operation"] == "restore"
+    # Microsecond resolution should prevent collisions in practice

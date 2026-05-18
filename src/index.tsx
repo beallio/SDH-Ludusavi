@@ -576,7 +576,7 @@ function Content() {
                    `Skipped${selectedHistory.reason ? ` (${selectedHistory.reason.replace(/_/g, " ")})` : ""}`}
                 </span>
                 <span style={{ marginLeft: "8px", fontSize: "10px", opacity: 0.6 }}>
-                  {selectedHistory.timestamp.split(" ")[1]}
+                  {selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0]}
                 </span>
               </div>
             </div>

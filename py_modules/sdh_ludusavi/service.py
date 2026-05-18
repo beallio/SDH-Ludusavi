@@ -337,6 +337,13 @@ class SDHLudusaviService:
             return None
         if coerced["operation"] not in ("backup", "restore", "start", "exit"):
             return None
+        if coerced["trigger"] not in (
+            "manual_backup",
+            "manual_restore",
+            "auto_start",
+            "auto_exit",
+        ):
+            return None
 
         for field, expected_types in optional.items():
             val = entry.get(field)
@@ -381,7 +388,7 @@ class SDHLudusaviService:
                 "status": status,
                 "reason": reason,
                 "message": message,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp": datetime.now().isoformat(timespec="microseconds"),
             }
         )
         if entry is None:
