@@ -7,15 +7,12 @@ The user experience is currently degraded by two distinct issues:
 
 ## Architecture Overview
 1. **Asynchronous Backend**: All backend methods that perform file I/O, persist state, or perform blocking discovery will be wrapped in `_run_blocking` to execute on a background thread.
-2. **State Concurrency**: A service-level `threading.Lock` will be added to `SDHLudusaviService` to protect `_save_state` and in-memory state mutations from races during asynchronous execution.
-3. **Subprocess Caching**: The `PyludusaviAdapter` will cache the static config path in memory to avoid redundant subprocess spawns during "fast" refresh checks.
-4. **Warmed-Boot Frontend**: Core state will be persisted in module-level global variables in `src/index.tsx`. The UI will render instantly using this cached data upon remounting, while performing a silent refresh in the background. 
+2. **Frontend Operation Gating**: The frontend will disable controls while refresh or settings persistence is in flight so duplicate refreshes and overlapping user-triggered save/refresh operations are not possible through the UI.
+3. **Subprocess Caching**: The `PyludusaviAdapter` will cache the static config path in memory to avoid redundant subprocess spawns during normal "fast" refresh checks.
+4. **Warmed-Boot Frontend**: Core state will be persisted in module-level global variables in `src/index.tsx`. The UI will render instantly using this cached data upon remounting only when both settings and games are cached, while performing a silent refresh in the background.
 5. **Robust RPC Handling**: All persistence and discovery RPCs will use the `RpcResult` pattern. The frontend will implement optimistic updates with explicit rollbacks if a backend operation fails.
 
 ## Core Data Structures
-
-### Backend State Lock
-- `SDHLudusaviService._state_lock: threading.Lock`
 
 ### Frontend Global Cache
 - `globalSettings: Settings | null`
@@ -36,22 +33,32 @@ The following methods will now execute asynchronously and their return types wil
 - `get_ludusavi_logs() -> RpcResult[string]`
 
 ### Frontend Implementation
-- **index.tsx**: Update callables and handle `RpcResult` in `onGameChange` and `toggleAutoSync`.
+- **index.tsx**: Update callables and handle `RpcResult` in `onGameChange`, `toggleAutoSync`, `loadInitial`, and `showLudusaviLogs`.
+- **Warmed Boot**: Treat the cache as warmed only when `globalSettings` and `globalGames` are both present. If a warmed background refresh fails, keep the stale cached data visible.
+- **Command Discovery**: If `get_ludusavi_command` returns `RpcStatus` during warmed boot, keep any existing `globalLudusaviCommand` and show/log a non-blocking warning. If no command is cached, show the existing Ludusavi unavailable state.
+- **Log Modal**: If `get_ludusavi_logs` returns `RpcStatus` or throws, open the log modal with an error message instead of raw log contents.
+- **Refresh Button**: Disable the refresh button immediately after it is clicked and until the refresh completes.
 - **ludusaviLauncher.ts**: Update `getSavedShortcutAppId` and `saveShortcutAppId` to handle `RpcResult` from `call()`.
 
 ## Testing Strategy
 
 ### Backend Tests
-- **Concurrency Test**: Add a test in `tests/test_service.py` that triggers multiple overlapping `_save_state` calls from different threads to verify lock stability.
 - **Discovery Semantics**: Verify that `get_ludusavi_command` returns `None` for "not installed" and `RpcStatus` for "discovery failure".
+- **Log Semantics**: Verify that `get_ludusavi_logs` can surface a failure payload that the frontend can display in the modal.
 - **Wrapper Coverage**: Verify all listed RPCs are handled by the background worker.
+- **Adapter Cache**: Verify `_client.config_path()` is cached during normal serial refresh checks.
 
 ### Frontend Tests
 - **Launcher RPCs**: Add tests for `src/ludusaviLauncher.ts` RpcResult handling.
-- **Static Analysis**: Verify module-level globals and "Warmed Load" logic.
+- **Static Analysis**: Verify module-level globals and "Warmed Load" logic require both `globalSettings` and `globalGames`.
+- **Command RPCs**: Verify `getLudusaviCommandCall` preserves a cached command on `RpcStatus`.
+- **Log Modal**: Verify log retrieval failures are displayed inside the Ludusavi log modal.
+- **Refresh Gating**: Verify the refresh button is disabled while refresh is in flight.
 
 ### Validation Suite
 - `./run.sh uv run pytest`
 - `./run.sh uv run ty check py_modules/sdh_ludusavi/`
 - `./run.sh uv run ruff check .`
-- Frontend typecheck and build.
+- `./run.sh uv run ruff format .`
+- `pnpm run typecheck`
+- `pnpm run build`

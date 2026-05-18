@@ -23,10 +23,10 @@ All backend methods that perform file I/O, persist state, or perform blocking su
 - **Failure**: Returns `RpcStatus` (e.g., `{"status": "failed", "message": "..."}`).
 
 ### 2.2. State Concurrency
-The `SDHLudusaviService` must implement a shared re-entrant or standard lock to protect both the in-memory state dictionary and the `_save_state` file-writing process. This ensures that concurrent asynchronous RPCs do not result in race conditions or partial state writes.
+The frontend must prevent overlapping user-triggered refresh and settings persistence operations by disabling affected controls while an operation is in flight. A settings save and a refresh save are not expected to run at the same time through the UI, so this feature does not add a broad backend state-locking layer.
 
 ### 2.3. Subprocess Caching
-Subprocess calls to `ludusavi` for static metadata (configuration paths) SHOULD be cached for the duration of the adapter session.
+Subprocess calls to `ludusavi` for static metadata (configuration paths) SHOULD be cached for the duration of the adapter session during normal serial refresh checks.
 
 | Resource | Discovery Command | Cache Key | Behavior on Stat Failure |
 | :--- | :--- | :--- | :--- |
@@ -49,21 +49,25 @@ The plugin frontend (React) is subject to unmounting and re-mounting by the Deck
 1. **Update**: Every successful RPC that fetches or modifies state MUST update BOTH the local React state and the corresponding global module-level variable.
 2. **Failure**: If a background refresh or fetch RPC fails, the stale cached data MUST remain visible. It MUST NOT overwrite the global cache with null or error payloads.
 3. **Optimistic UI**: When toggling settings or changing a game, the local UI state SHOULD be updated optimistically. If the backend RPC fails, the local state MUST be reverted to match the `global` state and an error toast shown.
+4. **Command Discovery Failure**: If `get_ludusavi_command` returns `RpcStatus` while a cached `globalLudusaviCommand` exists, keep the cached command and show/log a non-blocking warning. If no command is cached, show the existing Ludusavi unavailable state.
+5. **Log Retrieval Failure**: If `get_ludusavi_logs` returns `RpcStatus` or throws, the Ludusavi log modal MUST open with an error message instead of raw log contents.
 
 ### 3.3. Warmed Boot Sequence
 The initialization routine (`loadInitial`) must distinguish between a Cold Boot and a Warmed Boot.
 
 #### Logic Flow:
 1. Initialize local `useState` from `global` variables.
-2. If `globalGames` is null (Cold Boot):
+2. If `globalSettings` is null OR `globalGames` is null (Cold Boot):
    - Set UI to "Loading" state (`busyLabel("Loading")`).
    - Perform full RPC fetch.
-3. If `globalGames` is NOT null (Warmed Boot):
+3. If `globalSettings` and `globalGames` are both NOT null (Warmed Boot):
    - Show UI instantly with cached data.
    - Perform RPC fetch in background (silent refresh).
 4. On RPC success:
    - Update local state and `global` variables.
    - Clear "Loading" state if it was set.
+5. While refresh is in flight:
+   - Disable the refresh button so the user cannot trigger duplicate refresh requests.
 
 ## 4. Sequence Diagram
 
