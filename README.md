@@ -15,9 +15,11 @@ game status, operation status, and recent operation logs.
   - **Safety First:** Skips operations if results are ambiguous or if another operation is already running to prevent data corruption.
 - **Unified Logging:** Frontend and backend logs are consolidated into the Decky Loader system log and accessible via a "View Logs" modal with timestamps and chronological ordering.
 - **Persistent Settings:** Remembers your selected game and sync preferences across plugin reloads.
-- **Notification Preferences:** Toggle all plugin toasts off or control auto-sync progress,
-  auto-sync results, manual operation, refresh status, and failure/error notifications
-  independently.
+- **Autosync Status Strip:** Shows compact SteamOS-style backup and restore progress at
+  the bottom of the screen. Routine autosync progress and success states use the strip;
+  failures still use Decky toasts.
+- **Notification Preferences:** Toggle all plugin toasts off or control manual operation,
+  refresh status, and failure/error notifications independently.
 - **Ludusavi Integration:** Direct selector for Ludusavi game entries with real-time status display (e.g., "Backup ready", "Needs first backup").
 - **Manual Overrides:** Refresh Games, Force Backup, and Force Restore actions are always available, even when Automatic Sync is disabled.
 - **Shortcut Artwork:** The plugin-managed Ludusavi launcher shortcut uses bundled local
@@ -179,7 +181,8 @@ Other UI states:
 - `Unknown`: Version information is not available for Ludusavi or rclone.
 - Notification preferences live in their own panel above the Ludusavi launcher controls.
   Turning off `All Notifications` suppresses every Decky toast from the plugin and disables
-  the granular notification controls until it is turned back on.
+  the granular notification controls until it is turned back on. Autosync progress and
+  successful results are shown through the bottom status strip instead of routine toasts.
 - Log levels are currently `info` for normal decisions and `error` for refresh or dependency failures.
 
 ## Validation

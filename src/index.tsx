@@ -16,7 +16,15 @@ import {
   toaster
 } from "@decky/api";
 import React, { useEffect, useMemo, useState } from "react";
-import { FaDatabase, FaSave, FaDownload, FaExclamationTriangle } from "react-icons/fa";
+import { createPortal } from "react-dom";
+import { FaSave, FaDownload, FaExclamationTriangle } from "react-icons/fa";
+import {
+  FaCircle,
+  FaCircleArrowUp,
+  FaCircleCheck,
+  FaCircleExclamation,
+  FaFloppyDisk
+} from "react-icons/fa6";
 import { IoMdRefresh } from "react-icons/io";
 import { LuDatabaseBackup } from "react-icons/lu";
 
@@ -24,8 +32,6 @@ import { launchLudusavi, LudusaviLaunchCommand } from "./ludusaviLauncher";
 
 type NotificationSettings = {
   enabled: boolean;
-  auto_sync_progress: boolean;
-  auto_sync_results: boolean;
   manual_operations: boolean;
   refresh_status: boolean;
   failures_errors: boolean;
@@ -105,6 +111,15 @@ type RpcStatus = {
 };
 
 type RpcResult<T> = T | RpcStatus;
+
+type AutoSyncStatusKind = "backing_up" | "restoring" | "has_backup" | "needs_backup" | "error";
+
+type AutoSyncStatusState = {
+  status: AutoSyncStatusKind;
+  visible: boolean;
+};
+
+type AutoSyncStatusListener = (status: AutoSyncStatusKind) => void;
 
 type Versions = {
   sdh_ludusavi?: string;
@@ -189,8 +204,6 @@ const statusLabels: Record<GameStatus["status"], string> = {
 
 const defaultNotificationSettings: NotificationSettings = {
   enabled: true,
-  auto_sync_progress: true,
-  auto_sync_results: true,
   manual_operations: true,
   refresh_status: true,
   failures_errors: true
@@ -205,8 +218,6 @@ const defaultSettings = (): Settings => ({
 function normalizeNotificationSettings(settings?: Partial<NotificationSettings>): NotificationSettings {
   return {
     enabled: typeof settings?.enabled === "boolean" ? settings.enabled : true,
-    auto_sync_progress: typeof settings?.auto_sync_progress === "boolean" ? settings.auto_sync_progress : true,
-    auto_sync_results: typeof settings?.auto_sync_results === "boolean" ? settings.auto_sync_results : true,
     manual_operations: typeof settings?.manual_operations === "boolean" ? settings.manual_operations : true,
     refresh_status: typeof settings?.refresh_status === "boolean" ? settings.refresh_status : true,
     failures_errors: typeof settings?.failures_errors === "boolean" ? settings.failures_errors : true
@@ -228,6 +239,188 @@ function SpinnerButton({ children, loading, ...props }: any) {
         {children}
       </div>
     </ButtonItem>
+  );
+}
+
+const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
+  backing_up: "BACKUP: BACKING UP",
+  restoring: "BACKUP: RESTORING",
+  has_backup: "BACKUP: UP TO DATE",
+  needs_backup: "BACKUP: NEEDED",
+  error: "BACKUP: ERROR"
+};
+
+const autoSyncStatusListeners = new Set<AutoSyncStatusListener>();
+let autoSyncStatusTimedOut = false;
+
+function publishAutoSyncStatus(status: AutoSyncStatusKind) {
+  if (status === "backing_up" || status === "restoring") {
+    autoSyncStatusTimedOut = false;
+  }
+  for (const listener of autoSyncStatusListeners) {
+    listener(status);
+  }
+}
+
+function completeAutoSyncStatus(result: OperationResult) {
+  if (result.status === "failed") {
+    publishAutoSyncStatus("error");
+    return;
+  }
+
+  if (autoSyncStatusTimedOut) {
+    return;
+  }
+
+  if (result.status === "backed_up" || result.status === "restored") {
+    publishAutoSyncStatus("has_backup");
+    return;
+  }
+
+  if (result.status === "skipped") {
+    publishAutoSyncStatus("needs_backup");
+  }
+}
+
+function AutoSyncStatusIcon({ status }: { status: AutoSyncStatusKind }) {
+  if (status === "backing_up" || status === "restoring") {
+    return (
+      <span style={{ transform: status === "restoring" ? "rotate(180deg)" : undefined }}>
+        <FaCircleArrowUp />
+      </span>
+    );
+  }
+
+  if (status === "has_backup") {
+    return <FaCircleCheck />;
+  }
+
+  if (status === "needs_backup") {
+    return (
+      <span style={{ position: "relative", width: "18px", height: "18px", display: "block" }}>
+        <span style={{ position: "absolute", inset: 0, width: "18px", height: "18px" }}>
+          <FaCircle />
+        </span>
+        <span
+          style={{
+            position: "absolute",
+            inset: "4px",
+            width: "10px",
+            height: "10px",
+            color: "rgba(0, 0, 0, 0.74)"
+          }}
+        >
+          <FaFloppyDisk />
+        </span>
+      </span>
+    );
+  }
+
+  return <FaCircleExclamation />;
+}
+
+function AutoSyncStatusStrip() {
+  const [state, setState] = useState<AutoSyncStatusState>({
+    status: "has_backup",
+    visible: false
+  });
+
+  useEffect(() => {
+    const listener: AutoSyncStatusListener = (status) => {
+      setState({ status, visible: true });
+    };
+    autoSyncStatusListeners.add(listener);
+    return () => {
+      autoSyncStatusListeners.delete(listener);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!state.visible) {
+      return;
+    }
+
+    const isRunning = state.status === "backing_up" || state.status === "restoring";
+    const timeout = window.setTimeout(() => {
+      if (isRunning) {
+        autoSyncStatusTimedOut = true;
+      }
+      setState((current) => ({ ...current, visible: false }));
+    }, isRunning ? 10000 : 2000);
+
+    return () => window.clearTimeout(timeout);
+  }, [state.status, state.visible]);
+
+  return createPortal(
+    <div
+      style={{
+        position: "fixed",
+        bottom: "0",
+        left: "0",
+        width: "100vw",
+        zIndex: 99999,
+        pointerEvents: "none",
+        transform: state.visible ? "translateY(0)" : "translateY(100%)",
+        transition: "transform 300ms ease-out",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          height: "24px",
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          color: state.status === "error" ? "rgba(255, 210, 210, 0.95)" : "rgba(255, 255, 255, 0.92)",
+          background: "rgba(0, 0, 0, 0.34)",
+          fontFamily: '"Motiva Sans", "Arial", sans-serif',
+          fontSize: "13px",
+          fontWeight: 800,
+          letterSpacing: 0,
+          textTransform: "uppercase",
+          whiteSpace: "nowrap",
+        }}
+      >
+        <div
+          style={{
+            height: "2px",
+            flex: 1,
+            background: "rgba(255, 255, 255, 0.10)",
+          }}
+        />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "9px",
+            minWidth: "245px",
+          }}
+        >
+          <span
+            style={{
+              width: "18px",
+              height: "18px",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "15px",
+            }}
+          >
+            <AutoSyncStatusIcon status={state.status} />
+          </span>
+          <span style={{ lineHeight: 1 }}>{autoSyncStatusText[state.status]}</span>
+        </div>
+        <div
+          style={{
+            height: "2px",
+            flex: 1,
+            background: "rgba(255, 255, 255, 0.10)",
+          }}
+        />
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -737,18 +930,6 @@ function Content() {
           onChange={(enabled: boolean) => void toggleNotificationSetting("enabled", enabled)}
         />
         <ToggleField
-          label="Auto-sync Progress"
-          checked={settings.notifications.auto_sync_progress}
-          disabled={!settings.notifications.enabled || isBusy}
-          onChange={(enabled: boolean) => void toggleNotificationSetting("auto_sync_progress", enabled)}
-        />
-        <ToggleField
-          label="Auto-sync Results"
-          checked={settings.notifications.auto_sync_results}
-          disabled={!settings.notifications.enabled || isBusy}
-          onChange={(enabled: boolean) => void toggleNotificationSetting("auto_sync_results", enabled)}
-        />
-        <ToggleField
           label="Manual Operations"
           checked={settings.notifications.manual_operations}
           disabled={!settings.notifications.enabled || isBusy}
@@ -926,7 +1107,7 @@ export default definePlugin(() => {
     log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
     
     if (tracked && autoSyncNotificationsEnabled) {
-      notify("auto_sync_progress", "SDH-ludusavi Auto-sync", `Checking saves for ${name}...`, <FaDatabase />);
+      publishAutoSyncStatus("restoring");
     }
     
     const result = await handleGameStartCall(name, appID);
@@ -935,13 +1116,10 @@ export default definePlugin(() => {
     // or the game simply isn't managed by Ludusavi (unmatched or ignored).
     const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
     if (result.status !== "skipped" || !silentReasons.includes(result.reason ?? "")) {
-      let icon = <FaDatabase />;
-      if (result.status === "failed") icon = <FaExclamationTriangle />;
-      else if (result.status === "restored") icon = <FaDownload />;
-      else if (result.status === "backed_up") icon = <FaSave />;
-
-      const category = result.status === "failed" ? "failures_errors" : "auto_sync_results";
-      notify(category, "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), icon);
+      completeAutoSyncStatus(result);
+      if (result.status === "failed") {
+        notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+      }
     }
   };
 
@@ -950,16 +1128,17 @@ export default definePlugin(() => {
     log("info", `App exited: ${name} (${appID}) tracked=${tracked}`);
     
     if (tracked && autoSyncNotificationsEnabled) {
-      notify("auto_sync_progress", "SDH-ludusavi Auto-sync", `Backing up saves for ${name}...`, <FaSave />);
+      publishAutoSyncStatus("backing_up");
     }
     
     const result = await handleGameExitCall(name, appID);
     const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
     if (result.status !== "skipped" || !silentReasons.includes(result.reason ?? "")) {
       if (result.status !== "skipped" || result.reason === "local_current") {
-        const icon = result.status === "failed" ? <FaExclamationTriangle /> : <FaSave />;
-        const category = result.status === "failed" ? "failures_errors" : "auto_sync_results";
-        notify(category, "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), icon);
+        completeAutoSyncStatus(result);
+        if (result.status === "failed") {
+          notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+        }
       }
     }
   };
@@ -1157,14 +1336,21 @@ export default definePlugin(() => {
   return {
     name: "SDH-ludusavi",
     titleView: <div className={staticClasses.Title}>SDH-ludusavi</div>,
-    content: <Content />,
+    content: (
+      <>
+        <Content />
+        <AutoSyncStatusStrip />
+      </>
+    ),
     icon: <LuDatabaseBackup />,
+    alwaysRender: true,
     onDismount() {
       unregisterLifecycleNotifications();
       if (fallbackIntervalID !== null) {
         window.clearInterval(fallbackIntervalID);
       }
       activeSessions.clear();
+      autoSyncStatusListeners.clear();
       console.log("SDH-ludusavi unloading");
     },
   };

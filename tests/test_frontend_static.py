@@ -47,8 +47,6 @@ def test_frontend_exposes_notification_preferences_panel() -> None:
     for required_text in [
         'PanelSection title="Notifications"',
         'label="All Notifications"',
-        'label="Auto-sync Progress"',
-        'label="Auto-sync Results"',
         'label="Manual Operations"',
         'label="Refresh Status"',
         'label="Failures and Errors"',
@@ -58,6 +56,8 @@ def test_frontend_exposes_notification_preferences_panel() -> None:
     ]:
         assert required_text in source
 
+    assert 'label="Auto-sync Progress"' not in source
+    assert 'label="Auto-sync Results"' not in source
     assert source.index('PanelSection title="Notifications"') < source.index("<LudusaviPanel")
 
 
@@ -71,8 +71,6 @@ def test_frontend_centralizes_notification_aware_toasts() -> None:
     assert "toaster.toast" in source
     assert source.count("toaster.toast") == 1
     for category in [
-        '"auto_sync_progress"',
-        '"auto_sync_results"',
         '"manual_operations"',
         '"refresh_status"',
         '"failures_errors"',
@@ -107,17 +105,102 @@ def test_frontend_silences_lifecycle_toasts_when_auto_sync_is_disabled() -> None
     assert "autoSyncNotificationsEnabled = normalized.auto_sync_enabled;" in source
     assert source.count("if (tracked && autoSyncNotificationsEnabled)") == 2
 
-    start_toast = 'notify("auto_sync_progress", "SDH-ludusavi Auto-sync", `Checking saves for ${name}...`, <FaDatabase />);'
-    exit_toast = 'notify("auto_sync_progress", "SDH-ludusavi Auto-sync", `Backing up saves for ${name}...`, <FaSave />);'
-    assert start_toast in source
-    assert exit_toast in source
+    start_status = 'publishAutoSyncStatus("restoring");'
+    exit_status = 'publishAutoSyncStatus("backing_up");'
+    assert start_status in source
+    assert exit_status in source
 
-    assert source.index(start_toast) < source.index(
+    assert source.index(start_status) < source.index(
         "const result = await handleGameStartCall(name, appID);"
     )
-    assert source.index(exit_toast) < source.index(
+    assert source.index(exit_status) < source.index(
         "const result = await handleGameExitCall(name, appID);"
     )
+
+
+def test_frontend_renders_autosync_status_strip_portal() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        'import { createPortal } from "react-dom";',
+        'type AutoSyncStatusKind = "backing_up" | "restoring" | "has_backup" | "needs_backup" | "error";',
+        "function AutoSyncStatusStrip()",
+        "createPortal(",
+        "document.body",
+        "const autoSyncStatusListeners = new Set<AutoSyncStatusListener>();",
+        "function publishAutoSyncStatus(",
+        "<AutoSyncStatusStrip />",
+        "alwaysRender: true",
+    ]:
+        assert required_text in source
+
+
+def test_frontend_status_strip_matches_steamos_visual_contract() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        'position: "fixed"',
+        'bottom: "0"',
+        'left: "0"',
+        "zIndex: 99999",
+        'pointerEvents: "none"',
+        'transform: state.visible ? "translateY(0)" : "translateY(100%)"',
+        'transition: "transform 300ms ease-out"',
+        'height: "24px"',
+        'background: "rgba(0, 0, 0, 0.34)"',
+        'fontFamily: \'"Motiva Sans", "Arial", sans-serif\'',
+        "fontWeight: 800",
+        "letterSpacing: 0",
+        'minWidth: "245px"',
+        'height: "2px"',
+        'background: "rgba(255, 255, 255, 0.10)"',
+    ]:
+        assert required_text in source
+
+
+def test_frontend_status_strip_uses_existing_react_icons() -> None:
+    package_json = Path("package.json").read_text()
+    source = FRONTEND.read_text()
+
+    assert "@fortawesome/" not in package_json
+    assert "FontAwesomeIcon" not in source
+    assert "library.add" not in source
+
+    for required_text in [
+        "FaCircleArrowUp",
+        "FaCircleCheck",
+        "FaCircle",
+        "FaFloppyDisk",
+        "FaCircleExclamation",
+        'transform: status === "restoring" ? "rotate(180deg)" : undefined',
+        "<FaFloppyDisk",
+    ]:
+        assert required_text in source
+
+
+def test_frontend_status_strip_replaces_autosync_success_toasts() -> None:
+    source = FRONTEND.read_text()
+
+    assert 'notify("auto_sync_progress"' not in source
+    assert 'notify("auto_sync_results"' not in source
+    assert '"auto_sync_progress"' not in source
+    assert '"auto_sync_results"' not in source
+
+    for required_text in [
+        'publishAutoSyncStatus("has_backup");',
+        'publishAutoSyncStatus("needs_backup");',
+        'publishAutoSyncStatus("error");',
+        'notify("failures_errors", "SDH-ludusavi Auto-sync"',
+    ]:
+        assert required_text in source
+
+
+def test_frontend_status_strip_does_not_mutate_steam_overlay_composition() -> None:
+    source = FRONTEND.read_text()
+
+    assert "SetOverlayState" not in source
+    assert "SetComposition" not in source
+    assert "EUIComposition" not in source
 
 
 def test_frontend_uses_app_lifetime_notifications_for_lifecycle_detection() -> None:
