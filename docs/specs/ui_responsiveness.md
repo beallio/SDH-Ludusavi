@@ -6,51 +6,57 @@ Provide a seamless, low-latency user experience for game selection and plugin in
 ## 2. Backend Interface Requirements
 
 ### 2.1. RPC Async Execution
-All backend methods that perform file I/O or persist state MUST be executed on a background thread to prevent blocking the Decky Loader event loop.
+All backend methods that perform file I/O, persist state, or perform blocking subprocess discovery MUST be executed on a background thread to prevent blocking the Decky Loader event loop. They must return an `RpcResult` compatible dictionary to communicate failures.
 
-- `set_selected_game(game_name: str) -> dict`: Must be wrapped in `_run_blocking`.
-- `set_auto_sync_enabled(enabled: bool) -> dict`: Must be wrapped in `_run_blocking`.
+| Method | Original Return | New Return |
+| :--- | :--- | :--- |
+| `set_selected_game` | `dict` | `RpcResult[dict]` |
+| `set_auto_sync_enabled` | `dict` | `RpcResult[dict]` |
+| `set_ludusavi_launcher_shortcut_id` | `bool` | `RpcResult[bool]` |
+| `clear_ludusavi_launcher_shortcut_id` | `bool` | `RpcResult[bool]` |
+| `get_ludusavi_command` | `dict \| None` | `RpcResult[dict \| None]` |
 
 ### 2.2. Subprocess Caching
-Subprocess calls to `ludusavi` for static metadata (configuration paths) SHOULD be cached for the duration of the service session.
+Subprocess calls to `ludusavi` for static metadata SHOULD be cached for the duration of the adapter session.
 
-| Resource | Discovery Command | Cache Key |
-| :--- | :--- | :--- |
-| Config Path | `ludusavi config path` | `PyludusaviAdapter._cached_config_path` |
+| Resource | Discovery Command | Cache Key | Behavior on Stat Failure |
+| :--- | :--- | :--- | :--- |
+| Config Path | `ludusavi config path` | `PyludusaviAdapter._cached_config_path` | Keep cached path string, return `None` for mtime |
 
 ## 3. Frontend State Architecture
 
 ### 3.1. Persistence Across Mounts
-The plugin frontend (React) is subject to unmounting and re-mounting by the Decky UI. To maintain responsiveness, the core state must be persisted in variables scoped to the plugin module.
+The plugin frontend (React) is subject to unmounting and re-mounting by the Decky UI. Core state MUST be persisted in variables scoped to the plugin module.
 
 | State Variable | Type | Description |
 | :--- | :--- | :--- |
 | `globalSettings` | `Settings \| null` | Persisted settings (auto-sync, selected game). |
 | `globalGames` | `GameStatus[] \| null` | Cached list of Ludusavi-managed games. |
-| `globalGameHistory` | `Record<string, History> \| null` | Recent operations history for all games. |
+| `globalGameHistory` | `Record<string, GameOperationHistory> \| null` | Recent operations history. |
+| `globalVersions` | `Versions \| null` | Version info. |
+| `globalLudusaviCommand` | `LudusaviLaunchCommand \| null` | Launcher command info. |
 
-### 3.2. Warmed Boot Sequence
-The initialization routine (`loadInitial`) must distinguish between a **Cold Boot** (first time loading in a Decky session) and a **Warmed Boot** (re-mounting after previously successful load).
+### 3.2. Cache Update and Invalidation Rules
+1. **Update**: Every successful RPC that fetches or modifies state (e.g., `refreshGamesCall`, `setSelectedGameCall`, `setAutoSyncEnabled`, `getVersions`) MUST update BOTH the local React state and the corresponding global module-level variable.
+2. **Failure**: If a background refresh or fetch RPC fails (returns an RpcStatus error or throws), the stale cached data MUST remain visible. It MUST NOT overwrite the global cache with null or error payloads.
+3. **Optimistic UI**: When toggling settings or changing a game, the local UI state SHOULD be updated optimistically. If the backend RPC fails, the local state MUST be reverted to match the `global` state and an error toast shown.
+
+### 3.3. Warmed Boot Sequence
+The initialization routine (`loadInitial`) must distinguish between a Cold Boot and a Warmed Boot.
 
 #### Logic Flow:
 1. Initialize local `useState` from `global` variables.
-2. If `globalGames` is null:
-   - Set UI to "Loading" state (busy label).
+2. If `globalGames` is null (Cold Boot):
+   - Set UI to "Loading" state (`busyLabel("Loading")`).
    - Perform full RPC fetch.
-3. If `globalGames` is NOT null:
+3. If `globalGames` is NOT null (Warmed Boot):
    - Show UI instantly with cached data.
    - Perform RPC fetch in background (silent refresh).
 4. On RPC success:
-   - Update both local state and `global` variables.
+   - Update local state and `global` variables.
    - Clear "Loading" state if it was set.
 
-## 4. UI Behavior Specifications
-
-### 4.1. Status Transitions
-- **Dropdown Change**: Upon selecting a new game, the UI must update the `selectedGame` state immediately. The backend persistence happens in the background. The "Status:" line should reflect the new game's status instantly using the cached `games` list.
-- **Initial Load**: If cached data exists, the "Status:" line should show the status of the previously selected game immediately, with no "Loading game list..." flicker.
-
-## 5. Sequence Diagram
+## 4. Sequence Diagram
 
 ```text
 User           Frontend (Content)      Global Store      Backend (Plugin)

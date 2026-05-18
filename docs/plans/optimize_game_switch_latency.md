@@ -1,90 +1,49 @@
-# Plan: Optimize UI Responsiveness and "Warmed Boot" State Management
+# Plan: Optimize Game Switch Latency and UI Responsiveness
 
-## Overview
-This plan details the technical steps to achieve near-instantaneous UI responses when switching games and to eliminate the "Loading game list..." flicker when the plugin panel is re-opened.
+## Problem Definition
+Switching games in the dropdown or re-opening the plugin panel causes a visible "Loading game list..." status message for approximately one second. This latency and UI flicker are caused by:
+1. **Blocking Backend RPCs**: Settings updates and metadata discovery run on the main Decky thread, freezing the UI.
+2. **Redundant Subprocesses**: The "fast" refresh checks spawn multiple Ludusavi processes for config path discovery.
+3. **Frontend State Reset**: The plugin component occasionally re-mounts in Decky. Since it doesn't persist its "warmed" state in a global cache, it defaults to a "Loading" state on every mount.
 
-## 1. Backend: Asynchronous Settings Persistence
-Currently, updating plugin settings (like selecting a game) blocks the main Decky thread while performing file I/O. We will offload these operations to background threads.
+## Architecture Overview
+1. **Asynchronous Backend**: All backend methods that perform file I/O, persist state, or perform blocking discovery will be wrapped in `_run_blocking` to execute on a background thread.
+2. **Subprocess Caching**: The `PyludusaviAdapter` will cache the static config path in memory to avoid redundant subprocess spawns.
+3. **Warmed-Boot Frontend**: Core state will be persisted in module-level global variables. The UI will render instantly using this cached data upon remounting, while performing a silent refresh in the background. Optimistic UI updates will be used for settings, with robust rollbacks if the backend RPCs fail.
 
-### Implementation Detail (`main.py`)
-Wrap the following RPC methods in `_call` (which utilizes `_run_blocking`):
-- `set_selected_game`
-- `set_auto_sync_enabled`
+## Core Data Structures
 
-```python
-# Proposed change in main.py
-async def set_selected_game(self, game_name: str) -> dict[str, Any]:
-    return await self._call(
-        "set_selected_game", 
-        lambda: self._service().set_selected_game(game_name)
-    )
-```
+### Frontend Global Cache
+- `globalSettings: Settings | null`
+- `globalGames: GameStatus[] | null`
+- `globalGameHistory: Record<string, GameOperationHistory> | null`
+- `globalVersions: Versions | null`
+- `globalLudusaviCommand: LudusaviLaunchCommand | null`
 
-## 2. Backend: Subprocess Optimization (Adapter Caching)
-The `PyludusaviAdapter` currently calls `ludusavi config path` frequently to check for configuration changes. Since this path is static for a given installation, we will cache it in memory.
+## Public Interfaces
 
-### Implementation Detail (`py_modules/sdh_ludusavi/ludusavi.py`)
-- Add a private `_cached_config_path` variable to the `PyludusaviAdapter` class.
-- Update `get_config_mtime_ns` to populate and use this cache.
+### Backend RPC Contract Updates
+The following methods will now execute asynchronously and their return types will be wrapped in `RpcResult[T]` to handle `OperationLockedError` and other exceptions consistently:
+- `set_selected_game(game_name: str) -> RpcResult[Settings]` (previously `Settings`)
+- `set_auto_sync_enabled(enabled: bool) -> RpcResult[Settings]` (previously `Settings`)
+- `set_ludusavi_launcher_shortcut_id(app_id: int) -> RpcResult[bool]` (previously `bool`)
+- `clear_ludusavi_launcher_shortcut_id() -> RpcResult[bool]` (previously `bool`)
+- `get_ludusavi_command() -> RpcResult[LudusaviLaunchCommand | null]` (previously `LudusaviLaunchCommand | null`)
 
-```python
-# Proposed change in PyludusaviAdapter
-def get_config_mtime_ns(self) -> int | None:
-    if self._cached_config_path is None:
-        try:
-            self._cached_config_path = self._client.config_path()
-        except Exception:
-            return None
-    try:
-        return Path(self._cached_config_path).stat().st_mtime_ns
-    except Exception:
-        return None
-```
+### Frontend Type Updates
+- `setSelectedGameCall`, `setAutoSyncEnabled`, `setLudusaviLauncherShortcutIdCall`, `clearLudusaviLauncherShortcutIdCall`, and `getLudusaviCommandCall` signatures must be updated to return `RpcResult<T>`.
 
-## 3. Frontend: "Warmed Boot" Architecture
-To prevent the UI from resetting every time the Decky panel is closed and re-opened, we will move the core state (Settings, Games, History) to module-level variables.
+## Dependency Requirements
+None. Uses standard library and existing Decky UI/API imports.
 
-### Architecture Diagram (Text-based)
-```text
-[ First Mount ] -> [ No Global Cache ] -> [ Set "Loading" ] -> [ Fetch Data ] -> [ Populate Cache ] -> [ Render UI ]
-[ Second Mount] -> [ Global Cache Exists ] -> [ Render UI Instantly ] -> [ Fetch Data (Silent) ] -> [ Update UI ]
-```
+## Testing Strategy
 
-### Implementation Detail (`src/index.tsx`)
-1. **Global Store**: Define globals for `settings`, `games`, `gameHistory`, and `versions` outside the `Content` component.
-2. **Instant Init**: Initialize the component's `useState` hooks from these globals.
-3. **Optimized `loadInitial`**: 
-   - Check if `globalGames` has data.
-   - If yes: skip `setBusyLabel("Loading")` but still trigger the background fetch.
-   - If no: show "Loading" as usual.
+### Backend Tests (`tests/test_main_rpc.py`, `tests/test_service.py`, `tests/test_ludusavi.py`)
+- **Wrapper Tests**: Verify that `set_selected_game`, `set_auto_sync_enabled`, `get_ludusavi_command`, etc. are executed via `_call` and return `{"status": "failed"}` or `{"status": "skipped"}` on error.
+- **Adapter Cache Tests**: Verify that `_client.config_path()` is called exactly once per adapter session, and that `stat` failures return `None` for the mtime but do not clear the static path cache string itself.
 
-```typescript
-// Proposed global state in src/index.tsx
-let globalSettings: Settings | null = null;
-let globalGames: GameStatus[] | null = null;
-let globalHistory: Record<string, GameOperationHistory> | null = null;
-
-function Content() {
-  const [settings, setSettings] = useState<Settings>(globalSettings ?? { auto_sync_enabled: false, selected_game: "" });
-  const [games, setGames] = useState<GameStatus[]>(globalGames ?? []);
-  // ...
-  
-  const loadInitial = async () => {
-    const isWarmed = !!globalGames;
-    if (!isWarmed) {
-        setBusyLabel("Loading");
-    }
-    try {
-        // ... fetch data ...
-        // apply results
-    } finally {
-        setBusyLabel(null);
-    }
-  }
-}
-```
-
-## Verification
-1. **Log Analysis**: Verify that `set_selected_game` shows "sdh-ludusavi-worker" in the thread name.
-2. **Process Monitoring**: Verify (via `top` or logs) that only one Ludusavi process is spawned during the "fast refresh" check (version and path discovery are avoided or cached).
-3. **Visual UI Check**: Switch a game; the status line should update without any "Loading" text appearing. Re-opening the panel should show the previous game list instantly.
+### Frontend Static Tests (`tests/test_frontend_static.py`)
+- **Global Variables**: Assert the presence of `globalSettings`, `globalGames`, `globalGameHistory`, `globalVersions`, and `globalLudusaviCommand`.
+- **Warmed Load**: Assert that `loadInitial` checks `globalGames` before setting `busyLabel("Loading")`.
+- **Settings RPC Guards**: Assert that `setAutoSyncEnabled` and `setSelectedGameCall` usage is guarded with `isRpcStatus` to handle failures safely (e.g. reverting optimistic UI).
+- **Cache Updates**: Assert that successful responses update both the local state and the global cache variables, and that failures do not overwrite the cache.
