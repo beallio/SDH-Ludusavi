@@ -70,7 +70,5 @@ def test_get_ludusavi_command_not_found(service, monkeypatch):
 
     monkeypatch.setattr("pyludusavi.discovery.find_ludusavi", mock_find_ludusavi_fail)
 
-    from pyludusavi.discovery import LudusaviNotFoundError
-
-    with pytest.raises(LudusaviNotFoundError):
-        service.get_ludusavi_command()
+    cmd = service.get_ludusavi_command()
+    assert cmd is None

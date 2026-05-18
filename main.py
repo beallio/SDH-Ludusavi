@@ -35,7 +35,7 @@ class Plugin:
         return self._backend
 
     async def get_settings(self) -> dict[str, Any]:
-        return await self._call("get_settings", self._service().get_settings)
+        return await self._call("get_settings", lambda: self._service().get_settings())
 
     async def set_auto_sync_enabled(self, enabled: bool) -> dict[str, Any]:
         return await self._call(
@@ -59,11 +59,13 @@ class Plugin:
     async def clear_ludusavi_launcher_shortcut_id(self) -> bool:
         return await self._call(
             "clear_ludusavi_launcher_shortcut_id",
-            self._service().clear_ludusavi_launcher_shortcut_id,
+            lambda: self._service().clear_ludusavi_launcher_shortcut_id(),
         )
 
     async def get_ludusavi_command(self) -> dict[str, Any] | None:
-        return await self._call("get_ludusavi_command", self._service().get_ludusavi_command)
+        return await self._call(
+            "get_ludusavi_command", lambda: self._service().get_ludusavi_command()
+        )
 
     async def log(
         self,
@@ -116,7 +118,7 @@ class Plugin:
         return self._service().get_recent_logs()
 
     async def get_ludusavi_logs(self) -> str:
-        return await self._call("get_ludusavi_logs", self._service().get_ludusavi_logs)
+        return await self._call("get_ludusavi_logs", lambda: self._service().get_ludusavi_logs())
 
     async def _main(self) -> None:
         decky.logger.info("SDH-ludusavi backend loaded")

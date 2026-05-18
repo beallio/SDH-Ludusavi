@@ -303,6 +303,7 @@ function Content() {
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  const [backgroundRefreshBusy, setBackgroundRefreshBusy] = useState(false);
   const [ludusaviCommand, setLudusaviCommand] = useState<LudusaviLaunchCommand | null>(globalLudusaviCommand);
 
   const selectedStatus = useMemo(
@@ -313,7 +314,7 @@ function Content() {
     const history = gameHistory[selectedGame];
     return history?.last_operation ?? null;
   }, [gameHistory, selectedGame]);
-  const isBusy = operation.is_running || busyLabel !== null;
+  const isBusy = operation.is_running || busyLabel !== null || backgroundRefreshBusy;
 
   useEffect(() => {
     log("info", "Plugin mounted, starting initial load");
@@ -325,6 +326,7 @@ function Content() {
     if (!isWarmed) {
       setBusyLabel("Loading");
     }
+    setBackgroundRefreshBusy(isWarmed);
 
     try {
       log("debug", `Starting initial load (warmed=${isWarmed})`);
@@ -376,6 +378,7 @@ function Content() {
       log("error", `Initial load failed: ${error}`);
       setLogs(await getRecentLogs().catch(() => []));
     } finally {
+      setBackgroundRefreshBusy(false);
       setBusyLabel(null);
     }
   };
@@ -518,6 +521,8 @@ function Content() {
       }
       setSettings(result);
       globalSettings = result;
+      setSelectedGame(result.selected_game);
+      autoSyncNotificationsEnabled = result.auto_sync_enabled;
     } catch (error) {
       log("error", `Failed to persist selected game: ${error}`);
       // Rollback

@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 from pathlib import Path
+import ast
 import pytest
 
 from tests.test_main import fake_decky_module, import_main
@@ -54,3 +55,33 @@ async def test_get_ludusavi_command_not_found(plugin) -> None:
 
     result = await plugin.get_ludusavi_command()
     assert result is None
+
+
+def test_new_wrapped_rpcs_defer_service_lookup_into_worker() -> None:
+    tree = ast.parse(Path("main.py").read_text(encoding="utf-8"))
+    plugin_class = next(
+        node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Plugin"
+    )
+    methods = {
+        node.name: node
+        for node in plugin_class.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name
+        in {
+            "get_settings",
+            "clear_ludusavi_launcher_shortcut_id",
+            "get_ludusavi_command",
+            "get_ludusavi_logs",
+        }
+    }
+
+    for method_name, method in methods.items():
+        call = next(
+            node
+            for node in ast.walk(method)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_call"
+        )
+        assert len(call.args) == 2, method_name
+        assert isinstance(call.args[1], ast.Lambda), method_name

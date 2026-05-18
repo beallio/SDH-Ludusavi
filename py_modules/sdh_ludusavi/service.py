@@ -285,13 +285,16 @@ class SDHLudusaviService:
         Return the command path and args used by the plugin for GUI launching.
         Returns None if Ludusavi is not found.
         """
-        from pyludusavi.discovery import find_ludusavi
+        from pyludusavi.discovery import LudusaviNotFoundError, find_ludusavi
 
         from .ludusavi import FLATPAK_ID, _ludusavi_env
 
         # find_ludusavi returns a list[str] like ["/usr/bin/flatpak", "run", ...]
         # or just ["/usr/bin/ludusavi"]
-        prefix = find_ludusavi(explicit_flatpak_id=FLATPAK_ID, env=_ludusavi_env())
+        try:
+            prefix = find_ludusavi(explicit_flatpak_id=FLATPAK_ID, env=_ludusavi_env())
+        except LudusaviNotFoundError:
+            return None
 
         if not prefix:
             return None

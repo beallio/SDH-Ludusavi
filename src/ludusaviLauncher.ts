@@ -100,13 +100,17 @@ async function getSavedShortcutAppId(): Promise<number> {
 }
 
 async function saveShortcutAppId(appId: number): Promise<void> {
+  let result: RpcResult<boolean>;
   try {
-    const result = await call<[appId: number], RpcResult<boolean>>("set_ludusavi_launcher_shortcut_id", appId);
-    if (isRpcStatus(result)) {
-      console.error("Failed to save shortcut ID:", result.message || result.status);
-    }
+    result = await call<[appId: number], RpcResult<boolean>>("set_ludusavi_launcher_shortcut_id", appId);
   } catch (err) {
     console.error("Failed to save shortcut ID:", err);
+    throw new Error(
+      `Failed to save shortcut ID: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+  if (isRpcStatus(result)) {
+    throw new Error(`Failed to save shortcut ID: ${result.message || result.status}`);
   }
 }
 

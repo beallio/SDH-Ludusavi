@@ -236,3 +236,20 @@ def test_frontend_displays_durable_operation_history() -> None:
     )
     assert "setGameHistory(result.history ?? {});" in source
     assert "Last Operation:" in source
+
+
+def test_frontend_gates_warmed_background_refresh_without_loading_label() -> None:
+    source = FRONTEND.read_text()
+
+    assert "backgroundRefreshBusy" in source
+    assert "setBackgroundRefreshBusy(isWarmed)" in source
+    assert "operation.is_running || busyLabel !== null || backgroundRefreshBusy" in source
+    assert 'if (!isWarmed) {\n      setBusyLabel("Loading");\n    }' in source
+
+
+def test_frontend_applies_backend_selected_game_after_persisting() -> None:
+    source = FRONTEND.read_text()
+
+    assert "const result = await setSelectedGameCall(value);" in source
+    assert "setSelectedGame(result.selected_game);" in source
+    assert "autoSyncNotificationsEnabled = result.auto_sync_enabled;" in source
