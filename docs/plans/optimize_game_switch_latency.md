@@ -1,17 +1,21 @@
-# Plan: Optimize Game Switch Latency and UI Responsiveness
+# Plan: Optimize UI Responsiveness and "Warmed Boot" State Management
 
 ## Problem Definition
-Switching games in the dropdown or re-opening the plugin panel causes a visible "Loading game list..." status message for approximately one second. This latency and UI flicker are caused by:
-1. **Blocking Backend RPCs**: Settings updates and metadata discovery run on the main Decky thread, freezing the UI.
-2. **Redundant Subprocesses**: The "fast" refresh checks spawn multiple Ludusavi processes for config path discovery.
-3. **Frontend State Reset**: The plugin component occasionally re-mounts in Decky. Since it doesn't persist its "warmed" state in a global cache, it defaults to a "Loading" state on every mount.
+The user experience is currently degraded by two distinct issues:
+1. **Synchronous Backend Blocking**: RPCs that perform state persistence (e.g., changing the selected game) or blocking I/O (e.g., reading logs, discovering commands) run on the main Decky thread, causing the UI to freeze or lag during the operation.
+2. **Frontend State Flicker**: The plugin panel re-mounts frequently when closed and re-opened. Because it currently resets its state on every mount, it displays a "Loading game list..." message even when the data has not changed.
 
 ## Architecture Overview
 1. **Asynchronous Backend**: All backend methods that perform file I/O, persist state, or perform blocking discovery will be wrapped in `_run_blocking` to execute on a background thread.
-2. **Subprocess Caching**: The `PyludusaviAdapter` will cache the static config path in memory to avoid redundant subprocess spawns.
-3. **Warmed-Boot Frontend**: Core state will be persisted in module-level global variables. The UI will render instantly using this cached data upon remounting, while performing a silent refresh in the background. Optimistic UI updates will be used for settings, with robust rollbacks if the backend RPCs fail.
+2. **State Concurrency**: A service-level `threading.Lock` will be added to `SDHLudusaviService` to protect `_save_state` and in-memory state mutations from races during asynchronous execution.
+3. **Subprocess Caching**: The `PyludusaviAdapter` will cache the static config path in memory to avoid redundant subprocess spawns during "fast" refresh checks.
+4. **Warmed-Boot Frontend**: Core state will be persisted in module-level global variables in `src/index.tsx`. The UI will render instantly using this cached data upon remounting, while performing a silent refresh in the background. 
+5. **Robust RPC Handling**: All persistence and discovery RPCs will use the `RpcResult` pattern. The frontend will implement optimistic updates with explicit rollbacks if a backend operation fails.
 
 ## Core Data Structures
+
+### Backend State Lock
+- `SDHLudusaviService._state_lock: threading.Lock`
 
 ### Frontend Global Cache
 - `globalSettings: Settings | null`
@@ -23,27 +27,31 @@ Switching games in the dropdown or re-opening the plugin panel causes a visible 
 ## Public Interfaces
 
 ### Backend RPC Contract Updates
-The following methods will now execute asynchronously and their return types will be wrapped in `RpcResult[T]` to handle `OperationLockedError` and other exceptions consistently:
-- `set_selected_game(game_name: str) -> RpcResult[Settings]` (previously `Settings`)
-- `set_auto_sync_enabled(enabled: bool) -> RpcResult[Settings]` (previously `Settings`)
-- `set_ludusavi_launcher_shortcut_id(app_id: int) -> RpcResult[bool]` (previously `bool`)
-- `clear_ludusavi_launcher_shortcut_id() -> RpcResult[bool]` (previously `bool`)
-- `get_ludusavi_command() -> RpcResult[LudusaviLaunchCommand | null]` (previously `LudusaviLaunchCommand | null`)
+The following methods will now execute asynchronously and their return types will be wrapped in `RpcResult[T]` to handle concurrency and exceptions consistently:
+- `set_selected_game(game_name: str) -> RpcResult[Settings]`
+- `set_auto_sync_enabled(enabled: bool) -> RpcResult[Settings]`
+- `set_ludusavi_launcher_shortcut_id(app_id: int) -> RpcResult[bool]`
+- `clear_ludusavi_launcher_shortcut_id() -> RpcResult[bool]`
+- `get_ludusavi_command() -> RpcResult[LudusaviLaunchCommand | null]` (None = not found, RpcStatus = discovery failed)
+- `get_ludusavi_logs() -> RpcResult[string]`
 
-### Frontend Type Updates
-- `setSelectedGameCall`, `setAutoSyncEnabled`, `setLudusaviLauncherShortcutIdCall`, `clearLudusaviLauncherShortcutIdCall`, and `getLudusaviCommandCall` signatures must be updated to return `RpcResult<T>`.
-
-## Dependency Requirements
-None. Uses standard library and existing Decky UI/API imports.
+### Frontend Implementation
+- **index.tsx**: Update callables and handle `RpcResult` in `onGameChange` and `toggleAutoSync`.
+- **ludusaviLauncher.ts**: Update `getSavedShortcutAppId` and `saveShortcutAppId` to handle `RpcResult` from `call()`.
 
 ## Testing Strategy
 
-### Backend Tests (`tests/test_main_rpc.py`, `tests/test_service.py`, `tests/test_ludusavi.py`)
-- **Wrapper Tests**: Verify that `set_selected_game`, `set_auto_sync_enabled`, `get_ludusavi_command`, etc. are executed via `_call` and return `{"status": "failed"}` or `{"status": "skipped"}` on error.
-- **Adapter Cache Tests**: Verify that `_client.config_path()` is called exactly once per adapter session, and that `stat` failures return `None` for the mtime but do not clear the static path cache string itself.
+### Backend Tests
+- **Concurrency Test**: Add a test in `tests/test_service.py` that triggers multiple overlapping `_save_state` calls from different threads to verify lock stability.
+- **Discovery Semantics**: Verify that `get_ludusavi_command` returns `None` for "not installed" and `RpcStatus` for "discovery failure".
+- **Wrapper Coverage**: Verify all listed RPCs are handled by the background worker.
 
-### Frontend Static Tests (`tests/test_frontend_static.py`)
-- **Global Variables**: Assert the presence of `globalSettings`, `globalGames`, `globalGameHistory`, `globalVersions`, and `globalLudusaviCommand`.
-- **Warmed Load**: Assert that `loadInitial` checks `globalGames` before setting `busyLabel("Loading")`.
-- **Settings RPC Guards**: Assert that `setAutoSyncEnabled` and `setSelectedGameCall` usage is guarded with `isRpcStatus` to handle failures safely (e.g. reverting optimistic UI).
-- **Cache Updates**: Assert that successful responses update both the local state and the global cache variables, and that failures do not overwrite the cache.
+### Frontend Tests
+- **Launcher RPCs**: Add tests for `src/ludusaviLauncher.ts` RpcResult handling.
+- **Static Analysis**: Verify module-level globals and "Warmed Load" logic.
+
+### Validation Suite
+- `./run.sh uv run pytest`
+- `./run.sh uv run ty check py_modules/sdh_ludusavi/`
+- `./run.sh uv run ruff check .`
+- Frontend typecheck and build.

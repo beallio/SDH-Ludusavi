@@ -15,9 +15,18 @@ All backend methods that perform file I/O, persist state, or perform blocking su
 | `set_ludusavi_launcher_shortcut_id` | `bool` | `RpcResult[bool]` |
 | `clear_ludusavi_launcher_shortcut_id` | `bool` | `RpcResult[bool]` |
 | `get_ludusavi_command` | `dict \| None` | `RpcResult[dict \| None]` |
+| `get_ludusavi_logs` | `str` | `RpcResult[str]` |
 
-### 2.2. Subprocess Caching
-Subprocess calls to `ludusavi` for static metadata SHOULD be cached for the duration of the adapter session.
+#### Failure Semantics for `get_ludusavi_command`:
+- **Success (Found)**: Returns the `LudusaviLaunchCommand` object.
+- **Success (Not Found)**: Returns `None`.
+- **Failure**: Returns `RpcStatus` (e.g., `{"status": "failed", "message": "..."}`).
+
+### 2.2. State Concurrency
+The `SDHLudusaviService` must implement a shared re-entrant or standard lock to protect both the in-memory state dictionary and the `_save_state` file-writing process. This ensures that concurrent asynchronous RPCs do not result in race conditions or partial state writes.
+
+### 2.3. Subprocess Caching
+Subprocess calls to `ludusavi` for static metadata (configuration paths) SHOULD be cached for the duration of the adapter session.
 
 | Resource | Discovery Command | Cache Key | Behavior on Stat Failure |
 | :--- | :--- | :--- | :--- |
@@ -37,8 +46,8 @@ The plugin frontend (React) is subject to unmounting and re-mounting by the Deck
 | `globalLudusaviCommand` | `LudusaviLaunchCommand \| null` | Launcher command info. |
 
 ### 3.2. Cache Update and Invalidation Rules
-1. **Update**: Every successful RPC that fetches or modifies state (e.g., `refreshGamesCall`, `setSelectedGameCall`, `setAutoSyncEnabled`, `getVersions`) MUST update BOTH the local React state and the corresponding global module-level variable.
-2. **Failure**: If a background refresh or fetch RPC fails (returns an RpcStatus error or throws), the stale cached data MUST remain visible. It MUST NOT overwrite the global cache with null or error payloads.
+1. **Update**: Every successful RPC that fetches or modifies state MUST update BOTH the local React state and the corresponding global module-level variable.
+2. **Failure**: If a background refresh or fetch RPC fails, the stale cached data MUST remain visible. It MUST NOT overwrite the global cache with null or error payloads.
 3. **Optimistic UI**: When toggling settings or changing a game, the local UI state SHOULD be updated optimistically. If the backend RPC fails, the local state MUST be reverted to match the `global` state and an error toast shown.
 
 ### 3.3. Warmed Boot Sequence
