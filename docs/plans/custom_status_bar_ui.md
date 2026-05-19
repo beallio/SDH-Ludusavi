@@ -1,11 +1,11 @@
 # Status Update Bar Refinement
 
 ## Objective
-Refine the visual presentation of the Ludusavi Auto-Sync status update bar by adjusting its vertical positioning, changing its normal primary icon color to Steam Blue, retaining a distinct warning/action color for `needs_backup`, and horizontally centering the icon plus text as one group on the screen.
+Refine the visual presentation of the Ludusavi Auto-Sync status update bar by positioning it directly above the Steam bottom menu bar, sizing it by screen-height percentages, changing its normal primary icon color to Steam Blue, retaining a distinct warning/action color for `needs_backup`, and horizontally centering the icon plus text as one group on the screen.
 
 ## Key Files & Context
 - **Target File:** `src/index.tsx`
-- **Context:** The status bar is rendered as an HTML document injected into a Steam Deck BrowserView. Its bounds are calculated dynamically in `getAutoSyncStatusBounds()`, and its HTML structure is defined in `renderAutoSyncStatusHtml()`. The canonical behavior contract lives in `docs/specs/custom_status_bar_ui.md` and should be revised with the new centered visual contract before runtime code changes.
+- **Context:** The status bar is rendered as an HTML document injected into a Steam Deck BrowserView. Its bounds are calculated dynamically in `getAutoSyncStatusBounds()`, and its HTML structure is defined in `renderAutoSyncStatusHtml()`. The canonical behavior contract lives in `docs/specs/custom_status_bar_ui.md` and should use percentage-based geometry so the strip scales across devices.
 
 ## Diagram: Target Layout
 ```text
@@ -16,16 +16,16 @@ Refine the visual presentation of the Ludusavi Auto-Sync status update bar by ad
 |                                                             |
 |                                                             |
 +-------------------------------------------------------------+
-|                  [Icon] Status Text                         | <- Status Bar (Centered group)
+|                  [Icon] Status Text                         | <- Status Bar (4.75% high)
 +-------------------------------------------------------------+
-|                       (Bottom Padding)                      | <- Offset
+|                       Steam bottom menu                     | <- 2.625% high
 +-------------------------------------------------------------+
 ```
 
 ## Implementation Plan
 
-### Phase 1: Adjust Bounds (Padding)
-We will introduce a vertical offset to ensure the status bar does not sit flush against the absolute bottom edge of the screen, improving readability on the Deck.
+### Phase 1: Adjust Bounds (Percentage Geometry)
+Position the status strip directly above the Steam bottom menu bar using screen-height ratios instead of fixed pixels. The Steam Deck OLED screenshot reference is a 1280x800 viewport with a 38px status strip at `y=741` and a 21px bottom menu bar at `y=779`.
 
 **Target File:** `src/index.tsx`
 **Function:** `getAutoSyncStatusBounds()`
@@ -35,8 +35,8 @@ We will introduce a vertical offset to ensure the status bar does not sit flush 
 function getAutoSyncStatusBounds() {
   // ...
   const width = Math.round(rawWidth);
-  const height = Math.round(24 * pixelRatio);
-  const bottomOffset = 48; // CSS pixel bottom offset for BrowserView bounds
+  const height = Math.round(rawHeight * STATUS_STRIP_HEIGHT_RATIO);
+  const bottomOffset = Math.round(rawHeight * STEAM_BOTTOM_MENU_HEIGHT_RATIO);
 
   return {
     x: 0,
@@ -46,6 +46,13 @@ function getAutoSyncStatusBounds() {
     pixelRatio
   };
 }
+```
+
+Use these ratios:
+
+```typescript
+const STATUS_STRIP_HEIGHT_RATIO = 0.0475; // 38px on an 800px Steam Deck OLED viewport
+const STEAM_BOTTOM_MENU_HEIGHT_RATIO = 0.02625; // 21px on an 800px Steam Deck OLED viewport
 ```
 
 ### Phase 2: Update HTML and CSS
@@ -99,13 +106,14 @@ function renderAutoSyncStatusHtml(state: AutoSyncStatusState) {
 ```
 
 ## Verification & Testing
-1. **Red static test:** Update `tests/test_frontend_static.py` to require the new centered visual contract: `bottomOffset = 48`, centered `.bar`, centered stable-width `.text`, Steam Blue normal color, warning/action `needs_backup` color, and no `space-between`.
+1. **Red static test:** Update `tests/test_frontend_static.py` to require the new centered visual contract: percentage-based status strip height, percentage-based Steam bottom menu offset, centered `.bar`, centered stable-width `.text`, Steam Blue normal color, warning/action `needs_backup` color, and no `space-between`.
 2. **Spec update:** Update `docs/specs/custom_status_bar_ui.md` with the same color and centering contract.
 3. **Compile:** Run the TypeScript compiler through the project wrapper to ensure `src/index.tsx` compiles without syntax errors.
 4. **Launch Plugin:** Deploy the updated plugin to a Decky environment.
 5. **Trigger Status:** Trigger a Ludusavi backup operation (e.g., launching/exiting a game).
 6. **Visual Inspection:**
-    - Verify the status bar appears above the very bottom edge of the screen (padding applied).
+    - Verify the status bar sits directly above the bottom menu bar.
+    - On a 1280x800 Steam Deck OLED viewport, verify the strip is `38px` high at `y=741`, with the bottom menu occupying `y=779-799` (`21px` high).
     - Verify the icon plus text are centered horizontally as one group.
     - Verify running/success icons are Steam Blue (`#66c0f4`).
     - Verify `needs_backup` is a distinct warning/action color (`#f59e0b`).

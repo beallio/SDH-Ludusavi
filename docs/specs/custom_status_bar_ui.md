@@ -57,11 +57,15 @@ deselected Ludusavi game.
 The BrowserView document uses inline SVG icons. The restore icon is the backup arrow
 rotated 180 degrees. No additional icon dependencies are required.
 
-The visual contract is a compact bottom strip offset above the absolute bottom edge
-of the Gamepad UI viewport. The icon plus text are centered horizontally as one group,
-with a stable text-group width so status changes do not visibly shift the strip.
-Running and success states use Steam Blue (`#66c0f4`), `needs_backup` uses a distinct
-warning/action color (`#f59e0b`), and `error` remains red (`#ef4444`).
+The visual contract is a compact bottom strip positioned directly above the Steam
+bottom menu bar. BrowserView bounds use screen-height ratios instead of absolute
+pixel constants: the strip height is 4.75% of viewport height and the bottom menu
+offset is 2.625% of viewport height. On a 1280x800 Steam Deck OLED viewport, this
+maps to a 38px strip at `y=741` and a 21px bottom menu bar at `y=779-799`. The icon
+plus text are centered horizontally as one group, with a stable text-group width so
+status changes do not visibly shift the strip. Running and success states use Steam
+Blue (`#66c0f4`), `needs_backup` uses a distinct warning/action color (`#f59e0b`),
+and `error` remains red (`#ef4444`).
 
 ## Public Interfaces
 
@@ -97,8 +101,8 @@ Frontend static tests must verify:
   `BrowserView`, and nested `m_browserView.m_browserView` candidates.
 - The BrowserView document matches the compact SteamOS-style bottom strip visual
   contract.
-- The BrowserView bounds include a bottom offset so the strip does not sit flush
-  against the absolute bottom edge.
+- The BrowserView bounds use percentage-based height and bottom menu offset ratios
+  so the strip sits above the bottom menu bar across viewport sizes.
 - The icon plus text are centered as one group, normal/running/success icons use
   Steam Blue, `needs_backup` uses a warning/action color, and errors remain red.
 - Diagnostic buttons, diagnostic labels, alternate surface modes, React portal code,

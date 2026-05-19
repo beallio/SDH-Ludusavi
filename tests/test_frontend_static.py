@@ -175,7 +175,10 @@ def test_frontend_status_strip_matches_steamos_visual_contract() -> None:
     source = FRONTEND.read_text()
 
     for required_text in [
-        "const bottomOffset = 48;",
+        "const STATUS_STRIP_HEIGHT_RATIO = 0.0475;",
+        "const STEAM_BOTTOM_MENU_HEIGHT_RATIO = 0.02625;",
+        "Math.round(rawHeight * STATUS_STRIP_HEIGHT_RATIO)",
+        "Math.round(rawHeight * STEAM_BOTTOM_MENU_HEIGHT_RATIO)",
         "rawHeight - height - bottomOffset",
         "width: 100vw;",
         "height: 100vh;",

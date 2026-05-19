@@ -279,6 +279,9 @@ let autoSyncStatusHideTimeoutID: number | null = null;
 let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;
 let autoSyncStatusBrowserViewOwner: AutoSyncStatusBrowserViewOwner | null = null;
 
+const STATUS_STRIP_HEIGHT_RATIO = 0.0475;
+const STEAM_BOTTOM_MENU_HEIGHT_RATIO = 0.02625;
+
 function getAutoSyncStatusBounds() {
   const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance?.BrowserWindow;
   const viewWindow = rootWindow ?? window;
@@ -289,8 +292,8 @@ function getAutoSyncStatusBounds() {
   log("debug", `Window dimensions: raw=${rawWidth}x${rawHeight}, ratio=${pixelRatio}`, "autosync_status");
 
   const width = Math.round(rawWidth);
-  const height = Math.round(24 * pixelRatio);
-  const bottomOffset = 48;
+  const height = Math.round(rawHeight * STATUS_STRIP_HEIGHT_RATIO);
+  const bottomOffset = Math.round(rawHeight * STEAM_BOTTOM_MENU_HEIGHT_RATIO);
 
   return {
     x: 0,
