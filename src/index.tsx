@@ -8,7 +8,9 @@ import {
   staticClasses,
   ToggleField,
   Spinner,
-  Router
+  Router,
+  findModuleChild,
+  EUIComposition
 } from "@decky/ui";
 import {
   callable,
@@ -121,6 +123,8 @@ type AutoSyncStatusState = {
 };
 
 type AutoSyncStatusListener = (state: AutoSyncStatusState) => void;
+
+type UseUIComposition = (composition: EUIComposition) => { releaseComposition: () => void };
 
 type Versions = {
   sdh_ludusavi?: string;
@@ -259,6 +263,31 @@ let currentAutoSyncStatusState: AutoSyncStatusState = {
 };
 let autoSyncStatusTimedOut = false;
 
+const useUIComposition: UseUIComposition =
+  findModuleChild((module: any) => {
+    if (typeof module !== "object" || module === null) {
+      return undefined;
+    }
+
+    for (const prop in module) {
+      const candidate = module[prop];
+      if (
+        typeof candidate === "function" &&
+        candidate.toString().includes("AddMinimumCompositionStateRequest") &&
+        candidate.toString().includes("ChangeMinimumCompositionStateRequest") &&
+        candidate.toString().includes("RemoveMinimumCompositionStateRequest") &&
+        !candidate.toString().includes("m_mapCompositionStateRequests")
+      ) {
+        return candidate;
+      }
+    }
+
+    return undefined;
+  }) ??
+  (() => ({
+    releaseComposition: () => undefined
+  }));
+
 function publishAutoSyncStatus(status: AutoSyncStatusKind) {
   if (status === "backing_up" || status === "restoring") {
     autoSyncStatusTimedOut = false;
@@ -333,6 +362,11 @@ function AutoSyncStatusIcon({ status }: { status: AutoSyncStatusKind }) {
   return <FaCircleExclamation />;
 }
 
+function AutoSyncStatusComposition() {
+  useUIComposition(EUIComposition.Notification);
+  return null;
+}
+
 function AutoSyncStatusStrip() {
   const [state, setState] = useState<AutoSyncStatusState>(currentAutoSyncStatusState);
 
@@ -363,76 +397,81 @@ function AutoSyncStatusStrip() {
     return () => window.clearTimeout(timeout);
   }, [state.status, state.visible]);
 
-  return createPortal(
-    <div
-      style={{
-        position: "fixed",
-        bottom: "0",
-        left: "0",
-        width: "100vw",
-        zIndex: 99999,
-        pointerEvents: "none",
-        transform: state.visible ? "translateY(0)" : "translateY(100%)",
-        transition: "transform 300ms ease-out",
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          height: "24px",
-          display: "flex",
-          alignItems: "center",
-          gap: "10px",
-          color: state.status === "error" ? "rgba(255, 210, 210, 0.95)" : "rgba(255, 255, 255, 0.92)",
-          background: "rgba(0, 0, 0, 0.34)",
-          fontFamily: '"Motiva Sans", "Arial", sans-serif',
-          fontSize: "13px",
-          fontWeight: 800,
-          letterSpacing: 0,
-          textTransform: "uppercase",
-          whiteSpace: "nowrap",
-        }}
-      >
+  return (
+    <>
+      {state.visible && <AutoSyncStatusComposition />}
+      {createPortal(
         <div
           style={{
-            height: "2px",
-            flex: 1,
-            background: "rgba(255, 255, 255, 0.10)",
-          }}
-        />
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "9px",
-            minWidth: "245px",
+            position: "fixed",
+            bottom: "0",
+            left: "0",
+            width: "100vw",
+            zIndex: 99999,
+            pointerEvents: "none",
+            transform: state.visible ? "translateY(0)" : "translateY(100%)",
+            transition: "transform 300ms ease-out",
           }}
         >
-          <span
+          <div
             style={{
-              width: "18px",
-              height: "18px",
-              display: "inline-flex",
+              width: "100%",
+              height: "24px",
+              display: "flex",
               alignItems: "center",
-              justifyContent: "center",
-              fontSize: "15px",
+              gap: "10px",
+              color: state.status === "error" ? "rgba(255, 210, 210, 0.95)" : "rgba(255, 255, 255, 0.92)",
+              background: "rgba(0, 0, 0, 0.34)",
+              fontFamily: '"Motiva Sans", "Arial", sans-serif',
+              fontSize: "13px",
+              fontWeight: 800,
+              letterSpacing: 0,
+              textTransform: "uppercase",
+              whiteSpace: "nowrap",
             }}
           >
-            <AutoSyncStatusIcon status={state.status} />
-          </span>
-          <span style={{ lineHeight: 1 }}>{autoSyncStatusText[state.status]}</span>
-        </div>
-        <div
-          style={{
-            height: "2px",
-            flex: 1,
-            background: "rgba(255, 255, 255, 0.10)",
-          }}
-        />
-      </div>
-    </div>,
-    document.body
+            <div
+              style={{
+                height: "2px",
+                flex: 1,
+                background: "rgba(255, 255, 255, 0.10)",
+              }}
+            />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "9px",
+                minWidth: "245px",
+              }}
+            >
+              <span
+                style={{
+                  width: "18px",
+                  height: "18px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "15px",
+                }}
+              >
+                <AutoSyncStatusIcon status={state.status} />
+              </span>
+              <span style={{ lineHeight: 1 }}>{autoSyncStatusText[state.status]}</span>
+            </div>
+            <div
+              style={{
+                height: "2px",
+                flex: 1,
+                background: "rgba(255, 255, 255, 0.10)",
+              }}
+            />
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
   );
 }
 

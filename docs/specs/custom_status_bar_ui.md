@@ -19,12 +19,24 @@ The status strip is frontend-owned and driven by the existing app lifetime flow 
   operation boundary.
 - The strip publishes local frontend state before and after those RPC calls.
 - No backend `decky.emit` event stream is added for v1.
-- No Steam overlay composition APIs are mutated.
+- No direct Steam overlay/window composition APIs are called.
 
 The status strip is registered as a Decky global component and renders through a React
 portal into `document.body`. It stays mounted while the plugin is loaded and toggles
 visibility with CSS transforms. The strip must not live only inside the plugin panel
 content tree because that tree may not be visible while a game is launching or running.
+
+When visible, the status strip must also request SteamUI notification composition via
+the internal UI composition hook resolved with Decky's `findModuleChild`. This mirrors
+the decky-pip overlay pattern and uses `EUIComposition.Notification`, whose semantics
+allow transparent SteamUI pixels to show the running game behind Steam while input
+continues to go to the game. The composition request is mounted only while the strip
+is visible so SDH-ludusavi does not permanently alter SteamUI composition behavior.
+
+An external native overlay process, like OverLaid's backend-launched `DISPLAY=:0`
+overlay binary, remains a fallback architecture only. The autosync strip should stay
+inside SteamUI unless runtime testing proves the notification composition request is
+insufficient.
 
 Lifecycle status publication must not depend solely on frontend tracking caches. If
 settings or tracking data have not been loaded yet, the frontend should show the
@@ -82,7 +94,9 @@ Frontend static tests must verify:
 - Autosync lifecycle handlers publish strip states around existing RPC calls.
 - Autosync start/result success toasts are removed.
 - Autosync failure still routes through the `failures_errors` notification category.
-- Steam overlay composition APIs are not used.
+- The strip requests `EUIComposition.Notification` through the discovered SteamUI
+  composition hook while visible.
+- Direct `SetOverlayState` and `SetComposition` calls are not used.
 
 Validation commands:
 

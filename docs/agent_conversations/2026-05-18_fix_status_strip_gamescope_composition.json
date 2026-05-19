@@ -1,0 +1,22 @@
+{
+  "date": "2026-05-18",
+  "task_objective": "Fix autosync status strip visibility over running games by requesting SteamUI notification composition while the strip is visible.",
+  "files_modified": [
+    "docs/plans/fix_status_strip_gamescope_composition.md",
+    "docs/specs/custom_status_bar_ui.md",
+    "docs/plans/custom_status_bar_ui.md",
+    "docs/agent_conversations/2026-05-18_fix_status_strip_gamescope_composition.json",
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "Updated frontend static tests to require the local UI composition hook wrapper and visible-only EUIComposition.Notification usage while forbidding direct SetComposition and SetOverlayState calls."
+  ],
+  "design_decisions": [
+    "Modeled the compositor bridge on decky-pip's useUIComposition pattern instead of adding a BrowserView for the status strip.",
+    "Reviewed OverLaid's native overlay process pattern and kept it as a fallback architecture because it is heavier than this transient status strip needs.",
+    "Mounted a small AutoSyncStatusComposition child only while the strip is visible so the plugin does not permanently request notification composition.",
+    "Kept the existing Decky global component and document.body portal for the actual strip DOM."
+  ],
+  "results": "Targeted frontend static tests, TypeScript typecheck, Rollup build, Ruff, ty, and the full pytest suite passed."
+}

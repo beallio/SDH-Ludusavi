@@ -12,8 +12,9 @@ The change is frontend-only. Add a Decky global component that portal-mounts the
 status strip from `src/index.tsx`, and publish state from the existing lifecycle
 handlers around `handle_game_start` and `handle_game_exit`.
 
-Do not add backend events, dependencies, CSS pipeline changes, or Steam overlay
-composition changes.
+Do not add backend events, dependencies, or CSS pipeline changes. A follow-up runtime
+fix may request SteamUI notification composition while the strip is visible if
+Gamescope hides ordinary SteamUI DOM over a running game.
 
 ## Core Data Structures
 
@@ -47,7 +48,7 @@ Use the existing `react-icons` dependency. Import FA6 icons from `react-icons/fa
 
 1. Add failing frontend static tests for portal rendering, strip style invariants,
    icons, autosync lifecycle publishing, failure-only toasts, and the absence of
-   Steam overlay composition calls.
+   direct Steam overlay/window composition calls.
 2. Implement the minimal frontend changes to pass those tests.
 3. Run targeted frontend static tests, TypeScript typecheck, Rollup build, Ruff,
    `ty`, and the full pytest suite.

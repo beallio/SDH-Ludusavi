@@ -225,12 +225,26 @@ def test_frontend_status_strip_replaces_autosync_success_toasts() -> None:
         assert required_text in source
 
 
-def test_frontend_status_strip_does_not_mutate_steam_overlay_composition() -> None:
+def test_frontend_status_strip_requests_notification_composition_without_direct_overlay_mutation() -> (
+    None
+):
     source = FRONTEND.read_text()
+
+    for required_text in [
+        "findModuleChild",
+        "EUIComposition",
+        "type UseUIComposition",
+        "AddMinimumCompositionStateRequest",
+        "ChangeMinimumCompositionStateRequest",
+        "RemoveMinimumCompositionStateRequest",
+        "function AutoSyncStatusComposition()",
+        "useUIComposition(EUIComposition.Notification);",
+        "{state.visible && <AutoSyncStatusComposition />}",
+    ]:
+        assert required_text in source
 
     assert "SetOverlayState" not in source
     assert "SetComposition" not in source
-    assert "EUIComposition" not in source
 
 
 def test_frontend_uses_app_lifetime_notifications_for_lifecycle_detection() -> None:
