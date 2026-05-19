@@ -284,14 +284,22 @@ async def _run_blocking(callback: Any) -> Any:
         if not future.cancelled():
             future.set_exception(exc)
 
+    def signal_completion(callback: Any, payload: Any) -> None:
+        if loop.is_closed():
+            return
+        try:
+            loop.call_soon_threadsafe(callback, payload)
+        except RuntimeError:
+            return
+
     def worker() -> None:
         try:
             result = context.run(callback)
         except BaseException as exc:
-            loop.call_soon_threadsafe(set_exception, exc)
+            signal_completion(set_exception, exc)
             wake_loop()
             return
-        loop.call_soon_threadsafe(set_result, result)
+        signal_completion(set_result, result)
         wake_loop()
 
     threading.Thread(target=worker, name="sdh-ludusavi-worker", daemon=True).start()
