@@ -81,9 +81,9 @@ def build_frontend_bundle(project_root: Path) -> None:
     subprocess.run(["pnpm", "run", "build"], cwd=project_root, check=True)
 
 
-def ensure_required_files(project_root: Path) -> None:
+def ensure_required_files(project_root: Path, is_release: bool = False) -> None:
     validate_static_files(project_root)
-    if missing_runtime_files(project_root):
+    if not is_release or missing_runtime_files(project_root):
         build_frontend_bundle(project_root)
     validate_required_files(project_root)
 
@@ -135,7 +135,7 @@ def _get_git_hash() -> str | None:
 
 
 def build_plugin_zip(project_root: Path, output_dir: Path, is_release: bool = False) -> Path:
-    ensure_required_files(project_root)
+    ensure_required_files(project_root, is_release=is_release)
     base_version = validate_package_versions(project_root)
     if is_release:
         version = base_version
