@@ -274,8 +274,7 @@ let currentAutoSyncStatusState: AutoSyncStatusState = {
 let autoSyncStatusTimedOut = false;
 let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;
 
-const useUIComposition: UseUIComposition =
-  findModuleChild((module: any) => {
+const useUICompositionHook = findModuleChild((module: any) => {
     if (typeof module !== "object" || module === null) {
       return undefined;
     }
@@ -294,7 +293,16 @@ const useUIComposition: UseUIComposition =
     }
 
     return undefined;
-  }) ??
+  });
+
+if (useUICompositionHook) {
+  log("info", "Composition hook found", "autosync_status");
+} else {
+  log("warning", "Composition hook NOT found; in-game overlay may fail", "autosync_status");
+}
+
+const useUIComposition: UseUIComposition =
+  (useUICompositionHook as any) ??
   (() => ({
     releaseComposition: () => undefined
   }));
@@ -321,18 +329,30 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
   try {
     const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance;
     if (rootWindow?.CreateBrowserView) {
+      log("info", "Creating BrowserView via GamepadUIMainWindowInstance", "autosync_status");
       autoSyncStatusBrowserView = rootWindow.CreateBrowserView("sdh-ludusavi-autosync-status-strip") as AutoSyncStatusBrowserView;
     } else {
       const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
+      log("info", "Creating BrowserView via SteamClient fallback", "autosync_status");
       autoSyncStatusBrowserView = steamClient?.BrowserView?.Create?.({
         strInitialURL: "about:blank"
       }) as AutoSyncStatusBrowserView | null;
     }
 
-    autoSyncStatusBrowserView?.SetName?.("sdh-ludusavi-autosync-status-strip");
-    autoSyncStatusBrowserView?.SetWindowStackingOrder?.(1);
-    autoSyncStatusBrowserView?.SetFocus?.(false);
-    autoSyncStatusBrowserView?.SetVisible?.(false);
+    if (!autoSyncStatusBrowserView) {
+      log("error", "Failed to create BrowserView surface", "autosync_status");
+      return null;
+    }
+
+    autoSyncStatusBrowserView.SetName?.("sdh-ludusavi-autosync-status-strip");
+    autoSyncStatusBrowserView.SetWindowStackingOrder?.(2);
+    autoSyncStatusBrowserView.SetFocus?.(false);
+    autoSyncStatusBrowserView.SetVisible?.(false);
+    
+    if (typeof (autoSyncStatusBrowserView as any).SetTopmost === "function") {
+      (autoSyncStatusBrowserView as any).SetTopmost(true);
+    }
+
     return autoSyncStatusBrowserView;
   } catch (err) {
     log("warning", `Could not create status strip BrowserView: ${err}`, "autosync_status");
@@ -357,7 +377,7 @@ function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind) {
 }
 
 function renderAutoSyncStatusHtml(state: AutoSyncStatusState) {
-  const color = state.status === "error" ? "rgba(255, 210, 210, 0.95)" : "rgba(255, 255, 255, 0.92)";
+  const color = state.status === "error" ? "rgba(255, 210, 210, 1.0)" : "rgba(255, 255, 255, 1.0)";
   return `<!doctype html>
 <html>
 <head>
@@ -379,10 +399,10 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: rgba(0, 0, 0, 0.34);
+  background: rgba(0, 0, 0, 0.85);
   pointer-events: none;
 }
-.rule { height: 2px; flex: 1; background: rgba(255, 255, 255, 0.10); }
+.rule { height: 2px; flex: 1; background: rgba(255, 255, 255, 0.20); }
 .content { min-width: 245px; display: flex; align-items: center; justify-content: center; gap: 9px; }
 .icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; }
 .text { line-height: 1; }
@@ -407,10 +427,20 @@ function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
   try {
     const bounds = getAutoSyncStatusBounds();
     const url = "data:text/html;charset=utf-8," + encodeURIComponent(renderAutoSyncStatusHtml(state));
-    browserView.LoadURL(url);
+    
+    // Hardened sequence: Bounds -> Load -> Visible
     browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);
-    browserView.SetVisible(state.visible);
-    browserView.SetFocus?.(false);
+    browserView.LoadURL(url);
+    
+    if (state.visible) {
+      // Delay visibility slightly if becoming visible to allow LoadURL to register
+      setTimeout(() => {
+        browserView.SetVisible?.(true);
+        browserView.SetFocus?.(false);
+      }, 0);
+    } else {
+      browserView.SetVisible(false);
+    }
   } catch (err) {
     log("warning", `Could not update status strip BrowserView: ${err}`, "autosync_status");
   }

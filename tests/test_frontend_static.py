@@ -261,9 +261,18 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         '"data:text/html;charset=utf-8,"',
         "function syncAutoSyncStatusBrowserView(",
         "browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);",
-        "browserView.SetVisible(state.visible);",
+        "browserView.SetVisible(false);",
+        "browserView.SetVisible?.(true);",
         "syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);",
         "destroyAutoSyncStatusBrowserView();",
+        'log("info", "Composition hook found"',
+        'log("warning", "Composition hook NOT found',
+        'log("info", "Creating BrowserView via GamepadUIMainWindowInstance"',
+        'log("info", "Creating BrowserView via SteamClient fallback"',
+        "autoSyncStatusBrowserView.SetWindowStackingOrder?.(2);",
+        "SetTopmost(true)",
+        "browserView.LoadURL(url);",
+        "setTimeout(() => {",
     ]:
         assert required_text in source
 
