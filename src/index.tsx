@@ -290,10 +290,11 @@ function getAutoSyncStatusBounds() {
 
   const width = Math.round(rawWidth);
   const height = Math.round(24 * pixelRatio);
+  const bottomOffset = 48;
 
   return {
     x: 0,
-    y: Math.max(0, Math.round(rawHeight - height)),
+    y: Math.max(0, Math.round(rawHeight - height - bottomOffset)),
     width,
     height,
     pixelRatio
@@ -452,15 +453,15 @@ body {
   height: 100vh;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 10px;
   background: rgba(0, 0, 0, 0.34);
   border-top: 1px solid rgba(255, 255, 255, 0.10);
   padding: 0 18px;
   box-sizing: border-box;
 }
-.text { display: flex; align-items: center; gap: 8px; white-space: nowrap; min-width: 245px; }
-.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : "#22c55e"}; }
+.text { display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; min-width: 245px; }
+.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "needs_backup" ? "#f59e0b" : "#66c0f4"}; }
 </style>
 </head>
 <body>

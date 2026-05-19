@@ -175,15 +175,23 @@ def test_frontend_status_strip_matches_steamos_visual_contract() -> None:
     source = FRONTEND.read_text()
 
     for required_text in [
+        "const bottomOffset = 48;",
+        "rawHeight - height - bottomOffset",
         "width: 100vw;",
         "height: 100vh;",
         "background: rgba(0, 0, 0, 0.34)",
         'font-family: "Motiva Sans", Arial, sans-serif;',
         "font-weight: 800;",
+        "justify-content: center;",
         "min-width: 245px;",
+        'state.status === "needs_backup" ? "#f59e0b"',
+        '"#66c0f4"',
+        '"#ef4444"',
         "border-top: 1px solid rgba(255, 255, 255, 0.10);",
     ]:
         assert required_text in source
+
+    assert "justify-content: space-between;" not in source
 
 
 def test_frontend_status_strip_uses_inline_browserview_icons() -> None:
