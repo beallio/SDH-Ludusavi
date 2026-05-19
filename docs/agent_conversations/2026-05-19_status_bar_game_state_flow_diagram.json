@@ -1,0 +1,26 @@
+{
+  "date": "2026-05-19",
+  "task_objective": "Create a standalone HTML diagram explaining the automatic sync status bar game state flows.",
+  "files_modified": [
+    "docs/status_bar_game_state_flows.html",
+    "docs/plans/steam_aligned_autosync_status_strip.md",
+    "tests/test_status_flow_diagram.py"
+  ],
+  "tests_added": [
+    "tests/test_status_flow_diagram.py verifies the diagram includes launch and exit lifecycle paths, RPC names, visible status copy, reason mappings, and standalone HTML structure."
+  ],
+  "design_decisions": [
+    "Use a standalone HTML document with embedded CSS and no external assets.",
+    "Show launch and exit flows side by side with branch cards for action, up-to-date, unknown, and unable-to-sync outcomes.",
+    "Include a reason mapping table so backend reasons map directly to status bar behavior."
+  ],
+  "results": [
+    "./run.sh uv run pytest tests/test_status_flow_diagram.py passed",
+    "./run.sh uv run ruff check . --fix passed",
+    "./run.sh uv run ruff format . passed",
+    "./run.sh uv run ty check py_modules/sdh_ludusavi/ passed",
+    "./run.sh uv run pytest passed with 185 tests",
+    "./run.sh pnpm run typecheck passed",
+    "./run.sh pnpm run build passed"
+  ]
+}

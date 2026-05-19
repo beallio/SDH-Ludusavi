@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Status Bar Game State Flows</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111827;
+      --panel: #17212f;
+      --panel-2: #1f2937;
+      --line: #526174;
+      --text: #f8fafc;
+      --muted: #a8b3c2;
+      --blue: #66c0f4;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --green: #7dd3a8;
+      --shadow: rgba(0, 0, 0, 0.28);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Motiva Sans", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--muted);
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .intro {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    .intro p {
+      color: var(--muted);
+      max-width: 880px;
+    }
+
+    .flows {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      align-items: start;
+    }
+
+    .flow {
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      box-shadow: 0 18px 42px var(--shadow);
+      padding: 18px;
+    }
+
+    .flow-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .badge {
+      border: 1px solid rgba(102, 192, 244, 0.55);
+      border-radius: 999px;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 800;
+      padding: 4px 9px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .nodes {
+      display: grid;
+      gap: 12px;
+    }
+
+    .node {
+      position: relative;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      background: var(--panel-2);
+      padding: 13px 14px;
+      min-height: 74px;
+    }
+
+    .node:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      left: 24px;
+      bottom: -13px;
+      width: 2px;
+      height: 13px;
+      background: var(--line);
+    }
+
+    .node-title {
+      display: block;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+
+    .node-copy {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .status {
+      border-color: rgba(102, 192, 244, 0.5);
+      background: rgba(102, 192, 244, 0.1);
+    }
+
+    .status .node-title {
+      color: var(--blue);
+      text-transform: uppercase;
+    }
+
+    .branch-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      margin-top: 12px;
+    }
+
+    .branch {
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.035);
+      padding: 11px;
+      min-height: 118px;
+    }
+
+    .branch strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .branch code,
+    .node code,
+    td code {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      color: #dbeafe;
+    }
+
+    .branch p {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .ok {
+      border-color: rgba(125, 211, 168, 0.45);
+    }
+
+    .action {
+      border-color: rgba(102, 192, 244, 0.55);
+    }
+
+    .unknown {
+      border-color: rgba(245, 158, 11, 0.55);
+    }
+
+    .error {
+      border-color: rgba(239, 68, 68, 0.55);
+    }
+
+    .strip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 210px;
+      min-height: 30px;
+      margin-top: 8px;
+      padding: 6px 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(0, 0, 0, 0.34);
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .strip.unknown-strip {
+      color: var(--yellow);
+    }
+
+    .strip.error-strip {
+      color: var(--red);
+    }
+
+    .reason-map {
+      margin-top: 20px;
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 18px 42px var(--shadow);
+    }
+
+    .reason-map header {
+      padding: 16px 18px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    @media (max-width: 860px) {
+      main {
+        padding: 18px;
+      }
+
+      .flows,
+      .branch-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="intro" aria-labelledby="title">
+      <h1 id="title">Status Bar Game State Flows</h1>
+      <p>
+        The status bar must describe the verified save state, not the work the plugin
+        might do later. Both lifecycle paths begin with the same check state, then move
+        to download, upload, current, unknown, or unable-to-sync copy after the backend
+        has checked Ludusavi.
+      </p>
+    </section>
+
+    <section class="flows" aria-label="Autosync lifecycle flows">
+      <article class="flow" aria-labelledby="launch-flow">
+        <div class="flow-header">
+          <h2 id="launch-flow">Launch Flow</h2>
+          <span class="badge">Game start</span>
+        </div>
+
+        <div class="nodes">
+          <div class="node">
+            <span class="node-title">App lifetime start</span>
+            <p class="node-copy">Steam reports the selected game has started.</p>
+          </div>
+
+          <div class="node status">
+            <span class="node-title">VERIFYING GAME SAVE</span>
+            <p class="node-copy">Published before any restore language appears.</p>
+            <div class="strip">VERIFYING GAME SAVE</div>
+          </div>
+
+          <div class="node">
+            <span class="node-title"><code>check_game_start</code></span>
+            <p class="node-copy">Compares local save recency against the existing backup.</p>
+          </div>
+
+          <div class="branch-grid" aria-label="Launch check outcomes">
+            <div class="branch action">
+              <strong>Backup is newer</strong>
+              <p>Call <code>restore_game_on_start</code>, then show download action copy.</p>
+              <div class="strip">DOWNLOADING SAVE...</div>
+            </div>
+
+            <div class="branch ok">
+              <strong>Local save is current</strong>
+              <p>No restore is needed. The strip reports the save is synchronized.</p>
+              <div class="strip">GAME SAVE UP TO DATE</div>
+            </div>
+
+            <div class="branch unknown">
+              <strong>No usable backup state</strong>
+              <p><code>no_backup</code> maps to unknown rather than pretending sync occurred.</p>
+              <div class="strip unknown-strip">UNKNOWN</div>
+            </div>
+
+            <div class="branch error">
+              <strong>Unsafe or failed check</strong>
+              <p><code>ambiguous_recency</code> and <code>game_error</code> prevent sync.</p>
+              <div class="strip error-strip">UNABLE TO SYNC</div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="flow" aria-labelledby="exit-flow">
+        <div class="flow-header">
+          <h2 id="exit-flow">Exit Flow</h2>
+          <span class="badge">Game stop</span>
+        </div>
+
+        <div class="nodes">
+          <div class="node">
+            <span class="node-title">App lifetime stop</span>
+            <p class="node-copy">Steam reports the selected game has exited.</p>
+          </div>
+
+          <div class="node status">
+            <span class="node-title">VERIFYING GAME SAVE</span>
+            <p class="node-copy">Published before any backup language appears.</p>
+            <div class="strip">VERIFYING GAME SAVE</div>
+          </div>
+
+          <div class="node">
+            <span class="node-title"><code>check_game_exit</code></span>
+            <p class="node-copy">Runs a Ludusavi backup preview without writing backup data.</p>
+          </div>
+
+          <div class="branch-grid" aria-label="Exit check outcomes">
+            <div class="branch action">
+              <strong>Local save changed</strong>
+              <p>Call <code>backup_game_on_exit</code>, then show upload action copy.</p>
+              <div class="strip">UPLOADING SAVE...</div>
+            </div>
+
+            <div class="branch ok">
+              <strong>No local changes</strong>
+              <p><code>local_current</code> means there is no new save data to upload.</p>
+              <div class="strip">GAME SAVE UP TO DATE</div>
+            </div>
+
+            <div class="branch unknown">
+              <strong>No save files found</strong>
+              <p><code>no_files_found</code> and <code>not_in_preview</code> map to unknown.</p>
+              <div class="strip unknown-strip">UNKNOWN</div>
+            </div>
+
+            <div class="branch error">
+              <strong>Preview failed</strong>
+              <p><code>preview_failed</code> and <code>game_error</code> prevent sync.</p>
+              <div class="strip error-strip">UNABLE TO SYNC</div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="reason-map" aria-labelledby="reason-map-title">
+      <header>
+        <h2 id="reason-map-title">Reason Mapping</h2>
+      </header>
+      <table>
+        <thead>
+          <tr>
+            <th>Backend reason or result</th>
+            <th>Status bar behavior</th>
+            <th>Why</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>needed</code> + <code>restore</code></td>
+            <td><code>DOWNLOADING SAVE...</code></td>
+            <td>The backup is newer and will be applied locally before launch.</td>
+          </tr>
+          <tr>
+            <td><code>needed</code> + <code>backup</code></td>
+            <td><code>UPLOADING SAVE...</code></td>
+            <td>Local save changes will be written to the backup target after exit.</td>
+          </tr>
+          <tr>
+            <td><code>restored</code>, <code>backed_up</code>, <code>local_current</code></td>
+            <td><code>GAME SAVE UP TO DATE</code></td>
+            <td>The save state is current after action or no action was needed.</td>
+          </tr>
+          <tr>
+            <td><code>no_backup</code>, <code>no_files_found</code>, <code>not_in_preview</code></td>
+            <td><code>UNKNOWN</code></td>
+            <td>The plugin cannot prove a synchronized save state.</td>
+          </tr>
+          <tr>
+            <td><code>ambiguous_recency</code>, <code>game_error</code>, <code>preview_failed</code></td>
+            <td><code>UNABLE TO SYNC</code></td>
+            <td>The check is unsafe or failed, so the plugin avoids save movement.</td>
+          </tr>
+          <tr>
+            <td><code>auto_sync_disabled</code>, <code>operation_running</code>, <code>unmatched_game</code>, <code>not_processed</code></td>
+            <td>Hide the strip</td>
+            <td>These are silent lifecycle skips rather than user-visible sync results.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

@@ -44,4 +44,16 @@ required recency and backup-preview data.
 - Main RPC tests prove Decky bridge methods expose the new service calls.
 - Frontend static tests prove checking is published before check RPCs and action
   messages are published only after needed results.
+- HTML diagram tests prove the documentation artifact captures both launch and exit
+  state flows and the visible status strip copy.
 - Targeted and full validation run through `./run.sh`.
+
+## HTML Diagram Addendum
+
+Create `docs/status_bar_game_state_flows.html` as a standalone browser-openable diagram
+showing the two automatic lifecycle paths:
+
+- Game launch: app lifetime start -> `VERIFYING GAME SAVE` -> `check_game_start` ->
+  restore needed/current/unknown/unable-to-sync branches.
+- Game exit: app lifetime stop -> `VERIFYING GAME SAVE` -> `check_game_exit` ->
+  backup needed/current/unknown/unable-to-sync branches.
