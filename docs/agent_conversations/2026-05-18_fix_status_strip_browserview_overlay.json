@@ -1,0 +1,21 @@
+{
+  "date": "2026-05-18",
+  "task_objective": "Fix autosync status strip display during game run and exit by adding a BrowserView-backed overlay surface.",
+  "files_modified": [
+    "docs/plans/fix_status_strip_browserview_overlay.md",
+    "docs/specs/custom_status_bar_ui.md",
+    "docs/agent_conversations/2026-05-18_fix_status_strip_browserview_overlay.json",
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "Added a frontend static regression test requiring BrowserView creation, data URL rendering, bounds updates, visibility updates, publisher wiring, and dismount cleanup."
+  ],
+  "design_decisions": [
+    "Kept the React DOM strip as a fallback but made BrowserView the primary visible overlay surface.",
+    "Used GamepadUIMainWindowInstance.CreateBrowserView when available, with SteamClient.BrowserView.Create as a fallback.",
+    "Loaded a self-contained data URL instead of adding a separate asset or backend endpoint.",
+    "Destroyed the BrowserView on plugin dismount to avoid leaving an orphan overlay."
+  ],
+  "results": "Targeted frontend static tests, TypeScript typecheck, Rollup build, Ruff, ty, and the full pytest suite passed."
+}

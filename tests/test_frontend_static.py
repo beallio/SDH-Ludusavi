@@ -247,6 +247,27 @@ def test_frontend_status_strip_requests_notification_composition_without_direct_
     assert "SetComposition" not in source
 
 
+def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        "type AutoSyncStatusBrowserView",
+        "let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;",
+        "function ensureAutoSyncStatusBrowserView()",
+        "rootWindow?.CreateBrowserView",
+        'rootWindow.CreateBrowserView("sdh-ludusavi-autosync-status-strip")',
+        "steamClient?.BrowserView?.Create",
+        "function renderAutoSyncStatusHtml(",
+        '"data:text/html;charset=utf-8,"',
+        "function syncAutoSyncStatusBrowserView(",
+        "browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);",
+        "browserView.SetVisible(state.visible);",
+        "syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);",
+        "destroyAutoSyncStatusBrowserView();",
+    ]:
+        assert required_text in source
+
+
 def test_frontend_uses_app_lifetime_notifications_for_lifecycle_detection() -> None:
     source = FRONTEND.read_text()
 

@@ -33,10 +33,16 @@ allow transparent SteamUI pixels to show the running game behind Steam while inp
 continues to go to the game. The composition request is mounted only while the strip
 is visible so SDH-ludusavi does not permanently alter SteamUI composition behavior.
 
+The canonical visible surface is a BrowserView overlay. `publishAutoSyncStatus`
+creates or updates a small BrowserView, loads a self-contained `data:text/html`
+document that renders the same strip, positions it at the bottom of the Gamepad UI
+viewport, and toggles BrowserView visibility with the autosync state. The React DOM
+portal remains as a fallback surface for SteamUI contexts where it is visible, but the
+BrowserView is the path intended to survive the running-game layer.
+
 An external native overlay process, like OverLaid's backend-launched `DISPLAY=:0`
 overlay binary, remains a fallback architecture only. The autosync strip should stay
-inside SteamUI unless runtime testing proves the notification composition request is
-insufficient.
+inside SteamUI unless runtime testing proves the BrowserView surface is insufficient.
 
 Lifecycle status publication must not depend solely on frontend tracking caches. If
 settings or tracking data have not been loaded yet, the frontend should show the
@@ -96,6 +102,8 @@ Frontend static tests must verify:
 - Autosync failure still routes through the `failures_errors` notification category.
 - The strip requests `EUIComposition.Notification` through the discovered SteamUI
   composition hook while visible.
+- The strip creates and updates a BrowserView-backed overlay surface with a local
+  `data:text/html` document.
 - Direct `SetOverlayState` and `SetComposition` calls are not used.
 
 Validation commands:

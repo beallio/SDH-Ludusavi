@@ -126,6 +126,16 @@ type AutoSyncStatusListener = (state: AutoSyncStatusState) => void;
 
 type UseUIComposition = (composition: EUIComposition) => { releaseComposition: () => void };
 
+type AutoSyncStatusBrowserView = {
+  LoadURL?: (url: string) => void;
+  SetBounds?: (x: number, y: number, width: number, height: number) => void;
+  SetFocus?: (value: boolean) => void;
+  SetName?: (name: string) => void;
+  SetVisible?: (value: boolean) => void;
+  SetWindowStackingOrder?: (value: number) => void;
+  Destroy?: () => void;
+};
+
 type Versions = {
   sdh_ludusavi?: string;
   ludusavi?: string;
@@ -262,6 +272,7 @@ let currentAutoSyncStatusState: AutoSyncStatusState = {
   visible: false
 };
 let autoSyncStatusTimedOut = false;
+let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;
 
 const useUIComposition: UseUIComposition =
   findModuleChild((module: any) => {
@@ -288,11 +299,149 @@ const useUIComposition: UseUIComposition =
     releaseComposition: () => undefined
   }));
 
+function getAutoSyncStatusBounds() {
+  const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance?.BrowserWindow;
+  const viewWindow = rootWindow ?? window;
+  const width = Math.round(viewWindow?.innerWidth || viewWindow?.outerWidth || 1280);
+  const viewHeight = Math.round(viewWindow?.innerHeight || viewWindow?.outerHeight || 800);
+  const height = 24;
+  return {
+    x: 0,
+    y: Math.max(0, viewHeight - height),
+    width,
+    height
+  };
+}
+
+function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
+  if (autoSyncStatusBrowserView) {
+    return autoSyncStatusBrowserView;
+  }
+
+  try {
+    const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance;
+    if (rootWindow?.CreateBrowserView) {
+      autoSyncStatusBrowserView = rootWindow.CreateBrowserView("sdh-ludusavi-autosync-status-strip") as AutoSyncStatusBrowserView;
+    } else {
+      const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
+      autoSyncStatusBrowserView = steamClient?.BrowserView?.Create?.({
+        strInitialURL: "about:blank"
+      }) as AutoSyncStatusBrowserView | null;
+    }
+
+    autoSyncStatusBrowserView?.SetName?.("sdh-ludusavi-autosync-status-strip");
+    autoSyncStatusBrowserView?.SetWindowStackingOrder?.(1);
+    autoSyncStatusBrowserView?.SetFocus?.(false);
+    autoSyncStatusBrowserView?.SetVisible?.(false);
+    return autoSyncStatusBrowserView;
+  } catch (err) {
+    log("warning", `Could not create status strip BrowserView: ${err}`, "autosync_status");
+    autoSyncStatusBrowserView = null;
+    return null;
+  }
+}
+
+function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind) {
+  if (status === "has_backup") {
+    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 10.2 8.5 12.7 14.2 7" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  }
+  if (status === "needs_backup") {
+    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 5h7l2 2v8H6z" fill="#0b151f"/><path d="M8 5h5v4H8z" fill="currentColor"/><path d="M8 12h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+  }
+  if (status === "error") {
+    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M10 5.2v6.4" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/><circle cx="10" cy="15" r="1.2" fill="#0b151f"/></svg>';
+  }
+
+  const rotation = status === "restoring" ? ' style="transform: rotate(180deg); transform-origin: 50% 50%;"' : "";
+  return `<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"${rotation}><circle cx="10" cy="10" r="8.8" fill="currentColor"/><path d="M10 5.3v8.3" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/><path d="M6.8 8.4 10 5.2l3.2 3.2" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+function renderAutoSyncStatusHtml(state: AutoSyncStatusState) {
+  const color = state.status === "error" ? "rgba(255, 210, 210, 0.95)" : "rgba(255, 255, 255, 0.92)";
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+body {
+  color: ${color};
+  font-family: "Motiva Sans", Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.bar {
+  width: 100vw;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.34);
+  pointer-events: none;
+}
+.rule { height: 2px; flex: 1; background: rgba(255, 255, 255, 0.10); }
+.content { min-width: 245px; display: flex; align-items: center; justify-content: center; gap: 9px; }
+.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; }
+.text { line-height: 1; }
+</style>
+</head>
+<body>
+<div class="bar"><div class="rule"></div><div class="content"><span class="icon">${iconSvgForAutoSyncStatus(state.status)}</span><span class="text">${autoSyncStatusText[state.status]}</span></div><div class="rule"></div></div>
+</body>
+</html>`;
+}
+
+function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
+  const browserView = ensureAutoSyncStatusBrowserView();
+  if (!browserView) {
+    return;
+  }
+  if (!browserView.LoadURL || !browserView.SetBounds || !browserView.SetVisible) {
+    log("warning", "Status strip BrowserView is missing required methods", "autosync_status");
+    return;
+  }
+
+  try {
+    const bounds = getAutoSyncStatusBounds();
+    const url = "data:text/html;charset=utf-8," + encodeURIComponent(renderAutoSyncStatusHtml(state));
+    browserView.LoadURL(url);
+    browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);
+    browserView.SetVisible(state.visible);
+    browserView.SetFocus?.(false);
+  } catch (err) {
+    log("warning", `Could not update status strip BrowserView: ${err}`, "autosync_status");
+  }
+}
+
+function destroyAutoSyncStatusBrowserView() {
+  try {
+    const browserView = autoSyncStatusBrowserView;
+    if (!browserView) {
+      return;
+    }
+    browserView.SetVisible?.(false);
+    if (typeof browserView.Destroy === "function") {
+      browserView.Destroy();
+    } else {
+      const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
+      steamClient?.BrowserView?.Destroy?.(browserView);
+    }
+  } catch (err) {
+    log("warning", `Could not destroy status strip BrowserView: ${err}`, "autosync_status");
+  } finally {
+    autoSyncStatusBrowserView = null;
+  }
+}
+
 function publishAutoSyncStatus(status: AutoSyncStatusKind) {
   if (status === "backing_up" || status === "restoring") {
     autoSyncStatusTimedOut = false;
   }
   currentAutoSyncStatusState = { status, visible: true };
+  syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);
   for (const listener of autoSyncStatusListeners) {
     listener(currentAutoSyncStatusState);
   }
@@ -300,6 +449,7 @@ function publishAutoSyncStatus(status: AutoSyncStatusKind) {
 
 function hideAutoSyncStatus() {
   currentAutoSyncStatusState = { ...currentAutoSyncStatusState, visible: false };
+  syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);
   for (const listener of autoSyncStatusListeners) {
     listener(currentAutoSyncStatusState);
   }
@@ -391,6 +541,7 @@ function AutoSyncStatusStrip() {
         autoSyncStatusTimedOut = true;
       }
       currentAutoSyncStatusState = { ...currentAutoSyncStatusState, visible: false };
+      syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);
       setState((current) => ({ ...current, visible: false }));
     }, isRunning ? 10000 : 2000);
 
@@ -1412,6 +1563,7 @@ export default definePlugin(() => {
       activeSessions.clear();
       autoSyncStatusListeners.clear();
       currentAutoSyncStatusState = { status: "has_backup", visible: false };
+      destroyAutoSyncStatusBrowserView();
       console.log("SDH-ludusavi unloading");
     },
   };
