@@ -357,8 +357,14 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
     if (!view.Destroy && view.destroy) view.Destroy = view.destroy;
 
     autoSyncStatusBrowserView.SetName?.("sdh-ludusavi-autosync-status-strip");
-    autoSyncStatusBrowserView.SetWindowStackingOrder?.(2);
+    autoSyncStatusBrowserView.SetWindowStackingOrder?.(100);
     autoSyncStatusBrowserView.SetFocus?.(false);
+    
+    if (typeof (autoSyncStatusBrowserView as any).AddGlass === "function") {
+      log("debug", "Applying AddGlass to BrowserView", "autosync_status");
+      (autoSyncStatusBrowserView as any).AddGlass();
+    }
+
     autoSyncStatusBrowserView.SetVisible?.(false);
     
     if (typeof (autoSyncStatusBrowserView as any).SetTopmost === "function") {
@@ -413,6 +419,7 @@ body {
   gap: 10px;
   background: rgba(0, 0, 0, 0.85);
   pointer-events: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 .rule { height: 2px; flex: 1; background: rgba(255, 255, 255, 0.20); }
 .content { min-width: 245px; display: flex; align-items: center; justify-content: center; gap: 9px; }
@@ -438,8 +445,11 @@ function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
 
   try {
     const bounds = getAutoSyncStatusBounds();
-    const url = "data:text/html;charset=utf-8," + encodeURIComponent(renderAutoSyncStatusHtml(state));
+    const html = renderAutoSyncStatusHtml(state);
+    const url = "data:text/html;charset=utf-8," + encodeURIComponent(html);
     
+    log("debug", `Syncing BrowserView: visible=${state.visible}, bounds=${JSON.stringify(bounds)}, htmlLen=${html.length}`, "autosync_status");
+
     // Hardened sequence: Bounds -> Load -> Visible
     browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);
     browserView.LoadURL(url);
@@ -448,8 +458,11 @@ function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
       // Delay visibility slightly if becoming visible to allow LoadURL to register
       setTimeout(() => {
         browserView.SetVisible?.(true);
+        if (typeof (browserView as any).NotifyUserActivation === "function") {
+          (browserView as any).NotifyUserActivation();
+        }
         browserView.SetFocus?.(false);
-      }, 0);
+      }, 100);
     } else {
       browserView.SetVisible(false);
     }
@@ -556,7 +569,7 @@ function AutoSyncStatusIcon({ status }: { status: AutoSyncStatusKind }) {
 
 function AutoSyncStatusComposition() {
   log("debug", "Mounting AutoSyncStatusComposition (Strategy A)", "autosync_status");
-  const result = useUIComposition(EUIComposition.Notification);
+  const result = useMemo(() => useUIComposition(EUIComposition.Overlay), []);
   useEffect(() => {
     log("debug", "AutoSyncStatusComposition applied composition", "autosync_status");
     return () => {
