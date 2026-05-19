@@ -21,8 +21,10 @@ The status strip is frontend-owned and driven by the existing app lifetime flow 
 - No backend `decky.emit` event stream is added for v1.
 - No Steam overlay composition APIs are mutated.
 
-The status strip renders through a React portal into `document.body`, stays mounted
-while the plugin is loaded, and toggles visibility with CSS transforms.
+The status strip is registered as a Decky global component and renders through a React
+portal into `document.body`. It stays mounted while the plugin is loaded and toggles
+visibility with CSS transforms. The strip must not live only inside the plugin panel
+content tree because that tree may not be visible while a game is launching or running.
 
 ## Core Data Structures
 
@@ -64,6 +66,8 @@ No dependency changes are required.
 Frontend static tests must verify:
 
 - The status strip renders with `createPortal(..., document.body)`.
+- The plugin registers the strip with `routerHook.addGlobalComponent` and removes it on
+  dismount.
 - The plugin uses `alwaysRender: true`.
 - The strip is fixed to the bottom, non-interactive, high z-index, and transform
   animated.

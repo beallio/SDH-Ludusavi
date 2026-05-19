@@ -8,9 +8,9 @@ native Decky toasts only for failures.
 
 ## Architecture Overview
 
-The change is frontend-only. Add a portal-mounted status strip component to
-`src/index.tsx` and publish state from the existing lifecycle handlers around
-`handle_game_start` and `handle_game_exit`.
+The change is frontend-only. Add a Decky global component that portal-mounts the
+status strip from `src/index.tsx`, and publish state from the existing lifecycle
+handlers around `handle_game_start` and `handle_game_exit`.
 
 Do not add backend events, dependencies, CSS pipeline changes, or Steam overlay
 composition changes.
@@ -22,6 +22,8 @@ composition changes.
 - `AutoSyncStatusState`: current visible strip state.
 - `autoSyncStatusListeners`: local listener set that lets lifecycle handlers publish
   status updates to the mounted portal component.
+- Decky `routerHook.addGlobalComponent`: mounts the strip outside the QAM content tree
+  so it can appear while a game is launching.
 
 ## Public Interfaces
 

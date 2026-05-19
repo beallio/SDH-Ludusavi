@@ -37,6 +37,7 @@ def test_frontend_wires_backend_calls_and_toasts() -> None:
         assert callable_name in source
 
     assert "toaster.toast" in source
+    assert "routerHook.addGlobalComponent" in source
     assert "is_running" in source
     assert "dependency_error" in source
 
@@ -123,16 +124,25 @@ def test_frontend_renders_autosync_status_strip_portal() -> None:
 
     for required_text in [
         'import { createPortal } from "react-dom";',
+        "routerHook",
         'type AutoSyncStatusKind = "backing_up" | "restoring" | "has_backup" | "needs_backup" | "error";',
         "function AutoSyncStatusStrip()",
         "createPortal(",
         "document.body",
+        "let currentAutoSyncStatusState: AutoSyncStatusState",
+        "currentAutoSyncStatusState = { status, visible: true };",
+        "useState<AutoSyncStatusState>(currentAutoSyncStatusState)",
         "const autoSyncStatusListeners = new Set<AutoSyncStatusListener>();",
         "function publishAutoSyncStatus(",
-        "<AutoSyncStatusStrip />",
+        'const AUTO_SYNC_STATUS_COMPONENT = "sdh-ludusavi-autosync-status-strip";',
+        "routerHook.addGlobalComponent(AUTO_SYNC_STATUS_COMPONENT, AutoSyncStatusStrip);",
+        "routerHook.removeGlobalComponent(AUTO_SYNC_STATUS_COMPONENT);",
+        'currentAutoSyncStatusState = { status: "has_backup", visible: false };',
         "alwaysRender: true",
     ]:
         assert required_text in source
+
+    assert "<AutoSyncStatusStrip />" not in source.split("content:")[1].split("icon:")[0]
 
 
 def test_frontend_status_strip_matches_steamos_visual_contract() -> None:

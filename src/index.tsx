@@ -13,6 +13,7 @@ import {
 import {
   callable,
   definePlugin,
+  routerHook,
   toaster
 } from "@decky/api";
 import React, { useEffect, useMemo, useState } from "react";
@@ -251,12 +252,18 @@ const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
 };
 
 const autoSyncStatusListeners = new Set<AutoSyncStatusListener>();
+const AUTO_SYNC_STATUS_COMPONENT = "sdh-ludusavi-autosync-status-strip";
+let currentAutoSyncStatusState: AutoSyncStatusState = {
+  status: "has_backup",
+  visible: false
+};
 let autoSyncStatusTimedOut = false;
 
 function publishAutoSyncStatus(status: AutoSyncStatusKind) {
   if (status === "backing_up" || status === "restoring") {
     autoSyncStatusTimedOut = false;
   }
+  currentAutoSyncStatusState = { status, visible: true };
   for (const listener of autoSyncStatusListeners) {
     listener(status);
   }
@@ -320,10 +327,7 @@ function AutoSyncStatusIcon({ status }: { status: AutoSyncStatusKind }) {
 }
 
 function AutoSyncStatusStrip() {
-  const [state, setState] = useState<AutoSyncStatusState>({
-    status: "has_backup",
-    visible: false
-  });
+  const [state, setState] = useState<AutoSyncStatusState>(currentAutoSyncStatusState);
 
   useEffect(() => {
     const listener: AutoSyncStatusListener = (status) => {
@@ -345,6 +349,7 @@ function AutoSyncStatusStrip() {
       if (isRunning) {
         autoSyncStatusTimedOut = true;
       }
+      currentAutoSyncStatusState = { ...currentAutoSyncStatusState, visible: false };
       setState((current) => ({ ...current, visible: false }));
     }, isRunning ? 10000 : 2000);
 
@@ -1333,24 +1338,23 @@ export default definePlugin(() => {
     startFallbackPolling();
   }
 
+  routerHook.addGlobalComponent(AUTO_SYNC_STATUS_COMPONENT, AutoSyncStatusStrip);
+
   return {
     name: "SDH-ludusavi",
     titleView: <div className={staticClasses.Title}>SDH-ludusavi</div>,
-    content: (
-      <>
-        <Content />
-        <AutoSyncStatusStrip />
-      </>
-    ),
+    content: <Content />,
     icon: <LuDatabaseBackup />,
     alwaysRender: true,
     onDismount() {
       unregisterLifecycleNotifications();
+      routerHook.removeGlobalComponent(AUTO_SYNC_STATUS_COMPONENT);
       if (fallbackIntervalID !== null) {
         window.clearInterval(fallbackIntervalID);
       }
       activeSessions.clear();
       autoSyncStatusListeners.clear();
+      currentAutoSyncStatusState = { status: "has_backup", visible: false };
       console.log("SDH-ludusavi unloading");
     },
   };

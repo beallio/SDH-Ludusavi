@@ -1,0 +1,21 @@
+{
+  "date": "2026-05-18",
+  "task_objective": "Fix autosync status strip visibility while playing configured games by mounting it as a Decky global component.",
+  "files_modified": [
+    "docs/plans/fix_status_strip_global_mount.md",
+    "docs/specs/custom_status_bar_ui.md",
+    "docs/plans/custom_status_bar_ui.md",
+    "docs/agent_conversations/2026-05-18_fix_status_strip_global_mount.json",
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "Updated frontend static tests to require Decky global component registration, dismount cleanup, and module-level status state for pre-mount lifecycle events."
+  ],
+  "design_decisions": [
+    "Moved the status strip out of the plugin panel content tree and into Decky's global component registry.",
+    "Kept createPortal(document.body) for viewport anchoring and z-index behavior.",
+    "Stored the latest status at module scope so lifecycle publications are not lost if they occur before the React effect subscribes."
+  ],
+  "results": "Implemented global mounting for the autosync strip and prepared validation for commit."
+}
