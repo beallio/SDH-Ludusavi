@@ -26,6 +26,12 @@ portal into `document.body`. It stays mounted while the plugin is loaded and tog
 visibility with CSS transforms. The strip must not live only inside the plugin panel
 content tree because that tree may not be visible while a game is launching or running.
 
+Lifecycle status publication must not depend solely on frontend tracking caches. If
+settings or tracking data have not been loaded yet, the frontend should show the
+running strip before calling the backend and hide it if the backend returns a silent
+skip such as disabled autosync, unmatched game, another operation running, or a
+deselected Ludusavi game.
+
 ## Core Data Structures
 
 - `AutoSyncStatusKind`: `backing_up`, `restoring`, `has_backup`, `needs_backup`, or

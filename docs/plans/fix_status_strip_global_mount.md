@@ -15,12 +15,19 @@ rendering strategy, and unregister it on plugin dismount. Store the latest publi
 strip state at module scope so a lifecycle event that fires before the global component
 effect subscribes is not lost.
 
+If frontend settings or game tracking caches are not initialized when a lifecycle
+event arrives, publish the running strip before the backend RPC and let the backend
+result decide whether to keep, complete, or hide it. This avoids suppressing the strip
+for valid Ludusavi-configured games just because the QAM content cache has not loaded.
+
 ## Core Data Structures
 
 - `AUTO_SYNC_STATUS_COMPONENT`: stable global component key.
 - `currentAutoSyncStatusState`: module-level latest strip state used to initialize the
   global component.
 - `autoSyncStatusListeners`: existing listener set for mounted strip updates.
+- `shouldPublishAutoSyncStatusBeforeRpc`: returns true when the frontend knows the game
+  is tracked, or when settings/tracking are still unknown and the backend must decide.
 
 ## Public Interfaces
 

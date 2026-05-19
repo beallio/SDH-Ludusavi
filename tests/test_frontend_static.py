@@ -104,7 +104,10 @@ def test_frontend_silences_lifecycle_toasts_when_auto_sync_is_disabled() -> None
 
     assert "let autoSyncNotificationsEnabled = false;" in source
     assert "autoSyncNotificationsEnabled = normalized.auto_sync_enabled;" in source
-    assert source.count("if (tracked && autoSyncNotificationsEnabled)") == 2
+    assert "function shouldPublishAutoSyncStatusBeforeRpc(" in source
+    assert "globalSettings === null || autoSyncNotificationsEnabled" in source
+    assert "trackedAppIDs.size === 0 && trackedNames.size === 0" in source
+    assert source.count("if (shouldPublishAutoSyncStatusBeforeRpc(tracked))") == 2
 
     start_status = 'publishAutoSyncStatus("restoring");'
     exit_status = 'publishAutoSyncStatus("backing_up");'
@@ -131,9 +134,13 @@ def test_frontend_renders_autosync_status_strip_portal() -> None:
         "document.body",
         "let currentAutoSyncStatusState: AutoSyncStatusState",
         "currentAutoSyncStatusState = { status, visible: true };",
+        "function hideAutoSyncStatus()",
+        "currentAutoSyncStatusState = { ...currentAutoSyncStatusState, visible: false };",
         "useState<AutoSyncStatusState>(currentAutoSyncStatusState)",
         "const autoSyncStatusListeners = new Set<AutoSyncStatusListener>();",
         "function publishAutoSyncStatus(",
+        "type AutoSyncStatusListener = (state: AutoSyncStatusState) => void;",
+        "listener(currentAutoSyncStatusState);",
         'const AUTO_SYNC_STATUS_COMPONENT = "sdh-ludusavi-autosync-status-strip";',
         "routerHook.addGlobalComponent(AUTO_SYNC_STATUS_COMPONENT, AutoSyncStatusStrip);",
         "routerHook.removeGlobalComponent(AUTO_SYNC_STATUS_COMPONENT);",
@@ -143,6 +150,19 @@ def test_frontend_renders_autosync_status_strip_portal() -> None:
         assert required_text in source
 
     assert "<AutoSyncStatusStrip />" not in source.split("content:")[1].split("icon:")[0]
+
+
+def test_frontend_hides_status_strip_for_backend_silent_autosync_skips() -> None:
+    source = FRONTEND.read_text()
+
+    assert (
+        'const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];'
+        in source
+    )
+    assert source.count("hideAutoSyncStatus();") >= 2
+    assert source.index("hideAutoSyncStatus();") > source.index(
+        "const result = await handleGameStartCall(name, appID);"
+    )
 
 
 def test_frontend_status_strip_matches_steamos_visual_contract() -> None:

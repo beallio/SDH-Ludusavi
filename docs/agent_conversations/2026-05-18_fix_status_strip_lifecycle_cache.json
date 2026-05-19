@@ -1,0 +1,20 @@
+{
+  "date": "2026-05-18",
+  "task_objective": "Fix the autosync status strip not appearing for configured games when frontend tracking or settings caches are not initialized at lifecycle time.",
+  "files_modified": [
+    "docs/agent_conversations/2026-05-18_fix_status_strip_lifecycle_cache.json",
+    "docs/plans/fix_status_strip_global_mount.md",
+    "docs/specs/custom_status_bar_ui.md",
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "Updated frontend static tests to require optimistic status publication when settings/tracking are unknown and explicit hide behavior for backend silent skips."
+  ],
+  "design_decisions": [
+    "Do not rely solely on frontend tracked game caches to decide whether the strip should appear.",
+    "Publish the running strip when tracking/settings are unknown, then hide it if the backend returns auto_sync_disabled, operation_running, unmatched_game, or not_processed.",
+    "Changed status listeners to receive full visible state so hide events do not accidentally re-show the strip."
+  ],
+  "results": "Targeted frontend static tests and TypeScript typecheck passed before full validation."
+}

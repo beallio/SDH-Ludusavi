@@ -120,7 +120,7 @@ type AutoSyncStatusState = {
   visible: boolean;
 };
 
-type AutoSyncStatusListener = (status: AutoSyncStatusKind) => void;
+type AutoSyncStatusListener = (state: AutoSyncStatusState) => void;
 
 type Versions = {
   sdh_ludusavi?: string;
@@ -265,7 +265,14 @@ function publishAutoSyncStatus(status: AutoSyncStatusKind) {
   }
   currentAutoSyncStatusState = { status, visible: true };
   for (const listener of autoSyncStatusListeners) {
-    listener(status);
+    listener(currentAutoSyncStatusState);
+  }
+}
+
+function hideAutoSyncStatus() {
+  currentAutoSyncStatusState = { ...currentAutoSyncStatusState, visible: false };
+  for (const listener of autoSyncStatusListeners) {
+    listener(currentAutoSyncStatusState);
   }
 }
 
@@ -330,8 +337,8 @@ function AutoSyncStatusStrip() {
   const [state, setState] = useState<AutoSyncStatusState>(currentAutoSyncStatusState);
 
   useEffect(() => {
-    const listener: AutoSyncStatusListener = (status) => {
-      setState({ status, visible: true });
+    const listener: AutoSyncStatusListener = (nextState) => {
+      setState(nextState);
     };
     autoSyncStatusListeners.add(listener);
     return () => {
@@ -1107,11 +1114,16 @@ export default definePlugin(() => {
     return false;
   };
 
+  function shouldPublishAutoSyncStatusBeforeRpc(tracked: boolean) {
+    const trackingCacheEmpty = trackedAppIDs.size === 0 && trackedNames.size === 0;
+    return (globalSettings === null || autoSyncNotificationsEnabled) && (tracked || trackingCacheEmpty);
+  }
+
   const handleAppStart = async (name: string, appID: string) => {
     const tracked = isTracked(name, appID);
     log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
     
-    if (tracked && autoSyncNotificationsEnabled) {
+    if (shouldPublishAutoSyncStatusBeforeRpc(tracked)) {
       publishAutoSyncStatus("restoring");
     }
     
@@ -1120,6 +1132,9 @@ export default definePlugin(() => {
     // unless auto-sync is completely disabled, another operation is running,
     // or the game simply isn't managed by Ludusavi (unmatched or ignored).
     const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
+    if (result.status === "skipped" && silentReasons.includes(result.reason ?? "")) {
+      hideAutoSyncStatus();
+    }
     if (result.status !== "skipped" || !silentReasons.includes(result.reason ?? "")) {
       completeAutoSyncStatus(result);
       if (result.status === "failed") {
@@ -1132,12 +1147,15 @@ export default definePlugin(() => {
     const tracked = isTracked(name, appID);
     log("info", `App exited: ${name} (${appID}) tracked=${tracked}`);
     
-    if (tracked && autoSyncNotificationsEnabled) {
+    if (shouldPublishAutoSyncStatusBeforeRpc(tracked)) {
       publishAutoSyncStatus("backing_up");
     }
     
     const result = await handleGameExitCall(name, appID);
     const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
+    if (result.status === "skipped" && silentReasons.includes(result.reason ?? "")) {
+      hideAutoSyncStatus();
+    }
     if (result.status !== "skipped" || !silentReasons.includes(result.reason ?? "")) {
       if (result.status !== "skipped" || result.reason === "local_current") {
         completeAutoSyncStatus(result);
