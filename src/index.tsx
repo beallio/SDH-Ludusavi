@@ -273,14 +273,17 @@ let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;
 function getAutoSyncStatusBounds() {
   const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance?.BrowserWindow;
   const viewWindow = rootWindow ?? window;
-  const width = Math.round(viewWindow?.innerWidth || viewWindow?.outerWidth || 1280);
-  const viewHeight = Math.round(viewWindow?.innerHeight || viewWindow?.outerHeight || 800);
-  const height = 24;
+  const pixelRatio = window.devicePixelRatio || 1;
+  const width = Math.round((viewWindow?.innerWidth || viewWindow?.outerWidth || 1280) * pixelRatio);
+  const viewHeight = Math.round((viewWindow?.innerHeight || viewWindow?.outerHeight || 800) * pixelRatio);
+  const height = Math.round(24 * pixelRatio);
+  
   return {
     x: 0,
     y: Math.max(0, viewHeight - height),
     width,
-    height
+    height,
+    pixelRatio
   };
 }
 
@@ -320,7 +323,7 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
     if (!view.Destroy && view.destroy) view.Destroy = view.destroy;
 
     autoSyncStatusBrowserView.SetName?.("sdh-ludusavi-autosync-status-strip");
-    autoSyncStatusBrowserView.SetWindowStackingOrder?.(10);
+    autoSyncStatusBrowserView.SetWindowStackingOrder?.(50);
     autoSyncStatusBrowserView.SetFocus?.(false);
     autoSyncStatusBrowserView.SetVisible?.(false);
     
@@ -370,22 +373,22 @@ body {
 }
 .bar {
   width: 100vw;
-  height: 24px;
+  height: 100vh;
   display: flex;
   align-items: center;
   gap: 10px;
-  background: rgba(0, 0, 0, 0.85);
+  background: rgba(255, 0, 0, 0.85); /* BRIGHT RED FOR DEBUG */
   pointer-events: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid rgba(255, 255, 255, 0.5);
 }
-.rule { height: 2px; flex: 1; background: rgba(255, 255, 255, 0.20); }
+.rule { height: 2px; flex: 1; background: rgba(255, 255, 255, 0.5); }
 .content { min-width: 245px; display: flex; align-items: center; justify-content: center; gap: 9px; }
 .icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; }
 .text { line-height: 1; }
 </style>
 </head>
 <body>
-<div class="bar"><div class="rule"></div><div class="content"><span class="icon">${iconSvgForAutoSyncStatus(state.status)}</span><span class="text">${autoSyncStatusText[state.status]}</span></div><div class="rule"></div></div>
+<div class="bar"><div class="rule"></div><div class="content"><span class="icon">${iconSvgForAutoSyncStatus(state.status)}</span><span class="text">DEBUG: ${autoSyncStatusText[state.status]}</span></div><div class="rule"></div></div>
 </body>
 </html>`;
 }
@@ -412,11 +415,12 @@ function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
     browserView.LoadURL(url);
     
     if (state.visible) {
-      // Delay visibility slightly if becoming visible to allow LoadURL to register
+      // Force visibility update
+      browserView.SetVisible?.(false);
       setTimeout(() => {
         browserView.SetVisible?.(true);
         browserView.SetFocus?.(false);
-      }, 100);
+      }, 150);
     } else {
       browserView.SetVisible(false);
     }

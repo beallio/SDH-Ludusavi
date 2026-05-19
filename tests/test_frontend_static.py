@@ -246,10 +246,14 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         'log("info", "Creating BrowserView via GamepadUIMainWindowInstance"',
         'log("info", "Creating BrowserView via SteamClient.BrowserView.Create"',
         'log("info", `BrowserView created: type=${typeof autoSyncStatusBrowserView}',
-        "autoSyncStatusBrowserView.SetWindowStackingOrder?.(10);",
+        "autoSyncStatusBrowserView.SetWindowStackingOrder?.(50);",
         "SetTopmost(true)",
         "browserView.LoadURL(url);",
         "setTimeout(() => {",
+        "pixelRatio",
+        "Math.round(",
+        "background: rgba(255, 0, 0, 0.85)",
+        "DEBUG:",
     ]:
         assert required_text in source
 
