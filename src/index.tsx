@@ -9,7 +9,6 @@ import {
   ToggleField,
   Spinner,
   Router,
-  findModuleChild,
   EUIComposition
 } from "@decky/ui";
 import {
@@ -123,8 +122,6 @@ type AutoSyncStatusState = {
 };
 
 type AutoSyncStatusListener = (state: AutoSyncStatusState) => void;
-
-type UseUIComposition = (composition: EUIComposition) => { releaseComposition: () => void };
 
 type AutoSyncStatusBrowserView = {
   LoadURL?: (url: string) => void;
