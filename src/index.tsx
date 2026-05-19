@@ -619,45 +619,33 @@ function AutoSyncStatusStrip() {
     return () => window.clearTimeout(timeout);
   }, [state.status, state.visible]);
 
+  if (!state.visible) {
+    return null;
+  }
+
   return (
-    <>
-      {state.visible && <AutoSyncStatusComposition />}
-      {createPortal(
-        <div
-          style={{
-            position: "fixed",
-            top: "0", // Top for Strategy A
-            left: "0",
-            width: "100vw",
-            zIndex: 2147483647,
-            pointerEvents: "none",
-            transform: state.visible ? "translateY(0)" : "translateY(-100%)",
-            transition: "transform 400ms ease-out",
-          }}
-        >
-          <div
-            style={{
-              height: "100px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "rgba(0, 0, 255, 1.0)", // BLUE DEBUG TOP
-              border: "10px solid white",
-              color: "white",
-              fontSize: "30px",
-              fontWeight: 900,
-              gap: "20px"
-            }}
-          >
-            <span style={{ transform: "scale(2.5)", display: "inline-flex" }}>
-              <AutoSyncStatusIcon status={state.status} />
-            </span>
-            <span>STRATEGY A (BLUE FULL WIDTH TOP)</span>
-          </div>
-        </div>,
-        document.body
-      )}
-    </>
+    <div
+      style={{
+        position: "fixed",
+        top: "50%",
+        left: "50%",
+        width: "500px",
+        height: "500px",
+        background: "yellow",
+        color: "black",
+        zIndex: 2147483647,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: "40px",
+        fontWeight: "bold",
+        border: "20px solid red",
+        transform: "translate(-50%, -50%)",
+        pointerEvents: "none"
+      }}
+    >
+      RENDERED: {state.status}
+    </div>
   );
 }
 
@@ -730,23 +718,21 @@ function shouldShowNotification(category: NotificationCategory): boolean {
 }
 
 function notify(category: NotificationCategory, title: string, body: string, logo?: any) {
+  log("debug", `notify call: category=${category}, title=${title}, body=${body}`, "autosync_status");
   if (!shouldShowNotification(category)) {
+    log("debug", "notify skipped: disabled by settings", "autosync_status");
     return;
   }
   try {
-    log("debug", `Showing toast: ${title} - ${body}`);
     const toastObj = { 
       title, 
       body, 
-      logo: logo ? React.cloneElement(logo, { size: 40 }) : undefined,
-      duration: 2000 
+      duration: 3000 
     };
-    
-    // Attempt standard toaster
     toaster.toast(toastObj);
-    
+    log("debug", "notify successful: toaster.toast called", "autosync_status");
   } catch (err) {
-    log("error", `Failed to show toast: ${err}`);
+    log("error", `notify failed: ${err}`, "autosync_status");
   }
 }
 
@@ -1193,8 +1179,8 @@ function Content() {
           <ButtonItem
             layout="below"
             onClick={() => {
-              publishAutoSyncStatus("backing_up", true);
-              setTimeout(() => publishAutoSyncStatus("has_backup", true), 3000);
+              publishAutoSyncStatus("backing_up", false);
+              setTimeout(() => publishAutoSyncStatus("has_backup", false), 3000);
             }}
           >
             Debug: Test Notification Strip
