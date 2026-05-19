@@ -62,6 +62,32 @@ def validate_required_files(project_root: Path) -> None:
             raise FileNotFoundError(f"Required plugin file is missing: {file_name}")
 
 
+def validate_static_files(project_root: Path) -> None:
+    for file_name in REQUIRED_FILES:
+        path = project_root / file_name
+        if not path.is_file():
+            raise FileNotFoundError(f"Required plugin file is missing: {file_name}")
+
+
+def missing_runtime_files(project_root: Path) -> tuple[str, ...]:
+    return tuple(
+        file_name
+        for file_name in REQUIRED_RUNTIME_FILES
+        if not (project_root / file_name).is_file()
+    )
+
+
+def build_frontend_bundle(project_root: Path) -> None:
+    subprocess.run(["pnpm", "run", "build"], cwd=project_root, check=True)
+
+
+def ensure_required_files(project_root: Path) -> None:
+    validate_static_files(project_root)
+    if missing_runtime_files(project_root):
+        build_frontend_bundle(project_root)
+    validate_required_files(project_root)
+
+
 def validate_package_versions(project_root: Path) -> str:
     plugin_version = _metadata_version(project_root / "plugin.json")
     package_version = _metadata_version(project_root / "package.json")
@@ -109,7 +135,7 @@ def _get_git_hash() -> str | None:
 
 
 def build_plugin_zip(project_root: Path, output_dir: Path, is_release: bool = False) -> Path:
-    validate_required_files(project_root)
+    ensure_required_files(project_root)
     base_version = validate_package_versions(project_root)
     if is_release:
         version = base_version

@@ -82,6 +82,31 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
     assert "SDH-ludusavi/node_modules/.modules.yaml" not in names
 
 
+def test_package_script_rebuilds_missing_runtime_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_package_module()
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    for file_name in module.REQUIRED_FILES:
+        (project_root / file_name).write_text("{}", encoding="utf-8")
+    (project_root / "LICENSE").write_text("license", encoding="utf-8")
+
+    build_calls: list[Path] = []
+
+    def build_frontend_bundle(project_root_arg: Path) -> None:
+        build_calls.append(project_root_arg)
+        (project_root_arg / "dist").mkdir()
+        (project_root_arg / "dist" / "index.js").write_text("bundle", encoding="utf-8")
+
+    monkeypatch.setattr(module, "build_frontend_bundle", build_frontend_bundle)
+
+    module.ensure_required_files(project_root)
+
+    assert build_calls == [project_root]
+
+
 def test_package_metadata_versions_match_release_version() -> None:
     module = load_package_module()
     plugin_metadata = json.loads(Path("plugin.json").read_text())
