@@ -327,22 +327,34 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
   }
 
   try {
+    const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
     const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance;
-    if (rootWindow?.CreateBrowserView) {
-      log("info", "Creating BrowserView via GamepadUIMainWindowInstance", "autosync_status");
-      autoSyncStatusBrowserView = rootWindow.CreateBrowserView("sdh-ludusavi-autosync-status-strip") as AutoSyncStatusBrowserView;
-    } else {
-      const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
-      log("info", "Creating BrowserView via SteamClient fallback", "autosync_status");
-      autoSyncStatusBrowserView = steamClient?.BrowserView?.Create?.({
+
+    // Prefer SteamClient.BrowserView.Create as it returns the standard BrowserViewPopup
+    if (steamClient?.BrowserView?.Create) {
+      log("info", "Creating BrowserView via SteamClient.BrowserView.Create", "autosync_status");
+      autoSyncStatusBrowserView = steamClient.BrowserView.Create({
         strInitialURL: "about:blank"
       }) as AutoSyncStatusBrowserView | null;
+    } else if (rootWindow?.CreateBrowserView) {
+      log("info", "Creating BrowserView via GamepadUIMainWindowInstance", "autosync_status");
+      autoSyncStatusBrowserView = rootWindow.CreateBrowserView("sdh-ludusavi-autosync-status-strip") as AutoSyncStatusBrowserView;
     }
 
     if (!autoSyncStatusBrowserView) {
-      log("error", "Failed to create BrowserView surface", "autosync_status");
+      log("error", "Failed to create BrowserView surface (no creation methods found)", "autosync_status");
       return null;
     }
+
+    // Diagnostic logging for the created object
+    log("info", `BrowserView created: type=${typeof autoSyncStatusBrowserView}, keys=${Object.keys(autoSyncStatusBrowserView).join(",")}`, "autosync_status");
+
+    // Handle lowercase method fallbacks if necessary
+    const view = autoSyncStatusBrowserView as any;
+    if (!view.LoadURL && view.loadURL) view.LoadURL = view.loadURL;
+    if (!view.SetBounds && view.setBounds) view.SetBounds = view.setBounds;
+    if (!view.SetVisible && view.setVisible) view.SetVisible = view.setVisible;
+    if (!view.Destroy && view.destroy) view.Destroy = view.destroy;
 
     autoSyncStatusBrowserView.SetName?.("sdh-ludusavi-autosync-status-strip");
     autoSyncStatusBrowserView.SetWindowStackingOrder?.(2);
@@ -543,7 +555,15 @@ function AutoSyncStatusIcon({ status }: { status: AutoSyncStatusKind }) {
 }
 
 function AutoSyncStatusComposition() {
-  useUIComposition(EUIComposition.Notification);
+  log("debug", "Mounting AutoSyncStatusComposition (Strategy A)", "autosync_status");
+  const result = useUIComposition(EUIComposition.Notification);
+  useEffect(() => {
+    log("debug", "AutoSyncStatusComposition applied composition", "autosync_status");
+    return () => {
+      log("debug", "Releasing AutoSyncStatusComposition", "autosync_status");
+      result.releaseComposition();
+    };
+  }, [result]);
   return null;
 }
 

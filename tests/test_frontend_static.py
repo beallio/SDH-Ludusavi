@@ -268,11 +268,17 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         'log("info", "Composition hook found"',
         'log("warning", "Composition hook NOT found',
         'log("info", "Creating BrowserView via GamepadUIMainWindowInstance"',
-        'log("info", "Creating BrowserView via SteamClient fallback"',
+        'log("info", "Creating BrowserView via SteamClient.BrowserView.Create"',
+        'log("info", `BrowserView created: type=${typeof autoSyncStatusBrowserView}',
         "autoSyncStatusBrowserView.SetWindowStackingOrder?.(2);",
         "SetTopmost(true)",
         "browserView.LoadURL(url);",
         "setTimeout(() => {",
+        "function AutoSyncStatusComposition()",
+        'log("debug", "Mounting AutoSyncStatusComposition (Strategy A)"',
+        'log("debug", "AutoSyncStatusComposition applied composition"',
+        'log("debug", "Releasing AutoSyncStatusComposition"',
+        "result.releaseComposition();",
     ]:
         assert required_text in source
 
