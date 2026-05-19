@@ -1,33 +1,40 @@
-# Fix Status Strip Visibility and Diagnostics
+# Fix Status Strip Provenance and Diagnostics
 
 ## Problem Definition
 
-The AutoSync Status Strip (notification notification) is not appearing over running games. This is likely due to a combination of:
-1.  **Strategy Conflict:** Both `EUIComposition` (main DOM portal) and `BrowserView` (separate overlay) are being used simultaneously, which may cause layering or focus conflicts.
-2.  **Uncertain BrowserView Attachment:** The `BrowserView` created via `SteamClient.BrowserView.Create` or `CreateBrowserView` may not be correctly attached to the active Gamescope display surface.
-3.  **Silent Failures:** Critical discovery steps (finding the composition hook, creating the BrowserView) are not logged sufficiently to diagnose on-device failures.
+The AutoSync status strip is still not proven visible over a running game, and recent
+diagnostic logs can be confused with real lifecycle autosync. The next fix must make
+each status update's provenance explicit before changing the overlay strategy again.
 
 ## Architecture Overview
 
-Consolidate the overlay mechanism to prioritize the `BrowserView` as the primary surface for in-game visibility while adding deep diagnostic logging.
+Keep the implementation frontend-owned and SteamUI-only, but separate diagnostics
+from lifecycle autosync:
 
-- **Diagnostic Phase:** Add explicit `log` calls to `useUIComposition` discovery and `ensureAutoSyncStatusBrowserView` creation paths.
-- **Consolidation:** 
-    - Keep `BrowserView` as the primary overlay for running games.
-    - Maintain the React DOM portal only as a fallback or for display within the QAM itself.
-    - Ensure `BrowserView` methods are called in a safer sequence (Bounds -> Load -> Visible).
-- **Hardening:**
-    - Increase `SetWindowStackingOrder` to ensure it clears other SteamUI overlays.
-    - Add a `SetTopmost` call if available in the runtime environment.
+- Add a source label to every status publish: `debug_button`, `lifecycle_start`,
+  `lifecycle_exit`, `rpc_result`, `timeout`, or `hide`.
+- Log source, game name, app ID, tracked state, result status, status, visibility,
+  and diagnostic surface mode for every status change.
+- Log before and after the `handle_game_start` and `handle_game_exit` RPC calls.
+- Keep success/progress autosync out of Decky toasts; only failures use toasts.
+- Keep BrowserView, React portal, and combined diagnostic modes available from the
+  debug button with unmistakable labels and colors.
+- Avoid crash-prone runtime paths: no `EUIComposition.Overlay`, no BrowserView
+  `AddGlass` or `NotifyUserActivation`, and no hooks outside mounted components.
 
 ## Core Data Structures
 
-- No new data structures. Use existing `AutoSyncStatusState` and `AutoSyncStatusBrowserView` types.
+- `AutoSyncStatusSource`: provenance label for status changes.
+- `AutoSyncStatusSurfaceMode`: `browserview`, `react`, or `both`.
+- `AutoSyncStatusState`: status, visibility, source, optional game/app/tracked/result
+  metadata, and active diagnostic surface mode.
+- `AutoSyncStatusBrowserView`: minimal BrowserView runtime interface.
 
 ## Public Interfaces
 
 - No backend RPC changes.
-- Added logs will be visible in the "View Logs" modal within the plugin.
+- The existing debug button cycles BrowserView-only, React-only, and both-surfaces
+  diagnostics. Logs identify these as `debug_button` updates.
 
 ## Dependency Requirements
 
@@ -35,16 +42,17 @@ Consolidate the overlay mechanism to prioritize the `BrowserView` as the primary
 
 ## Testing Strategy
 
-1.  **Static Tests:** Update `tests/test_frontend_static.py` to require the new diagnostic log strings and the corrected BrowserView initialization sequence.
-2.  **Runtime Diagnostics:** Once deployed, the user can check "View Logs" to see:
-    - `SDH-ludusavi:autosync_status: Composition hook found: <boolean>`
-    - `SDH-ludusavi:autosync_status: Created BrowserView via GamepadUIMainWindowInstance: <boolean>`
-    - `SDH-ludusavi:autosync_status: Created BrowserView via SteamClient fallback: <boolean>`
+1. Update `tests/test_frontend_static.py` with static invariants for source labels,
+   lifecycle/RPC logging, failure-only autosync toasts, BrowserView creation order,
+   React portal fallback, and debug mode cycling.
+2. Run the targeted frontend static tests and TypeScript typecheck.
+3. Run Rollup build and full Python test suite after implementation.
 
 ## Implementation Steps
 
-1.  Modify `useUIComposition` in `src/index.tsx` to log whether the module child was successfully found.
-2.  Update `ensureAutoSyncStatusBrowserView` to log exactly which creation path was taken.
-3.  In `syncAutoSyncStatusBrowserView`, increase `SetWindowStackingOrder` to `2` (above standard notifications) and call `SetVisible` after a small microtask to allow the `LoadURL` to register.
-4.  Update the `AutoSyncStatusIcon` and `renderAutoSyncStatusHtml` to ensure high contrast for the overlay.
-5.  Update `tests/test_frontend_static.py` with invariants for the new logs and hardened BrowserView logic.
+1. Add source and surface-mode types plus provenance logging helpers.
+2. Replace the temporary full-screen debug styling with the bottom strip React portal.
+3. Prefer `GamepadUIMainWindowInstance.CreateBrowserView`, then fall back to
+   `SteamClient.BrowserView.Create`.
+4. Wire lifecycle start/exit and RPC results through explicit source metadata.
+5. Replace the debug button with a three-mode diagnostic cycle.

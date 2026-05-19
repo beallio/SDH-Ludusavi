@@ -18,7 +18,7 @@ import {
   routerHook,
   toaster
 } from "@decky/api";
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { FaSave, FaDownload, FaExclamationTriangle } from "react-icons/fa";
 import {
@@ -119,9 +119,19 @@ type RpcResult<T> = T | RpcStatus;
 
 type AutoSyncStatusKind = "backing_up" | "restoring" | "has_backup" | "needs_backup" | "error";
 
+type AutoSyncStatusSource = "debug_button" | "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";
+
+type AutoSyncStatusSurfaceMode = "browserview" | "react" | "both";
+
 type AutoSyncStatusState = {
   status: AutoSyncStatusKind;
   visible: boolean;
+  source: AutoSyncStatusSource;
+  surfaceMode: AutoSyncStatusSurfaceMode;
+  gameName?: string;
+  appID?: string;
+  tracked?: boolean;
+  resultStatus?: OperationResult["status"] | RpcStatus["status"];
 };
 
 type AutoSyncStatusListener = (state: AutoSyncStatusState) => void;
@@ -275,10 +285,14 @@ const autoSyncStatusListeners = new Set<AutoSyncStatusListener>();
 const AUTO_SYNC_STATUS_COMPONENT = "sdh-ludusavi-autosync-status-strip";
 let currentAutoSyncStatusState: AutoSyncStatusState = {
   status: "has_backup",
-  visible: false
+  visible: false,
+  source: "hide",
+  surfaceMode: "both"
 };
 let autoSyncStatusTimedOut = false;
 let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;
+const autoSyncDiagnosticModes: AutoSyncStatusSurfaceMode[] = ["browserview", "react", "both"];
+let autoSyncDiagnosticModeIndex = 0;
 
 const useUICompositionHook = findModuleChild((module: any) => {
   if (typeof module !== "object" || module === null) {
@@ -322,11 +336,14 @@ function getAutoSyncStatusBounds() {
   
   log("debug", `Window dimensions: raw=${rawWidth}x${rawHeight}, ratio=${pixelRatio}`, "autosync_status");
 
+  const width = Math.round(rawWidth);
+  const height = Math.round(24 * pixelRatio);
+
   return {
     x: 0,
-    y: 0, // Full screen for Strategy B debug
-    width: rawWidth,
-    height: rawHeight,
+    y: Math.max(0, Math.round(rawHeight - height)),
+    width,
+    height,
     pixelRatio
   };
 }
@@ -340,14 +357,14 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
     const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
     const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance;
 
-    if (steamClient?.BrowserView?.Create) {
+    if (rootWindow?.CreateBrowserView) {
+      log("info", "Creating BrowserView via GamepadUIMainWindowInstance", "autosync_status");
+      autoSyncStatusBrowserView = rootWindow.CreateBrowserView("sdh-ludusavi-autosync-status-strip") as AutoSyncStatusBrowserView;
+    } else if (steamClient?.BrowserView?.Create) {
       log("info", "Creating BrowserView via SteamClient.BrowserView.Create", "autosync_status");
       autoSyncStatusBrowserView = steamClient.BrowserView.Create({
         strInitialURL: "about:blank"
       }) as AutoSyncStatusBrowserView | null;
-    } else if (rootWindow?.CreateBrowserView) {
-      log("info", "Creating BrowserView via GamepadUIMainWindowInstance", "autosync_status");
-      autoSyncStatusBrowserView = rootWindow.CreateBrowserView("sdh-ludusavi-autosync-status-strip") as AutoSyncStatusBrowserView;
     }
 
     if (!autoSyncStatusBrowserView) {
@@ -366,7 +383,7 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
     if (!view.Destroy && view.destroy) view.Destroy = view.destroy;
 
     autoSyncStatusBrowserView.SetName?.("sdh-ludusavi-autosync-status-strip");
-    autoSyncStatusBrowserView.SetWindowStackingOrder?.(200);
+    autoSyncStatusBrowserView.SetWindowStackingOrder?.(50);
     autoSyncStatusBrowserView.SetFocus?.(false);
     autoSyncStatusBrowserView.SetVisible?.(false);
     
@@ -397,7 +414,19 @@ function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind) {
   return `<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"${rotation}><circle cx="10" cy="10" r="8.8" fill="currentColor"/><path d="M10 5.3v8.3" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/><path d="M6.8 8.4 10 5.2l3.2 3.2" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 
+function diagnosticLabelForMode(mode: AutoSyncStatusSurfaceMode) {
+  if (mode === "browserview") {
+    return "DIAGNOSTIC: BROWSERVIEW";
+  }
+  if (mode === "react") {
+    return "DIAGNOSTIC: REACT";
+  }
+  return "DIAGNOSTIC: BOTH";
+}
+
 function renderAutoSyncStatusHtml(state: AutoSyncStatusState) {
+  const isDebug = state.source === "debug_button";
+  const diagnosticLabel = isDebug ? diagnosticLabelForMode(state.surfaceMode) : "";
   return `<!doctype html>
 <html>
 <head>
@@ -405,9 +434,9 @@ function renderAutoSyncStatusHtml(state: AutoSyncStatusState) {
 <style>
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
 body {
-  color: black;
+  color: #f8fafc;
   font-family: "Motiva Sans", Arial, sans-serif;
-  font-size: 24px;
+  font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -415,28 +444,36 @@ body {
   width: 100vw;
   height: 100vh;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 30px;
-  background: rgba(255, 255, 0, 0.9); /* STRATEGY B YELLOW FULL SCREEN */
-  border: 10px solid black;
+  justify-content: space-between;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.34);
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+  padding: 0 18px;
   box-sizing: border-box;
 }
-.text { font-size: 40px; text-shadow: 2px 2px 0 white; display: flex; align-items: center; gap: 20px; }
-.icon { width: 60px; height: 60px; display: inline-flex; align-items: center; justify-content: center; transform: scale(3); }
+.text { display: flex; align-items: center; gap: 8px; white-space: nowrap; min-width: 245px; }
+.diagnostic { color: ${state.surfaceMode === "browserview" ? "#38bdf8" : state.surfaceMode === "react" ? "#f97316" : "#22c55e"}; }
+.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : "#22c55e"}; }
 </style>
 </head>
 <body>
 <div class="bar">
-  <div class="text">STRATEGY B (YELLOW FULL SCREEN)</div>
-  <div class="text"><span class="icon">${iconSvgForAutoSyncStatus(state.status)}</span> STATUS: ${autoSyncStatusText[state.status]}</div>
+  <div class="text"><span class="icon">${iconSvgForAutoSyncStatus(state.status)}</span>${autoSyncStatusText[state.status]}</div>
+  ${isDebug ? `<div class="text diagnostic">${diagnosticLabel}</div>` : ""}
 </div>
 </body>
 </html>`;
 }
 
 function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
+  if (state.surfaceMode === "react") {
+    if (autoSyncStatusBrowserView) {
+      autoSyncStatusBrowserView.SetVisible?.(false);
+    }
+    return;
+  }
+
   const browserView = ensureAutoSyncStatusBrowserView();
   if (!browserView) {
     return;
@@ -454,15 +491,14 @@ function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
     log("debug", `Syncing BrowserView: visible=${state.visible}, bounds=${JSON.stringify(bounds)}`, "autosync_status");
 
     if (state.visible) {
-      browserView.SetVisible(true);
       browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);
       browserView.LoadURL(url);
       
       setTimeout(() => {
         browserView.SetVisible?.(true);
-        browserView.SetWindowStackingOrder?.(200);
+        browserView.SetWindowStackingOrder?.(50);
         browserView.SetFocus?.(false);
-      }, 200);
+      }, 0);
     } else {
       browserView.SetVisible(false);
     }
@@ -491,41 +527,74 @@ function destroyAutoSyncStatusBrowserView() {
   }
 }
 
-function publishAutoSyncStatus(status: AutoSyncStatusKind, silent = false) {
+type AutoSyncStatusPublishOptions = {
+  source: AutoSyncStatusSource;
+  surfaceMode?: AutoSyncStatusSurfaceMode;
+  gameName?: string;
+  appID?: string;
+  tracked?: boolean;
+  resultStatus?: OperationResult["status"] | RpcStatus["status"];
+};
+
+function logAutoSyncStatusChange(state: AutoSyncStatusState) {
+  log(
+    "info",
+    `Status update: source=${state.source} status=${state.status} visible=${state.visible} game=${state.gameName ?? "unknown"} app_id=${state.appID ?? "unknown"} tracked=${state.tracked ?? "unknown"} result=${state.resultStatus ?? "none"} surface=${state.surfaceMode}`,
+    "autosync_status",
+    state.gameName
+  );
+}
+
+function publishAutoSyncStatus(status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions) {
   if (status === "backing_up" || status === "restoring") {
     autoSyncStatusTimedOut = false;
   }
-  
-  // Also send native notification for in-game visibility
-  if (!silent) {
-    const label = autoSyncStatusText[status];
-    if (status === "backing_up") {
-      notify("auto_sync_progress", "Ludusavi Auto-sync", label);
-    } else if (status === "restoring") {
-      notify("auto_sync_progress", "Ludusavi Auto-sync", label);
-    } else if (status === "error") {
-      notify("failures_errors", "Ludusavi Auto-sync", "Failed - check logs");
-    }
-  }
 
-  currentAutoSyncStatusState = { status, visible: true };
+  currentAutoSyncStatusState = {
+    status,
+    visible: true,
+    source: options.source,
+    surfaceMode: options.surfaceMode ?? currentAutoSyncStatusState.surfaceMode,
+    gameName: options.gameName,
+    appID: options.appID,
+    tracked: options.tracked,
+    resultStatus: options.resultStatus
+  };
+  logAutoSyncStatusChange(currentAutoSyncStatusState);
   syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);
   for (const listener of autoSyncStatusListeners) {
     listener(currentAutoSyncStatusState);
   }
 }
 
-function hideAutoSyncStatus() {
-  currentAutoSyncStatusState = { ...currentAutoSyncStatusState, visible: false };
+function hideAutoSyncStatus(options: Partial<AutoSyncStatusPublishOptions> = {}) {
+  currentAutoSyncStatusState = {
+    ...currentAutoSyncStatusState,
+    visible: false,
+    source: options.source ?? "hide",
+    gameName: options.gameName ?? currentAutoSyncStatusState.gameName,
+    appID: options.appID ?? currentAutoSyncStatusState.appID,
+    tracked: options.tracked ?? currentAutoSyncStatusState.tracked,
+    resultStatus: options.resultStatus ?? currentAutoSyncStatusState.resultStatus,
+    surfaceMode: options.surfaceMode ?? currentAutoSyncStatusState.surfaceMode
+  };
+  logAutoSyncStatusChange(currentAutoSyncStatusState);
   syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);
   for (const listener of autoSyncStatusListeners) {
     listener(currentAutoSyncStatusState);
   }
 }
 
-function completeAutoSyncStatus(result: OperationResult) {
+function completeAutoSyncStatus(
+  result: OperationResult,
+  options: Omit<AutoSyncStatusPublishOptions, "source" | "resultStatus">
+) {
   if (result.status === "failed") {
-    publishAutoSyncStatus("error");
+    publishAutoSyncStatus("error", {
+      ...options,
+      source: "rpc_result",
+      resultStatus: result.status
+    });
     return;
   }
 
@@ -534,15 +603,44 @@ function completeAutoSyncStatus(result: OperationResult) {
   }
 
   if (result.status === "backed_up" || result.status === "restored") {
-    const label = autoSyncStatusText[result.status === "backed_up" ? "has_backup" : "has_backup"];
-    notify("auto_sync_results", "Ludusavi Auto-sync", label);
-    publishAutoSyncStatus("has_backup");
+    publishAutoSyncStatus("has_backup", {
+      ...options,
+      source: "rpc_result",
+      resultStatus: result.status
+    });
     return;
   }
 
   if (result.status === "skipped") {
-    publishAutoSyncStatus("needs_backup");
+    publishAutoSyncStatus("needs_backup", {
+      ...options,
+      source: "rpc_result",
+      resultStatus: result.status
+    });
   }
+}
+
+function publishNextDebugAutoSyncStatus() {
+  const surfaceMode = autoSyncDiagnosticModes[autoSyncDiagnosticModeIndex];
+  autoSyncDiagnosticModeIndex = (autoSyncDiagnosticModeIndex + 1) % autoSyncDiagnosticModes.length;
+  log("info", `Debug status strip diagnostic requested: ${surfaceMode}`, "autosync_status", "Debug diagnostic");
+  publishAutoSyncStatus("backing_up", {
+    source: "debug_button",
+    surfaceMode,
+    gameName: "Debug diagnostic",
+    appID: "debug",
+    tracked: true
+  });
+  window.setTimeout(() => {
+    publishAutoSyncStatus("has_backup", {
+      source: "debug_button",
+      surfaceMode,
+      gameName: "Debug diagnostic",
+      appID: "debug",
+      tracked: true,
+      resultStatus: "backed_up"
+    });
+  }, 3000);
 }
 
 function AutoSyncStatusIcon({ status }: { status: AutoSyncStatusKind }) {
@@ -611,7 +709,12 @@ function AutoSyncStatusStrip() {
       if (isRunning) {
         autoSyncStatusTimedOut = true;
       }
-      currentAutoSyncStatusState = { ...currentAutoSyncStatusState, visible: false };
+      currentAutoSyncStatusState = {
+        ...currentAutoSyncStatusState,
+        visible: false,
+        source: "timeout"
+      };
+      logAutoSyncStatusChange(currentAutoSyncStatusState);
       syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);
       setState((current) => ({ ...current, visible: false }));
     }, isRunning ? 10000 : 2000);
@@ -619,33 +722,68 @@ function AutoSyncStatusStrip() {
     return () => window.clearTimeout(timeout);
   }, [state.status, state.visible]);
 
-  if (!state.visible) {
-    return null;
-  }
+  const renderReactSurface = state.visible && state.surfaceMode !== "browserview";
 
-  return (
+  return createPortal(
     <div
       style={{
         position: "fixed",
-        top: "50%",
-        left: "50%",
-        width: "500px",
-        height: "500px",
-        background: "yellow",
-        color: "black",
-        zIndex: 2147483647,
+        bottom: "0",
+        left: "0",
+        width: "100%",
+        height: "24px",
+        background: "rgba(0, 0, 0, 0.34)",
+        color: "#f8fafc",
+        zIndex: 99999,
         display: "flex",
         alignItems: "center",
-        justifyContent: "center",
-        fontSize: "40px",
-        fontWeight: "bold",
-        border: "20px solid red",
-        transform: "translate(-50%, -50%)",
-        pointerEvents: "none"
+        justifyContent: "space-between",
+        gap: "10px",
+        padding: "0 18px",
+        boxSizing: "border-box",
+        fontFamily: '"Motiva Sans", "Arial", sans-serif',
+        fontSize: "13px",
+        fontWeight: 800,
+        letterSpacing: 0,
+        textTransform: "uppercase",
+        pointerEvents: "none",
+        transform: state.visible ? "translateY(0)" : "translateY(100%)",
+        transition: "transform 300ms ease-out",
+        borderTop: "1px solid rgba(255, 255, 255, 0.10)"
       }}
+      aria-hidden={!state.visible}
     >
-      RENDERED: {state.status}
-    </div>
+      {renderReactSurface && <AutoSyncStatusComposition />}
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: "245px" }}>
+        <AutoSyncStatusIcon status={state.status} />
+        <span>{autoSyncStatusText[state.status]}</span>
+      </div>
+      {state.source === "debug_button" && (
+        <div
+          style={{
+            color:
+              state.surfaceMode === "browserview"
+                ? "#38bdf8"
+                : state.surfaceMode === "react"
+                  ? "#f97316"
+                  : "#22c55e"
+          }}
+        >
+          {diagnosticLabelForMode(state.surfaceMode)}
+        </div>
+      )}
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          top: 0,
+          height: "2px",
+          background: "rgba(255, 255, 255, 0.10)"
+        }}
+      />
+    </div>,
+    document.body
   );
 }
 
@@ -727,10 +865,11 @@ function notify(category: NotificationCategory, title: string, body: string, log
     const toastObj = { 
       title, 
       body, 
-      duration: 3000 
+      duration: 3000,
+      ...(logo ? { logo } : {})
     };
     toaster.toast(toastObj);
-    log("debug", "notify successful: toaster.toast called", "autosync_status");
+    log("debug", "notify successful: toast dispatched", "autosync_status");
   } catch (err) {
     log("error", `notify failed: ${err}`, "autosync_status");
   }
@@ -1178,12 +1317,9 @@ function Content() {
         <PanelSectionRow>
           <ButtonItem
             layout="below"
-            onClick={() => {
-              publishAutoSyncStatus("backing_up", false);
-              setTimeout(() => publishAutoSyncStatus("has_backup", false), 3000);
-            }}
+            onClick={() => publishNextDebugAutoSyncStatus()}
           >
-            Debug: Test Notification Strip
+            Debug: Cycle Status Strip Surface
           </ButtonItem>
         </PanelSectionRow>
         <PanelSectionRow>
@@ -1346,19 +1482,32 @@ export default definePlugin(() => {
     log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
     
     if (shouldPublishAutoSyncStatusBeforeRpc(tracked)) {
-      publishAutoSyncStatus("restoring");
+      publishAutoSyncStatus("restoring", {
+        source: "lifecycle_start",
+        gameName: name,
+        appID,
+        tracked
+      });
     }
     
+    log("info", `Calling handle_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
     const result = await handleGameStartCall(name, appID);
+    log("info", `handle_game_start result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
     // Show result toast for all outcomes (restored, failed, or skipped)
     // unless auto-sync is completely disabled, another operation is running,
     // or the game simply isn't managed by Ludusavi (unmatched or ignored).
     const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
     if (result.status === "skipped" && silentReasons.includes(result.reason ?? "")) {
-      hideAutoSyncStatus();
+      hideAutoSyncStatus({
+        source: "hide",
+        gameName: name,
+        appID,
+        tracked,
+        resultStatus: result.status
+      });
     }
     if (result.status !== "skipped" || !silentReasons.includes(result.reason ?? "")) {
-      completeAutoSyncStatus(result);
+      completeAutoSyncStatus(result, { gameName: name, appID, tracked });
       if (result.status === "failed") {
         notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
       }
@@ -1370,17 +1519,30 @@ export default definePlugin(() => {
     log("info", `App exited: ${name} (${appID}) tracked=${tracked}`);
     
     if (shouldPublishAutoSyncStatusBeforeRpc(tracked)) {
-      publishAutoSyncStatus("backing_up");
+      publishAutoSyncStatus("backing_up", {
+        source: "lifecycle_exit",
+        gameName: name,
+        appID,
+        tracked
+      });
     }
     
+    log("info", `Calling handle_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
     const result = await handleGameExitCall(name, appID);
+    log("info", `handle_game_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
     const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
     if (result.status === "skipped" && silentReasons.includes(result.reason ?? "")) {
-      hideAutoSyncStatus();
+      hideAutoSyncStatus({
+        source: "hide",
+        gameName: name,
+        appID,
+        tracked,
+        resultStatus: result.status
+      });
     }
     if (result.status !== "skipped" || !silentReasons.includes(result.reason ?? "")) {
       if (result.status !== "skipped" || result.reason === "local_current") {
-        completeAutoSyncStatus(result);
+        completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
           notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
         }
@@ -1594,7 +1756,12 @@ export default definePlugin(() => {
       }
       activeSessions.clear();
       autoSyncStatusListeners.clear();
-      currentAutoSyncStatusState = { status: "has_backup", visible: false };
+      currentAutoSyncStatusState = {
+        status: "has_backup",
+        visible: false,
+        source: "hide",
+        surfaceMode: "both"
+      };
       destroyAutoSyncStatusBrowserView();
       console.log("SDH-ludusavi unloading");
     },

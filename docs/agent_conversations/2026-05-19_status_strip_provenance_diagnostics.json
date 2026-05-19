@@ -1,0 +1,27 @@
+{
+  "date": "2026-05-19",
+  "task_objective": "Implement the revised status bar diagnostics plan by restoring a green frontend baseline, adding status provenance, separating BrowserView and React diagnostic surfaces, and keeping routine autosync progress/results out of Decky toasts.",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py",
+    "docs/plans/fix_status_strip_visibility_and_diagnostics.md",
+    "docs/agent_conversations/2026-05-19_status_strip_provenance_diagnostics.json"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py::test_frontend_status_strip_logs_status_provenance",
+    "tests/test_frontend_static.py::test_frontend_logs_lifecycle_rpc_boundaries",
+    "tests/test_frontend_static.py::test_frontend_debug_button_cycles_status_surfaces"
+  ],
+  "design_decisions": [
+    "Every status publish now carries a source label and optional game, app ID, tracked, result, and surface metadata.",
+    "BrowserView creation now prefers Router.WindowStore.GamepadUIMainWindowInstance.CreateBrowserView before SteamClient.BrowserView.Create.",
+    "The debug button cycles BrowserView-only, React-only, and combined diagnostic surfaces with distinct labels.",
+    "Routine autosync progress and success states no longer emit Decky toasts; failures still route through the notification-aware toast helper.",
+    "EUIComposition.Notification is only requested from the mounted React status component when the React surface is active."
+  ],
+  "results": [
+    "Targeted frontend static tests pass.",
+    "Frontend typecheck passes.",
+    "Frontend build passes."
+  ]
+}

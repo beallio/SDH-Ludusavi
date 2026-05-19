@@ -109,8 +109,8 @@ def test_frontend_silences_lifecycle_toasts_when_auto_sync_is_disabled() -> None
     assert "trackedAppIDs.size === 0 && trackedNames.size === 0" in source
     assert source.count("if (shouldPublishAutoSyncStatusBeforeRpc(tracked))") == 2
 
-    start_status = 'publishAutoSyncStatus("restoring");'
-    exit_status = 'publishAutoSyncStatus("backing_up");'
+    start_status = 'publishAutoSyncStatus("restoring", {'
+    exit_status = 'publishAutoSyncStatus("backing_up", {'
     assert start_status in source
     assert exit_status in source
 
@@ -133,9 +133,9 @@ def test_frontend_renders_autosync_status_strip_portal() -> None:
         "createPortal(",
         "document.body",
         "let currentAutoSyncStatusState: AutoSyncStatusState",
-        "currentAutoSyncStatusState = { status, visible: true };",
-        "function hideAutoSyncStatus()",
-        "currentAutoSyncStatusState = { ...currentAutoSyncStatusState, visible: false };",
+        "currentAutoSyncStatusState = {",
+        "function hideAutoSyncStatus(",
+        'source: "hide"',
         "useState<AutoSyncStatusState>(currentAutoSyncStatusState)",
         "const autoSyncStatusListeners = new Set<AutoSyncStatusListener>();",
         "function publishAutoSyncStatus(",
@@ -144,7 +144,7 @@ def test_frontend_renders_autosync_status_strip_portal() -> None:
         'const AUTO_SYNC_STATUS_COMPONENT = "sdh-ludusavi-autosync-status-strip";',
         "routerHook.addGlobalComponent(AUTO_SYNC_STATUS_COMPONENT, AutoSyncStatusStrip);",
         "routerHook.removeGlobalComponent(AUTO_SYNC_STATUS_COMPONENT);",
-        'currentAutoSyncStatusState = { status: "has_backup", visible: false };',
+        'source: "hide",',
         "alwaysRender: true",
     ]:
         assert required_text in source
@@ -159,8 +159,8 @@ def test_frontend_hides_status_strip_for_backend_silent_autosync_skips() -> None
         'const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];'
         in source
     )
-    assert source.count("hideAutoSyncStatus();") >= 2
-    assert source.index("hideAutoSyncStatus();") > source.index(
+    assert source.count("hideAutoSyncStatus({") >= 2
+    assert source.index("hideAutoSyncStatus({") > source.index(
         "const result = await handleGameStartCall(name, appID);"
     )
 
@@ -217,9 +217,9 @@ def test_frontend_status_strip_replaces_autosync_success_toasts() -> None:
     assert '"auto_sync_results"' not in source
 
     for required_text in [
-        'publishAutoSyncStatus("has_backup");',
-        'publishAutoSyncStatus("needs_backup");',
-        'publishAutoSyncStatus("error");',
+        'publishAutoSyncStatus("has_backup", {',
+        'publishAutoSyncStatus("needs_backup", {',
+        'publishAutoSyncStatus("error", {',
         'notify("failures_errors", "SDH-ludusavi Auto-sync"',
     ]:
         assert required_text in source
@@ -252,8 +252,67 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         "setTimeout(() => {",
         "pixelRatio",
         "Math.round(",
-        "background: rgba(255, 0, 0, 0.85)",
-        "DEBUG:",
+        "background: rgba(0, 0, 0, 0.34)",
+        "DIAGNOSTIC:",
+    ]:
+        assert required_text in source
+    assert source.index("rootWindow?.CreateBrowserView") < source.index(
+        "steamClient?.BrowserView?.Create"
+    )
+
+
+def test_frontend_status_strip_logs_status_provenance() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        'type AutoSyncStatusSource = "debug_button" | "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";',
+        'type AutoSyncStatusSurfaceMode = "browserview" | "react" | "both";',
+        "source: AutoSyncStatusSource;",
+        "gameName?: string;",
+        "appID?: string;",
+        "tracked?: boolean;",
+        'resultStatus?: OperationResult["status"] | RpcStatus["status"];',
+        "function logAutoSyncStatusChange(",
+        "source=${state.source}",
+        'game=${state.gameName ?? "unknown"}',
+        'app_id=${state.appID ?? "unknown"}',
+        'tracked=${state.tracked ?? "unknown"}',
+        'result=${state.resultStatus ?? "none"}',
+        "visible=${state.visible}",
+        "surface=${state.surfaceMode}",
+    ]:
+        assert required_text in source
+
+
+def test_frontend_logs_lifecycle_rpc_boundaries() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        'log("info", `Calling handle_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);',
+        "const result = await handleGameStartCall(name, appID);",
+        'log("info", `handle_game_start result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);',
+        'log("info", `Calling handle_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);',
+        "const result = await handleGameExitCall(name, appID);",
+        'log("info", `handle_game_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);',
+    ]:
+        assert required_text in source
+
+
+def test_frontend_debug_button_cycles_status_surfaces() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        'const autoSyncDiagnosticModes: AutoSyncStatusSurfaceMode[] = ["browserview", "react", "both"];',
+        "let autoSyncDiagnosticModeIndex = 0;",
+        "function publishNextDebugAutoSyncStatus()",
+        "autoSyncDiagnosticModeIndex = (autoSyncDiagnosticModeIndex + 1) % autoSyncDiagnosticModes.length;",
+        'source: "debug_button",',
+        'gameName: "Debug diagnostic",',
+        'appID: "debug",',
+        "Debug: Cycle Status Strip Surface",
+        "DIAGNOSTIC: BROWSERVIEW",
+        "DIAGNOSTIC: REACT",
+        "DIAGNOSTIC: BOTH",
     ]:
         assert required_text in source
 
