@@ -8,8 +8,7 @@ import {
   staticClasses,
   ToggleField,
   Spinner,
-  Router,
-  EUIComposition
+  Router
 } from "@decky/ui";
 import {
   callable,
