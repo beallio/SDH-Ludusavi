@@ -376,21 +376,6 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
   }
 }
 
-function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind) {
-  if (status === "has_backup") {
-    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 10.2 8.5 12.7 14.2 7" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  }
-  if (status === "needs_backup") {
-    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 5h7l2 2v8H6z" fill="#0b151f"/><path d="M8 5h5v4H8z" fill="currentColor"/><path d="M8 12h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
-  }
-  if (status === "error") {
-    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M10 5.2v6.4" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/><circle cx="10" cy="15" r="1.2" fill="#0b151f"/></svg>';
-  }
-
-  const rotation = status === "restoring" ? ' style="transform: rotate(180deg); transform-origin: 50% 50%;"' : "";
-  return `<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"${rotation}><circle cx="10" cy="10" r="8.8" fill="currentColor"/><path d="M10 5.3v8.3" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/><path d="M6.8 8.4 10 5.2l3.2 3.2" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-}
-
 function renderAutoSyncStatusHtml(state: AutoSyncStatusState) {
   return `<!doctype html>
 <html>
@@ -567,6 +552,7 @@ function AutoSyncStatusComposition() {
 
 function AutoSyncStatusStrip() {
   const [state, setState] = useState<AutoSyncStatusState>(currentAutoSyncStatusState);
+  log("debug", `AutoSyncStatusStrip render: visible=${state.visible}, status=${state.status}`, "autosync_status");
 
   useEffect(() => {
     const listener: AutoSyncStatusListener = (nextState) => {
@@ -603,45 +589,29 @@ function AutoSyncStatusStrip() {
         <div
           style={{
             position: "fixed",
-            top: "100px", // Top for Strategy A
+            top: "0", // Top for Strategy A
             left: "0",
             width: "100vw",
-            zIndex: 99999,
+            zIndex: 2147483647,
             pointerEvents: "none",
             transform: state.visible ? "translateY(0)" : "translateY(-100%)",
-            transition: "transform 300ms ease-out",
+            transition: "transform 400ms ease-out",
           }}
         >
           <div
             style={{
-              height: "40px",
+              height: "100px",
               display: "flex",
               alignItems: "center",
-              gap: "10px",
-              background: "rgba(0, 0, 255, 0.85)", // BLUE DEBUG TOP
-              borderBottom: "2px solid white",
-              padding: "0 20px",
+              justifyContent: "center",
+              background: "rgba(0, 0, 255, 1.0)", // BLUE DEBUG TOP
+              border: "10px solid white",
               color: "white",
-              fontFamily: '"Motiva Sans", "Arial", sans-serif',
-              fontSize: "18px",
-              fontWeight: 800,
-              textTransform: "uppercase",
+              fontSize: "30px",
+              fontWeight: 900,
             }}
           >
-            <div style={{ height: "4px", flex: 1, background: "white" }} />
-            <div
-              style={{
-                minWidth: "300px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "12px",
-              }}
-            >
-              <AutoSyncStatusIcon status={state.status} />
-              <div style={{ lineHeight: 1 }}>STRATEGY A (BLUE): {autoSyncStatusText[state.status]}</div>
-            </div>
-            <div style={{ height: "4px", flex: 1, background: "white" }} />
+            STRATEGY A (BLUE FULL WIDTH TOP)
           </div>
         </div>,
         document.body
