@@ -85,7 +85,7 @@ function renderAutoSyncStatusHtml(state: AutoSyncStatusState) {
   display: inline-flex; 
   align-items: center; 
   justify-content: center; 
-  color: ${autoSyncStatusIconColor(state.status)};
+  color: ${state.status === "error" ? "#ef4444" : state.status === "needs_backup" ? "#f59e0b" : "#66c0f4"};
 }
 </style>
 </head>
