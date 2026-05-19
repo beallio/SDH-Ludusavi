@@ -314,17 +314,14 @@ function getAutoSyncStatusBounds() {
   const rawWidth = viewWindow?.innerWidth || viewWindow?.outerWidth || 1280;
   const rawHeight = viewWindow?.innerHeight || viewWindow?.outerHeight || 800;
   
-  const width = Math.floor(rawWidth * pixelRatio);
-  const viewHeight = Math.floor(rawHeight * pixelRatio);
-  const height = Math.floor(24 * pixelRatio);
-  
-  log("debug", `Window dimensions: raw=${rawWidth}x${rawHeight}, ratio=${pixelRatio}, physical=${width}x${viewHeight}`, "autosync_status");
+  // SetBounds expects LOGICAL pixels (the raw dimensions from the window object)
+  log("debug", `Window dimensions: raw=${rawWidth}x${rawHeight}, ratio=${pixelRatio}`, "autosync_status");
 
   return {
     x: 0,
-    y: Math.floor(400 * pixelRatio), // Middle of screen for Strategy B
-    width,
-    height,
+    y: 200, // Fixed logical Y in the upper-middle of the screen
+    width: rawWidth,
+    height: 40,
     pixelRatio
   };
 }
