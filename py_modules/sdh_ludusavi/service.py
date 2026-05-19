@@ -509,16 +509,18 @@ class SDHLudusaviService:
                 "dependency_error": message,
             }
 
-    def handle_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+    def check_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """
-        Logic triggered when a game is launched in Steam.
+        Check whether a game launch needs a restore without changing local saves.
 
-        Checks if a restore is needed based on backup recency.
+        This is the first phase of automatic launch sync. It verifies the current
+        save state and lets the frontend display checking status before any action
+        language is shown.
         """
         game_name = self._sanitize_name(game_name)
         self.log(
             "info",
-            f"handle_game_start triggered for game='{game_name}', app_id='{app_id}'",
+            f"check_game_start triggered for game='{game_name}', app_id='{app_id}'",
             "start",
             game_name,
         )
@@ -558,32 +560,77 @@ class SDHLudusaviService:
         self.log("info", f"Recency check result for {game.name}: {recency}", "start", game.name)
 
         if recency == "backup_newer":
-            try:
-                result = self._run_locked(
-                    "restore",
-                    game.name,
-                    lambda: self._ludusavi().restore(game.name),
-                )
-            except Exception as exc:
-                self._record_history(game.name, "restore", "auto_start", "failed", message=str(exc))
-                raise
-            self.log("info", f"Restored {game.name} before launch", "restore", game.name)
-            self._record_history(game.name, "restore", "auto_start", "restored")
-            return {"status": "restored", "game": game.name, "result": result}
+            return {"status": "needed", "operation": "restore", "game": game.name}
         if recency == "local_current":
             return self._skip("start", game.name, "local_current")
         return self._skip("start", game.name, "ambiguous_recency")
 
-    def handle_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+    def restore_game_on_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """
-        Logic triggered when a game is closed in Steam.
-
-        Triggers an automatic backup if enabled.
+        Restore a game's backup during launch after a check reports it is needed.
         """
         game_name = self._sanitize_name(game_name)
         self.log(
             "info",
-            f"handle_game_exit triggered for game='{game_name}', app_id='{app_id}'",
+            f"restore_game_on_start triggered for game='{game_name}', app_id='{app_id}'",
+            "restore",
+            game_name,
+        )
+        if not self._auto_sync_enabled:
+            self.log("info", "Skipping: auto_sync_enabled is False", "restore", game_name)
+            return self._skip("start", game_name, "auto_sync_disabled")
+
+        game = self._match_game(game_name, app_id=app_id)
+        if game is None:
+            self.log(
+                "info",
+                f"Skipping: game not found in Ludusavi list (app_id: {app_id})",
+                "restore",
+                game_name,
+            )
+            return self._skip("start", game_name, "unmatched_game")
+        if not game.has_backup:
+            self.log("info", "Skipping: game has no existing backup", "restore", game.name)
+            return self._skip("start", game.name, "no_backup")
+        if game.error:
+            self.log(
+                "info", f"Skipping: game has a reported error: {game.error}", "restore", game.name
+            )
+            return self._skip("start", game.name, "game_error")
+
+        try:
+            result = self._run_locked(
+                "restore",
+                game.name,
+                lambda: self._ludusavi().restore(game.name),
+            )
+        except Exception as exc:
+            self._record_history(game.name, "restore", "auto_start", "failed", message=str(exc))
+            raise
+        self.log("info", f"Restored {game.name} before launch", "restore", game.name)
+        self._record_history(game.name, "restore", "auto_start", "restored")
+        return {"status": "restored", "game": game.name, "result": result}
+
+    def handle_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+        """
+        Compatibility wrapper for the original one-call launch autosync flow.
+        """
+        result = self.check_game_start(game_name, app_id)
+        if result.get("status") == "needed" and result.get("operation") == "restore":
+            return self.restore_game_on_start(str(result["game"]), app_id)
+        return result
+
+    def check_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+        """
+        Check whether a game exit needs a backup without writing backup data.
+
+        This is the first phase of automatic exit sync. It uses Ludusavi preview
+        output to verify that local save data should be uploaded.
+        """
+        game_name = self._sanitize_name(game_name)
+        self.log(
+            "info",
+            f"check_game_exit triggered for game='{game_name}', app_id='{app_id}'",
             "exit",
             game_name,
         )
@@ -665,6 +712,38 @@ class SDHLudusaviService:
             # If preview fails, we skip to avoid potentially invalid or redundant backup attempts.
             return self._skip("exit", game.name, "preview_failed")
 
+        return {"status": "needed", "operation": "backup", "game": game.name}
+
+    def backup_game_on_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+        """
+        Back up a game during exit after a check reports it is needed.
+        """
+        game_name = self._sanitize_name(game_name)
+        self.log(
+            "info",
+            f"backup_game_on_exit triggered for game='{game_name}', app_id='{app_id}'",
+            "backup",
+            game_name,
+        )
+        if not self._auto_sync_enabled:
+            self.log("info", "Skipping: auto_sync_enabled is False", "backup", game_name)
+            return self._skip("exit", game_name, "auto_sync_disabled")
+
+        game = self._match_game(game_name, app_id=app_id)
+        if game is None:
+            self.log(
+                "info",
+                f"Skipping: game not found in Ludusavi list (app_id: {app_id})",
+                "backup",
+                game_name,
+            )
+            return self._skip("exit", game_name, "unmatched_game")
+        if game.error:
+            self.log(
+                "info", f"Skipping: game has a reported error: {game.error}", "backup", game.name
+            )
+            return self._skip("exit", game.name, "game_error")
+
         try:
             result = self._run_locked(
                 "backup", game.name, lambda: self._ludusavi().backup(game.name)
@@ -682,6 +761,15 @@ class SDHLudusaviService:
 
         self.log("info", f"Backed up {game.name} after exit", "backup", game.name)
         return {"status": "backed_up", "game": game.name, "result": result}
+
+    def handle_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+        """
+        Compatibility wrapper for the original one-call exit autosync flow.
+        """
+        result = self.check_game_exit(game_name, app_id)
+        if result.get("status") == "needed" and result.get("operation") == "backup":
+            return self.backup_game_on_exit(str(result["game"]), app_id)
+        return result
 
     def force_backup(self, game_name: str) -> dict[str, object]:
         """Trigger a manual backup for the specified game."""

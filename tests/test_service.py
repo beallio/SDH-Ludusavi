@@ -44,7 +44,17 @@ class FakeAdapter:
     def compare_recency(self, game_name: str) -> str:
         return self.recency.get(game_name, "ambiguous")
 
-    def backup(self, game_name: str) -> dict[str, object]:
+    def backup(self, game_name: str, preview: bool = False) -> dict[str, object]:
+        if preview:
+            return {
+                "games": {
+                    game_name: {
+                        "change": "Different",
+                        "files": {"save.dat": {}},
+                        "registry": {},
+                    }
+                }
+            }
         self.backups.append(game_name)
         return {"ok": True, "game": game_name}
 
@@ -375,6 +385,33 @@ def test_start_matches_steam_and_non_steam_names_conservatively(tmp_path: Path) 
     assert adapter.restores == ["Hades"]
 
 
+def test_check_game_start_reports_restore_needed_without_restoring(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    adapter.recency["Hades"] = "backup_newer"
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+
+    result = service.check_game_start("hades", app_id="1145360")
+
+    assert result == {"status": "needed", "operation": "restore", "game": "Hades"}
+    assert adapter.restores == []
+
+
+def test_restore_game_on_start_performs_restore_and_records_history(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+
+    result = service.restore_game_on_start("Hades", app_id="1145360")
+
+    assert result["status"] == "restored"
+    assert adapter.restores == ["Hades"]
+    refresh = service.refresh_games()
+    assert refresh["history"]["Hades"]["last_restore"]["trigger"] == "auto_start"
+
+
 def test_start_skips_disabled_unmatched_local_current_and_ambiguous(tmp_path: Path) -> None:
     adapter = FakeAdapter()
     service = service_with_state(tmp_path, adapter)
@@ -400,6 +437,32 @@ def test_start_skips_disabled_unmatched_local_current_and_ambiguous(tmp_path: Pa
     logs = service.get_recent_logs()
     skip_logs = [log for log in logs if "Skipping" in log["message"] or "Skipped" in log["message"]]
     assert all(log["level"] == "info" for log in skip_logs)
+
+
+def test_check_game_exit_reports_backup_needed_without_backing_up(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+
+    result = service.check_game_exit("Hades")
+
+    assert result == {"status": "needed", "operation": "backup", "game": "Hades"}
+    assert adapter.backups == []
+
+
+def test_backup_game_on_exit_performs_backup_and_refreshes_history(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+
+    result = service.backup_game_on_exit("Hades")
+
+    assert result["status"] == "backed_up"
+    assert adapter.backups == ["Hades"]
+    refresh = service.refresh_games()
+    assert refresh["history"]["Hades"]["last_backup"]["trigger"] == "auto_exit"
 
 
 def test_exit_backs_up_only_when_auto_sync_enabled_and_matched(tmp_path: Path) -> None:

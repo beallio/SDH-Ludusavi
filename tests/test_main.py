@@ -162,6 +162,71 @@ def test_call_maps_base_exception_from_worker_thread(
     assert logger.exceptions == ["refresh failed"]
 
 
+def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decky, _logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+    calls: list[tuple[str, str, str | None]] = []
+
+    class CapturingService:
+        def __init__(self, state_path: Path) -> None:
+            self.state_path = state_path
+
+        def check_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+            calls.append(("check_start", game_name, app_id))
+            return {"status": "needed", "operation": "restore", "game": game_name}
+
+        def restore_game_on_start(
+            self, game_name: str, app_id: str | None = None
+        ) -> dict[str, object]:
+            calls.append(("restore_start", game_name, app_id))
+            return {"status": "restored", "game": game_name}
+
+        def check_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+            calls.append(("check_exit", game_name, app_id))
+            return {"status": "needed", "operation": "backup", "game": game_name}
+
+        def backup_game_on_exit(
+            self, game_name: str, app_id: str | None = None
+        ) -> dict[str, object]:
+            calls.append(("backup_exit", game_name, app_id))
+            return {"status": "backed_up", "game": game_name}
+
+    monkeypatch.setattr(module, "SDHLudusaviService", CapturingService)
+
+    async def scenario() -> None:
+        assert await plugin.check_game_start("Hades", "1145360") == {
+            "status": "needed",
+            "operation": "restore",
+            "game": "Hades",
+        }
+        assert await plugin.restore_game_on_start("Hades", "1145360") == {
+            "status": "restored",
+            "game": "Hades",
+        }
+        assert await plugin.check_game_exit("Hades", "1145360") == {
+            "status": "needed",
+            "operation": "backup",
+            "game": "Hades",
+        }
+        assert await plugin.backup_game_on_exit("Hades", "1145360") == {
+            "status": "backed_up",
+            "game": "Hades",
+        }
+
+    asyncio.run(scenario())
+
+    assert calls == [
+        ("check_start", "Hades", "1145360"),
+        ("restore_start", "Hades", "1145360"),
+        ("check_exit", "Hades", "1145360"),
+        ("backup_exit", "Hades", "1145360"),
+    ]
+
+
 def test_service_uses_decky_settings_dir_when_present(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

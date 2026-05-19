@@ -87,6 +87,14 @@ type OperationResult = {
   message?: string;
 };
 
+type LifecycleCheckResult = {
+  status: "needed" | "skipped" | "failed";
+  operation?: "backup" | "restore";
+  game?: string;
+  reason?: string;
+  message?: string;
+};
+
 type AppLifetimeNotification = {
   unAppID: number;
   nInstanceID: number;
@@ -106,7 +114,7 @@ type RpcStatus = {
 
 type RpcResult<T> = T | RpcStatus;
 
-type AutoSyncStatusKind = "backing_up" | "restoring" | "has_backup" | "needs_backup" | "error";
+type AutoSyncStatusKind = "checking" | "backing_up" | "restoring" | "has_backup" | "unknown" | "error";
 
 type AutoSyncStatusSource = "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";
 
@@ -176,8 +184,10 @@ const getRecentLogs = callable<[], LogEntry[]>("get_recent_logs");
 const getLudusaviLogs = callable<[], RpcResult<string>>("get_ludusavi_logs");
 const logCall = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
 const getLudusaviCommandCall = callable<[], RpcResult<LudusaviLaunchCommand | null>>("get_ludusavi_command");
-const handleGameStartCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("handle_game_start");
-const handleGameExitCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("handle_game_exit");
+const checkGameStartCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_start");
+const restoreGameOnStartCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("restore_game_on_start");
+const checkGameExitCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_exit");
+const backupGameOnExitCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("backup_game_on_exit");
 
 const getInstalledAppIdsString = async (): Promise<string | undefined> => {
   try {
@@ -262,11 +272,12 @@ function SpinnerButton({ children, loading, ...props }: any) {
 }
 
 const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
-  backing_up: "BACKUP: BACKING UP",
-  restoring: "BACKUP: RESTORING",
-  has_backup: "BACKUP: UP TO DATE",
-  needs_backup: "BACKUP: NEEDED",
-  error: "BACKUP: ERROR"
+  checking: "VERIFYING GAME SAVE",
+  backing_up: "UPLOADING SAVE...",
+  restoring: "DOWNLOADING SAVE...",
+  has_backup: "GAME SAVE UP TO DATE",
+  unknown: "UNKNOWN",
+  error: "UNABLE TO SYNC"
 };
 
 let currentAutoSyncStatusState: AutoSyncStatusState = {
@@ -426,11 +437,14 @@ function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind) {
   if (status === "has_backup") {
     return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 10.2 8.5 12.7 14.2 7" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   }
-  if (status === "needs_backup") {
+  if (status === "unknown") {
     return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 5h7l2 2v8H6z" fill="#0b151f"/><path d="M8 5h5v4H8z" fill="currentColor"/><path d="M8 12h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
   }
   if (status === "error") {
     return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M10 5.2v6.4" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/><circle cx="10" cy="15" r="1.2" fill="#0b151f"/></svg>';
+  }
+  if (status === "checking") {
+    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2.2" opacity="0.55"/><path d="M10 2a8 8 0 0 1 8 8" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/></svg>';
   }
 
   const rotation = status === "restoring" ? ' style="transform: rotate(180deg); transform-origin: 50% 50%;"' : "";
@@ -464,7 +478,7 @@ body {
   box-sizing: border-box;
 }
 .text { display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; min-width: 245px; }
-.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "needs_backup" ? "#f59e0b" : "#66c0f4"}; }
+.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" ? "#f59e0b" : "#66c0f4"}; }
 </style>
 </head>
 <body>
@@ -563,7 +577,7 @@ function scheduleAutoSyncStatusHide(state: AutoSyncStatusState) {
     return;
   }
 
-  const isRunning = state.status === "backing_up" || state.status === "restoring";
+  const isRunning = state.status === "checking" || state.status === "backing_up" || state.status === "restoring";
   autoSyncStatusHideTimeoutID = window.setTimeout(() => {
     if (isRunning) {
       autoSyncStatusTimedOut = true;
@@ -613,7 +627,7 @@ function hideAutoSyncStatus(options: Partial<AutoSyncStatusPublishOptions> = {})
 }
 
 function completeAutoSyncStatus(
-  result: OperationResult,
+  result: OperationResult | LifecycleCheckResult,
   options: Omit<AutoSyncStatusPublishOptions, "source" | "resultStatus">
 ) {
   if (result.status === "failed") {
@@ -648,7 +662,16 @@ function completeAutoSyncStatus(
       return;
     }
 
-    publishAutoSyncStatus("needs_backup", {
+    if (["ambiguous_recency", "game_error", "preview_failed"].includes(result.reason ?? "")) {
+      publishAutoSyncStatus("error", {
+        ...options,
+        source: "rpc_result",
+        resultStatus: result.status
+      });
+      return;
+    }
+
+    publishAutoSyncStatus("unknown", {
       ...options,
       source: "rpc_result",
       resultStatus: result.status
@@ -1208,7 +1231,7 @@ function Content() {
   );
 };
 
-function summarizeOperationResult(result: OperationResult, label: string) {
+function summarizeOperationResult(result: OperationResult | LifecycleCheckResult, label: string) {
   if (result.status === "skipped") {
     switch (result.reason) {
       case "auto_sync_disabled": return `Auto-sync skipped: feature disabled`;
@@ -1343,7 +1366,7 @@ export default definePlugin(() => {
     log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
     
     if (shouldPublishAutoSyncStatusBeforeRpc(tracked)) {
-      publishAutoSyncStatus("restoring", {
+      publishAutoSyncStatus("checking", {
         source: "lifecycle_start",
         gameName: name,
         appID,
@@ -1351,27 +1374,44 @@ export default definePlugin(() => {
       });
     }
     
-    log("info", `Calling handle_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-    const result = await handleGameStartCall(name, appID);
-    log("info", `handle_game_start result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
+    log("info", `Calling check_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
+    const checkResult = await checkGameStartCall(name, appID);
+    log("info", `check_game_start result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
     // Show result toast for all outcomes (restored, failed, or skipped)
     // unless auto-sync is completely disabled, another operation is running,
     // or the game simply isn't managed by Ludusavi (unmatched or ignored).
     const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
-    if (result.status === "skipped" && silentReasons.includes(result.reason ?? "")) {
+    if (checkResult.status === "skipped" && silentReasons.includes(checkResult.reason ?? "")) {
       hideAutoSyncStatus({
         source: "hide",
         gameName: name,
         appID,
         tracked,
-        resultStatus: result.status
+        resultStatus: checkResult.status
       });
+      return;
     }
-    if (result.status !== "skipped" || !silentReasons.includes(result.reason ?? "")) {
+
+    if (checkResult.status === "needed" && checkResult.operation === "restore") {
+      publishAutoSyncStatus("restoring", {
+        source: "lifecycle_start",
+        gameName: name,
+        appID,
+        tracked
+      });
+      log("info", `Calling restore_game_on_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
+      const result = await restoreGameOnStartCall(name, appID);
+      log("info", `restore_game_on_start result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
       completeAutoSyncStatus(result, { gameName: name, appID, tracked });
       if (result.status === "failed") {
         notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
       }
+      return;
+    }
+
+    completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
+    if (checkResult.status === "failed") {
+      notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
     }
   };
 
@@ -1380,7 +1420,7 @@ export default definePlugin(() => {
     log("info", `App exited: ${name} (${appID}) tracked=${tracked}`);
     
     if (shouldPublishAutoSyncStatusBeforeRpc(tracked)) {
-      publishAutoSyncStatus("backing_up", {
+      publishAutoSyncStatus("checking", {
         source: "lifecycle_exit",
         gameName: name,
         appID,
@@ -1388,26 +1428,41 @@ export default definePlugin(() => {
       });
     }
     
-    log("info", `Calling handle_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-    const result = await handleGameExitCall(name, appID);
-    log("info", `handle_game_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
+    log("info", `Calling check_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
+    const checkResult = await checkGameExitCall(name, appID);
+    log("info", `check_game_exit result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
     const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
-    if (result.status === "skipped" && silentReasons.includes(result.reason ?? "")) {
+    if (checkResult.status === "skipped" && silentReasons.includes(checkResult.reason ?? "")) {
       hideAutoSyncStatus({
         source: "hide",
         gameName: name,
         appID,
         tracked,
-        resultStatus: result.status
+        resultStatus: checkResult.status
       });
+      return;
     }
-    if (result.status !== "skipped" || !silentReasons.includes(result.reason ?? "")) {
-      if (result.status !== "skipped" || result.reason === "local_current") {
-        completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-        if (result.status === "failed") {
-          notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
-        }
+
+    if (checkResult.status === "needed" && checkResult.operation === "backup") {
+      publishAutoSyncStatus("backing_up", {
+        source: "lifecycle_exit",
+        gameName: name,
+        appID,
+        tracked
+      });
+      log("info", `Calling backup_game_on_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
+      const result = await backupGameOnExitCall(name, appID);
+      log("info", `backup_game_on_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
+      completeAutoSyncStatus(result, { gameName: name, appID, tracked });
+      if (result.status === "failed") {
+        notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
       }
+      return;
+    }
+
+    completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
+    if (checkResult.status === "failed") {
+      notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
     }
   };
 

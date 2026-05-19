@@ -108,16 +108,16 @@ def test_frontend_silences_lifecycle_toasts_when_auto_sync_is_disabled() -> None
     assert "trackedAppIDs.size === 0 && trackedNames.size === 0" in source
     assert source.count("if (shouldPublishAutoSyncStatusBeforeRpc(tracked))") == 2
 
-    start_status = 'publishAutoSyncStatus("restoring", {'
-    exit_status = 'publishAutoSyncStatus("backing_up", {'
+    start_status = 'publishAutoSyncStatus("checking", {'
+    exit_status = 'publishAutoSyncStatus("checking", {'
     assert start_status in source
     assert exit_status in source
 
     assert source.index(start_status) < source.index(
-        "const result = await handleGameStartCall(name, appID);"
+        "const checkResult = await checkGameStartCall(name, appID);"
     )
     assert source.index(exit_status) < source.index(
-        "const result = await handleGameExitCall(name, appID);"
+        "const checkResult = await checkGameExitCall(name, appID);"
     )
 
 
@@ -125,7 +125,7 @@ def test_frontend_uses_browserview_only_autosync_status_strip() -> None:
     source = FRONTEND.read_text()
 
     for required_text in [
-        'type AutoSyncStatusKind = "backing_up" | "restoring" | "has_backup" | "needs_backup" | "error";',
+        'type AutoSyncStatusKind = "checking" | "backing_up" | "restoring" | "has_backup" | "unknown" | "error";',
         "let currentAutoSyncStatusState: AutoSyncStatusState",
         "currentAutoSyncStatusState = {",
         "function hideAutoSyncStatus(",
@@ -167,7 +167,7 @@ def test_frontend_hides_status_strip_for_backend_silent_autosync_skips() -> None
     lifecycle_source = source[source.index("const handleAppStart = async") :]
     assert lifecycle_source.count("hideAutoSyncStatus({") >= 2
     assert lifecycle_source.index("hideAutoSyncStatus({") > lifecycle_source.index(
-        "const result = await handleGameStartCall(name, appID);"
+        "const checkResult = await checkGameStartCall(name, appID);"
     )
 
 
@@ -187,7 +187,7 @@ def test_frontend_status_strip_matches_steamos_visual_contract() -> None:
         "font-weight: 800;",
         "justify-content: center;",
         "min-width: 245px;",
-        'state.status === "needs_backup" ? "#f59e0b"',
+        'state.status === "unknown" ? "#f59e0b"',
         '"#66c0f4"',
         '"#ef4444"',
         "border-top: 1px solid rgba(255, 255, 255, 0.10);",
@@ -208,6 +208,7 @@ def test_frontend_status_strip_uses_inline_browserview_icons() -> None:
     for required_text in [
         "function iconSvgForAutoSyncStatus(",
         'status === "restoring"',
+        'status === "checking"',
         "transform: rotate(180deg);",
         '<svg viewBox="0 0 20 20"',
         'stroke="#0b151f"',
@@ -225,7 +226,7 @@ def test_frontend_status_strip_replaces_autosync_success_toasts() -> None:
 
     for required_text in [
         'publishAutoSyncStatus("has_backup", {',
-        'publishAutoSyncStatus("needs_backup", {',
+        'publishAutoSyncStatus("unknown", {',
         'publishAutoSyncStatus("error", {',
         'notify("failures_errors", "SDH-ludusavi Auto-sync"',
     ]:
@@ -307,12 +308,12 @@ def test_frontend_status_strip_maps_local_current_to_up_to_date() -> None:
         'if (result.reason === "local_current") {',
         'publishAutoSyncStatus("has_backup", {',
         "resultStatus: result.status",
-        'publishAutoSyncStatus("needs_backup", {',
+        'publishAutoSyncStatus("unknown", {',
     ]:
         assert required_text in source
 
     assert source.index('result.reason === "local_current"') < source.index(
-        'publishAutoSyncStatus("needs_backup", {'
+        'publishAutoSyncStatus("unknown", {'
     )
 
 
@@ -320,14 +321,68 @@ def test_frontend_logs_lifecycle_rpc_boundaries() -> None:
     source = FRONTEND.read_text()
 
     for required_text in [
-        'log("info", `Calling handle_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);',
-        "const result = await handleGameStartCall(name, appID);",
-        'log("info", `handle_game_start result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);',
-        'log("info", `Calling handle_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);',
-        "const result = await handleGameExitCall(name, appID);",
-        'log("info", `handle_game_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);',
+        'log("info", `Calling check_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);',
+        "const checkResult = await checkGameStartCall(name, appID);",
+        'log("info", `check_game_start result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);',
+        'log("info", `Calling restore_game_on_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);',
+        "const result = await restoreGameOnStartCall(name, appID);",
+        'log("info", `restore_game_on_start result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);',
+        'log("info", `Calling check_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);',
+        "const checkResult = await checkGameExitCall(name, appID);",
+        'log("info", `check_game_exit result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);',
+        'log("info", `Calling backup_game_on_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);',
+        "const result = await backupGameOnExitCall(name, appID);",
+        'log("info", `backup_game_on_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);',
     ]:
         assert required_text in source
+
+
+def test_frontend_status_strip_uses_steam_aligned_autosync_copy() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        'checking: "VERIFYING GAME SAVE"',
+        'restoring: "DOWNLOADING SAVE..."',
+        'backing_up: "UPLOADING SAVE..."',
+        'has_backup: "GAME SAVE UP TO DATE"',
+        'error: "UNABLE TO SYNC"',
+        'unknown: "UNKNOWN"',
+    ]:
+        assert required_text in source
+
+    assert "BACKUP: RESTORING" not in source
+    assert "BACKUP: BACKING UP" not in source
+
+
+def test_frontend_lifecycle_publishes_actions_only_after_needed_checks() -> None:
+    source = FRONTEND.read_text()
+
+    start_source = source[
+        source.index("const handleAppStart = async") : source.index("const handleAppExit = async")
+    ]
+    exit_source = source[
+        source.index("const handleAppExit = async") : source.index("const sessionFromAppOverview")
+    ]
+
+    assert start_source.index('publishAutoSyncStatus("checking", {') < start_source.index(
+        "const checkResult = await checkGameStartCall(name, appID);"
+    )
+    assert start_source.index('checkResult.status === "needed"') < start_source.index(
+        'publishAutoSyncStatus("restoring", {'
+    )
+    assert start_source.index('publishAutoSyncStatus("restoring", {') < start_source.index(
+        "const result = await restoreGameOnStartCall(name, appID);"
+    )
+
+    assert exit_source.index('publishAutoSyncStatus("checking", {') < exit_source.index(
+        "const checkResult = await checkGameExitCall(name, appID);"
+    )
+    assert exit_source.index('checkResult.status === "needed"') < exit_source.index(
+        'publishAutoSyncStatus("backing_up", {'
+    )
+    assert exit_source.index('publishAutoSyncStatus("backing_up", {') < exit_source.index(
+        "const result = await backupGameOnExitCall(name, appID);"
+    )
 
 
 def test_frontend_has_no_status_strip_diagnostic_ui_or_modes() -> None:
@@ -466,14 +521,13 @@ def test_frontend_models_rpc_status_results_for_call_wrapped_methods() -> None:
         in source
     )
     assert 'const getVersions = callable<[], RpcResult<Versions>>("get_versions");' in source
-    assert (
-        "const handleGameStartCall = callable<[gameName: string, app_id?: string], "
-        'RpcResult<OperationResult>>("handle_game_start");'
-    ) in source
-    assert (
-        "const handleGameExitCall = callable<[gameName: string, app_id?: string], "
-        'RpcResult<OperationResult>>("handle_game_exit");'
-    ) in source
+    for required_text in [
+        'const checkGameStartCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_start");',
+        'const restoreGameOnStartCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("restore_game_on_start");',
+        'const checkGameExitCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_exit");',
+        'const backupGameOnExitCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("backup_game_on_exit");',
+    ]:
+        assert required_text in source
 
 
 def test_frontend_guards_refresh_and_version_rpc_status_payloads() -> None:

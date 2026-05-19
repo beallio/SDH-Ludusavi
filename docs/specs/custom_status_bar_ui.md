@@ -63,28 +63,41 @@ pixel constants: the strip height is 4.75% of viewport height and the bottom men
 offset is 2.625% of viewport height. On a 1280x800 Steam Deck OLED viewport, this
 maps to a 38px strip at `y=741` and a 21px bottom menu bar at `y=779-799`. The icon
 plus text are centered horizontally as one group, with a stable text-group width so
-status changes do not visibly shift the strip. Running and success states use Steam
-Blue (`#66c0f4`), `needs_backup` uses a distinct warning/action color (`#f59e0b`),
-and `error` remains red (`#ef4444`).
+status changes do not visibly shift the strip. Checking, upload/download, and success
+states use Steam Blue (`#66c0f4`), `unknown` uses a distinct warning color
+(`#f59e0b`), and `error` remains red (`#ef4444`).
 
 ## Public Interfaces
 
-No backend RPCs, persisted state, or package dependencies change. The frontend
-notification preferences panel no longer exposes autosync progress/result toast
-toggles because those routine states move to the status strip.
+Automatic lifecycle sync is split into check and action RPCs so the strip can verify
+save state before showing action copy:
+
+- `check_game_start(game_name, app_id?)`
+- `restore_game_on_start(game_name, app_id?)`
+- `check_game_exit(game_name, app_id?)`
+- `backup_game_on_exit(game_name, app_id?)`
+
+The existing `handle_game_start(game_name, app_id?)` and
+`handle_game_exit(game_name, app_id?)` RPCs remain compatibility wrappers with the
+original result shapes. No persisted state or package dependencies change. The
+frontend notification preferences panel no longer exposes autosync progress/result
+toast toggles because those routine states move to the status strip.
 
 Manual force backup and force restore keep their existing notification behavior.
 
-Autosync notification behavior changes:
+Autosync status strip behavior:
 
-- Start restore operation: show `BACKUP: RESTORING`.
-- Start backup operation: show `BACKUP: BACKING UP`.
-- Successful autosync result: show `BACKUP: UP TO DATE` for 2 seconds.
-- User-relevant skipped autosync result: show `BACKUP: NEEDED` for 2 seconds.
-- Failed autosync result: show `BACKUP: ERROR` and emit one Decky failure toast.
+- Before launch and exit checks: show `VERIFYING GAME SAVE`.
+- Restore needed after launch check: show `DOWNLOADING SAVE...`.
+- Backup needed after exit check: show `UPLOADING SAVE...`.
+- Successful autosync result or current save state: show `GAME SAVE UP TO DATE` for
+  2 seconds.
+- Unknown/non-actionable save state: show `UNKNOWN` for 2 seconds.
+- Failed or unsafe-to-sync state: show `UNABLE TO SYNC` and emit one Decky failure
+  toast.
 
-The running state auto-hides after 10 seconds. A late success stays quiet. A late
-failure still shows the failure toast.
+Checking and running states auto-hide after 10 seconds. A late success stays quiet. A
+late failure still shows the failure toast.
 
 ## Dependency Requirements
 

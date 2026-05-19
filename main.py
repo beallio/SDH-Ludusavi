@@ -100,12 +100,42 @@ class Plugin:
             lambda: self._service().handle_game_start(game_name, app_id),
         )
 
+    async def check_game_start(
+        self, game_name: str, app_id: str | None = None
+    ) -> dict[str, object]:
+        return await self._call(
+            "check_game_start",
+            lambda: self._service().check_game_start(game_name, app_id),
+        )
+
+    async def restore_game_on_start(
+        self, game_name: str, app_id: str | None = None
+    ) -> dict[str, object]:
+        return await self._call(
+            "restore_game_on_start",
+            lambda: self._service().restore_game_on_start(game_name, app_id),
+        )
+
     async def handle_game_exit(
         self, game_name: str, app_id: str | None = None
     ) -> dict[str, object]:
         return await self._call(
             "handle_game_exit",
             lambda: self._service().handle_game_exit(game_name, app_id),
+        )
+
+    async def check_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+        return await self._call(
+            "check_game_exit",
+            lambda: self._service().check_game_exit(game_name, app_id),
+        )
+
+    async def backup_game_on_exit(
+        self, game_name: str, app_id: str | None = None
+    ) -> dict[str, object]:
+        return await self._call(
+            "backup_game_on_exit",
+            lambda: self._service().backup_game_on_exit(game_name, app_id),
         )
 
     async def force_backup(self, game_name: str) -> dict[str, object]:
