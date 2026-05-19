@@ -8,7 +8,9 @@ import {
   staticClasses,
   ToggleField,
   Spinner,
-  Router
+  Router,
+  findModuleChild,
+  EUIComposition
 } from "@decky/ui";
 import {
   callable,
@@ -121,6 +123,8 @@ type AutoSyncStatusState = {
 };
 
 type AutoSyncStatusListener = (state: AutoSyncStatusState) => void;
+
+type UseUIComposition = (composition: EUIComposition) => { releaseComposition: () => void };
 
 type AutoSyncStatusBrowserView = {
   LoadURL?: (url: string) => void;
@@ -270,17 +274,55 @@ let currentAutoSyncStatusState: AutoSyncStatusState = {
 let autoSyncStatusTimedOut = false;
 let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;
 
+const useUICompositionHook = findModuleChild((module: any) => {
+  if (typeof module !== "object" || module === null) {
+    return undefined;
+  }
+
+  for (const prop in module) {
+    const candidate = module[prop];
+    if (
+      typeof candidate === "function" &&
+      candidate.toString().includes("AddMinimumCompositionStateRequest") &&
+      candidate.toString().includes("ChangeMinimumCompositionStateRequest") &&
+      candidate.toString().includes("RemoveMinimumCompositionStateRequest") &&
+      !candidate.toString().includes("m_mapCompositionStateRequests")
+    ) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+});
+
+if (useUICompositionHook) {
+  log("info", "Composition hook found", "autosync_status");
+} else {
+  log("warning", "Composition hook NOT found; in-game overlay may fail", "autosync_status");
+}
+
+const useUIComposition: UseUIComposition =
+  (useUICompositionHook as any) ??
+  (() => ({
+    releaseComposition: () => undefined
+  }));
+
 function getAutoSyncStatusBounds() {
   const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance?.BrowserWindow;
   const viewWindow = rootWindow ?? window;
   const pixelRatio = window.devicePixelRatio || 1;
-  const width = Math.round((viewWindow?.innerWidth || viewWindow?.outerWidth || 1280) * pixelRatio);
-  const viewHeight = Math.round((viewWindow?.innerHeight || viewWindow?.outerHeight || 800) * pixelRatio);
-  const height = Math.round(24 * pixelRatio);
+  const rawWidth = viewWindow?.innerWidth || viewWindow?.outerWidth || 1280;
+  const rawHeight = viewWindow?.innerHeight || viewWindow?.outerHeight || 800;
   
+  const width = Math.floor(rawWidth * pixelRatio);
+  const viewHeight = Math.floor(rawHeight * pixelRatio);
+  const height = Math.floor(24 * pixelRatio);
+  
+  log("debug", `Window dimensions: raw=${rawWidth}x${rawHeight}, ratio=${pixelRatio}, physical=${width}x${viewHeight}`, "autosync_status");
+
   return {
     x: 0,
-    y: Math.max(0, viewHeight - height),
+    y: Math.floor(400 * pixelRatio), // Middle of screen for Strategy B
     width,
     height,
     pixelRatio
@@ -323,8 +365,18 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
     if (!view.Destroy && view.destroy) view.Destroy = view.destroy;
 
     autoSyncStatusBrowserView.SetName?.("sdh-ludusavi-autosync-status-strip");
-    autoSyncStatusBrowserView.SetWindowStackingOrder?.(50);
+    autoSyncStatusBrowserView.SetWindowStackingOrder?.(75);
     autoSyncStatusBrowserView.SetFocus?.(false);
+    
+    if (typeof (autoSyncStatusBrowserView as any).AddGlass === "function") {
+      log("debug", "Applying AddGlass to BrowserView", "autosync_status");
+      try {
+        (autoSyncStatusBrowserView as any).AddGlass(true, "GlassAppearance_Standard");
+      } catch (err) {
+        log("warning", `AddGlass failed: ${err}`, "autosync_status");
+      }
+    }
+
     autoSyncStatusBrowserView.SetVisible?.(false);
     
     if (typeof (autoSyncStatusBrowserView as any).SetTopmost === "function") {
@@ -377,18 +429,19 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: rgba(255, 0, 0, 0.85); /* BRIGHT RED FOR DEBUG */
+  background: rgba(255, 0, 0, 0.85); /* RED DEBUG MIDDLE */
   pointer-events: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.5);
+  border-top: 2px solid white;
+  border-bottom: 2px solid white;
 }
-.rule { height: 2px; flex: 1; background: rgba(255, 255, 255, 0.5); }
-.content { min-width: 245px; display: flex; align-items: center; justify-content: center; gap: 9px; }
-.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; }
-.text { line-height: 1; }
+.rule { height: 4px; flex: 1; background: white; }
+.content { min-width: 245px; display: flex; align-items: center; justify-content: center; gap: 12px; }
+.icon { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; }
+.text { font-size: 18px; line-height: 1; }
 </style>
 </head>
 <body>
-<div class="bar"><div class="rule"></div><div class="content"><span class="icon">${iconSvgForAutoSyncStatus(state.status)}</span><span class="text">DEBUG: ${autoSyncStatusText[state.status]}</span></div><div class="rule"></div></div>
+<div class="bar"><div class="rule"></div><div class="content"><span class="icon">${iconSvgForAutoSyncStatus(state.status)}</span><span class="text">STRATEGY B (RED): ${autoSyncStatusText[state.status]}</span></div><div class="rule"></div></div>
 </body>
 </html>`;
 }
@@ -525,6 +578,11 @@ function AutoSyncStatusIcon({ status }: { status: AutoSyncStatusKind }) {
   return <FaCircleExclamation />;
 }
 
+function AutoSyncStatusComposition() {
+  useUIComposition(EUIComposition.Notification);
+  return null;
+}
+
 function AutoSyncStatusStrip() {
   const [state, setState] = useState<AutoSyncStatusState>(currentAutoSyncStatusState);
 
@@ -558,73 +616,50 @@ function AutoSyncStatusStrip() {
 
   return (
     <>
+      {state.visible && <AutoSyncStatusComposition />}
       {createPortal(
         <div
           style={{
             position: "fixed",
-            bottom: "0",
+            top: "100px", // Top for Strategy A
             left: "0",
             width: "100vw",
             zIndex: 99999,
             pointerEvents: "none",
-            transform: state.visible ? "translateY(0)" : "translateY(100%)",
+            transform: state.visible ? "translateY(0)" : "translateY(-100%)",
             transition: "transform 300ms ease-out",
           }}
         >
           <div
             style={{
-              width: "100%",
-              height: "24px",
+              height: "40px",
               display: "flex",
               alignItems: "center",
               gap: "10px",
-              color: state.status === "error" ? "rgba(255, 210, 210, 0.95)" : "rgba(255, 255, 255, 0.92)",
-              background: "rgba(0, 0, 0, 0.34)",
+              background: "rgba(0, 0, 255, 0.85)", // BLUE DEBUG TOP
+              borderBottom: "2px solid white",
+              padding: "0 20px",
+              color: "white",
               fontFamily: '"Motiva Sans", "Arial", sans-serif',
-              fontSize: "13px",
+              fontSize: "18px",
               fontWeight: 800,
-              letterSpacing: 0,
               textTransform: "uppercase",
-              whiteSpace: "nowrap",
             }}
           >
+            <div style={{ height: "4px", flex: 1, background: "white" }} />
             <div
               style={{
-                height: "2px",
-                flex: 1,
-                background: "rgba(255, 255, 255, 0.10)",
-              }}
-            />
-            <div
-              style={{
+                minWidth: "300px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: "9px",
-                minWidth: "245px",
+                gap: "12px",
               }}
             >
-              <span
-                style={{
-                  width: "18px",
-                  height: "18px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "15px",
-                }}
-              >
-                <AutoSyncStatusIcon status={state.status} />
-              </span>
-              <span style={{ lineHeight: 1 }}>{autoSyncStatusText[state.status]}</span>
+              <AutoSyncStatusIcon status={state.status} />
+              <div style={{ lineHeight: 1 }}>STRATEGY A (BLUE): {autoSyncStatusText[state.status]}</div>
             </div>
-            <div
-              style={{
-                height: "2px",
-                flex: 1,
-                background: "rgba(255, 255, 255, 0.10)",
-              }}
-            />
+            <div style={{ height: "4px", flex: 1, background: "white" }} />
           </div>
         </div>,
         document.body
