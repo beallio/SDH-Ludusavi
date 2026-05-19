@@ -314,14 +314,13 @@ function getAutoSyncStatusBounds() {
   const rawWidth = viewWindow?.innerWidth || viewWindow?.outerWidth || 1280;
   const rawHeight = viewWindow?.innerHeight || viewWindow?.outerHeight || 800;
   
-  // SetBounds expects LOGICAL pixels (the raw dimensions from the window object)
   log("debug", `Window dimensions: raw=${rawWidth}x${rawHeight}, ratio=${pixelRatio}`, "autosync_status");
 
   return {
     x: 0,
-    y: 200, // Fixed logical Y in the upper-middle of the screen
+    y: 0, // Full screen for Strategy B debug
     width: rawWidth,
-    height: 40,
+    height: rawHeight,
     pixelRatio
   };
 }
@@ -335,7 +334,6 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
     const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
     const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance;
 
-    // Prefer SteamClient.BrowserView.Create as it returns the standard BrowserViewPopup
     if (steamClient?.BrowserView?.Create) {
       log("info", "Creating BrowserView via SteamClient.BrowserView.Create", "autosync_status");
       autoSyncStatusBrowserView = steamClient.BrowserView.Create({
@@ -347,7 +345,7 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
     }
 
     if (!autoSyncStatusBrowserView) {
-      log("error", "Failed to create BrowserView surface (no creation methods found)", "autosync_status");
+      log("error", "Failed to create BrowserView surface", "autosync_status");
       return null;
     }
 
@@ -362,18 +360,8 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
     if (!view.Destroy && view.destroy) view.Destroy = view.destroy;
 
     autoSyncStatusBrowserView.SetName?.("sdh-ludusavi-autosync-status-strip");
-    autoSyncStatusBrowserView.SetWindowStackingOrder?.(75);
+    autoSyncStatusBrowserView.SetWindowStackingOrder?.(200);
     autoSyncStatusBrowserView.SetFocus?.(false);
-    
-    if (typeof (autoSyncStatusBrowserView as any).AddGlass === "function") {
-      log("debug", "Applying AddGlass to BrowserView", "autosync_status");
-      try {
-        (autoSyncStatusBrowserView as any).AddGlass(true, "GlassAppearance_Standard");
-      } catch (err) {
-        log("warning", `AddGlass failed: ${err}`, "autosync_status");
-      }
-    }
-
     autoSyncStatusBrowserView.SetVisible?.(false);
     
     if (typeof (autoSyncStatusBrowserView as any).SetTopmost === "function") {
@@ -404,7 +392,6 @@ function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind) {
 }
 
 function renderAutoSyncStatusHtml(state: AutoSyncStatusState) {
-  const color = state.status === "error" ? "rgba(255, 210, 210, 1.0)" : "rgba(255, 255, 255, 1.0)";
   return `<!doctype html>
 <html>
 <head>
@@ -412,33 +399,32 @@ function renderAutoSyncStatusHtml(state: AutoSyncStatusState) {
 <style>
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
 body {
-  color: ${color};
+  color: black;
   font-family: "Motiva Sans", Arial, sans-serif;
-  font-size: 13px;
+  font-size: 24px;
   font-weight: 800;
-  letter-spacing: 0;
   text-transform: uppercase;
-  white-space: nowrap;
 }
 .bar {
   width: 100vw;
   height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
-  background: rgba(255, 0, 0, 0.85); /* RED DEBUG MIDDLE */
-  pointer-events: none;
-  border-top: 2px solid white;
-  border-bottom: 2px solid white;
+  justify-content: center;
+  gap: 30px;
+  background: rgba(255, 255, 0, 0.9); /* STRATEGY B YELLOW FULL SCREEN */
+  border: 10px solid black;
+  box-sizing: border-box;
 }
-.rule { height: 4px; flex: 1; background: white; }
-.content { min-width: 245px; display: flex; align-items: center; justify-content: center; gap: 12px; }
-.icon { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; }
-.text { font-size: 18px; line-height: 1; }
+.text { font-size: 40px; text-shadow: 2px 2px 0 white; }
 </style>
 </head>
 <body>
-<div class="bar"><div class="rule"></div><div class="content"><span class="icon">${iconSvgForAutoSyncStatus(state.status)}</span><span class="text">STRATEGY B (RED): ${autoSyncStatusText[state.status]}</span></div><div class="rule"></div></div>
+<div class="bar">
+  <div class="text">STRATEGY B (YELLOW FULL SCREEN)</div>
+  <div class="text">STATUS: ${autoSyncStatusText[state.status]}</div>
+</div>
 </body>
 </html>`;
 }
@@ -458,19 +444,18 @@ function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
     const html = renderAutoSyncStatusHtml(state);
     const url = "data:text/html;charset=utf-8," + encodeURIComponent(html);
     
-    log("debug", `Syncing BrowserView: visible=${state.visible}, bounds=${JSON.stringify(bounds)}, htmlLen=${html.length}`, "autosync_status");
+    log("debug", `Syncing BrowserView: visible=${state.visible}, bounds=${JSON.stringify(bounds)}`, "autosync_status");
 
-    // Hardened sequence: Bounds -> Load -> Visible
-    browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);
-    browserView.LoadURL(url);
-    
     if (state.visible) {
-      // Force visibility update
-      browserView.SetVisible?.(false);
+      browserView.SetVisible(true);
+      browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);
+      browserView.LoadURL(url);
+      
       setTimeout(() => {
         browserView.SetVisible?.(true);
+        browserView.SetWindowStackingOrder?.(200);
         browserView.SetFocus?.(false);
-      }, 150);
+      }, 200);
     } else {
       browserView.SetVisible(false);
     }
