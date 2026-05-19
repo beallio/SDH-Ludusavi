@@ -21,24 +21,19 @@ The status strip is frontend-owned and driven by the existing app lifetime flow 
 - No backend `decky.emit` event stream is added for v1.
 - No direct Steam overlay/window composition APIs are called.
 
-The status strip is registered as a Decky global component and renders through a React
-portal into `document.body`. It stays mounted while the plugin is loaded and toggles
-visibility with CSS transforms. The strip must not live only inside the plugin panel
-content tree because that tree may not be visible while a game is launching or running.
-
-When visible, the status strip must also request SteamUI notification composition via
-the internal UI composition hook resolved with Decky's `findModuleChild`. This mirrors
-the decky-pip overlay pattern and uses `EUIComposition.Notification`, whose semantics
-allow transparent SteamUI pixels to show the running game behind Steam while input
-continues to go to the game. The composition request is mounted only while the strip
-is visible so SDH-ludusavi does not permanently alter SteamUI composition behavior.
-
-The canonical visible surface is a BrowserView overlay. `publishAutoSyncStatus`
+The production visible surface is a BrowserView overlay. `publishAutoSyncStatus`
 creates or updates a small BrowserView, loads a self-contained `data:text/html`
-document that renders the same strip, positions it at the bottom of the Gamepad UI
-viewport, and toggles BrowserView visibility with the autosync state. The React DOM
-portal remains as a fallback surface for SteamUI contexts where it is visible, but the
-BrowserView is the path intended to survive the running-game layer.
+document that renders the strip, positions it at the bottom of the Gamepad UI
+viewport, and toggles BrowserView visibility with the autosync state. The BrowserView
+owner is normalized through known Decky/Steam wrapper shapes, including `m_browserView`,
+before required methods are used.
+
+Module-level timers own status expiry. Running states hide after 10 seconds, result
+states hide after 2 seconds, hide events clear pending timers, and plugin dismount
+clears pending timers before destroying the BrowserView.
+
+React global components, React DOM portals, diagnostic surface cycling, and SteamUI
+composition-hook fallback paths are not production surfaces for this feature.
 
 An external native overlay process, like OverLaid's backend-launched `DISPLAY=:0`
 overlay binary, remains a fallback architecture only. The autosync strip should stay
@@ -54,13 +49,13 @@ deselected Ludusavi game.
 
 - `AutoSyncStatusKind`: `backing_up`, `restoring`, `has_backup`, `needs_backup`, or
   `error`.
-- `AutoSyncStatusState`: current strip status plus visibility.
-- `AutoSyncStatusListener`: local frontend callback used by lifecycle handlers to
-  publish strip updates.
+- `AutoSyncStatusSource`: lifecycle, RPC result, timeout, or hide provenance.
+- `AutoSyncStatusState`: current strip status, visibility, and provenance.
+- `AutoSyncStatusBrowserViewOwner`: wrapper shape used to normalize the BrowserView
+  returned by Decky or Steam APIs.
 
-The UI uses existing `react-icons/fa6` icons. The restore icon is the backup arrow
-rotated 180 degrees. The backup-needed icon layers a floppy disk over a circle with
-positioned spans instead of adding Font Awesome dependencies.
+The BrowserView document uses inline SVG icons. The restore icon is the backup arrow
+rotated 180 degrees. No additional icon dependencies are required.
 
 ## Public Interfaces
 
@@ -89,21 +84,19 @@ No dependency changes are required.
 
 Frontend static tests must verify:
 
-- The status strip renders with `createPortal(..., document.body)`.
-- The plugin registers the strip with `routerHook.addGlobalComponent` and removes it on
-  dismount.
 - The plugin uses `alwaysRender: true`.
-- The strip is fixed to the bottom, non-interactive, high z-index, and transform
-  animated.
-- The implementation imports the expected `react-icons/fa6` icons and does not add
-  Font Awesome packages.
+- The strip creates and updates a BrowserView-backed overlay surface with a local
+  `data:text/html` document.
+- The BrowserView wrapper is normalized through root, `m_browserView`, `browserView`,
+  `BrowserView`, and nested `m_browserView.m_browserView` candidates.
+- The BrowserView document matches the compact SteamOS-style bottom strip visual
+  contract.
+- Diagnostic buttons, diagnostic labels, alternate surface modes, React portal code,
+  global component registration, and composition-hook code are absent.
 - Autosync lifecycle handlers publish strip states around existing RPC calls.
 - Autosync start/result success toasts are removed.
 - Autosync failure still routes through the `failures_errors` notification category.
-- The strip requests `EUIComposition.Notification` through the discovered SteamUI
-  composition hook while visible.
-- The strip creates and updates a BrowserView-backed overlay surface with a local
-  `data:text/html` document.
+- Module-level timers clear on hide and dismount.
 - Direct `SetOverlayState` and `SetComposition` calls are not used.
 
 Validation commands:

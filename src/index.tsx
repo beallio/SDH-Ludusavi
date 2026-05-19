@@ -8,26 +8,15 @@ import {
   staticClasses,
   ToggleField,
   Spinner,
-  Router,
-  findModuleChild,
-  EUIComposition
+  Router
 } from "@decky/ui";
 import {
   callable,
   definePlugin,
-  routerHook,
   toaster
 } from "@decky/api";
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import { FaSave, FaDownload, FaExclamationTriangle } from "react-icons/fa";
-import {
-  FaCircle,
-  FaCircleArrowUp,
-  FaCircleCheck,
-  FaCircleExclamation,
-  FaFloppyDisk
-} from "react-icons/fa6";
 import { IoMdRefresh } from "react-icons/io";
 import { LuDatabaseBackup } from "react-icons/lu";
 
@@ -119,24 +108,17 @@ type RpcResult<T> = T | RpcStatus;
 
 type AutoSyncStatusKind = "backing_up" | "restoring" | "has_backup" | "needs_backup" | "error";
 
-type AutoSyncStatusSource = "debug_button" | "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";
-
-type AutoSyncStatusSurfaceMode = "browserview" | "react" | "both";
+type AutoSyncStatusSource = "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";
 
 type AutoSyncStatusState = {
   status: AutoSyncStatusKind;
   visible: boolean;
   source: AutoSyncStatusSource;
-  surfaceMode: AutoSyncStatusSurfaceMode;
   gameName?: string;
   appID?: string;
   tracked?: boolean;
   resultStatus?: OperationResult["status"] | RpcStatus["status"];
 };
-
-type AutoSyncStatusListener = (state: AutoSyncStatusState) => void;
-
-type UseUIComposition = (composition: EUIComposition) => { releaseComposition: () => void };
 
 type AutoSyncStatusBrowserView = {
   LoadURL?: (url: string) => void;
@@ -287,52 +269,15 @@ const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
   error: "BACKUP: ERROR"
 };
 
-const autoSyncStatusListeners = new Set<AutoSyncStatusListener>();
-const AUTO_SYNC_STATUS_COMPONENT = "sdh-ludusavi-autosync-status-strip";
 let currentAutoSyncStatusState: AutoSyncStatusState = {
   status: "has_backup",
   visible: false,
-  source: "hide",
-  surfaceMode: "both"
+  source: "hide"
 };
 let autoSyncStatusTimedOut = false;
+let autoSyncStatusHideTimeoutID: number | null = null;
 let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;
 let autoSyncStatusBrowserViewOwner: AutoSyncStatusBrowserViewOwner | null = null;
-const autoSyncDiagnosticModes: AutoSyncStatusSurfaceMode[] = ["browserview", "react", "both"];
-let autoSyncDiagnosticModeIndex = 0;
-
-const useUICompositionHook = findModuleChild((module: any) => {
-  if (typeof module !== "object" || module === null) {
-    return undefined;
-  }
-
-  for (const prop in module) {
-    const candidate = module[prop];
-    if (
-      typeof candidate === "function" &&
-      candidate.toString().includes("AddMinimumCompositionStateRequest") &&
-      candidate.toString().includes("ChangeMinimumCompositionStateRequest") &&
-      candidate.toString().includes("RemoveMinimumCompositionStateRequest") &&
-      !candidate.toString().includes("m_mapCompositionStateRequests")
-    ) {
-      return candidate;
-    }
-  }
-
-  return undefined;
-});
-
-if (useUICompositionHook) {
-  log("info", "Composition hook found", "autosync_status");
-} else {
-  log("warning", "Composition hook NOT found; in-game overlay may fail", "autosync_status");
-}
-
-const useUIComposition: UseUIComposition =
-  (useUICompositionHook as any) ??
-  (() => ({
-    releaseComposition: () => undefined
-  }));
 
 function getAutoSyncStatusBounds() {
   const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance?.BrowserWindow;
@@ -488,19 +433,7 @@ function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind) {
   return `<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"${rotation}><circle cx="10" cy="10" r="8.8" fill="currentColor"/><path d="M10 5.3v8.3" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/><path d="M6.8 8.4 10 5.2l3.2 3.2" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 
-function diagnosticLabelForMode(mode: AutoSyncStatusSurfaceMode) {
-  if (mode === "browserview") {
-    return "DIAGNOSTIC: BROWSERVIEW";
-  }
-  if (mode === "react") {
-    return "DIAGNOSTIC: REACT";
-  }
-  return "DIAGNOSTIC: BOTH";
-}
-
 function renderAutoSyncStatusHtml(state: AutoSyncStatusState) {
-  const isDebug = state.source === "debug_button";
-  const diagnosticLabel = isDebug ? diagnosticLabelForMode(state.surfaceMode) : "";
   return `<!doctype html>
 <html>
 <head>
@@ -527,27 +460,18 @@ body {
   box-sizing: border-box;
 }
 .text { display: flex; align-items: center; gap: 8px; white-space: nowrap; min-width: 245px; }
-.diagnostic { color: ${state.surfaceMode === "browserview" ? "#38bdf8" : state.surfaceMode === "react" ? "#f97316" : "#22c55e"}; }
 .icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : "#22c55e"}; }
 </style>
 </head>
 <body>
 <div class="bar">
   <div class="text"><span class="icon">${iconSvgForAutoSyncStatus(state.status)}</span>${autoSyncStatusText[state.status]}</div>
-  ${isDebug ? `<div class="text diagnostic">${diagnosticLabel}</div>` : ""}
 </div>
 </body>
 </html>`;
 }
 
 function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
-  if (state.surfaceMode === "react") {
-    if (autoSyncStatusBrowserView) {
-      autoSyncStatusBrowserView.SetVisible?.(false);
-    }
-    return;
-  }
-
   const browserView = ensureAutoSyncStatusBrowserView();
   if (!browserView) {
     return;
@@ -606,7 +530,6 @@ function destroyAutoSyncStatusBrowserView() {
 
 type AutoSyncStatusPublishOptions = {
   source: AutoSyncStatusSource;
-  surfaceMode?: AutoSyncStatusSurfaceMode;
   gameName?: string;
   appID?: string;
   tracked?: boolean;
@@ -616,10 +539,39 @@ type AutoSyncStatusPublishOptions = {
 function logAutoSyncStatusChange(state: AutoSyncStatusState) {
   log(
     "info",
-    `Status update: source=${state.source} status=${state.status} visible=${state.visible} game=${state.gameName ?? "unknown"} app_id=${state.appID ?? "unknown"} tracked=${state.tracked ?? "unknown"} result=${state.resultStatus ?? "none"} surface=${state.surfaceMode}`,
+    `Status update: source=${state.source} status=${state.status} visible=${state.visible} game=${state.gameName ?? "unknown"} app_id=${state.appID ?? "unknown"} tracked=${state.tracked ?? "unknown"} result=${state.resultStatus ?? "none"}`,
     "autosync_status",
     state.gameName
   );
+}
+
+function clearAutoSyncStatusHideTimeout() {
+  if (autoSyncStatusHideTimeoutID === null) {
+    return;
+  }
+  window.clearTimeout(autoSyncStatusHideTimeoutID);
+  autoSyncStatusHideTimeoutID = null;
+}
+
+function scheduleAutoSyncStatusHide(state: AutoSyncStatusState) {
+  clearAutoSyncStatusHideTimeout();
+  if (!state.visible) {
+    return;
+  }
+
+  const isRunning = state.status === "backing_up" || state.status === "restoring";
+  autoSyncStatusHideTimeoutID = window.setTimeout(() => {
+    if (isRunning) {
+      autoSyncStatusTimedOut = true;
+    }
+    hideAutoSyncStatus({
+      source: "timeout",
+      gameName: currentAutoSyncStatusState.gameName,
+      appID: currentAutoSyncStatusState.appID,
+      tracked: currentAutoSyncStatusState.tracked,
+      resultStatus: currentAutoSyncStatusState.resultStatus
+    });
+  }, isRunning ? 10000 : 2000);
 }
 
 function publishAutoSyncStatus(status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions) {
@@ -631,7 +583,6 @@ function publishAutoSyncStatus(status: AutoSyncStatusKind, options: AutoSyncStat
     status,
     visible: true,
     source: options.source,
-    surfaceMode: options.surfaceMode ?? currentAutoSyncStatusState.surfaceMode,
     gameName: options.gameName,
     appID: options.appID,
     tracked: options.tracked,
@@ -639,12 +590,11 @@ function publishAutoSyncStatus(status: AutoSyncStatusKind, options: AutoSyncStat
   };
   logAutoSyncStatusChange(currentAutoSyncStatusState);
   syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);
-  for (const listener of autoSyncStatusListeners) {
-    listener(currentAutoSyncStatusState);
-  }
+  scheduleAutoSyncStatusHide(currentAutoSyncStatusState);
 }
 
 function hideAutoSyncStatus(options: Partial<AutoSyncStatusPublishOptions> = {}) {
+  clearAutoSyncStatusHideTimeout();
   currentAutoSyncStatusState = {
     ...currentAutoSyncStatusState,
     visible: false,
@@ -652,14 +602,10 @@ function hideAutoSyncStatus(options: Partial<AutoSyncStatusPublishOptions> = {})
     gameName: options.gameName ?? currentAutoSyncStatusState.gameName,
     appID: options.appID ?? currentAutoSyncStatusState.appID,
     tracked: options.tracked ?? currentAutoSyncStatusState.tracked,
-    resultStatus: options.resultStatus ?? currentAutoSyncStatusState.resultStatus,
-    surfaceMode: options.surfaceMode ?? currentAutoSyncStatusState.surfaceMode
+    resultStatus: options.resultStatus ?? currentAutoSyncStatusState.resultStatus
   };
   logAutoSyncStatusChange(currentAutoSyncStatusState);
   syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);
-  for (const listener of autoSyncStatusListeners) {
-    listener(currentAutoSyncStatusState);
-  }
 }
 
 function completeAutoSyncStatus(
@@ -704,173 +650,6 @@ function completeAutoSyncStatus(
       resultStatus: result.status
     });
   }
-}
-
-function publishNextDebugAutoSyncStatus() {
-  const surfaceMode = autoSyncDiagnosticModes[autoSyncDiagnosticModeIndex];
-  autoSyncDiagnosticModeIndex = (autoSyncDiagnosticModeIndex + 1) % autoSyncDiagnosticModes.length;
-  log("info", `Debug status strip diagnostic requested: ${surfaceMode}`, "autosync_status", "Debug diagnostic");
-  publishAutoSyncStatus("backing_up", {
-    source: "debug_button",
-    surfaceMode,
-    gameName: "Debug diagnostic",
-    appID: "debug",
-    tracked: true
-  });
-  window.setTimeout(() => {
-    publishAutoSyncStatus("has_backup", {
-      source: "debug_button",
-      surfaceMode,
-      gameName: "Debug diagnostic",
-      appID: "debug",
-      tracked: true,
-      resultStatus: "backed_up"
-    });
-  }, 3000);
-}
-
-function AutoSyncStatusIcon({ status }: { status: AutoSyncStatusKind }) {
-  if (status === "backing_up" || status === "restoring") {
-    return (
-      <span style={{ transform: status === "restoring" ? "rotate(180deg)" : undefined }}>
-        <FaCircleArrowUp />
-      </span>
-    );
-  }
-
-  if (status === "has_backup") {
-    return <FaCircleCheck />;
-  }
-
-  if (status === "needs_backup") {
-    return (
-      <span style={{ position: "relative", width: "18px", height: "18px", display: "block" }}>
-        <span style={{ position: "absolute", inset: 0, width: "18px", height: "18px" }}>
-          <FaCircle />
-        </span>
-        <span
-          style={{
-            position: "absolute",
-            inset: "4px",
-            width: "10px",
-            height: "10px",
-            color: "rgba(0, 0, 0, 0.74)"
-          }}
-        >
-          <FaFloppyDisk />
-        </span>
-      </span>
-    );
-  }
-
-  return <FaCircleExclamation />;
-}
-
-function AutoSyncStatusComposition() {
-  useUIComposition(EUIComposition.Notification);
-  return null;
-}
-
-function AutoSyncStatusStrip() {
-  const [state, setState] = useState<AutoSyncStatusState>(currentAutoSyncStatusState);
-  log("debug", `AutoSyncStatusStrip render: visible=${state.visible}, status=${state.status}`, "autosync_status");
-
-  useEffect(() => {
-    const listener: AutoSyncStatusListener = (nextState) => {
-      setState(nextState);
-    };
-    autoSyncStatusListeners.add(listener);
-    return () => {
-      autoSyncStatusListeners.delete(listener);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!state.visible) {
-      return;
-    }
-
-    const isRunning = state.status === "backing_up" || state.status === "restoring";
-    const timeout = window.setTimeout(() => {
-      if (isRunning) {
-        autoSyncStatusTimedOut = true;
-      }
-      currentAutoSyncStatusState = {
-        ...currentAutoSyncStatusState,
-        visible: false,
-        source: "timeout"
-      };
-      logAutoSyncStatusChange(currentAutoSyncStatusState);
-      syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);
-      setState((current) => ({ ...current, visible: false }));
-    }, isRunning ? 10000 : 2000);
-
-    return () => window.clearTimeout(timeout);
-  }, [state.status, state.visible]);
-
-  const reactVisible = state.visible && state.surfaceMode !== "browserview";
-
-  return createPortal(
-    <div
-      style={{
-        position: "fixed",
-        bottom: "0",
-        left: "0",
-        width: "100%",
-        height: "24px",
-        background: "rgba(0, 0, 0, 0.34)",
-        color: "#f8fafc",
-        zIndex: 99999,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "10px",
-        padding: "0 18px",
-        boxSizing: "border-box",
-        fontFamily: '"Motiva Sans", "Arial", sans-serif',
-        fontSize: "13px",
-        fontWeight: 800,
-        letterSpacing: 0,
-        textTransform: "uppercase",
-        pointerEvents: "none",
-        transform: reactVisible ? "translateY(0)" : "translateY(100%)",
-        transition: "transform 300ms ease-out",
-        borderTop: "1px solid rgba(255, 255, 255, 0.10)"
-      }}
-      aria-hidden={!reactVisible}
-    >
-      {reactVisible && <AutoSyncStatusComposition />}
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: "245px" }}>
-        <AutoSyncStatusIcon status={state.status} />
-        <span>{autoSyncStatusText[state.status]}</span>
-      </div>
-      {state.source === "debug_button" && (
-        <div
-          style={{
-            color:
-              state.surfaceMode === "browserview"
-                ? "#38bdf8"
-                : state.surfaceMode === "react"
-                  ? "#f97316"
-                  : "#22c55e"
-          }}
-        >
-          {diagnosticLabelForMode(state.surfaceMode)}
-        </div>
-      )}
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          right: 0,
-          top: 0,
-          height: "2px",
-          background: "rgba(255, 255, 255, 0.10)"
-        }}
-      />
-    </div>,
-    document.body
-  );
 }
 
 function LogModal({ logs, closeModal }: LogModalProps) {
@@ -1401,14 +1180,6 @@ function Content() {
 
       <PanelSection title="Logs">
         <PanelSectionRow>
-          <ButtonItem
-            layout="below"
-            onClick={() => publishNextDebugAutoSyncStatus()}
-          >
-            Debug: Cycle Status Strip Surface
-          </ButtonItem>
-        </PanelSectionRow>
-        <PanelSectionRow>
           <ButtonItem layout="below" onClick={() => showModal(<LogModal logs={logs} />)}>
             View Logs
           </ButtonItem>
@@ -1826,8 +1597,6 @@ export default definePlugin(() => {
     startFallbackPolling();
   }
 
-  routerHook.addGlobalComponent(AUTO_SYNC_STATUS_COMPONENT, AutoSyncStatusStrip);
-
   return {
     name: "SDH-ludusavi",
     titleView: <div className={staticClasses.Title}>SDH-ludusavi</div>,
@@ -1836,18 +1605,16 @@ export default definePlugin(() => {
     alwaysRender: true,
     onDismount() {
       unregisterLifecycleNotifications();
-      routerHook.removeGlobalComponent(AUTO_SYNC_STATUS_COMPONENT);
       if (fallbackIntervalID !== null) {
         window.clearInterval(fallbackIntervalID);
       }
       activeSessions.clear();
-      autoSyncStatusListeners.clear();
       currentAutoSyncStatusState = {
         status: "has_backup",
         visible: false,
-        source: "hide",
-        surfaceMode: "both"
+        source: "hide"
       };
+      clearAutoSyncStatusHideTimeout();
       destroyAutoSyncStatusBrowserView();
       console.log("SDH-ludusavi unloading");
     },

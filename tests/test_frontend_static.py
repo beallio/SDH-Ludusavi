@@ -37,7 +37,6 @@ def test_frontend_wires_backend_calls_and_toasts() -> None:
         assert callable_name in source
 
     assert "toaster.toast" in source
-    assert "routerHook.addGlobalComponent" in source
     assert "is_running" in source
     assert "dependency_error" in source
 
@@ -122,34 +121,40 @@ def test_frontend_silences_lifecycle_toasts_when_auto_sync_is_disabled() -> None
     )
 
 
-def test_frontend_renders_autosync_status_strip_portal() -> None:
+def test_frontend_uses_browserview_only_autosync_status_strip() -> None:
     source = FRONTEND.read_text()
 
     for required_text in [
-        'import { createPortal } from "react-dom";',
-        "routerHook",
         'type AutoSyncStatusKind = "backing_up" | "restoring" | "has_backup" | "needs_backup" | "error";',
-        "function AutoSyncStatusStrip()",
-        "createPortal(",
-        "document.body",
         "let currentAutoSyncStatusState: AutoSyncStatusState",
         "currentAutoSyncStatusState = {",
         "function hideAutoSyncStatus(",
         'source: "hide"',
-        "useState<AutoSyncStatusState>(currentAutoSyncStatusState)",
-        "const autoSyncStatusListeners = new Set<AutoSyncStatusListener>();",
         "function publishAutoSyncStatus(",
-        "type AutoSyncStatusListener = (state: AutoSyncStatusState) => void;",
-        "listener(currentAutoSyncStatusState);",
-        'const AUTO_SYNC_STATUS_COMPONENT = "sdh-ludusavi-autosync-status-strip";',
-        "routerHook.addGlobalComponent(AUTO_SYNC_STATUS_COMPONENT, AutoSyncStatusStrip);",
-        "routerHook.removeGlobalComponent(AUTO_SYNC_STATUS_COMPONENT);",
         'source: "hide",',
         "alwaysRender: true",
+        "function scheduleAutoSyncStatusHide(",
+        "function clearAutoSyncStatusHideTimeout()",
+        "autoSyncStatusHideTimeoutID",
+        "window.clearTimeout(autoSyncStatusHideTimeoutID);",
     ]:
         assert required_text in source
 
-    assert "<AutoSyncStatusStrip />" not in source.split("content:")[1].split("icon:")[0]
+    for stale_text in [
+        'import { createPortal } from "react-dom";',
+        "createPortal(",
+        "document.body",
+        "function AutoSyncStatusStrip()",
+        "type AutoSyncStatusListener",
+        "autoSyncStatusListeners",
+        "routerHook.addGlobalComponent",
+        "routerHook.removeGlobalComponent",
+        "EUIComposition",
+        "findModuleChild",
+        "UseUIComposition",
+        "AutoSyncStatusComposition",
+    ]:
+        assert stale_text not in source
 
 
 def test_frontend_hides_status_strip_for_backend_silent_autosync_skips() -> None:
@@ -159,8 +164,9 @@ def test_frontend_hides_status_strip_for_backend_silent_autosync_skips() -> None
         'const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];'
         in source
     )
-    assert source.count("hideAutoSyncStatus({") >= 2
-    assert source.index("hideAutoSyncStatus({") > source.index(
+    lifecycle_source = source[source.index("const handleAppStart = async") :]
+    assert lifecycle_source.count("hideAutoSyncStatus({") >= 2
+    assert lifecycle_source.index("hideAutoSyncStatus({") > lifecycle_source.index(
         "const result = await handleGameStartCall(name, appID);"
     )
 
@@ -169,26 +175,18 @@ def test_frontend_status_strip_matches_steamos_visual_contract() -> None:
     source = FRONTEND.read_text()
 
     for required_text in [
-        'position: "fixed"',
-        'bottom: "0"',
-        'left: "0"',
-        "zIndex: 99999",
-        'pointerEvents: "none"',
-        'transform: reactVisible ? "translateY(0)" : "translateY(100%)"',
-        'transition: "transform 300ms ease-out"',
-        'height: "24px"',
-        'background: "rgba(0, 0, 0, 0.34)"',
-        'fontFamily: \'"Motiva Sans", "Arial", sans-serif\'',
-        "fontWeight: 800",
-        "letterSpacing: 0",
-        'minWidth: "245px"',
-        'height: "2px"',
-        'background: "rgba(255, 255, 255, 0.10)"',
+        "width: 100vw;",
+        "height: 100vh;",
+        "background: rgba(0, 0, 0, 0.34)",
+        'font-family: "Motiva Sans", Arial, sans-serif;',
+        "font-weight: 800;",
+        "min-width: 245px;",
+        "border-top: 1px solid rgba(255, 255, 255, 0.10);",
     ]:
         assert required_text in source
 
 
-def test_frontend_status_strip_uses_existing_react_icons() -> None:
+def test_frontend_status_strip_uses_inline_browserview_icons() -> None:
     package_json = Path("package.json").read_text()
     source = FRONTEND.read_text()
 
@@ -197,13 +195,11 @@ def test_frontend_status_strip_uses_existing_react_icons() -> None:
     assert "library.add" not in source
 
     for required_text in [
-        "FaCircleArrowUp",
-        "FaCircleCheck",
-        "FaCircle",
-        "FaFloppyDisk",
-        "FaCircleExclamation",
-        'transform: status === "restoring" ? "rotate(180deg)" : undefined',
-        "<FaFloppyDisk",
+        "function iconSvgForAutoSyncStatus(",
+        'status === "restoring"',
+        "transform: rotate(180deg);",
+        '<svg viewBox="0 0 20 20"',
+        'stroke="#0b151f"',
     ]:
         assert required_text in source
 
@@ -264,7 +260,6 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         "pixelRatio",
         "Math.round(",
         "background: rgba(0, 0, 0, 0.34)",
-        "DIAGNOSTIC:",
     ]:
         assert required_text in source
     assert source.index("rootWindow?.CreateBrowserView") < source.index(
@@ -276,8 +271,7 @@ def test_frontend_status_strip_logs_status_provenance() -> None:
     source = FRONTEND.read_text()
 
     for required_text in [
-        'type AutoSyncStatusSource = "debug_button" | "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";',
-        'type AutoSyncStatusSurfaceMode = "browserview" | "react" | "both";',
+        'type AutoSyncStatusSource = "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";',
         "source: AutoSyncStatusSource;",
         "gameName?: string;",
         "appID?: string;",
@@ -290,7 +284,6 @@ def test_frontend_status_strip_logs_status_provenance() -> None:
         'tracked=${state.tracked ?? "unknown"}',
         'result=${state.resultStatus ?? "none"}',
         "visible=${state.visible}",
-        "surface=${state.surfaceMode}",
     ]:
         assert required_text in source
 
@@ -326,35 +319,21 @@ def test_frontend_logs_lifecycle_rpc_boundaries() -> None:
         assert required_text in source
 
 
-def test_frontend_debug_button_cycles_status_surfaces() -> None:
+def test_frontend_has_no_status_strip_diagnostic_ui_or_modes() -> None:
     source = FRONTEND.read_text()
 
-    for required_text in [
-        'const autoSyncDiagnosticModes: AutoSyncStatusSurfaceMode[] = ["browserview", "react", "both"];',
-        "let autoSyncDiagnosticModeIndex = 0;",
+    for stale_text in [
+        "AutoSyncStatusSurfaceMode",
+        "autoSyncDiagnosticModes",
+        "autoSyncDiagnosticModeIndex",
         "function publishNextDebugAutoSyncStatus()",
-        "autoSyncDiagnosticModeIndex = (autoSyncDiagnosticModeIndex + 1) % autoSyncDiagnosticModes.length;",
         'source: "debug_button",',
         'gameName: "Debug diagnostic",',
         'appID: "debug",',
         "Debug: Cycle Status Strip Surface",
-        "DIAGNOSTIC: BROWSERVIEW",
-        "DIAGNOSTIC: REACT",
-        "DIAGNOSTIC: BOTH",
+        "DIAGNOSTIC:",
     ]:
-        assert required_text in source
-
-
-def test_frontend_browserview_only_mode_suppresses_react_surface() -> None:
-    source = FRONTEND.read_text()
-
-    for required_text in [
-        'const reactVisible = state.visible && state.surfaceMode !== "browserview";',
-        "aria-hidden={!reactVisible}",
-        'transform: reactVisible ? "translateY(0)" : "translateY(100%)"',
-        "{reactVisible && <AutoSyncStatusComposition />}",
-    ]:
-        assert required_text in source
+        assert stale_text not in source
 
 
 def test_frontend_uses_app_lifetime_notifications_for_lifecycle_detection() -> None:
