@@ -274,39 +274,6 @@ let currentAutoSyncStatusState: AutoSyncStatusState = {
 let autoSyncStatusTimedOut = false;
 let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;
 
-const useUICompositionHook = findModuleChild((module: any) => {
-    if (typeof module !== "object" || module === null) {
-      return undefined;
-    }
-
-    for (const prop in module) {
-      const candidate = module[prop];
-      if (
-        typeof candidate === "function" &&
-        candidate.toString().includes("AddMinimumCompositionStateRequest") &&
-        candidate.toString().includes("ChangeMinimumCompositionStateRequest") &&
-        candidate.toString().includes("RemoveMinimumCompositionStateRequest") &&
-        !candidate.toString().includes("m_mapCompositionStateRequests")
-      ) {
-        return candidate;
-      }
-    }
-
-    return undefined;
-  });
-
-if (useUICompositionHook) {
-  log("info", "Composition hook found", "autosync_status");
-} else {
-  log("warning", "Composition hook NOT found; in-game overlay may fail", "autosync_status");
-}
-
-const useUIComposition: UseUIComposition =
-  (useUICompositionHook as any) ??
-  (() => ({
-    releaseComposition: () => undefined
-  }));
-
 function getAutoSyncStatusBounds() {
   const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance?.BrowserWindow;
   const viewWindow = rootWindow ?? window;
@@ -558,11 +525,6 @@ function AutoSyncStatusIcon({ status }: { status: AutoSyncStatusKind }) {
   return <FaCircleExclamation />;
 }
 
-function AutoSyncStatusComposition() {
-  useUIComposition(EUIComposition.Notification);
-  return null;
-}
-
 function AutoSyncStatusStrip() {
   const [state, setState] = useState<AutoSyncStatusState>(currentAutoSyncStatusState);
 
@@ -596,7 +558,6 @@ function AutoSyncStatusStrip() {
 
   return (
     <>
-      {state.visible && <AutoSyncStatusComposition />}
       {createPortal(
         <div
           style={{

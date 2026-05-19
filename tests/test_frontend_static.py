@@ -225,28 +225,6 @@ def test_frontend_status_strip_replaces_autosync_success_toasts() -> None:
         assert required_text in source
 
 
-def test_frontend_status_strip_requests_notification_composition_without_direct_overlay_mutation() -> (
-    None
-):
-    source = FRONTEND.read_text()
-
-    for required_text in [
-        "findModuleChild",
-        "EUIComposition",
-        "type UseUIComposition",
-        "AddMinimumCompositionStateRequest",
-        "ChangeMinimumCompositionStateRequest",
-        "RemoveMinimumCompositionStateRequest",
-        "function AutoSyncStatusComposition()",
-        "useUIComposition(EUIComposition.Notification);",
-        "{state.visible && <AutoSyncStatusComposition />}",
-    ]:
-        assert required_text in source
-
-    assert "SetOverlayState" not in source
-    assert "SetComposition" not in source
-
-
 def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
     source = FRONTEND.read_text()
 
@@ -265,8 +243,6 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         "browserView.SetVisible?.(true);",
         "syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);",
         "destroyAutoSyncStatusBrowserView();",
-        'log("info", "Composition hook found"',
-        'log("warning", "Composition hook NOT found',
         'log("info", "Creating BrowserView via GamepadUIMainWindowInstance"',
         'log("info", "Creating BrowserView via SteamClient.BrowserView.Create"',
         'log("info", `BrowserView created: type=${typeof autoSyncStatusBrowserView}',
