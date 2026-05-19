@@ -57,6 +57,12 @@ deselected Ludusavi game.
 The BrowserView document uses inline SVG icons. The restore icon is the backup arrow
 rotated 180 degrees. No additional icon dependencies are required.
 
+The visual contract is a compact bottom strip offset above the absolute bottom edge
+of the Gamepad UI viewport. The icon plus text are centered horizontally as one group,
+with a stable text-group width so status changes do not visibly shift the strip.
+Running and success states use Steam Blue (`#66c0f4`), `needs_backup` uses a distinct
+warning/action color (`#f59e0b`), and `error` remains red (`#ef4444`).
+
 ## Public Interfaces
 
 No backend RPCs, persisted state, or package dependencies change. The frontend
@@ -91,6 +97,10 @@ Frontend static tests must verify:
   `BrowserView`, and nested `m_browserView.m_browserView` candidates.
 - The BrowserView document matches the compact SteamOS-style bottom strip visual
   contract.
+- The BrowserView bounds include a bottom offset so the strip does not sit flush
+  against the absolute bottom edge.
+- The icon plus text are centered as one group, normal/running/success icons use
+  Steam Blue, `needs_backup` uses a warning/action color, and errors remain red.
 - Diagnostic buttons, diagnostic labels, alternate surface modes, React portal code,
   global component registration, and composition-hook code are absent.
 - Autosync lifecycle handlers publish strip states around existing RPC calls.
@@ -103,8 +113,8 @@ Validation commands:
 
 ```bash
 ./run.sh uv run pytest tests/test_frontend_static.py
-pnpm run typecheck
-pnpm run build
+./run.sh pnpm run typecheck
+./run.sh pnpm run build
 ./run.sh uv run ruff check . --fix
 ./run.sh uv run ruff format .
 ./run.sh uv run ty check py_modules/sdh_ludusavi/
