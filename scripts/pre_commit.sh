@@ -5,6 +5,8 @@ cd "$(git rev-parse --show-toplevel)"
 
 echo "Running protocol checks..."
 
+mapfile -t staged_paths < <(git diff --cached --name-only --diff-filter=ACMR)
+
 ./run.sh uv run ruff check . --fix || {
   echo "Ruff linting failed. Fix your code."
   exit 1
@@ -13,7 +15,9 @@ echo "Running protocol checks..."
 echo "Formatting code..."
 ./run.sh uv run ruff format .
 
-git add -u
+if ((${#staged_paths[@]} > 0)); then
+  git add -- "${staged_paths[@]}"
+fi
 
 echo "Checking types..."
 ./run.sh uv run ty check py_modules/sdh_ludusavi/ || {
