@@ -1,0 +1,24 @@
+{
+  "date": "2026-05-19",
+  "task_objective": "Fix the failed on-device status strip attempt after logs showed BrowserView wrapper methods were missing and local_current skipped results rendered as backup needed.",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py",
+    "docs/plans/fix_status_strip_visibility_and_diagnostics.md",
+    "docs/agent_conversations/2026-05-19_status_strip_browserview_wrapper_followup.json"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py::test_frontend_status_strip_maps_local_current_to_up_to_date",
+    "tests/test_frontend_static.py::test_frontend_browserview_only_mode_suppresses_react_surface"
+  ],
+  "design_decisions": [
+    "Normalize BrowserView wrapper objects by checking the root object and nested browserView, BrowserView, m_browserView, and m_browserView.m_browserView fields.",
+    "Log candidate object keys and prototype keys when BrowserView normalization cannot find the required methods.",
+    "Treat skipped local_current autosync results as up to date instead of backup needed.",
+    "Hide the React portal surface during BrowserView-only diagnostics so the diagnostic modes are distinct."
+  ],
+  "results": [
+    "Targeted frontend static tests pass after the BrowserView wrapper and local_current fixes.",
+    "Frontend typecheck and build pass."
+  ]
+}

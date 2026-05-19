@@ -174,7 +174,7 @@ def test_frontend_status_strip_matches_steamos_visual_contract() -> None:
         'left: "0"',
         "zIndex: 99999",
         'pointerEvents: "none"',
-        'transform: state.visible ? "translateY(0)" : "translateY(100%)"',
+        'transform: reactVisible ? "translateY(0)" : "translateY(100%)"',
         'transition: "transform 300ms ease-out"',
         'height: "24px"',
         'background: "rgba(0, 0, 0, 0.34)"',
@@ -230,10 +230,19 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
 
     for required_text in [
         "type AutoSyncStatusBrowserView",
+        "type AutoSyncStatusBrowserViewOwner",
         "let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;",
+        "let autoSyncStatusBrowserViewOwner: AutoSyncStatusBrowserViewOwner | null = null;",
         "function ensureAutoSyncStatusBrowserView()",
+        "function normalizeAutoSyncStatusBrowserView(",
+        "candidate?.m_browserView",
+        "candidate?.browserView",
+        "candidate?.BrowserView",
+        "candidate?.m_browserView?.m_browserView",
+        "BrowserView normalized from",
         "rootWindow?.CreateBrowserView",
-        'rootWindow.CreateBrowserView("sdh-ludusavi-autosync-status-strip")',
+        "rootWindow.CreateBrowserView(",
+        '"sdh-ludusavi-autosync-status-strip"',
         "steamClient?.BrowserView?.Create",
         "function renderAutoSyncStatusHtml(",
         '"data:text/html;charset=utf-8,"',
@@ -243,10 +252,12 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         "browserView.SetVisible?.(true);",
         "syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);",
         "destroyAutoSyncStatusBrowserView();",
+        "autoSyncStatusBrowserViewOwner",
         'log("info", "Creating BrowserView via GamepadUIMainWindowInstance"',
         'log("info", "Creating BrowserView via SteamClient.BrowserView.Create"',
-        'log("info", `BrowserView created: type=${typeof autoSyncStatusBrowserView}',
-        "autoSyncStatusBrowserView.SetWindowStackingOrder?.(50);",
+        'log("info",',
+        "`BrowserView created: type=${typeof autoSyncStatusBrowserViewOwner}",
+        "normalized.SetWindowStackingOrder?.(50);",
         "SetTopmost(true)",
         "browserView.LoadURL(url);",
         "setTimeout(() => {",
@@ -284,6 +295,23 @@ def test_frontend_status_strip_logs_status_provenance() -> None:
         assert required_text in source
 
 
+def test_frontend_status_strip_maps_local_current_to_up_to_date() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        'if (result.status === "skipped") {',
+        'if (result.reason === "local_current") {',
+        'publishAutoSyncStatus("has_backup", {',
+        "resultStatus: result.status",
+        'publishAutoSyncStatus("needs_backup", {',
+    ]:
+        assert required_text in source
+
+    assert source.index('result.reason === "local_current"') < source.index(
+        'publishAutoSyncStatus("needs_backup", {'
+    )
+
+
 def test_frontend_logs_lifecycle_rpc_boundaries() -> None:
     source = FRONTEND.read_text()
 
@@ -313,6 +341,18 @@ def test_frontend_debug_button_cycles_status_surfaces() -> None:
         "DIAGNOSTIC: BROWSERVIEW",
         "DIAGNOSTIC: REACT",
         "DIAGNOSTIC: BOTH",
+    ]:
+        assert required_text in source
+
+
+def test_frontend_browserview_only_mode_suppresses_react_surface() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        'const reactVisible = state.visible && state.surfaceMode !== "browserview";',
+        "aria-hidden={!reactVisible}",
+        'transform: reactVisible ? "translateY(0)" : "translateY(100%)"',
+        "{reactVisible && <AutoSyncStatusComposition />}",
     ]:
         assert required_text in source
 

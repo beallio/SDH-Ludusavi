@@ -56,3 +56,18 @@ from lifecycle autosync:
    `SteamClient.BrowserView.Create`.
 4. Wire lifecycle start/exit and RPC results through explicit source metadata.
 5. Replace the debug button with a three-mode diagnostic cycle.
+
+## Follow-up From Device Logs
+
+The Steam Deck log from version `0.1.0+37d2571` proved lifecycle detection works and
+showed two remaining frontend defects:
+
+- `GamepadUIMainWindowInstance.CreateBrowserView` returned a wrapper object whose
+  method-bearing view is under nested fields such as `m_browserView`, so the status
+  code must normalize the wrapper before requiring `LoadURL`, `SetBounds`, and
+  `SetVisible`.
+- Backend `skipped` results with `reason: "local_current"` were rendered as
+  `BACKUP: NEEDED`; those should render as up to date.
+
+Add static regressions for both behaviors and keep BrowserView-only diagnostics from
+rendering the React surface so the three debug modes remain distinct.

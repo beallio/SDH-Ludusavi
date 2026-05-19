@@ -148,6 +148,12 @@ type AutoSyncStatusBrowserView = {
   Destroy?: () => void;
 };
 
+type AutoSyncStatusBrowserViewOwner = AutoSyncStatusBrowserView & {
+  browserView?: AutoSyncStatusBrowserView;
+  BrowserView?: AutoSyncStatusBrowserView;
+  m_browserView?: AutoSyncStatusBrowserViewOwner;
+};
+
 type Versions = {
   sdh_ludusavi?: string;
   ludusavi?: string;
@@ -291,6 +297,7 @@ let currentAutoSyncStatusState: AutoSyncStatusState = {
 };
 let autoSyncStatusTimedOut = false;
 let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;
+let autoSyncStatusBrowserViewOwner: AutoSyncStatusBrowserViewOwner | null = null;
 const autoSyncDiagnosticModes: AutoSyncStatusSurfaceMode[] = ["browserview", "react", "both"];
 let autoSyncDiagnosticModeIndex = 0;
 
@@ -348,6 +355,67 @@ function getAutoSyncStatusBounds() {
   };
 }
 
+function objectKeys(value: unknown): string {
+  if (typeof value !== "object" || value === null) {
+    return "none";
+  }
+  return Object.keys(value).join(",");
+}
+
+function getPrototypeKeys(value: unknown): string {
+  if (typeof value !== "object" || value === null) {
+    return "none";
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (typeof prototype !== "object" || prototype === null) {
+    return "none";
+  }
+  return Object.getOwnPropertyNames(prototype).join(",");
+}
+
+function patchBrowserViewMethodAliases(view: AutoSyncStatusBrowserViewOwner) {
+  const raw = view as any;
+  if (!raw.LoadURL && raw.loadURL) raw.LoadURL = raw.loadURL;
+  if (!raw.SetBounds && raw.setBounds) raw.SetBounds = raw.setBounds;
+  if (!raw.SetVisible && raw.setVisible) raw.SetVisible = raw.setVisible;
+  if (!raw.SetFocus && raw.setFocus) raw.SetFocus = raw.setFocus;
+  if (!raw.SetName && raw.setName) raw.SetName = raw.setName;
+  if (!raw.SetWindowStackingOrder && raw.setWindowStackingOrder) {
+    raw.SetWindowStackingOrder = raw.setWindowStackingOrder;
+  }
+  if (!raw.Destroy && raw.destroy) raw.Destroy = raw.destroy;
+}
+
+function normalizeAutoSyncStatusBrowserView(
+  candidate: AutoSyncStatusBrowserViewOwner | null,
+): AutoSyncStatusBrowserView | null {
+  const candidates: Array<[string, AutoSyncStatusBrowserViewOwner | undefined | null]> = [
+    ["root", candidate],
+    ["m_browserView", candidate?.m_browserView],
+    ["browserView", candidate?.browserView],
+    ["BrowserView", candidate?.BrowserView],
+    ["m_browserView.m_browserView", candidate?.m_browserView?.m_browserView],
+  ];
+
+  for (const [source, view] of candidates) {
+    if (!view) {
+      continue;
+    }
+    patchBrowserViewMethodAliases(view);
+    if (view.LoadURL && view.SetBounds && view.SetVisible) {
+      log("info", `BrowserView normalized from ${source}`, "autosync_status");
+      return view;
+    }
+    log(
+      "debug",
+      `BrowserView candidate ${source} missing methods; keys=${objectKeys(view)} prototype=${getPrototypeKeys(view)}`,
+      "autosync_status",
+    );
+  }
+
+  return null;
+}
+
 function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
   if (autoSyncStatusBrowserView) {
     return autoSyncStatusBrowserView;
@@ -359,42 +427,48 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
 
     if (rootWindow?.CreateBrowserView) {
       log("info", "Creating BrowserView via GamepadUIMainWindowInstance", "autosync_status");
-      autoSyncStatusBrowserView = rootWindow.CreateBrowserView("sdh-ludusavi-autosync-status-strip") as AutoSyncStatusBrowserView;
+      autoSyncStatusBrowserViewOwner = rootWindow.CreateBrowserView(
+        "sdh-ludusavi-autosync-status-strip",
+      ) as AutoSyncStatusBrowserViewOwner;
     } else if (steamClient?.BrowserView?.Create) {
       log("info", "Creating BrowserView via SteamClient.BrowserView.Create", "autosync_status");
-      autoSyncStatusBrowserView = steamClient.BrowserView.Create({
+      autoSyncStatusBrowserViewOwner = steamClient.BrowserView.Create({
         strInitialURL: "about:blank"
-      }) as AutoSyncStatusBrowserView | null;
+      }) as AutoSyncStatusBrowserViewOwner | null;
     }
 
-    if (!autoSyncStatusBrowserView) {
+    if (!autoSyncStatusBrowserViewOwner) {
       log("error", "Failed to create BrowserView surface", "autosync_status");
       return null;
     }
 
-    // Diagnostic logging for the created object
-    log("info", `BrowserView created: type=${typeof autoSyncStatusBrowserView}, keys=${Object.keys(autoSyncStatusBrowserView).join(",")}`, "autosync_status");
+    log(
+      "info",
+      `BrowserView created: type=${typeof autoSyncStatusBrowserViewOwner}, keys=${objectKeys(autoSyncStatusBrowserViewOwner)} prototype=${getPrototypeKeys(autoSyncStatusBrowserViewOwner)}`,
+      "autosync_status",
+    );
 
-    // Handle lowercase method fallbacks if necessary
-    const view = autoSyncStatusBrowserView as any;
-    if (!view.LoadURL && view.loadURL) view.LoadURL = view.loadURL;
-    if (!view.SetBounds && view.setBounds) view.SetBounds = view.setBounds;
-    if (!view.SetVisible && view.setVisible) view.SetVisible = view.setVisible;
-    if (!view.Destroy && view.destroy) view.Destroy = view.destroy;
-
-    autoSyncStatusBrowserView.SetName?.("sdh-ludusavi-autosync-status-strip");
-    autoSyncStatusBrowserView.SetWindowStackingOrder?.(50);
-    autoSyncStatusBrowserView.SetFocus?.(false);
-    autoSyncStatusBrowserView.SetVisible?.(false);
-    
-    if (typeof (autoSyncStatusBrowserView as any).SetTopmost === "function") {
-      (autoSyncStatusBrowserView as any).SetTopmost(true);
+    const normalized = normalizeAutoSyncStatusBrowserView(autoSyncStatusBrowserViewOwner);
+    if (!normalized) {
+      log("warning", "Status strip BrowserView is missing required methods", "autosync_status");
+      return null;
     }
 
+    normalized.SetName?.("sdh-ludusavi-autosync-status-strip");
+    normalized.SetWindowStackingOrder?.(50);
+    normalized.SetFocus?.(false);
+    normalized.SetVisible?.(false);
+
+    if (typeof (normalized as any).SetTopmost === "function") {
+      (normalized as any).SetTopmost(true);
+    }
+
+    autoSyncStatusBrowserView = normalized;
     return autoSyncStatusBrowserView;
   } catch (err) {
     log("warning", `Could not create status strip BrowserView: ${err}`, "autosync_status");
     autoSyncStatusBrowserView = null;
+    autoSyncStatusBrowserViewOwner = null;
     return null;
   }
 }
@@ -516,14 +590,17 @@ function destroyAutoSyncStatusBrowserView() {
     browserView.SetVisible?.(false);
     if (typeof browserView.Destroy === "function") {
       browserView.Destroy();
+    } else if (typeof autoSyncStatusBrowserViewOwner?.Destroy === "function") {
+      autoSyncStatusBrowserViewOwner.Destroy();
     } else {
       const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
-      steamClient?.BrowserView?.Destroy?.(browserView);
+      steamClient?.BrowserView?.Destroy?.(autoSyncStatusBrowserViewOwner ?? browserView);
     }
   } catch (err) {
     log("warning", `Could not destroy status strip BrowserView: ${err}`, "autosync_status");
   } finally {
     autoSyncStatusBrowserView = null;
+    autoSyncStatusBrowserViewOwner = null;
   }
 }
 
@@ -612,6 +689,15 @@ function completeAutoSyncStatus(
   }
 
   if (result.status === "skipped") {
+    if (result.reason === "local_current") {
+      publishAutoSyncStatus("has_backup", {
+        ...options,
+        source: "rpc_result",
+        resultStatus: result.status
+      });
+      return;
+    }
+
     publishAutoSyncStatus("needs_backup", {
       ...options,
       source: "rpc_result",
@@ -722,7 +808,7 @@ function AutoSyncStatusStrip() {
     return () => window.clearTimeout(timeout);
   }, [state.status, state.visible]);
 
-  const renderReactSurface = state.visible && state.surfaceMode !== "browserview";
+  const reactVisible = state.visible && state.surfaceMode !== "browserview";
 
   return createPortal(
     <div
@@ -747,13 +833,13 @@ function AutoSyncStatusStrip() {
         letterSpacing: 0,
         textTransform: "uppercase",
         pointerEvents: "none",
-        transform: state.visible ? "translateY(0)" : "translateY(100%)",
+        transform: reactVisible ? "translateY(0)" : "translateY(100%)",
         transition: "transform 300ms ease-out",
         borderTop: "1px solid rgba(255, 255, 255, 0.10)"
       }}
-      aria-hidden={!state.visible}
+      aria-hidden={!reactVisible}
     >
-      {renderReactSurface && <AutoSyncStatusComposition />}
+      {reactVisible && <AutoSyncStatusComposition />}
       <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: "245px" }}>
         <AutoSyncStatusIcon status={state.status} />
         <span>{autoSyncStatusText[state.status]}</span>
