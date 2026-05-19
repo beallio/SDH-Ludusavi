@@ -238,7 +238,7 @@ def test_frontend_status_strip_requests_notification_composition_without_direct_
         "ChangeMinimumCompositionStateRequest",
         "RemoveMinimumCompositionStateRequest",
         "function AutoSyncStatusComposition()",
-        "useMemo(() => useUIComposition(EUIComposition.Overlay), []);",
+        "useUIComposition(EUIComposition.Notification);",
         "{state.visible && <AutoSyncStatusComposition />}",
     ]:
         assert required_text in source
@@ -270,15 +270,10 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         'log("info", "Creating BrowserView via GamepadUIMainWindowInstance"',
         'log("info", "Creating BrowserView via SteamClient.BrowserView.Create"',
         'log("info", `BrowserView created: type=${typeof autoSyncStatusBrowserView}',
-        "autoSyncStatusBrowserView.SetWindowStackingOrder?.(100);",
+        "autoSyncStatusBrowserView.SetWindowStackingOrder?.(10);",
         "SetTopmost(true)",
         "browserView.LoadURL(url);",
         "setTimeout(() => {",
-        "function AutoSyncStatusComposition()",
-        'log("debug", "Mounting AutoSyncStatusComposition (Strategy A)"',
-        'log("debug", "AutoSyncStatusComposition applied composition"',
-        'log("debug", "Releasing AutoSyncStatusComposition"',
-        "result.releaseComposition();",
     ]:
         assert required_text in source
 

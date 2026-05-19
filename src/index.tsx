@@ -357,14 +357,8 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
     if (!view.Destroy && view.destroy) view.Destroy = view.destroy;
 
     autoSyncStatusBrowserView.SetName?.("sdh-ludusavi-autosync-status-strip");
-    autoSyncStatusBrowserView.SetWindowStackingOrder?.(100);
+    autoSyncStatusBrowserView.SetWindowStackingOrder?.(10);
     autoSyncStatusBrowserView.SetFocus?.(false);
-    
-    if (typeof (autoSyncStatusBrowserView as any).AddGlass === "function") {
-      log("debug", "Applying AddGlass to BrowserView", "autosync_status");
-      (autoSyncStatusBrowserView as any).AddGlass();
-    }
-
     autoSyncStatusBrowserView.SetVisible?.(false);
     
     if (typeof (autoSyncStatusBrowserView as any).SetTopmost === "function") {
@@ -458,9 +452,6 @@ function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
       // Delay visibility slightly if becoming visible to allow LoadURL to register
       setTimeout(() => {
         browserView.SetVisible?.(true);
-        if (typeof (browserView as any).NotifyUserActivation === "function") {
-          (browserView as any).NotifyUserActivation();
-        }
         browserView.SetFocus?.(false);
       }, 100);
     } else {
@@ -568,15 +559,7 @@ function AutoSyncStatusIcon({ status }: { status: AutoSyncStatusKind }) {
 }
 
 function AutoSyncStatusComposition() {
-  log("debug", "Mounting AutoSyncStatusComposition (Strategy A)", "autosync_status");
-  const result = useMemo(() => useUIComposition(EUIComposition.Overlay), []);
-  useEffect(() => {
-    log("debug", "AutoSyncStatusComposition applied composition", "autosync_status");
-    return () => {
-      log("debug", "Releasing AutoSyncStatusComposition", "autosync_status");
-      result.releaseComposition();
-    };
-  }, [result]);
+  useUIComposition(EUIComposition.Notification);
   return null;
 }
 
