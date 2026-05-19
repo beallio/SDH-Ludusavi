@@ -35,6 +35,8 @@ import { launchLudusavi, LudusaviLaunchCommand } from "./ludusaviLauncher";
 
 type NotificationSettings = {
   enabled: boolean;
+  auto_sync_progress: boolean;
+  auto_sync_results: boolean;
   manual_operations: boolean;
   refresh_status: boolean;
   failures_errors: boolean;
@@ -219,6 +221,8 @@ const statusLabels: Record<GameStatus["status"], string> = {
 
 const defaultNotificationSettings: NotificationSettings = {
   enabled: true,
+  auto_sync_progress: true,
+  auto_sync_results: true,
   manual_operations: true,
   refresh_status: true,
   failures_errors: true
@@ -233,6 +237,8 @@ const defaultSettings = (): Settings => ({
 function normalizeNotificationSettings(settings?: Partial<NotificationSettings>): NotificationSettings {
   return {
     enabled: typeof settings?.enabled === "boolean" ? settings.enabled : true,
+    auto_sync_progress: typeof settings?.auto_sync_progress === "boolean" ? settings.auto_sync_progress : true,
+    auto_sync_results: typeof settings?.auto_sync_results === "boolean" ? settings.auto_sync_results : true,
     manual_operations: typeof settings?.manual_operations === "boolean" ? settings.manual_operations : true,
     refresh_status: typeof settings?.refresh_status === "boolean" ? settings.refresh_status : true,
     failures_errors: typeof settings?.failures_errors === "boolean" ? settings.failures_errors : true
@@ -376,6 +382,21 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
   }
 }
 
+function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind) {
+  if (status === "has_backup") {
+    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 10.2 8.5 12.7 14.2 7" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  }
+  if (status === "needs_backup") {
+    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 5h7l2 2v8H6z" fill="#0b151f"/><path d="M8 5h5v4H8z" fill="currentColor"/><path d="M8 12h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+  }
+  if (status === "error") {
+    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M10 5.2v6.4" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/><circle cx="10" cy="15" r="1.2" fill="#0b151f"/></svg>';
+  }
+
+  const rotation = status === "restoring" ? ' style="transform: rotate(180deg); transform-origin: 50% 50%;"' : "";
+  return `<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"${rotation}><circle cx="10" cy="10" r="8.8" fill="currentColor"/><path d="M10 5.3v8.3" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/><path d="M6.8 8.4 10 5.2l3.2 3.2" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
 function renderAutoSyncStatusHtml(state: AutoSyncStatusState) {
   return `<!doctype html>
 <html>
@@ -402,13 +423,14 @@ body {
   border: 10px solid black;
   box-sizing: border-box;
 }
-.text { font-size: 40px; text-shadow: 2px 2px 0 white; }
+.text { font-size: 40px; text-shadow: 2px 2px 0 white; display: flex; align-items: center; gap: 20px; }
+.icon { width: 60px; height: 60px; display: inline-flex; align-items: center; justify-content: center; transform: scale(3); }
 </style>
 </head>
 <body>
 <div class="bar">
   <div class="text">STRATEGY B (YELLOW FULL SCREEN)</div>
-  <div class="text">STATUS: ${autoSyncStatusText[state.status]}</div>
+  <div class="text"><span class="icon">${iconSvgForAutoSyncStatus(state.status)}</span> STATUS: ${autoSyncStatusText[state.status]}</div>
 </div>
 </body>
 </html>`;
@@ -469,10 +491,23 @@ function destroyAutoSyncStatusBrowserView() {
   }
 }
 
-function publishAutoSyncStatus(status: AutoSyncStatusKind) {
+function publishAutoSyncStatus(status: AutoSyncStatusKind, silent = false) {
   if (status === "backing_up" || status === "restoring") {
     autoSyncStatusTimedOut = false;
   }
+  
+  // Also send native notification for in-game visibility
+  if (!silent) {
+    const label = autoSyncStatusText[status];
+    if (status === "backing_up") {
+      notify("auto_sync_progress", "Ludusavi Auto-sync", label);
+    } else if (status === "restoring") {
+      notify("auto_sync_progress", "Ludusavi Auto-sync", label);
+    } else if (status === "error") {
+      notify("failures_errors", "Ludusavi Auto-sync", "Failed - check logs");
+    }
+  }
+
   currentAutoSyncStatusState = { status, visible: true };
   syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);
   for (const listener of autoSyncStatusListeners) {
@@ -499,6 +534,8 @@ function completeAutoSyncStatus(result: OperationResult) {
   }
 
   if (result.status === "backed_up" || result.status === "restored") {
+    const label = autoSyncStatusText[result.status === "backed_up" ? "has_backup" : "has_backup"];
+    notify("auto_sync_results", "Ludusavi Auto-sync", label);
     publishAutoSyncStatus("has_backup");
     return;
   }
@@ -609,9 +646,13 @@ function AutoSyncStatusStrip() {
               color: "white",
               fontSize: "30px",
               fontWeight: 900,
+              gap: "20px"
             }}
           >
-            STRATEGY A (BLUE FULL WIDTH TOP)
+            <span style={{ transform: "scale(2.5)", display: "inline-flex" }}>
+              <AutoSyncStatusIcon status={state.status} />
+            </span>
+            <span>STRATEGY A (BLUE FULL WIDTH TOP)</span>
           </div>
         </div>,
         document.body
@@ -1148,6 +1189,17 @@ function Content() {
       <LudusaviPanel ludusaviCommand={ludusaviCommand} isLoading={busyLabel === "Loading"} />
 
       <PanelSection title="Logs">
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={() => {
+              publishAutoSyncStatus("backing_up", true);
+              setTimeout(() => publishAutoSyncStatus("has_backup", true), 3000);
+            }}
+          >
+            Debug: Test Notification Strip
+          </ButtonItem>
+        </PanelSectionRow>
         <PanelSectionRow>
           <ButtonItem layout="below" onClick={() => showModal(<LogModal logs={logs} />)}>
             View Logs
