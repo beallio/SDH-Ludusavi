@@ -13,9 +13,10 @@ import {
 import {
   callable,
   definePlugin,
-  toaster
+  toaster,
+  useQuickAccessVisible
 } from "@decky/api";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FaSave, FaDownload, FaExclamationTriangle } from "react-icons/fa";
 import { IoMdRefresh } from "react-icons/io";
 
@@ -72,6 +73,7 @@ type GameOperationHistory = {
 
 type GameStatus = {
   name: string;
+  steam_id?: string | number | null;
   configured: boolean;
   has_backup: boolean;
   needs_first_backup: boolean;
@@ -242,6 +244,69 @@ const getInstalledAppIdsString = async (): Promise<string | undefined> => {
     return undefined;
   }
 };
+
+const sessionFromAppOverview = (app: any): RunningSession | null => {
+  const appID = app?.appid ? String(app.appid) : null;
+  const name = app?.display_name || null;
+  if (!appID || !name) {
+    return null;
+  }
+  return { appID, name };
+};
+
+function getMainRunningSession(): RunningSession | null {
+  return sessionFromAppOverview((Router as any).MainRunningApp);
+}
+
+function getGameSteamAppID(game: GameStatus): string | null {
+  const steamID = game.steam_id;
+  if (steamID === undefined || steamID === null || steamID === "") {
+    return null;
+  }
+  return String(steamID);
+}
+
+function findGameForRunningSession(
+  currentGames: GameStatus[],
+  session: RunningSession
+): GameStatus | null {
+  const appIDMatch = currentGames.find((game) => {
+    const gameAppID = getGameSteamAppID(game);
+    return gameAppID === session.appID;
+  });
+  if (appIDMatch) {
+    return appIDMatch;
+  }
+
+  return currentGames.find((game) => normalize(game.name) === normalize(session.name)) ?? null;
+}
+
+function findScrollableParent(element: HTMLElement | null): HTMLElement | null {
+  let current = element?.parentElement ?? null;
+  while (current) {
+    const style = window.getComputedStyle(current);
+    if (
+      ["auto", "scroll", "overlay"].includes(style.overflowY) &&
+      current.scrollHeight > current.clientHeight
+    ) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
+
+function resetQuickAccessScroll(container: HTMLElement | null) {
+  window.requestAnimationFrame(() => {
+    const scrollable = findScrollableParent(container);
+    if (scrollable) {
+      scrollable.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    }
+    if (container) {
+      container.scrollIntoView({ block: "start" });
+    }
+  });
+}
 
 const log = (level: "info" | "debug" | "warning" | "error", message: string, operation?: string, gameName?: string) => {
   const prefix = `SDH-ludusavi${operation ? `:${operation}` : ""}${gameName ? ` [${gameName}]` : ""}`;
@@ -934,6 +999,10 @@ let globalVersions: Versions | null = null;
 let globalLudusaviCommand: LudusaviLaunchCommand | null = null;
 
 function Content() {
+  const isQuickAccessVisible = useQuickAccessVisible();
+  const qamContentRef = useRef<HTMLDivElement | null>(null);
+  const wasQuickAccessVisible = useRef(false);
+  const pendingCurrentGameSelection = useRef(false);
   const [settings, setSettings] = useState<Settings>(globalSettings ?? defaultSettings());
   const [games, setGames] = useState<GameStatus[]>(globalGames ?? []);
   const [gameHistory, setGameHistory] = useState<Record<string, GameOperationHistory>>(globalGameHistory ?? {});
@@ -980,10 +1049,42 @@ function Content() {
   }, [gameHistory, selectedGame]);
   const isBusy = operation.is_running || busyLabel !== null || backgroundRefreshBusy;
 
+  function selectCurrentSteamGameIfAvailable(currentGames: GameStatus[]): boolean {
+    const runningSession = getMainRunningSession();
+    if (!runningSession) {
+      return false;
+    }
+
+    const runningGame = findGameForRunningSession(currentGames, runningSession);
+    if (!runningGame) {
+      return false;
+    }
+
+    setSelectedGame(runningGame.name);
+    return true;
+  }
+
   useEffect(() => {
     log("info", "Plugin mounted, starting initial load");
     void loadInitial();
   }, []);
+
+  useEffect(() => {
+    if (isQuickAccessVisible && !wasQuickAccessVisible.current) {
+      pendingCurrentGameSelection.current = true;
+      resetQuickAccessScroll(qamContentRef.current);
+    }
+    wasQuickAccessVisible.current = isQuickAccessVisible;
+  }, [isQuickAccessVisible]);
+
+  useEffect(() => {
+    if (!isQuickAccessVisible || !pendingCurrentGameSelection.current || games.length === 0) {
+      return;
+    }
+
+    selectCurrentSteamGameIfAvailable(games);
+    pendingCurrentGameSelection.current = false;
+  }, [games, isQuickAccessVisible]);
 
   const loadInitial = async () => {
     const isWarmed = globalSettings !== null && globalGames !== null;
@@ -1075,6 +1176,10 @@ function Content() {
     trackedNames = names;
     
     log("info", `Tracked ${trackedNames.size} game names/aliases`);
+
+    if (selectCurrentSteamGameIfAvailable(result.games)) {
+      return true;
+    }
 
     const target = preferredGame || selectedGame;
     if (target && result.games.some((game) => game.name === target)) {
@@ -1226,7 +1331,7 @@ function Content() {
   };
 
   return (
-    <>
+    <div ref={qamContentRef}>
       <style>{qamPanelStyles}</style>
       <PanelSection title="GLOBAL">
         <FullWidthToggle>
@@ -1409,7 +1514,7 @@ function Content() {
           </Field>
         </PanelSectionRow>
       </PanelSection>
-    </>
+    </div>
   );
 };
 
@@ -1699,19 +1804,6 @@ export default definePlugin(() => {
     if (checkResult.status === "failed") {
       notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
     }
-  };
-
-  const sessionFromAppOverview = (app: any): RunningSession | null => {
-    const appID = app?.appid ? String(app.appid) : null;
-    const name = app?.display_name || null;
-    if (!appID || !name) {
-      return null;
-    }
-    return { appID, name };
-  };
-
-  const getMainRunningSession = (): RunningSession | null => {
-    return sessionFromAppOverview((Router as any).MainRunningApp);
   };
 
   const findRunningSessionByAppID = (appID: string): RunningSession | null => {

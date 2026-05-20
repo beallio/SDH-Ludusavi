@@ -137,6 +137,11 @@ def test_frontend_uses_browserview_only_autosync_status_strip() -> None:
         "function clearAutoSyncStatusHideTimeout()",
         "autoSyncStatusHideTimeoutID",
         "window.clearTimeout(autoSyncStatusHideTimeoutID);",
+        "onDismount()",
+        "unregisterLifecycleNotifications();",
+        "window.clearInterval(fallbackIntervalID);",
+        "activeSessions.clear();",
+        "destroyAutoSyncStatusBrowserView();",
     ]:
         assert required_text in source
 
@@ -362,7 +367,9 @@ def test_frontend_lifecycle_publishes_actions_only_after_needed_checks() -> None
         source.index("const handleAppStart = async") : source.index("const handleAppExit = async")
     ]
     exit_source = source[
-        source.index("const handleAppExit = async") : source.index("const sessionFromAppOverview")
+        source.index("const handleAppExit = async") : source.index(
+            "const findRunningSessionByAppID"
+        )
     ]
 
     assert start_source.index('publishAutoSyncStatus("checking", {') < start_source.index(
@@ -736,3 +743,67 @@ def test_frontend_syncs_warmed_settings_cache_when_refresh_defaults_selected_gam
     assert "selected_game: nextSelectedGame" in source
     assert "syncSelectedGameCache(target);" in source
     assert "syncSelectedGameCache(firstGame);" in source
+
+
+def test_frontend_resets_qam_scroll_when_quick_access_opens() -> None:
+    source = FRONTEND.read_text()
+
+    assert "useQuickAccessVisible" in source
+    assert "const isQuickAccessVisible = useQuickAccessVisible();" in source
+    assert "const qamContentRef = useRef<HTMLDivElement | null>(null);" in source
+    assert "const wasQuickAccessVisible = useRef(false);" in source
+    assert "function resetQuickAccessScroll(" in source
+    assert "findScrollableParent(" in source
+    assert "window.requestAnimationFrame(() => {" in source
+    assert 'scrollable.scrollTo({ top: 0, left: 0, behavior: "auto" });' in source
+    assert 'container.scrollIntoView({ block: "start" });' in source
+    assert "isQuickAccessVisible && !wasQuickAccessVisible.current" in source
+    assert "ref={qamContentRef}" in source
+
+
+def test_frontend_preserves_always_render_for_lifecycle_and_status_surface() -> None:
+    source = FRONTEND.read_text()
+
+    plugin_return = source[source.index('return {\n    name: "SDH-ludusavi"') :]
+    assert "alwaysRender: true" in plugin_return
+    assert "onDismount()" in plugin_return
+    for required_text in [
+        "unregisterLifecycleNotifications();",
+        "window.clearInterval(fallbackIntervalID);",
+        "activeSessions.clear();",
+        "clearAutoSyncStatusHideTimeout();",
+        "destroyAutoSyncStatusBrowserView();",
+    ]:
+        assert required_text in plugin_return
+
+
+def test_frontend_prefers_main_running_app_for_qam_game_selection() -> None:
+    source = FRONTEND.read_text()
+
+    assert "function getMainRunningSession(): RunningSession | null" in source
+    assert "return sessionFromAppOverview((Router as any).MainRunningApp);" in source
+    assert "function getGameSteamAppID(game: GameStatus): string | null" in source
+    assert "function findGameForRunningSession(" in source
+    assert "gameAppID === session.appID" in source
+    assert "normalize(game.name) === normalize(session.name)" in source
+    assert "function selectCurrentSteamGameIfAvailable(" in source
+    assert "const runningGame = findGameForRunningSession(currentGames, runningSession);" in source
+    assert "setSelectedGame(runningGame.name);" in source
+
+
+def test_frontend_applies_current_game_before_saved_selected_game() -> None:
+    source = FRONTEND.read_text()
+
+    apply_refresh = source[
+        source.index("const applyRefreshResult =") : source.index("const refreshGames =")
+    ]
+    assert "if (selectCurrentSteamGameIfAvailable(result.games)) {" in apply_refresh
+    assert "const target = preferredGame || selectedGame;" in apply_refresh
+    assert apply_refresh.index(
+        "selectCurrentSteamGameIfAvailable(result.games)"
+    ) < apply_refresh.index("const target = preferredGame || selectedGame;")
+    assert "const pendingCurrentGameSelection = useRef(false);" in source
+    assert "pendingCurrentGameSelection.current = true;" in source
+    assert "pendingCurrentGameSelection.current = false;" in source
+    assert "void onGameChange(data)" in source
+    assert "const result = await setSelectedGameCall(value);" in source

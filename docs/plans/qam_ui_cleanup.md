@@ -39,6 +39,19 @@ Follow-up visual refinements:
   `@decky/ui` `ToggleField` type does not expose `className` or `style` props.
 - Use scoped CSS to expand the toggle focus background to the QAM panel edges.
 
+Open-state and current-game refinements:
+
+- Keep `alwaysRender: true`; the plugin relies on preserved frontend state for
+  app lifetime notifications, fallback polling, active session tracking, and the
+  BrowserView autosync status surface.
+- Reset the QAM scroll position when Decky's quick access panel becomes visible,
+  using `useQuickAccessVisible()` instead of remounting the plugin content.
+- Prefer the current SteamOS running game from `Router.MainRunningApp` when it
+  matches a Ludusavi dropdown game by Steam app id, then by display name. This
+  follows the standard current-game pattern found in other Decky plugins.
+- Do not implement ambient Home/Library tile detection in this pass; researched
+  plugins either use `Router.MainRunningApp` or explicit context-menu routing.
+
 ## Dependency Requirements
 
 No dependency changes are required. The implementation uses existing Decky UI exports, including `Field`, `ToggleField`, and existing button/dropdown components.
@@ -56,6 +69,12 @@ Follow red-green-refactor:
 - Assert toggles are wrapped in the full-width focus container and scoped CSS.
 - Assert version rows are ordered as `SDH-ludusavi`, `Ludusavi`, `pyludusavi`, `Decky`.
 - Assert `titleView` no longer uses `staticClasses.Title`.
+- Assert `useQuickAccessVisible()` drives a visibility-transition scroll reset.
+- Assert `alwaysRender: true` remains present and `onDismount` retains lifecycle
+  and BrowserView cleanup.
+- Assert `Router.MainRunningApp` is used to select a matching dropdown game ahead
+  of the saved `selected_game`, while manual dropdown changes still persist via
+  `setSelectedGameCall`.
 
 Final validation uses:
 
