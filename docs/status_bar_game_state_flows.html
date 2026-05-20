@@ -323,8 +323,8 @@
           <div class="branch-grid" aria-label="Launch check outcomes">
             <div class="branch action">
               <strong>Backup is newer</strong>
-              <p>Call <code>restore_game_on_start</code>, then show download action copy.</p>
-              <div class="strip">DOWNLOADING SAVE...</div>
+              <p>Call <code>restore_game_on_start</code>, then show backup restore action copy.</p>
+              <div class="strip">RESTORING BACKUP SAVE</div>
             </div>
 
             <div class="branch ok">
@@ -340,9 +340,9 @@
             </div>
 
             <div class="branch error">
-              <strong>Unsafe or failed check</strong>
-              <p><code>ambiguous_recency</code> and <code>game_error</code> prevent sync.</p>
-              <div class="strip error-strip">UNABLE TO SYNC</div>
+              <strong>Ambiguous recency</strong>
+              <p><code>ambiguous_recency</code> asks the user to choose a save source.</p>
+              <div class="strip error-strip">SAVE CONFLICT</div>
             </div>
           </div>
         </div>
@@ -374,8 +374,8 @@
           <div class="branch-grid" aria-label="Exit check outcomes">
             <div class="branch action">
               <strong>Local save changed</strong>
-              <p>Call <code>backup_game_on_exit</code>, then show upload action copy.</p>
-              <div class="strip">UPLOADING SAVE...</div>
+              <p>Call <code>backup_game_on_exit</code>, then show backup action copy.</p>
+              <div class="strip">BACKING UP LOCAL SAVE</div>
             </div>
 
             <div class="branch ok">
@@ -415,13 +415,18 @@
         <tbody>
           <tr>
             <td><code>needed</code> + <code>restore</code></td>
-            <td><code>DOWNLOADING SAVE...</code></td>
+            <td><code>RESTORING BACKUP SAVE</code></td>
             <td>The backup is newer and will be applied locally before launch.</td>
           </tr>
           <tr>
             <td><code>needed</code> + <code>backup</code></td>
-            <td><code>UPLOADING SAVE...</code></td>
+            <td><code>BACKING UP LOCAL SAVE</code></td>
             <td>Local save changes will be written to the backup target after exit.</td>
+          </tr>
+          <tr>
+            <td><code>ambiguous_recency</code></td>
+            <td><code>SAVE CONFLICT</code></td>
+            <td>The plugin needs a user decision before moving save data.</td>
           </tr>
           <tr>
             <td><code>restored</code>, <code>backed_up</code>, <code>local_current</code></td>
@@ -434,7 +439,7 @@
             <td>The plugin cannot prove a synchronized save state.</td>
           </tr>
           <tr>
-            <td><code>ambiguous_recency</code>, <code>game_error</code>, <code>preview_failed</code></td>
+            <td><code>game_error</code>, <code>preview_failed</code></td>
             <td><code>UNABLE TO SYNC</code></td>
             <td>The check is unsafe or failed, so the plugin avoids save movement.</td>
           </tr>

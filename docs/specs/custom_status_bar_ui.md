@@ -88,8 +88,10 @@ Manual force backup and force restore keep their existing notification behavior.
 Autosync status strip behavior:
 
 - Before launch and exit checks: show `VERIFYING GAME SAVE`.
-- Restore needed after launch check: show `DOWNLOADING SAVE...`.
-- Backup needed after exit check: show `UPLOADING SAVE...`.
+- Restore needed after launch check: show `RESTORING BACKUP SAVE`.
+- Backup needed after exit check: show `BACKING UP LOCAL SAVE`.
+- Ambiguous launch recency: show `SAVE CONFLICT` while the user chooses between
+  keeping the local save and restoring the Ludusavi backup save.
 - Successful autosync result or current save state: show `GAME SAVE UP TO DATE` for
   2 seconds.
 - Unknown/non-actionable save state: show `UNKNOWN` for 2 seconds.

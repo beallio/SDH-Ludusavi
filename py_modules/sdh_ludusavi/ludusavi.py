@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 import logging
 import os
 from pathlib import Path
@@ -125,6 +126,43 @@ class PyludusaviAdapter:
 
         return "ambiguous"
 
+    def get_conflict_metadata(self, game_name: str) -> dict[str, object]:
+        metadata: dict[str, object] = {}
+        try:
+            backups_data = self._client.backups_list(games=[game_name]).data.get("games", {})
+            game_backups = backups_data.get(game_name, {})
+            backups = game_backups.get("backups") or []
+            if backups:
+                latest_backup = backups[0]
+                if isinstance(latest_backup, dict):
+                    metadata["backupModifiedAt"] = latest_backup.get("when")
+            backup_path = game_backups.get("backupPath")
+            if backup_path:
+                metadata["backupPath"] = backup_path
+        except Exception:
+            pass
+
+        try:
+            preview = self._client.backup(games=[game_name], preview=True, force=True).data
+            files = preview.get("games", {}).get(game_name, {}).get("files", {})
+            mtimes = []
+            if isinstance(files, dict):
+                for file_data in files.values():
+                    if not isinstance(file_data, dict):
+                        continue
+                    raw_path = file_data.get("redirectedPath") or file_data.get("originalPath")
+                    if not raw_path:
+                        continue
+                    try:
+                        mtimes.append(Path(str(raw_path)).stat().st_mtime)
+                    except OSError:
+                        continue
+            if mtimes:
+                metadata["localModifiedAt"] = datetime.fromtimestamp(max(mtimes)).isoformat()
+        except Exception:
+            pass
+        return metadata
+
     def backup(self, game_name: str, preview: bool = False) -> dict[str, object]:
         return cast(
             dict[str, object],
@@ -146,6 +184,35 @@ class PyludusaviAdapter:
         return {
             "ludusavi": ludusavi,
             "pyludusavi": pyludusavi_version,
+        }
+
+    def get_diagnostics(self) -> dict[str, object]:
+        command_prefix = list(getattr(self._client, "command_prefix", []))
+        command_type = "unknown"
+        command_path = "unknown"
+        if command_prefix[:2] == ["flatpak", "run"]:
+            command_type = "flatpak"
+            command_path = command_prefix[2] if len(command_prefix) > 2 else "unknown"
+        elif command_prefix:
+            command_type = "bin"
+            command_path = command_prefix[0]
+
+        version = self.get_versions().get("ludusavi", "unknown")
+        config_path = self._client.config_path()
+        backup_path = "unknown"
+        try:
+            backup_config = self._client.config_show().data.get("backup", {})
+            if isinstance(backup_config, dict):
+                backup_path = str(backup_config.get("path") or "unknown")
+        except Exception:
+            pass
+
+        return {
+            "version": version,
+            "type": command_type,
+            "path": command_path,
+            "configPath": config_path,
+            "backupPath": backup_path,
         }
 
     def get_log_contents(self) -> str:

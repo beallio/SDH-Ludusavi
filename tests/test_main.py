@@ -195,6 +195,12 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
             calls.append(("backup_exit", game_name, app_id))
             return {"status": "backed_up", "game": game_name}
 
+        def resolve_game_start_conflict(
+            self, game_name: str, app_id: str | None, resolution: str
+        ) -> dict[str, object]:
+            calls.append((f"resolve_{resolution}", game_name, app_id))
+            return {"status": "restored", "game": game_name}
+
     monkeypatch.setattr(module, "SDHLudusaviService", CapturingService)
 
     async def scenario() -> None:
@@ -216,6 +222,10 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
             "status": "backed_up",
             "game": "Hades",
         }
+        assert await plugin.resolve_game_start_conflict("Hades", "1145360", "restore_backup") == {
+            "status": "restored",
+            "game": "Hades",
+        }
 
     asyncio.run(scenario())
 
@@ -224,7 +234,40 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
         ("restore_start", "Hades", "1145360"),
         ("check_exit", "Hades", "1145360"),
         ("backup_exit", "Hades", "1145360"),
+        ("resolve_restore_backup", "Hades", "1145360"),
     ]
+
+
+def test_plugin_exposes_process_pause_resume_rpcs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decky, _logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+    calls: list[tuple[str, int]] = []
+
+    class CapturingService:
+        def __init__(self, state_path: Path) -> None:
+            self.state_path = state_path
+
+        def pause_game_process(self, pid: int) -> dict[str, object]:
+            calls.append(("pause", pid))
+            return {"status": "paused", "pid": pid}
+
+        def resume_game_process(self, pid: int) -> dict[str, object]:
+            calls.append(("resume", pid))
+            return {"status": "resumed", "pid": pid}
+
+    monkeypatch.setattr(module, "SDHLudusaviService", CapturingService)
+
+    async def scenario() -> None:
+        assert await plugin.pause_game_process(1234) == {"status": "paused", "pid": 1234}
+        assert await plugin.resume_game_process(1234) == {"status": "resumed", "pid": 1234}
+
+    asyncio.run(scenario())
+
+    assert calls == [("pause", 1234), ("resume", 1234)]
 
 
 def test_service_uses_decky_settings_dir_when_present(

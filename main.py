@@ -73,6 +73,16 @@ class Plugin:
             "get_ludusavi_command", lambda: self._service().get_ludusavi_command()
         )
 
+    async def pause_game_process(self, pid: int) -> dict[str, object]:
+        return await self._call(
+            "pause_game_process", lambda: self._service().pause_game_process(pid)
+        )
+
+    async def resume_game_process(self, pid: int) -> dict[str, object]:
+        return await self._call(
+            "resume_game_process", lambda: self._service().resume_game_process(pid)
+        )
+
     async def log(
         self,
         level: str,
@@ -114,6 +124,14 @@ class Plugin:
         return await self._call(
             "restore_game_on_start",
             lambda: self._service().restore_game_on_start(game_name, app_id),
+        )
+
+    async def resolve_game_start_conflict(
+        self, game_name: str, app_id: str | None = None, resolution: str = ""
+    ) -> dict[str, object]:
+        return await self._call(
+            "resolve_game_start_conflict",
+            lambda: self._service().resolve_game_start_conflict(game_name, app_id, resolution),
         )
 
     async def handle_game_exit(
@@ -161,6 +179,8 @@ class Plugin:
         self._service()
 
     async def _unload(self) -> None:
+        if self._backend is not None:
+            self._backend.resume_all_paused_processes()
         decky.logger.info("SDH-ludusavi backend unloaded")
 
     async def _uninstall(self) -> None:

@@ -10,9 +10,9 @@ game status, operation status, and recent operation logs.
 ## Features
 
 - **Automatic Sync:** Automates save lifecycle management:
-  - **On Game Start:** Automatically restores your save if the backup is newer than the local files (e.g., after playing on another device).
+  - **On Game Start:** Pauses the launched game process, restores your save if the Ludusavi backup is newer than the local files, and resumes the game afterward. If local and backup recency is ambiguous, the plugin asks whether to keep the local save or restore the backup save.
   - **On Game Exit:** Automatically performs a backup immediately after closing the game, including cloud synchronization if Ludusavi/rclone is configured.
-  - **Safety First:** Skips operations if results are ambiguous or if another operation is already running to prevent data corruption.
+  - **Safety First:** Skips operations if another operation is already running and always resumes any paused launch process after a start-sync decision.
 - **Unified Logging:** Frontend and backend logs are consolidated into the Decky Loader system log and accessible via a "View Logs" modal with timestamps and chronological ordering.
 - **Persistent Settings:** Remembers your selected game and sync preferences across plugin reloads.
 - **Autosync Status Strip:** Shows compact SteamOS-style backup and restore progress at
@@ -24,7 +24,7 @@ game status, operation status, and recent operation logs.
 - **Manual Overrides:** Refresh Games, Force Backup, and Force Restore actions are always available, even when Automatic Sync is disabled.
 - **Shortcut Artwork:** The plugin-managed Ludusavi launcher shortcut uses bundled local
   capsule, hero, and logo artwork and does not fetch SteamGridDB assets at runtime.
-- **Version Display:** SDH-ludusavi and Ludusavi version information.
+- **Version Display:** SDH-ludusavi, Decky, Ludusavi, and pyludusavi version information.
 
 ## Requirements
 
@@ -157,7 +157,8 @@ Skip reasons:
 - `unmatched_game`: The provided game name did not confidently match a Ludusavi game name.
 - `no_backup`: Restore was requested or considered, but Ludusavi has no backup for that game.
 - `local_current`: On game start, Ludusavi data indicated the local save is already current.
-- `ambiguous_recency`: On game start, the plugin could not prove that the backup is newer than the local save, so it skipped automatic restore.
+- `ambiguous_recency`: On game start, the plugin could not prove that the backup is newer than the local save. The launch-gated flow shows a conflict modal with `Keep Local Save` and `Restore Backup Save`.
+- `conflict_unresolved`: The user dismissed the conflict modal, so no save data was moved.
 
 Durable History entries:
 

@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import re
+import signal
+import subprocess
 import threading
 from datetime import datetime
 from collections.abc import Callable
@@ -92,6 +94,8 @@ class LudusaviAdapter(Protocol):
 
     def compare_recency(self, game_name: str) -> str: ...
 
+    def get_conflict_metadata(self, game_name: str) -> dict[str, object]: ...
+
     def backup(self, game_name: str, preview: bool = False) -> dict[str, object]: ...
 
     def restore(self, game_name: str, preview: bool = False) -> dict[str, object]: ...
@@ -101,6 +105,8 @@ class LudusaviAdapter(Protocol):
     def get_log_contents(self) -> str: ...
 
     def get_config_mtime_ns(self) -> int | None: ...
+
+    def get_diagnostics(self) -> dict[str, object]: ...
 
 
 @dataclass
@@ -194,7 +200,10 @@ class SDHLudusaviService:
         self._game_history: dict[str, dict[str, Any]] = {}
         self._operation = OperationState()
         self._operation_lock = threading.Lock()
+        self._paused_pids: set[int] = set()
+        self._paused_pids_lock = threading.Lock()
         self._logs: deque[LogEntry] = deque(maxlen=log_limit)
+        self._diagnostics_logged = False
         self._setup_logging()
         self._load_state()
         self.log("info", "SDH-ludusavi service initialized", "init")
@@ -218,6 +227,38 @@ class SDHLudusaviService:
             if key in _allowed_env_keys
         }
         self.log("debug", f"Environment summary: {_filtered_env}", "init")
+
+    def pause_game_process(self, pid: int) -> dict[str, object]:
+        """Suspend a launched game process tree while start sync runs."""
+        pid = int(pid)
+        if not _send_signal_tree(pid, signal.SIGSTOP):
+            self.log(
+                "warning", f"Unable to pause game process tree rooted at PID {pid}", "launch_gate"
+            )
+            return {"status": "failed", "pid": pid, "message": "Unable to pause game process"}
+        with self._paused_pids_lock:
+            self._paused_pids.add(pid)
+        self.log("info", f"Paused game process tree rooted at PID {pid}", "launch_gate")
+        return {"status": "paused", "pid": pid}
+
+    def resume_game_process(self, pid: int) -> dict[str, object]:
+        """Resume a previously suspended game process tree."""
+        pid = int(pid)
+        _send_signal_tree(pid, signal.SIGCONT)
+        with self._paused_pids_lock:
+            self._paused_pids.discard(pid)
+        self.log("info", f"Resumed game process tree rooted at PID {pid}", "launch_gate")
+        return {"status": "resumed", "pid": pid}
+
+    def resume_all_paused_processes(self) -> None:
+        """Best-effort cleanup for plugin unload or launch-gate failures."""
+        with self._paused_pids_lock:
+            paused_pids = sorted(self._paused_pids)
+        for pid in paused_pids:
+            try:
+                self.resume_game_process(pid)
+            except Exception as exc:
+                self.log("warning", f"Unable to resume paused PID {pid}: {exc}", "launch_gate")
 
     def _setup_logging(self) -> None:
         """Configure the standard logging library to route through our handler."""
@@ -563,7 +604,78 @@ class SDHLudusaviService:
             return {"status": "needed", "operation": "restore", "game": game.name}
         if recency == "local_current":
             return self._skip("start", game.name, "local_current")
-        return self._skip("start", game.name, "ambiguous_recency")
+        metadata = self._conflict_metadata(game.name)
+        self._record_history(
+            game.name, "start", "auto_start", "skipped", reason="ambiguous_recency"
+        )
+        return {
+            "status": "conflict",
+            "operation": "restore",
+            "game": game.name,
+            "reason": "ambiguous_recency",
+            "localLabel": "Keep Local Save",
+            "backupLabel": "Restore Backup Save",
+            **metadata,
+        }
+
+    def resolve_game_start_conflict(
+        self, game_name: str, app_id: str | None, resolution: str
+    ) -> dict[str, object]:
+        """Apply the user's choice for an ambiguous launch recency conflict."""
+        if resolution not in ("keep_local", "restore_backup"):
+            return self._skip("start", self._sanitize_name(game_name), "invalid_resolution")
+        if not self._auto_sync_enabled:
+            self.log("info", "Skipping: auto_sync_enabled is False", "start", game_name)
+            return self._skip("start", game_name, "auto_sync_disabled")
+
+        game_name = self._sanitize_name(game_name)
+        game = self._match_game(game_name, app_id=app_id)
+        if game is None:
+            return self._skip("start", game_name, "unmatched_game")
+        if game.error:
+            return self._skip("start", game.name, "game_error")
+
+        if resolution == "keep_local":
+            try:
+                result = self._run_locked(
+                    "backup", game.name, lambda: self._ludusavi().backup(game.name)
+                )
+                self._record_history(game.name, "backup", "auto_start", "backed_up")
+            except Exception as exc:
+                self._record_history(game.name, "backup", "auto_start", "failed", message=str(exc))
+                raise
+            self.log("info", f"Kept local save for {game.name}", "backup", game.name)
+            return {"status": "backed_up", "game": game.name, "result": result}
+
+        if not game.has_backup:
+            return self._skip("start", game.name, "no_backup")
+        try:
+            result = self._run_locked(
+                "restore", game.name, lambda: self._ludusavi().restore(game.name)
+            )
+            self._record_history(game.name, "restore", "auto_start", "restored")
+        except Exception as exc:
+            self._record_history(game.name, "restore", "auto_start", "failed", message=str(exc))
+            raise
+        self.log("info", f"Restored backup save for {game.name}", "restore", game.name)
+        return {"status": "restored", "game": game.name, "result": result}
+
+    def _conflict_metadata(self, game_name: str) -> dict[str, object]:
+        try:
+            metadata = self._ludusavi().get_conflict_metadata(game_name)
+        except Exception as exc:
+            self.log(
+                "debug",
+                f"Unable to collect conflict metadata for {game_name}: {exc}",
+                "start",
+                game_name,
+            )
+            metadata = {}
+        return {
+            "localModifiedAt": metadata.get("localModifiedAt"),
+            "backupModifiedAt": metadata.get("backupModifiedAt"),
+            "backupPath": metadata.get("backupPath"),
+        }
 
     def restore_game_on_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """
@@ -832,6 +944,7 @@ class SDHLudusaviService:
         self.log("debug", "Fetching version list", "versions")
         versions = dict(self._run_locked("versions", None, lambda: self._ludusavi().get_versions()))
         versions["sdh_ludusavi"] = resolve_version()
+        versions["decky"] = _decky_version()
 
         # Ensure pyludusavi is in the version map if not already provided by adapter
         if "pyludusavi" not in versions:
@@ -1169,7 +1282,30 @@ class SDHLudusaviService:
             with self._adapter_lock:
                 if self._adapter is None:
                     self._adapter = self._adapter_factory()
+                    self._log_ludusavi_diagnostics(self._adapter)
+        if not self._diagnostics_logged:
+            self._log_ludusavi_diagnostics(self._adapter)
         return self._adapter
+
+    def _log_ludusavi_diagnostics(self, adapter: LudusaviAdapter) -> None:
+        if self._diagnostics_logged:
+            return
+        self._diagnostics_logged = True
+        try:
+            diagnostics = adapter.get_diagnostics()
+        except Exception as exc:
+            self.log("debug", f"Ludusavi diagnostics unavailable: {exc}", "init")
+            return
+
+        version = diagnostics.get("version", "unknown")
+        ludusavi_type = diagnostics.get("type", "unknown")
+        path = diagnostics.get("path", "unknown")
+        config_path = diagnostics.get("configPath", "unknown")
+        backup_path = diagnostics.get("backupPath", "unknown")
+        self.log("info", f"Ludusavi version: {version}", "init")
+        self.log("info", f"Ludusavi type/path: {ludusavi_type} {path}", "init")
+        self.log("info", f"Ludusavi config path: {config_path}", "init")
+        self.log("info", f"Ludusavi backup path: {backup_path}", "init")
 
     def _current_ludusavi_config_mtime_ns(self) -> int | None | object:
         try:
@@ -1187,6 +1323,43 @@ def _normalize(game_name: str) -> str:
     """Normalize a game name for easier matching."""
     # Retain dots and hyphens for better precision in non-steam titles
     return re.sub(r"[^a-z0-9.-]+", " ", game_name.casefold()).strip()
+
+
+def _child_pids(pid: int) -> list[int]:
+    try:
+        with subprocess.Popen(
+            ["ps", "--ppid", str(pid), "-o", "pid="],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ) as process:
+            stdout, _ = process.communicate(timeout=2)
+    except Exception:
+        return []
+    return [int(line.strip()) for line in stdout.splitlines() if line.strip().isdigit()]
+
+
+def _send_signal_tree(pid: int, sig: signal.Signals) -> bool:
+    sent = False
+    try:
+        os.kill(pid, sig)
+        sent = True
+    except OSError:
+        return False
+    for child_pid in _child_pids(pid):
+        _send_signal_tree(child_pid, sig)
+    return sent
+
+
+def _decky_version() -> str:
+    env_version = os.environ.get("DECKY_VERSION")
+    if env_version:
+        return env_version
+    try:
+        import decky
+    except ImportError:
+        return "unknown"
+    return str(getattr(decky, "__version__", "unknown"))
 
 
 def _normalize_installed_app_ids(raw: str | None) -> str | None:

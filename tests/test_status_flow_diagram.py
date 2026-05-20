@@ -2,6 +2,7 @@ from pathlib import Path
 
 
 DIAGRAM = Path("docs/status_bar_game_state_flows.html")
+CONFLICT_DIAGRAM = Path("docs/plans/cloud_sync_conflict_resolution_flow.html")
 
 
 def test_status_bar_game_state_flow_diagram_documents_lifecycle_paths() -> None:
@@ -18,8 +19,9 @@ def test_status_bar_game_state_flow_diagram_documents_lifecycle_paths() -> None:
         "check_game_exit",
         "backup_game_on_exit",
         "VERIFYING GAME SAVE",
-        "DOWNLOADING SAVE...",
-        "UPLOADING SAVE...",
+        "RESTORING BACKUP SAVE",
+        "BACKING UP LOCAL SAVE",
+        "SAVE CONFLICT",
         "GAME SAVE UP TO DATE",
         "UNKNOWN",
         "UNABLE TO SYNC",
@@ -38,6 +40,39 @@ def test_status_bar_game_state_flow_diagram_documents_lifecycle_paths() -> None:
 
 def test_status_bar_game_state_flow_diagram_is_standalone_html() -> None:
     source = DIAGRAM.read_text(encoding="utf-8")
+
+    assert source.startswith("<!doctype html>")
+    assert "<style>" in source
+    assert "</html>" in source
+    assert "http://" not in source
+    assert "https://" not in source
+
+
+def test_backup_conflict_resolution_flow_diagram_documents_launch_gate() -> None:
+    source = CONFLICT_DIAGRAM.read_text(encoding="utf-8")
+
+    for required_text in [
+        "Launch-Gated Backup Conflict Resolution",
+        "App lifetime start",
+        "SIGSTOP",
+        "check_game_start",
+        "ambiguous_recency",
+        "Conflict Detected",
+        "Keep Local Save",
+        "Restore Backup Save",
+        "resolve_game_start_conflict",
+        "SIGCONT",
+        "backupModifiedAt",
+        "Ludusavi backup path",
+    ]:
+        assert required_text in source
+
+    assert "Download Cloud Save" not in source
+    assert "Cloud Save" not in source
+
+
+def test_backup_conflict_resolution_flow_diagram_is_standalone_html() -> None:
+    source = CONFLICT_DIAGRAM.read_text(encoding="utf-8")
 
     assert source.startswith("<!doctype html>")
     assert "<style>" in source

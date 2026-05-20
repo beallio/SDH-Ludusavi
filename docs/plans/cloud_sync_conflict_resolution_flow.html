@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Launch-Gated Backup Conflict Resolution</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101820;
+      --panel: #18232e;
+      --line: #6ea8fe;
+      --text: #eef4f8;
+      --muted: #a9b8c5;
+      --ok: #55d68b;
+      --warn: #f3c969;
+      --bad: #f47c7c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, sans-serif;
+      line-height: 1.45;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+    h1, h2 { margin: 0 0 14px; }
+    section {
+      margin-top: 22px;
+      padding: 18px;
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+    }
+    .flow {
+      display: grid;
+      gap: 10px;
+      justify-items: center;
+    }
+    .node, .split span {
+      width: min(100%, 520px);
+      padding: 12px 14px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-left: 5px solid var(--line);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .node strong, .split strong { display: block; margin-bottom: 4px; }
+    .node p, .split p { margin: 0; color: var(--muted); }
+    .warn { border-left-color: var(--warn); }
+    .ok { border-left-color: var(--ok); }
+    .bad { border-left-color: var(--bad); }
+    .arrow {
+      color: var(--line);
+      font-weight: 700;
+    }
+    .split {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .split span { width: 100%; }
+    code {
+      color: #d6e8ff;
+      background: rgba(255, 255, 255, 0.08);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    @media (max-width: 760px) {
+      main { padding: 16px; }
+      .split { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Launch-Gated Backup Conflict Resolution</h1>
+    <p>
+      This chart documents the game-start path that pauses the game process,
+      resolves Ludusavi backup recency, and resumes the game in every outcome.
+    </p>
+
+    <section aria-labelledby="startup-gate">
+      <h2 id="startup-gate">Startup Gate</h2>
+      <div class="flow">
+        <div class="node"><strong>App lifetime start</strong><p>Steam reports a game start with app ID and process instance.</p></div>
+        <div class="arrow">&darr;</div>
+        <div class="node warn"><strong>SIGSTOP</strong><p>Pause the game process tree before checking save state.</p></div>
+        <div class="arrow">&darr;</div>
+        <div class="node"><strong><code>check_game_start</code></strong><p>Compare local save against the Ludusavi backup save.</p></div>
+        <div class="arrow">&darr;</div>
+        <div class="split">
+          <span><strong>Backup newer</strong><p>Run <code>restore_game_on_start</code>.</p></span>
+          <span><strong><code>ambiguous_recency</code></strong><p>Show <code>Conflict Detected</code>.</p></span>
+          <span><strong>No action</strong><p>Skip restore or report current save.</p></span>
+        </div>
+        <div class="arrow">&darr;</div>
+        <div class="node ok"><strong>SIGCONT</strong><p>Resume the process in a cleanup path.</p></div>
+      </div>
+    </section>
+
+    <section aria-labelledby="decision-tree">
+      <h2 id="decision-tree">Conflict Decision Tree</h2>
+      <div class="flow">
+        <div class="node bad"><strong>Conflict Detected</strong><p>Local save and Backup Save both appear changed.</p></div>
+        <div class="arrow">&darr;</div>
+        <div class="split">
+          <span><strong>Keep Local Save</strong><p><code>resolve_game_start_conflict</code> backs up the local save.</p></span>
+          <span><strong>Restore Backup Save</strong><p><code>resolve_game_start_conflict</code> restores the Ludusavi backup.</p></span>
+          <span><strong>Dismiss</strong><p>No save movement; resume the game.</p></span>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="metadata">
+      <h2 id="metadata">Displayed Metadata</h2>
+      <div class="flow">
+        <div class="node"><strong><code>localModifiedAt</code></strong><p>Latest local save timestamp when available.</p></div>
+        <div class="node"><strong><code>backupModifiedAt</code></strong><p>Latest Ludusavi backup timestamp when available.</p></div>
+        <div class="node"><strong>Ludusavi backup path</strong><p>Backup location path from Ludusavi configuration or backup listing.</p></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

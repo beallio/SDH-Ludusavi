@@ -125,7 +125,7 @@ def test_frontend_uses_browserview_only_autosync_status_strip() -> None:
     source = FRONTEND.read_text()
 
     for required_text in [
-        'type AutoSyncStatusKind = "checking" | "backing_up" | "restoring" | "has_backup" | "unknown" | "error";',
+        'type AutoSyncStatusKind = "checking" | "backing_up" | "restoring" | "conflict" | "has_backup" | "unknown" | "error";',
         "let currentAutoSyncStatusState: AutoSyncStatusState",
         "currentAutoSyncStatusState = {",
         "function hideAutoSyncStatus(",
@@ -288,7 +288,7 @@ def test_frontend_status_strip_logs_status_provenance() -> None:
         "gameName?: string;",
         "appID?: string;",
         "tracked?: boolean;",
-        'resultStatus?: OperationResult["status"] | RpcStatus["status"];',
+        'resultStatus?: OperationResult["status"] | LifecycleCheckResult["status"] | RpcStatus["status"];',
         "function logAutoSyncStatusChange(",
         "source=${state.source}",
         'game=${state.gameName ?? "unknown"}',
@@ -342,8 +342,9 @@ def test_frontend_status_strip_uses_steam_aligned_autosync_copy() -> None:
 
     for required_text in [
         'checking: "VERIFYING GAME SAVE"',
-        'restoring: "DOWNLOADING SAVE..."',
-        'backing_up: "UPLOADING SAVE..."',
+        'restoring: "RESTORING BACKUP SAVE"',
+        'backing_up: "BACKING UP LOCAL SAVE"',
+        'conflict: "SAVE CONFLICT"',
         'has_backup: "GAME SAVE UP TO DATE"',
         'error: "UNABLE TO SYNC"',
         'unknown: "UNKNOWN"',
@@ -385,6 +386,51 @@ def test_frontend_lifecycle_publishes_actions_only_after_needed_checks() -> None
     )
 
 
+def test_frontend_launch_gate_pauses_before_start_check_and_resumes_in_finally() -> None:
+    source = FRONTEND.read_text()
+    start_source = source[
+        source.index("const handleAppStart = async") : source.index("const handleAppExit = async")
+    ]
+
+    for required_text in [
+        'const pauseGameProcessCall = callable<[pid: number], RpcResult<ProcessSignalResult>>("pause_game_process");',
+        'const resumeGameProcessCall = callable<[pid: number], RpcResult<ProcessSignalResult>>("resume_game_process");',
+        "const handleAppStart = async (name: string, appID: string, instanceID?: number) => {",
+        "const pauseResult = await pauseGameProcessCall(instanceID);",
+        "const checkResult = await checkGameStartCall(name, appID);",
+        "} finally {",
+        "await resumeGameProcessCall(instanceID);",
+        "void handleAppStart(session.name, session.appID, notification.nInstanceID);",
+    ]:
+        assert required_text in source
+
+    assert start_source.index(
+        "const pauseResult = await pauseGameProcessCall(instanceID);"
+    ) < start_source.index("const checkResult = await checkGameStartCall(name, appID);")
+    assert start_source.index("} finally {") < start_source.index(
+        "await resumeGameProcessCall(instanceID);"
+    )
+
+
+def test_frontend_conflict_modal_uses_backup_save_copy_not_cloud_save() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        'type ConflictResolution = "keep_local" | "restore_backup";',
+        'const resolveGameStartConflictCall = callable<[gameName: string, app_id: string | undefined, resolution: ConflictResolution], RpcResult<OperationResult>>("resolve_game_start_conflict");',
+        "function showConflictResolutionModal",
+        'strTitle="Conflict Detected"',
+        "Keep Local Save",
+        "Restore Backup Save",
+        "backupModifiedAt",
+        'publishAutoSyncStatus("conflict", {',
+    ]:
+        assert required_text in source
+
+    assert "Download Cloud Save" not in source
+    assert "Cloud Save" not in source
+
+
 def test_frontend_has_no_status_strip_diagnostic_ui_or_modes() -> None:
     source = FRONTEND.read_text()
 
@@ -413,7 +459,7 @@ def test_frontend_uses_app_lifetime_notifications_for_lifecycle_detection() -> N
     assert "notification.nInstanceID" in source
     assert "notification.bRunning" in source
     assert "handleLifetimeNotification" in source
-    assert "void handleAppStart(session.name, session.appID);" in source
+    assert "void handleAppStart(session.name, session.appID, notification.nInstanceID);" in source
     assert "void handleAppExit(session.name, session.appID);" in source
 
 
@@ -454,7 +500,9 @@ def test_frontend_exposes_sdh_ludusavi_version_row() -> None:
     source = FRONTEND.read_text()
 
     assert "sdh_ludusavi?: string;" in source
+    assert "decky?: string;" in source
     assert '<div>SDH-ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>' in source
+    assert '<div>Decky: {versions.decky ?? "Unknown"}</div>' in source
     assert source.index("SDH-ludusavi:") < source.index("Ludusavi:")
 
 
@@ -524,6 +572,7 @@ def test_frontend_models_rpc_status_results_for_call_wrapped_methods() -> None:
     for required_text in [
         'const checkGameStartCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_start");',
         'const restoreGameOnStartCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("restore_game_on_start");',
+        'const resolveGameStartConflictCall = callable<[gameName: string, app_id: string | undefined, resolution: ConflictResolution], RpcResult<OperationResult>>("resolve_game_start_conflict");',
         'const checkGameExitCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_exit");',
         'const backupGameOnExitCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("backup_game_on_exit");',
     ]:

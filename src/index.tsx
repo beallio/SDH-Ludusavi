@@ -87,10 +87,24 @@ type OperationResult = {
   message?: string;
 };
 
+type ConflictResolution = "keep_local" | "restore_backup";
+
 type LifecycleCheckResult = {
-  status: "needed" | "skipped" | "failed";
+  status: "needed" | "conflict" | "skipped" | "failed";
   operation?: "backup" | "restore";
   game?: string;
+  reason?: string;
+  message?: string;
+  localModifiedAt?: string | null;
+  backupModifiedAt?: string | null;
+  backupPath?: string | null;
+  localLabel?: string;
+  backupLabel?: string;
+};
+
+type ProcessSignalResult = {
+  status: "paused" | "resumed" | "skipped" | "failed";
+  pid?: number;
   reason?: string;
   message?: string;
 };
@@ -114,7 +128,7 @@ type RpcStatus = {
 
 type RpcResult<T> = T | RpcStatus;
 
-type AutoSyncStatusKind = "checking" | "backing_up" | "restoring" | "has_backup" | "unknown" | "error";
+type AutoSyncStatusKind = "checking" | "backing_up" | "restoring" | "conflict" | "has_backup" | "unknown" | "error";
 
 type AutoSyncStatusSource = "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";
 
@@ -125,7 +139,7 @@ type AutoSyncStatusState = {
   gameName?: string;
   appID?: string;
   tracked?: boolean;
-  resultStatus?: OperationResult["status"] | RpcStatus["status"];
+  resultStatus?: OperationResult["status"] | LifecycleCheckResult["status"] | RpcStatus["status"];
 };
 
 type AutoSyncStatusBrowserView = {
@@ -146,6 +160,7 @@ type AutoSyncStatusBrowserViewOwner = AutoSyncStatusBrowserView & {
 
 type Versions = {
   sdh_ludusavi?: string;
+  decky?: string;
   ludusavi?: string;
   pyludusavi?: string;
   rclone?: string;
@@ -184,8 +199,11 @@ const getRecentLogs = callable<[], LogEntry[]>("get_recent_logs");
 const getLudusaviLogs = callable<[], RpcResult<string>>("get_ludusavi_logs");
 const logCall = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
 const getLudusaviCommandCall = callable<[], RpcResult<LudusaviLaunchCommand | null>>("get_ludusavi_command");
+const pauseGameProcessCall = callable<[pid: number], RpcResult<ProcessSignalResult>>("pause_game_process");
+const resumeGameProcessCall = callable<[pid: number], RpcResult<ProcessSignalResult>>("resume_game_process");
 const checkGameStartCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_start");
 const restoreGameOnStartCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("restore_game_on_start");
+const resolveGameStartConflictCall = callable<[gameName: string, app_id: string | undefined, resolution: ConflictResolution], RpcResult<OperationResult>>("resolve_game_start_conflict");
 const checkGameExitCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_exit");
 const backupGameOnExitCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("backup_game_on_exit");
 
@@ -273,8 +291,9 @@ function SpinnerButton({ children, loading, ...props }: any) {
 
 const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
   checking: "VERIFYING GAME SAVE",
-  backing_up: "UPLOADING SAVE...",
-  restoring: "DOWNLOADING SAVE...",
+  backing_up: "BACKING UP LOCAL SAVE",
+  restoring: "RESTORING BACKUP SAVE",
+  conflict: "SAVE CONFLICT",
   has_backup: "GAME SAVE UP TO DATE",
   unknown: "UNKNOWN",
   error: "UNABLE TO SYNC"
@@ -551,7 +570,7 @@ type AutoSyncStatusPublishOptions = {
   gameName?: string;
   appID?: string;
   tracked?: boolean;
-  resultStatus?: OperationResult["status"] | RpcStatus["status"];
+  resultStatus?: OperationResult["status"] | LifecycleCheckResult["status"] | RpcStatus["status"];
 };
 
 function logAutoSyncStatusChange(state: AutoSyncStatusState) {
@@ -639,6 +658,15 @@ function completeAutoSyncStatus(
     return;
   }
 
+  if (result.status === "conflict") {
+    publishAutoSyncStatus("conflict", {
+      ...options,
+      source: "rpc_result",
+      resultStatus: result.status
+    });
+    return;
+  }
+
   if (autoSyncStatusTimedOut) {
     return;
   }
@@ -704,6 +732,76 @@ function LogModal({ logs, closeModal }: LogModalProps) {
       </div>
     </ConfirmModal>
   );
+}
+
+type ConflictResolutionModalProps = {
+  conflict: LifecycleCheckResult;
+  onChoose: (resolution: ConflictResolution) => void;
+  onDismiss: () => void;
+  closeModal?: () => void;
+};
+
+function formatConflictTime(value?: string | null) {
+  return value || "Unknown time";
+}
+
+function ConflictResolutionModal({ conflict, onChoose, onDismiss, closeModal }: ConflictResolutionModalProps) {
+  const choose = (resolution: ConflictResolution) => {
+    closeModal?.();
+    onChoose(resolution);
+  };
+  const dismiss = () => {
+    closeModal?.();
+    onDismiss();
+  };
+  return (
+    <ConfirmModal
+      bAlertDialog={true}
+      strTitle="Conflict Detected"
+      onOK={() => choose("restore_backup")}
+      onCancel={dismiss}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "14px" }}>
+        <div>
+          Both your local save and backup save appear to have changed. Choose which version
+          should be used before the game continues loading.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+          <div>Keep Local Save: {formatConflictTime(conflict.localModifiedAt)}</div>
+          <div>Restore Backup Save: {formatConflictTime(conflict.backupModifiedAt)}</div>
+          {conflict.backupPath && <div>Backup path: {conflict.backupPath}</div>}
+        </div>
+        <ButtonItem layout="below" onClick={() => choose("keep_local")}>
+          Keep Local Save
+        </ButtonItem>
+        <ButtonItem layout="below" onClick={() => choose("restore_backup")}>
+          Restore Backup Save
+        </ButtonItem>
+      </div>
+    </ConfirmModal>
+  );
+}
+
+function showConflictResolutionModal(
+  conflict: LifecycleCheckResult
+): Promise<ConflictResolution | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (resolution: ConflictResolution | null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(resolution);
+    };
+    showModal(
+      <ConflictResolutionModal
+        conflict={conflict}
+        onChoose={(resolution) => settle(resolution)}
+        onDismiss={() => settle(null)}
+      />
+    );
+  });
 }
 
 function LudusaviLogModal({ logs, closeModal }: LudusaviLogModalProps) {
@@ -1222,6 +1320,7 @@ function Content() {
         <PanelSectionRow>
           <div style={{ color: "#cbd5e1", fontSize: "14px", display: "flex", flexDirection: "column", gap: "4px", padding: "12px", backgroundColor: "rgba(30, 41, 59, 0.3)", borderRadius: "4px" }}>
             <div>SDH-ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
+            <div>Decky: {versions.decky ?? "Unknown"}</div>
             <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
             <div>pyludusavi: {versions.pyludusavi ?? "Unknown"}</div>
           </div>
@@ -1232,6 +1331,9 @@ function Content() {
 };
 
 function summarizeOperationResult(result: OperationResult | LifecycleCheckResult, label: string) {
+  if (result.status === "conflict") {
+    return `Auto-sync needs a save conflict decision for ${result.game ?? "this game"}`;
+  }
   if (result.status === "skipped") {
     switch (result.reason) {
       case "auto_sync_disabled": return `Auto-sync skipped: feature disabled`;
@@ -1242,6 +1344,7 @@ function summarizeOperationResult(result: OperationResult | LifecycleCheckResult
 
       case "local_current": return `Auto-sync skipped: local save is already current`;
       case "ambiguous_recency": return `Auto-sync skipped: recency is ambiguous`;
+      case "conflict_unresolved": return `Auto-sync skipped: save conflict was not resolved`;
       default: return `${label} skipped: ${result.reason ?? "unknown reason"}`;
     }
   }
@@ -1361,9 +1464,10 @@ export default definePlugin(() => {
     return (globalSettings === null || autoSyncNotificationsEnabled) && (tracked || trackingCacheEmpty);
   }
 
-  const handleAppStart = async (name: string, appID: string) => {
+  const handleAppStart = async (name: string, appID: string, instanceID?: number) => {
     const tracked = isTracked(name, appID);
     log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
+    let paused = false;
     
     if (shouldPublishAutoSyncStatusBeforeRpc(tracked)) {
       publishAutoSyncStatus("checking", {
@@ -1373,45 +1477,93 @@ export default definePlugin(() => {
         tracked
       });
     }
-    
-    log("info", `Calling check_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-    const checkResult = await checkGameStartCall(name, appID);
-    log("info", `check_game_start result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
-    // Show result toast for all outcomes (restored, failed, or skipped)
-    // unless auto-sync is completely disabled, another operation is running,
-    // or the game simply isn't managed by Ludusavi (unmatched or ignored).
-    const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
-    if (checkResult.status === "skipped" && silentReasons.includes(checkResult.reason ?? "")) {
-      hideAutoSyncStatus({
-        source: "hide",
-        gameName: name,
-        appID,
-        tracked,
-        resultStatus: checkResult.status
-      });
-      return;
-    }
 
-    if (checkResult.status === "needed" && checkResult.operation === "restore") {
-      publishAutoSyncStatus("restoring", {
-        source: "lifecycle_start",
-        gameName: name,
-        appID,
-        tracked
-      });
-      log("info", `Calling restore_game_on_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-      const result = await restoreGameOnStartCall(name, appID);
-      log("info", `restore_game_on_start result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
-      completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-      if (result.status === "failed") {
-        notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+    try {
+      if (typeof instanceID === "number" && instanceID > 0) {
+        const pauseResult = await pauseGameProcessCall(instanceID);
+        if (!isRpcStatus(pauseResult) && pauseResult.status === "paused") {
+          paused = true;
+        }
       }
-      return;
-    }
 
-    completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
-    if (checkResult.status === "failed") {
-      notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
+      log("info", `Calling check_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
+      const checkResult = await checkGameStartCall(name, appID);
+      log("info", `check_game_start result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
+      // Show result toast for all outcomes (restored, failed, conflict, or skipped)
+      // unless auto-sync is completely disabled, another operation is running,
+      // or the game simply isn't managed by Ludusavi (unmatched or ignored).
+      const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
+      if (checkResult.status === "skipped" && silentReasons.includes(checkResult.reason ?? "")) {
+        hideAutoSyncStatus({
+          source: "hide",
+          gameName: name,
+          appID,
+          tracked,
+          resultStatus: checkResult.status
+        });
+        return;
+      }
+
+      if (checkResult.status === "needed" && checkResult.operation === "restore") {
+        if (!paused) {
+          const result: OperationResult = {
+            status: "failed",
+            game: name,
+            message: "Launch gate unavailable; restore skipped while game is loading."
+          };
+          completeAutoSyncStatus(result, { gameName: name, appID, tracked });
+          notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+          return;
+        }
+        publishAutoSyncStatus("restoring", {
+          source: "lifecycle_start",
+          gameName: name,
+          appID,
+          tracked
+        });
+        log("info", `Calling restore_game_on_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
+        const result = await restoreGameOnStartCall(name, appID);
+        log("info", `restore_game_on_start result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
+        completeAutoSyncStatus(result, { gameName: name, appID, tracked });
+        if (result.status === "failed") {
+          notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+        }
+        return;
+      }
+
+      if (checkResult.status === "conflict") {
+        publishAutoSyncStatus("conflict", {
+          source: "lifecycle_start",
+          gameName: name,
+          appID,
+          tracked,
+          resultStatus: checkResult.status
+        });
+        if (!paused) {
+          notify("failures_errors", "SDH-ludusavi Auto-sync", "Launch gate unavailable; conflict resolution skipped while game is loading.", <FaExclamationTriangle />);
+          return;
+        }
+        const resolution = await showConflictResolutionModal(checkResult);
+        if (!resolution) {
+          completeAutoSyncStatus({ status: "skipped", game: name, reason: "conflict_unresolved" }, { gameName: name, appID, tracked });
+          return;
+        }
+        const result = await resolveGameStartConflictCall(checkResult.game ?? name, appID, resolution);
+        completeAutoSyncStatus(result, { gameName: name, appID, tracked });
+        if (result.status === "failed") {
+          notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+        }
+        return;
+      }
+
+      completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
+      if (checkResult.status === "failed") {
+        notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
+      }
+    } finally {
+      if (paused && typeof instanceID === "number") {
+        await resumeGameProcessCall(instanceID);
+      }
     }
   };
 
@@ -1573,7 +1725,7 @@ export default definePlugin(() => {
         }
 
         activeSessions.set(notification.nInstanceID, session);
-        void handleAppStart(session.name, session.appID);
+        void handleAppStart(session.name, session.appID, notification.nInstanceID);
         return;
       }
 

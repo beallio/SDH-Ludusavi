@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import json
 import logging
+import signal
 import threading
 from pathlib import Path
 
@@ -33,6 +34,18 @@ class FakeAdapter:
         self.backups: list[str] = []
         self.restores: list[str] = []
         self.versions = {"ludusavi": "ludusavi 0.31.0", "rclone": "rclone v1.66.0"}
+        self.conflict_metadata = {
+            "localModifiedAt": "2026-05-19T09:00:00",
+            "backupModifiedAt": "2026-05-19T10:00:00",
+            "backupPath": "/home/deck/ludusavi-backups/Hades",
+        }
+        self.diagnostics = {
+            "version": "0.31.0",
+            "type": "flatpak",
+            "path": "com.github.mtkennerly.ludusavi",
+            "configPath": "/home/deck/.var/app/com.github.mtkennerly.ludusavi/config/ludusavi/config.yaml",
+            "backupPath": "/home/deck/ludusavi-backups",
+        }
         self.refresh_error: Exception | None = None
         self.config_mtime_ns: int | None = 100
 
@@ -58,12 +71,20 @@ class FakeAdapter:
         self.backups.append(game_name)
         return {"ok": True, "game": game_name}
 
-    def restore(self, game_name: str) -> dict[str, object]:
+    def restore(self, game_name: str, preview: bool = False) -> dict[str, object]:
+        if preview:
+            return {"games": {game_name: {"change": "Different", "files": {"save.dat": {}}}}}
         self.restores.append(game_name)
         return {"ok": True, "game": game_name}
 
+    def get_conflict_metadata(self, game_name: str) -> dict[str, object]:
+        return dict(self.conflict_metadata)
+
     def get_versions(self) -> dict[str, str]:
         return dict(self.versions)
+
+    def get_diagnostics(self) -> dict[str, object]:
+        return dict(self.diagnostics)
 
     def get_log_contents(self) -> str:
         return ""
@@ -269,6 +290,54 @@ def test_ludusavi_adapter_initialization_is_thread_safe(tmp_path: Path) -> None:
     assert len({id(adapter) for adapter in adapters}) == 1
 
 
+def test_pause_and_resume_game_process_signal_process_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = service_with_state(tmp_path)
+    children = {100: [101, 102], 101: [201], 102: [], 201: []}
+    signals: list[tuple[int, signal.Signals]] = []
+
+    monkeypatch.setattr("sdh_ludusavi.service._child_pids", lambda pid: children[pid])
+    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
+
+    assert service.pause_game_process(100) == {"status": "paused", "pid": 100}
+    assert service.resume_game_process(100) == {"status": "resumed", "pid": 100}
+
+    assert signals == [
+        (100, signal.SIGSTOP),
+        (101, signal.SIGSTOP),
+        (201, signal.SIGSTOP),
+        (102, signal.SIGSTOP),
+        (100, signal.SIGCONT),
+        (101, signal.SIGCONT),
+        (201, signal.SIGCONT),
+        (102, signal.SIGCONT),
+    ]
+
+
+def test_resume_all_paused_processes_resumes_remaining_pids(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = service_with_state(tmp_path)
+    signals: list[tuple[int, signal.Signals]] = []
+
+    monkeypatch.setattr("sdh_ludusavi.service._child_pids", lambda pid: [])
+    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
+
+    service.pause_game_process(100)
+    service.pause_game_process(200)
+    service.resume_all_paused_processes()
+
+    assert signals == [
+        (100, signal.SIGSTOP),
+        (200, signal.SIGSTOP),
+        (100, signal.SIGCONT),
+        (200, signal.SIGCONT),
+    ]
+
+
 def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
 
@@ -412,7 +481,30 @@ def test_restore_game_on_start_performs_restore_and_records_history(tmp_path: Pa
     assert refresh["history"]["Hades"]["last_restore"]["trigger"] == "auto_start"
 
 
-def test_start_skips_disabled_unmatched_local_current_and_ambiguous(tmp_path: Path) -> None:
+def test_check_game_start_reports_conflict_for_ambiguous_recency(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+
+    adapter.recency["Hades"] = "ambiguous"
+    result = service.check_game_start("Hades")
+
+    assert result == {
+        "status": "conflict",
+        "operation": "restore",
+        "game": "Hades",
+        "reason": "ambiguous_recency",
+        "localModifiedAt": "2026-05-19T09:00:00",
+        "backupModifiedAt": "2026-05-19T10:00:00",
+        "backupPath": "/home/deck/ludusavi-backups/Hades",
+        "localLabel": "Keep Local Save",
+        "backupLabel": "Restore Backup Save",
+    }
+    assert adapter.restores == []
+
+
+def test_start_skips_disabled_unmatched_and_local_current(tmp_path: Path) -> None:
     adapter = FakeAdapter()
     service = service_with_state(tmp_path, adapter)
     service.refresh_games()
@@ -424,19 +516,57 @@ def test_start_skips_disabled_unmatched_local_current_and_ambiguous(tmp_path: Pa
     # local_current requires preview logic mock if using real adapter,
     # but FakeAdapter is static here.
     local_current = service.handle_game_start("Hades")
-    adapter.recency["Hades"] = "ambiguous"
-    ambiguous = service.handle_game_start("Hades")
 
     assert disabled["reason"] == "auto_sync_disabled"
     assert unmatched["reason"] == "unmatched_game"
     assert local_current["reason"] == "local_current"
-    assert ambiguous["reason"] == "ambiguous_recency"
     assert adapter.restores == []
 
     # Verify log levels for skips are now 'info'
     logs = service.get_recent_logs()
     skip_logs = [log for log in logs if "Skipping" in log["message"] or "Skipped" in log["message"]]
     assert all(log["level"] == "info" for log in skip_logs)
+
+
+@pytest.mark.parametrize(
+    ("resolution", "expected_status", "expected_backups", "expected_restores"),
+    [
+        ("keep_local", "backed_up", ["Hades"], []),
+        ("restore_backup", "restored", [], ["Hades"]),
+    ],
+)
+def test_resolve_game_start_conflict_applies_selected_save(
+    tmp_path: Path,
+    resolution: str,
+    expected_status: str,
+    expected_backups: list[str],
+    expected_restores: list[str],
+) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+
+    result = service.resolve_game_start_conflict("Hades", "1145360", resolution)
+
+    assert result["status"] == expected_status
+    assert result["game"] == "Hades"
+    assert adapter.backups == expected_backups
+    assert adapter.restores == expected_restores
+
+
+def test_resolve_game_start_conflict_rejects_unknown_resolution(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+
+    result = service.resolve_game_start_conflict("Hades", "1145360", "download_cloud")
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "invalid_resolution"
+    assert adapter.backups == []
+    assert adapter.restores == []
 
 
 def test_check_game_exit_reports_backup_needed_without_backing_up(tmp_path: Path) -> None:
@@ -573,11 +703,13 @@ def test_version_lookup_and_missing_dependency_states_are_logged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("sdh_ludusavi.service.resolve_version", lambda: "0.1.dev104+gabcdef")
+    monkeypatch.setenv("DECKY_VERSION", "3.1.4")
     adapter = FakeAdapter()
     service = service_with_state(tmp_path, adapter)
 
     versions = service.get_versions()
     assert versions["sdh_ludusavi"] == "0.1.dev104+gabcdef"
+    assert versions["decky"] == "3.1.4"
     assert "ludusavi" in versions
     assert "pyludusavi" in versions
 
@@ -587,6 +719,24 @@ def test_version_lookup_and_missing_dependency_states_are_logged(
     assert result["dependency_error"] == "Ludusavi Flatpak is not installed"
     assert service.get_recent_logs()[-1]["level"] == "error"
     assert "Ludusavi Flatpak" in service.get_recent_logs()[-1]["message"]
+
+
+def test_ludusavi_diagnostics_are_logged_after_adapter_initialization(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+
+    service.refresh_games()
+
+    messages = [entry["message"] for entry in service.get_recent_logs()]
+    assert any("Ludusavi version: 0.31.0" in message for message in messages)
+    assert any(
+        "Ludusavi type/path: flatpak com.github.mtkennerly.ludusavi" in message
+        for message in messages
+    )
+    assert any("Ludusavi config path:" in message for message in messages)
+    assert any(
+        "Ludusavi backup path: /home/deck/ludusavi-backups" in message for message in messages
+    )
 
 
 def test_get_ludusavi_logs(tmp_path, monkeypatch):
