@@ -1,0 +1,29 @@
+{
+  "date": "2026-05-20T11:00:17-0700",
+  "task_objective": "Implement the QAM UI cleanup plan by reorganizing frontend panels, replacing the plugin icon, improving focus behavior, and tightening status/version presentation.",
+  "files_modified": [
+    "docs/agent_conversations/2026-05-20_qam_ui_cleanup.json",
+    "docs/plans/qam_ui_cleanup.md",
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py::test_frontend_qam_uses_global_and_game_panels",
+    "tests/test_frontend_static.py::test_frontend_qam_uses_custom_plugin_icon_and_plain_title",
+    "tests/test_frontend_static.py::test_frontend_qam_rows_use_native_full_row_focus",
+    "tests/test_frontend_static.py::test_frontend_qam_last_operation_uses_single_line_ellipsis",
+    "tests/test_frontend_static.py::test_frontend_versions_order_places_decky_last"
+  ],
+  "design_decisions": [
+    "Kept the change frontend-only with no backend RPC, settings schema, or dependency changes.",
+    "Used a local inline PluginIcon component with currentColor instead of the LuDatabaseBackup react-icon.",
+    "Split the QAM controls into GLOBAL and GAME panels so automatic sync and refresh are separated from selected-game controls.",
+    "Used Decky Field and highlightOnFocus/focusable props for full-row focus behavior where the installed @decky/ui types support them.",
+    "Kept the titleView scoped to plugin-owned plain markup rather than using staticClasses.Title."
+  ],
+  "results": [
+    "Verified the new static frontend tests failed before implementation.",
+    "Passed targeted frontend static tests after implementation.",
+    "Passed full validation through ruff, ty, pytest, pnpm typecheck, and pnpm verify."
+  ]
+}
