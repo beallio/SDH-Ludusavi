@@ -761,6 +761,19 @@ def test_frontend_resets_qam_scroll_when_quick_access_opens() -> None:
     assert "ref={qamContentRef}" in source
 
 
+def test_frontend_logs_and_retries_qam_scroll_reset() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        'function resetQuickAccessScroll(container: HTMLElement | null, reason = "qam_open")',
+        "const resetDelays = [0, 50, 150, 350];",
+        "resetDelays.forEach((delay) => {",
+        "window.setTimeout(() => resetQuickAccessScroll(qamContentRef.current, `qam_open_retry_${delay}`), delay);",
+        "`QAM scroll reset (${reason}): before=${beforeTop}, after=${afterTop}, containerTop=${containerTop}, scrollable=${scrollableTag}`",
+    ]:
+        assert required_text in source
+
+
 def test_frontend_preserves_always_render_for_lifecycle_and_status_surface() -> None:
     source = FRONTEND.read_text()
 
@@ -781,15 +794,19 @@ def test_frontend_prefers_main_running_app_for_qam_game_selection() -> None:
     source = FRONTEND.read_text()
 
     assert "function getMainRunningSession(): RunningSession | null" in source
-    assert "return sessionFromAppOverview((Router as any).MainRunningApp);" in source
+    assert "sessionFromAppOverview((Router as any).MainRunningApp);" in source
+    assert 'source: "running"' in source
     assert "function getPreferredSteamGameSession(): RunningSession | null" in source
     assert "function getGameSteamAppID(game: GameStatus): string | null" in source
     assert "function findGameForRunningSession(" in source
     assert "gameAppID === session.appID" in source
     assert "normalize(game.name) === normalize(session.name)" in source
     assert "function selectCurrentSteamGameIfAvailable(" in source
-    assert "const runningGame = findGameForRunningSession(currentGames, runningSession);" in source
-    assert "setSelectedGame(runningGame.name);" in source
+    assert (
+        "const runningGame = findGameForRunningSession(currentGames, runningSession, currentAliases);"
+        in source
+    )
+    assert "setSelectedGame(runningGame.game.name);" in source
 
 
 def test_frontend_applies_current_game_before_saved_selected_game() -> None:
@@ -798,16 +815,53 @@ def test_frontend_applies_current_game_before_saved_selected_game() -> None:
     apply_refresh = source[
         source.index("const applyRefreshResult =") : source.index("const refreshGames =")
     ]
-    assert "if (selectCurrentSteamGameIfAvailable(result.games)) {" in apply_refresh
+    assert (
+        "if (selectCurrentSteamGameIfAvailable(result.games, result.aliases || {})) {"
+        in apply_refresh
+    )
     assert "const target = preferredGame || selectedGame;" in apply_refresh
     assert apply_refresh.index(
-        "selectCurrentSteamGameIfAvailable(result.games)"
+        "selectCurrentSteamGameIfAvailable(result.games, result.aliases || {})"
     ) < apply_refresh.index("const target = preferredGame || selectedGame;")
     assert "const pendingCurrentGameSelection = useRef(false);" in source
     assert "pendingCurrentGameSelection.current = true;" in source
     assert "pendingCurrentGameSelection.current = false;" in source
     assert "void onGameChange(data)" in source
     assert "const result = await setSelectedGameCall(value);" in source
+
+
+def test_frontend_logs_current_game_context_and_match_reason() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        "type RunningSession = {",
+        'source?: "focused" | "route" | "cached" | "running";',
+        "function describeSteamGameSession(",
+        "function logCurrentGameSelection(",
+        "function logCurrentGameNoMatch(",
+        "context=${describeSteamGameSession(session)}",
+        "match=${runningGame.name}",
+        "reason=${reason}",
+        "games=${currentGames.length}",
+        "aliasKeys=${Object.keys(currentAliases).length}",
+    ]:
+        assert required_text in source
+
+
+def test_frontend_matches_current_game_through_ludusavi_aliases() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        "function findGameForRunningSession(",
+        "currentAliases: Record<string, string>",
+        "const aliasTarget = findAliasTargetForSession(session, currentAliases);",
+        "function findAliasTargetForSession(",
+        "normalize(alias) === normalizedSessionName",
+        "normalize(target) === normalizedSessionName",
+        'return { game: aliasMatch, reason: "alias" };',
+        "selectCurrentSteamGameIfAvailable(result.games, result.aliases || {})",
+    ]:
+        assert required_text in source
 
 
 def test_frontend_captures_home_library_focused_game_context() -> None:

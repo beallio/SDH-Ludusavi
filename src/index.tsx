@@ -134,6 +134,7 @@ type AppLifetimeNotification = {
 type RunningSession = {
   appID: string;
   name: string;
+  source?: "focused" | "route" | "cached" | "running";
 };
 
 type RpcStatus = {
@@ -261,7 +262,8 @@ const sessionFromAppOverview = (app: any): RunningSession | null => {
 };
 
 function getMainRunningSession(): RunningSession | null {
-  return sessionFromAppOverview((Router as any).MainRunningApp);
+  const session = sessionFromAppOverview((Router as any).MainRunningApp);
+  return session ? { ...session, source: "running" } : null;
 }
 
 function getMainSteamWindow(): Window | null {
@@ -307,7 +309,7 @@ function sessionFromRoutePath(path: string): RunningSession | null {
     return null;
   }
   const name = getSteamAppNameFromStores(appID) ?? "";
-  return { appID, name };
+  return { appID, name, source: "route" };
 }
 
 function getRouteSteamGameSession(): RunningSession | null {
@@ -392,7 +394,7 @@ function getFocusedSteamGameSession(): RunningSession | null {
     for (const candidate of getSteamUiReactPropCandidates(element)) {
       const session = sessionFromSteamUiCandidate(candidate);
       if (session) {
-        return session;
+        return { ...session, source: "focused" };
       }
     }
   }
@@ -403,6 +405,18 @@ function getFocusedSteamGameSession(): RunningSession | null {
 function captureSteamUiGameContext(): RunningSession | null {
   const session = getFocusedSteamGameSession() ?? getRouteSteamGameSession();
   if (session) {
+    if (
+      lastSteamUiGameContext?.appID !== session.appID ||
+      lastSteamUiGameContext?.name !== session.name ||
+      lastSteamUiGameContext?.source !== session.source
+    ) {
+      log(
+        "debug",
+        `QAM context captured: ${describeSteamGameSession(session)}`,
+        "qam_context",
+        session.name
+      );
+    }
     lastSteamUiGameContext = session;
     lastSteamUiGameContextCapturedAt = Date.now();
   }
@@ -416,7 +430,7 @@ function getRecentSteamUiGameContext(): RunningSession | null {
   if (Date.now() - lastSteamUiGameContextCapturedAt > STEAM_UI_GAME_CONTEXT_TTL_MS) {
     return null;
   }
-  return lastSteamUiGameContext;
+  return { ...lastSteamUiGameContext, source: "cached" };
 }
 
 function getPreferredSteamGameSession(): RunningSession | null {
@@ -435,23 +449,84 @@ function getGameSteamAppID(game: GameStatus): string | null {
   return String(steamID);
 }
 
+function findAliasTargetForSession(
+  session: RunningSession,
+  currentAliases: Record<string, string>
+): string | null {
+  const normalizedSessionName = normalize(session.name);
+  for (const [alias, target] of Object.entries(currentAliases)) {
+    if (normalize(alias) === normalizedSessionName || normalize(target) === normalizedSessionName) {
+      return target;
+    }
+  }
+  return null;
+}
+
 function findGameForRunningSession(
   currentGames: GameStatus[],
-  session: RunningSession
-): GameStatus | null {
+  session: RunningSession,
+  currentAliases: Record<string, string>
+): { game: GameStatus; reason: "steam_id" | "name" | "alias" } | null {
   const appIDMatch = currentGames.find((game) => {
     const gameAppID = getGameSteamAppID(game);
     return gameAppID === session.appID;
   });
   if (appIDMatch) {
-    return appIDMatch;
+    return { game: appIDMatch, reason: "steam_id" };
   }
 
   if (!session.name) {
     return null;
   }
 
-  return currentGames.find((game) => normalize(game.name) === normalize(session.name)) ?? null;
+  const nameMatch = currentGames.find((game) => normalize(game.name) === normalize(session.name));
+  if (nameMatch) {
+    return { game: nameMatch, reason: "name" };
+  }
+
+  const aliasTarget = findAliasTargetForSession(session, currentAliases);
+  if (!aliasTarget) {
+    return null;
+  }
+
+  const aliasMatch = currentGames.find((game) => normalize(game.name) === normalize(aliasTarget));
+  if (aliasMatch) {
+    return { game: aliasMatch, reason: "alias" };
+  }
+
+  return null;
+}
+
+function describeSteamGameSession(session: RunningSession): string {
+  return `source=${session.source ?? "unknown"} appID=${session.appID || "unknown"} name=${session.name || "unknown"} normalized=${normalize(session.name || "")}`;
+}
+
+function logCurrentGameSelection(
+  session: RunningSession,
+  runningGame: GameStatus,
+  reason: string,
+  currentGames: GameStatus[],
+  currentAliases: Record<string, string>
+) {
+  log(
+    "info",
+    `QAM current game selected: context=${describeSteamGameSession(session)} match=${runningGame.name} reason=${reason} games=${currentGames.length} aliasKeys=${Object.keys(currentAliases).length}`,
+    "qam_context",
+    runningGame.name
+  );
+}
+
+function logCurrentGameNoMatch(
+  session: RunningSession | null,
+  currentGames: GameStatus[],
+  currentAliases: Record<string, string>
+) {
+  log(
+    "warning",
+    `QAM current game not selected: context=${session ? describeSteamGameSession(session) : "none"} games=${currentGames.length} aliasKeys=${Object.keys(currentAliases).length}`,
+    "qam_context",
+    session?.name
+  );
 }
 
 function findScrollableParent(element: HTMLElement | null): HTMLElement | null {
@@ -469,15 +544,26 @@ function findScrollableParent(element: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-function resetQuickAccessScroll(container: HTMLElement | null) {
+function resetQuickAccessScroll(container: HTMLElement | null, reason = "qam_open") {
   window.requestAnimationFrame(() => {
     const scrollable = findScrollableParent(container);
+    const beforeTop = scrollable?.scrollTop ?? -1;
     if (scrollable) {
       scrollable.scrollTo({ top: 0, left: 0, behavior: "auto" });
     }
     if (container) {
       container.scrollIntoView({ block: "start" });
     }
+    const afterTop = scrollable?.scrollTop ?? -1;
+    const containerTop = container?.getBoundingClientRect?.().top ?? -1;
+    const scrollableTag = scrollable
+      ? `${scrollable.tagName.toLowerCase()}${scrollable.id ? `#${scrollable.id}` : ""}`
+      : "none";
+    log(
+      "debug",
+      `QAM scroll reset (${reason}): before=${beforeTop}, after=${afterTop}, containerTop=${containerTop}, scrollable=${scrollableTag}`,
+      "qam_scroll"
+    );
   });
 }
 
@@ -1170,6 +1256,7 @@ function logRpcStatus(result: RpcStatus, operation: string) {
 
 let globalSettings: Settings | null = null;
 let globalGames: GameStatus[] | null = null;
+let globalGameAliases: Record<string, string> | null = null;
 let globalGameHistory: Record<string, GameOperationHistory> | null = null;
 let globalVersions: Versions | null = null;
 let globalLudusaviCommand: LudusaviLaunchCommand | null = null;
@@ -1181,6 +1268,7 @@ function Content() {
   const pendingCurrentGameSelection = useRef(false);
   const [settings, setSettings] = useState<Settings>(globalSettings ?? defaultSettings());
   const [games, setGames] = useState<GameStatus[]>(globalGames ?? []);
+  const [gameAliases, setGameAliases] = useState<Record<string, string>>(globalGameAliases ?? {});
   const [gameHistory, setGameHistory] = useState<Record<string, GameOperationHistory>>(globalGameHistory ?? {});
   const [selectedGame, setSelectedGame] = useState(globalSettings?.selected_game ?? "");
   const [versions, setVersions] = useState<Versions>(globalVersions ?? {});
@@ -1225,18 +1313,30 @@ function Content() {
   }, [gameHistory, selectedGame]);
   const isBusy = operation.is_running || busyLabel !== null || backgroundRefreshBusy;
 
-  function selectCurrentSteamGameIfAvailable(currentGames: GameStatus[]): boolean {
+  function selectCurrentSteamGameIfAvailable(
+    currentGames: GameStatus[],
+    currentAliases: Record<string, string>
+  ): boolean {
     const runningSession = getPreferredSteamGameSession();
     if (!runningSession) {
+      logCurrentGameNoMatch(null, currentGames, currentAliases);
       return false;
     }
 
-    const runningGame = findGameForRunningSession(currentGames, runningSession);
+    const runningGame = findGameForRunningSession(currentGames, runningSession, currentAliases);
     if (!runningGame) {
+      logCurrentGameNoMatch(runningSession, currentGames, currentAliases);
       return false;
     }
 
-    setSelectedGame(runningGame.name);
+    setSelectedGame(runningGame.game.name);
+    logCurrentGameSelection(
+      runningSession,
+      runningGame.game,
+      runningGame.reason,
+      currentGames,
+      currentAliases
+    );
     return true;
   }
 
@@ -1248,7 +1348,11 @@ function Content() {
   useEffect(() => {
     if (isQuickAccessVisible && !wasQuickAccessVisible.current) {
       pendingCurrentGameSelection.current = true;
+      const resetDelays = [0, 50, 150, 350];
       resetQuickAccessScroll(qamContentRef.current);
+      resetDelays.forEach((delay) => {
+        window.setTimeout(() => resetQuickAccessScroll(qamContentRef.current, `qam_open_retry_${delay}`), delay);
+      });
     }
     wasQuickAccessVisible.current = isQuickAccessVisible;
   }, [isQuickAccessVisible]);
@@ -1258,9 +1362,9 @@ function Content() {
       return;
     }
 
-    selectCurrentSteamGameIfAvailable(games);
+    selectCurrentSteamGameIfAvailable(games, gameAliases);
     pendingCurrentGameSelection.current = false;
-  }, [games, isQuickAccessVisible]);
+  }, [gameAliases, games, isQuickAccessVisible]);
 
   useEffect(() => {
     if (isQuickAccessVisible) {
@@ -1346,8 +1450,10 @@ function Content() {
 
     log("debug", `Applying refresh result (${result.games.length} games, ${Object.keys(result.aliases || {}).length} aliases)`);
     setGames(result.games);
+    setGameAliases(result.aliases || {});
     setGameHistory(result.history ?? {});
     globalGames = result.games;
+    globalGameAliases = result.aliases || {};
     globalGameHistory = result.history ?? {};
     
     // Update global tracking sets for toast filtering
@@ -1363,7 +1469,7 @@ function Content() {
     
     log("info", `Tracked ${trackedNames.size} game names/aliases`);
 
-    if (selectCurrentSteamGameIfAvailable(result.games)) {
+    if (selectCurrentSteamGameIfAvailable(result.games, result.aliases || {})) {
       return true;
     }
 

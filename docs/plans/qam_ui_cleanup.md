@@ -56,6 +56,12 @@ Open-state and current-game refinements:
 - Keep the Home/Library resolver best-effort and read-only: inspect SteamUI
   route, appStore/collectionStore metadata, and React-owned props on the focused
   or hovered app element. Do not patch Steam's context menu or mutate SteamUI.
+- Add verbose QAM diagnostics for current-game context, match reason, no-match
+  cases, alias key counts, and scroll reset positions so intermittent SteamUI
+  behavior can be diagnosed from plugin logs.
+- Retry QAM scroll reset over the first few hundred milliseconds after open,
+  because Decky focus restoration can move the panel after the first visibility
+  edge.
 
 ## Dependency Requirements
 
@@ -84,6 +90,9 @@ Follow red-green-refactor:
   hidden and preferred over saved `selected_game` on QAM open.
 - Assert Library app routes such as `/routes/library/app/<appid>` can resolve a
   Steam app id through appStore or collectionStore metadata.
+- Assert QAM context selection logs include context source, normalized name,
+  match reason, dropdown game count, and alias count.
+- Assert QAM scroll reset is retried and logs before/after scroll positions.
 
 Final validation uses:
 
