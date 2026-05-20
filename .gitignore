@@ -68,3 +68,5 @@ out/*
 cli/
 cli/*
 cli/decky
+
+.antigravitycli
