@@ -604,6 +604,98 @@ def test_frontend_displays_durable_operation_history() -> None:
     assert "Last Operation:" in source
 
 
+def test_frontend_qam_uses_global_and_game_panels() -> None:
+    source = FRONTEND.read_text()
+
+    assert 'PanelSection title="GLOBAL"' in source
+    assert 'PanelSection title="GAME"' in source
+    assert 'PanelSection title="Sync"' not in source
+
+    global_panel = source[
+        source.index('PanelSection title="GLOBAL"') : source.index('PanelSection title="GAME"')
+    ]
+    game_panel = source[
+        source.index('PanelSection title="GAME"') : source.index(
+            'PanelSection title="Notifications"'
+        )
+    ]
+
+    assert global_panel.index('label="Automatic Sync"') < global_panel.index("Refresh Games")
+    assert "Refresh Games" in global_panel
+    assert "Select Game" not in global_panel
+    assert "Force Backup" not in global_panel
+    assert "Force Restore" not in global_panel
+
+    for text in [
+        "Select Game",
+        "Status:",
+        "Last Operation:",
+        "Force Backup",
+        "Force Restore",
+    ]:
+        assert text in game_panel
+
+
+def test_frontend_qam_uses_custom_plugin_icon_and_plain_title() -> None:
+    source = FRONTEND.read_text()
+
+    assert "function PluginIcon()" in source
+    assert "<PluginIcon />" in source
+    assert "currentColor" in source
+    assert "LuDatabaseBackup" not in source
+    assert "staticClasses.Title" not in source
+    assert 'titleView: <div className="sdh-ludusavi-title">SDH-ludusavi</div>' in source
+
+
+def test_frontend_qam_rows_use_native_full_row_focus() -> None:
+    source = FRONTEND.read_text()
+
+    for text in [
+        "Field",
+        "highlightOnFocus={true}",
+        "focusable={true}",
+        '<ToggleField\n          label="Automatic Sync"\n          highlightOnFocus={true}',
+        '<Field\n            label="Status:"',
+        '<Field\n              label="Last Operation:"',
+    ]:
+        assert text in source
+
+    versions_panel = source[source.index('PanelSection title="Versions"') :]
+    assert '<Field highlightOnFocus={true} focusable={true} padding="standard">' in versions_panel
+
+
+def test_frontend_qam_last_operation_uses_single_line_ellipsis() -> None:
+    source = FRONTEND.read_text()
+
+    game_panel = source[
+        source.index('PanelSection title="GAME"') : source.index(
+            'PanelSection title="Notifications"'
+        )
+    ]
+    last_operation = source[
+        source.index("Last Operation:") : source.index(
+            "Force Backup", source.index("Last Operation:")
+        )
+    ]
+    assert "Last Operation:" in game_panel
+    for text in [
+        "minWidth: 0",
+        'whiteSpace: "nowrap"',
+        'overflow: "hidden"',
+        'textOverflow: "ellipsis"',
+    ]:
+        assert text in last_operation
+
+
+def test_frontend_versions_order_places_decky_last() -> None:
+    source = FRONTEND.read_text()
+
+    versions_panel = source[source.index('PanelSection title="Versions"') :]
+    assert versions_panel.index("SDH-ludusavi:") < versions_panel.index("Ludusavi:")
+    assert versions_panel.index("Ludusavi:") < versions_panel.index("pyludusavi:")
+    assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
+
+
 def test_frontend_gates_warmed_background_refresh_without_loading_label() -> None:
     source = FRONTEND.read_text()
 

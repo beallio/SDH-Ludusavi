@@ -2,10 +2,10 @@ import {
   ButtonItem,
   ConfirmModal,
   DropdownItem,
+  Field,
   PanelSection,
   PanelSectionRow,
   showModal,
-  staticClasses,
   ToggleField,
   Spinner,
   Router
@@ -18,7 +18,6 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { FaSave, FaDownload, FaExclamationTriangle } from "react-icons/fa";
 import { IoMdRefresh } from "react-icons/io";
-import { LuDatabaseBackup } from "react-icons/lu";
 
 import { launchLudusavi, LudusaviLaunchCommand } from "./ludusaviLauncher";
 
@@ -286,6 +285,26 @@ function SpinnerButton({ children, loading, ...props }: any) {
         {children}
       </div>
     </ButtonItem>
+  );
+}
+
+function PluginIcon() {
+  return (
+    <svg viewBox="0 0 1536 1536" role="img" aria-label="SDH-ludusavi" fill="currentColor">
+      <circle cx="191" cy="192" r="71" />
+      <circle cx="192" cy="478" r="71" />
+      <rect x="120" y="708" width="144" height="707" rx="72" ry="72" />
+      <rect x="120" y="1265" width="1332" height="150" rx="75" ry="75" />
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M496 216H1256C1304.6 216 1344 255.4 1344 304V1064C1344 1112.6 1304.6 1152 1256 1152H496C447.4 1152 408 1112.6 408 1064V304C408 255.4 447.4 216 496 216ZM552 360V1008H1200V360H552Z"
+      />
+      <circle cx="719" cy="527" r="71" />
+      <circle cx="1031" cy="528" r="71" />
+      <circle cx="719" cy="840" r="71" />
+      <circle cx="1031" cy="840" r="71" />
+    </svg>
   );
 }
 
@@ -1181,17 +1200,34 @@ function Content() {
 
   return (
     <>
-      <PanelSection title="Sync">
+      <PanelSection title="GLOBAL">
         <ToggleField
           label="Automatic Sync"
+          highlightOnFocus={true}
           checked={settings.auto_sync_enabled}
           disabled={isBusy}
           onChange={(enabled: boolean) => void toggleAutoSync(enabled)}
         />
 
         <PanelSectionRow>
+          <SpinnerButton
+            layout="below"
+            highlightOnFocus={true}
+            disabled={isBusy}
+            loading={busyLabel === "Refreshing games"}
+            onClick={() => void refreshGames()}
+          >
+            Refresh Games
+          </SpinnerButton>
+        </PanelSectionRow>
+      </PanelSection>
+
+      <PanelSection title="GAME">
+        <PanelSectionRow>
           <DropdownItem
             menuLabel="Select Game"
+            highlightOnFocus={true}
+            focusable={true}
             disabled={isBusy}
             rgOptions={games.map((game) => ({
               label: game.name,
@@ -1203,27 +1239,39 @@ function Content() {
         </PanelSectionRow>
 
         <PanelSectionRow>
-          <div style={{ color: "#cbd5e1", fontSize: "14px", margin: "12px 0", padding: "0 4px" }}>
-            <span style={{ color: "#64748b", fontWeight: "bold", marginRight: "8px" }}>Status:</span>
-            {isBusy && busyLabel === "Loading" ? (
-              <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Loading game list...</span>
-            ) : isBusy && busyLabel === "Refreshing games" ? (
-              <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Game refresh in progress...</span>
-            ) : isBusy && busyLabel === "Backup running" ? (
-              <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Backup in progress...</span>
-            ) : isBusy && busyLabel === "Restore running" ? (
-              <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Restore in progress...</span>
-            ) : (
-              selectedStatus ? statusLabels[selectedStatus.status] : "No Ludusavi games found"
-            )}
-          </div>
+          <Field
+            label="Status:"
+            highlightOnFocus={true}
+            focusable={true}
+            childrenLayout="inline"
+            padding="standard"
+          >
+            <div style={{ color: "#cbd5e1", fontSize: "14px", minWidth: 0 }}>
+              {isBusy && busyLabel === "Loading" ? (
+                <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Loading game list...</span>
+              ) : isBusy && busyLabel === "Refreshing games" ? (
+                <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Game refresh in progress...</span>
+              ) : isBusy && busyLabel === "Backup running" ? (
+                <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Backup in progress...</span>
+              ) : isBusy && busyLabel === "Restore running" ? (
+                <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Restore in progress...</span>
+              ) : (
+                selectedStatus ? statusLabels[selectedStatus.status] : "No Ludusavi games found"
+              )}
+            </div>
+          </Field>
         </PanelSectionRow>
 
         {selectedHistory && !isBusy && (
           <PanelSectionRow>
-            <div style={{ display: "flex", justifyContent: "space-between", color: "#94a3b8", fontSize: "12px", padding: "0 4px", opacity: 0.8, marginBottom: "8px" }}>
-              <div style={{ fontWeight: "bold" }}>Last Operation:</div>
-              <div style={{ textAlign: "right" }}>
+            <Field
+              label="Last Operation:"
+              highlightOnFocus={true}
+              focusable={true}
+              childrenLayout="inline"
+              padding="standard"
+            >
+              <div style={{ color: "#94a3b8", fontSize: "12px", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" }}>
                 <span style={{ 
                   color: selectedHistory.status === "failed" ? "#f87171" : "#94a3b8" 
                 }}>
@@ -1236,24 +1284,14 @@ function Content() {
                   {selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0]}
                 </span>
               </div>
-            </div>
+            </Field>
           </PanelSectionRow>
         )}
 
         <PanelSectionRow>
-          <SpinnerButton 
-            layout="below" 
-            disabled={isBusy} 
-            loading={busyLabel === "Refreshing games"}
-            onClick={() => void refreshGames()}
-          >
-            Refresh Games
-          </SpinnerButton>
-        </PanelSectionRow>
-
-        <PanelSectionRow>
           <SpinnerButton
             layout="below"
+            highlightOnFocus={true}
             disabled={isBusy || !selectedStatus}
             loading={busyLabel === "Backup running"}
             onClick={() => void runForceOperation("Backup", forceBackupCall)}
@@ -1265,6 +1303,7 @@ function Content() {
         <PanelSectionRow>
           <SpinnerButton
             layout="below"
+            highlightOnFocus={true}
             disabled={isBusy || selectedStatus?.status !== "has_backup"}
             loading={busyLabel === "Restore running"}
             onClick={() => void runForceOperation("Restore", forceRestoreCall)}
@@ -1277,24 +1316,28 @@ function Content() {
       <PanelSection title="Notifications">
         <ToggleField
           label="All Notifications"
+          highlightOnFocus={true}
           checked={settings.notifications.enabled}
           disabled={isBusy}
           onChange={(enabled: boolean) => void toggleNotificationSetting("enabled", enabled)}
         />
         <ToggleField
           label="Manual Operations"
+          highlightOnFocus={true}
           checked={settings.notifications.manual_operations}
           disabled={!settings.notifications.enabled || isBusy}
           onChange={(enabled: boolean) => void toggleNotificationSetting("manual_operations", enabled)}
         />
         <ToggleField
           label="Refresh Status"
+          highlightOnFocus={true}
           checked={settings.notifications.refresh_status}
           disabled={!settings.notifications.enabled || isBusy}
           onChange={(enabled: boolean) => void toggleNotificationSetting("refresh_status", enabled)}
         />
         <ToggleField
           label="Failures and Errors"
+          highlightOnFocus={true}
           checked={settings.notifications.failures_errors}
           disabled={!settings.notifications.enabled || isBusy}
           onChange={(enabled: boolean) => void toggleNotificationSetting("failures_errors", enabled)}
@@ -1318,12 +1361,14 @@ function Content() {
 
       <PanelSection title="Versions">
         <PanelSectionRow>
-          <div style={{ color: "#cbd5e1", fontSize: "14px", display: "flex", flexDirection: "column", gap: "4px", padding: "12px", backgroundColor: "rgba(30, 41, 59, 0.3)", borderRadius: "4px" }}>
-            <div>SDH-ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
-            <div>Decky: {versions.decky ?? "Unknown"}</div>
-            <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
-            <div>pyludusavi: {versions.pyludusavi ?? "Unknown"}</div>
-          </div>
+          <Field highlightOnFocus={true} focusable={true} padding="standard">
+            <div style={{ color: "#cbd5e1", fontSize: "14px", display: "flex", flexDirection: "column", gap: "4px", minWidth: 0 }}>
+              <div>SDH-ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
+              <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
+              <div>pyludusavi: {versions.pyludusavi ?? "Unknown"}</div>
+              <div>Decky: {versions.decky ?? "Unknown"}</div>
+            </div>
+          </Field>
         </PanelSectionRow>
       </PanelSection>
     </>
@@ -1810,9 +1855,9 @@ export default definePlugin(() => {
 
   return {
     name: "SDH-ludusavi",
-    titleView: <div className={staticClasses.Title}>SDH-ludusavi</div>,
+    titleView: <div className="sdh-ludusavi-title">SDH-ludusavi</div>,
     content: <Content />,
-    icon: <LuDatabaseBackup />,
+    icon: <PluginIcon />,
     alwaysRender: true,
     onDismount() {
       unregisterLifecycleNotifications();
