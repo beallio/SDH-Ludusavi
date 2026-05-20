@@ -27,7 +27,17 @@ No RPC methods or public backend interfaces change. The user-visible panel order
 5. `Logs`
 6. `Versions`
 
-The QAM plugin icon becomes a local inline React SVG component named `PluginIcon`.
+The QAM plugin icon becomes a local inline React SVG component named `PluginIcon`. It
+uses `1em` width and height so Decky's plugin list sizes it like the prior
+`react-icons` component instead of rendering the raw SVG viewport at an oversized
+default.
+
+Follow-up visual refinements:
+
+- Increase the last-operation value and timestamp text for readability.
+- Wrap `ToggleField` rows in a local full-width container because the installed
+  `@decky/ui` `ToggleField` type does not expose `className` or `style` props.
+- Use scoped CSS to expand the toggle focus background to the QAM panel edges.
 
 ## Dependency Requirements
 
@@ -41,6 +51,9 @@ Follow red-green-refactor:
 - Assert the inline `PluginIcon` replaces `LuDatabaseBackup`.
 - Assert focusable/full-row Decky primitives are used for toggle, status, last-operation, and versions rows.
 - Assert last-operation layout uses no-wrap ellipsis safeguards.
+- Assert last-operation value text uses the larger 14px size.
+- Assert `PluginIcon` uses `1em` dimensions.
+- Assert toggles are wrapped in the full-width focus container and scoped CSS.
 - Assert version rows are ordered as `SDH-ludusavi`, `Ludusavi`, `pyludusavi`, `Decky`.
 - Assert `titleView` no longer uses `staticClasses.Title`.
 

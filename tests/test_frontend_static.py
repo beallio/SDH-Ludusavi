@@ -642,9 +642,24 @@ def test_frontend_qam_uses_custom_plugin_icon_and_plain_title() -> None:
     assert "function PluginIcon()" in source
     assert "<PluginIcon />" in source
     assert "currentColor" in source
+    assert 'width="1em"' in source
+    assert 'height="1em"' in source
     assert "LuDatabaseBackup" not in source
     assert "staticClasses.Title" not in source
     assert 'titleView: <div className="sdh-ludusavi-title">SDH-ludusavi</div>' in source
+
+
+def test_frontend_qam_toggle_focus_stretches_to_panel_edges() -> None:
+    source = FRONTEND.read_text()
+
+    assert "function FullWidthToggle" in source
+    assert 'className="sdh-ludusavi-full-width-toggle"' in source
+    assert source.count("<FullWidthToggle>") == 5
+    assert ".sdh-ludusavi-full-width-toggle" in source
+    assert "margin-left: -32px;" in source
+    assert "margin-right: -32px;" in source
+    assert "width: 100%;" in source
+    assert "box-sizing: border-box;" in source
 
 
 def test_frontend_qam_rows_use_native_full_row_focus() -> None:
@@ -654,7 +669,7 @@ def test_frontend_qam_rows_use_native_full_row_focus() -> None:
         "Field",
         "highlightOnFocus={true}",
         "focusable={true}",
-        '<ToggleField\n          label="Automatic Sync"\n          highlightOnFocus={true}',
+        '<ToggleField\n            label="Automatic Sync"\n            highlightOnFocus={true}',
         '<Field\n            label="Status:"',
         '<Field\n              label="Last Operation:"',
     ]:
@@ -680,6 +695,7 @@ def test_frontend_qam_last_operation_uses_single_line_ellipsis() -> None:
     assert "Last Operation:" in game_panel
     for text in [
         "minWidth: 0",
+        'fontSize: "14px"',
         'whiteSpace: "nowrap"',
         'overflow: "hidden"',
         'textOverflow: "ellipsis"',

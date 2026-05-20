@@ -15,11 +15,26 @@ import {
   definePlugin,
   toaster
 } from "@decky/api";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { FaSave, FaDownload, FaExclamationTriangle } from "react-icons/fa";
 import { IoMdRefresh } from "react-icons/io";
 
 import { launchLudusavi, LudusaviLaunchCommand } from "./ludusaviLauncher";
+
+const qamPanelStyles = `
+.sdh-ludusavi-full-width-toggle {
+  display: block;
+  margin-left: -32px;
+  margin-right: -32px;
+}
+
+.sdh-ludusavi-full-width-toggle > * {
+  box-sizing: border-box;
+  width: 100%;
+  padding-left: 32px;
+  padding-right: 32px;
+}
+`;
 
 type NotificationSettings = {
   enabled: boolean;
@@ -290,7 +305,15 @@ function SpinnerButton({ children, loading, ...props }: any) {
 
 function PluginIcon() {
   return (
-    <svg viewBox="0 0 1536 1536" role="img" aria-label="SDH-ludusavi" fill="currentColor">
+    <svg
+      viewBox="0 0 1536 1536"
+      role="img"
+      aria-label="SDH-ludusavi"
+      fill="currentColor"
+      width="1em"
+      height="1em"
+      style={{ display: "block" }}
+    >
       <circle cx="191" cy="192" r="71" />
       <circle cx="192" cy="478" r="71" />
       <rect x="120" y="708" width="144" height="707" rx="72" ry="72" />
@@ -306,6 +329,10 @@ function PluginIcon() {
       <circle cx="1031" cy="840" r="71" />
     </svg>
   );
+}
+
+function FullWidthToggle({ children }: { children: ReactNode }) {
+  return <div className="sdh-ludusavi-full-width-toggle">{children}</div>;
 }
 
 const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
@@ -1200,14 +1227,17 @@ function Content() {
 
   return (
     <>
+      <style>{qamPanelStyles}</style>
       <PanelSection title="GLOBAL">
-        <ToggleField
-          label="Automatic Sync"
-          highlightOnFocus={true}
-          checked={settings.auto_sync_enabled}
-          disabled={isBusy}
-          onChange={(enabled: boolean) => void toggleAutoSync(enabled)}
-        />
+        <FullWidthToggle>
+          <ToggleField
+            label="Automatic Sync"
+            highlightOnFocus={true}
+            checked={settings.auto_sync_enabled}
+            disabled={isBusy}
+            onChange={(enabled: boolean) => void toggleAutoSync(enabled)}
+          />
+        </FullWidthToggle>
 
         <PanelSectionRow>
           <SpinnerButton
@@ -1271,16 +1301,16 @@ function Content() {
               childrenLayout="inline"
               padding="standard"
             >
-              <div style={{ color: "#94a3b8", fontSize: "12px", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" }}>
+              <div style={{ color: "#cbd5e1", fontSize: "14px", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" }}>
                 <span style={{ 
-                  color: selectedHistory.status === "failed" ? "#f87171" : "#94a3b8" 
+                  color: selectedHistory.status === "failed" ? "#f87171" : "#cbd5e1" 
                 }}>
                   {selectedHistory.status === "failed" ? "Failed" : 
                    selectedHistory.status === "backed_up" ? "Backed up" :
                    selectedHistory.status === "restored" ? "Restored" :
                    `Skipped${selectedHistory.reason ? ` (${selectedHistory.reason.replace(/_/g, " ")})` : ""}`}
                 </span>
-                <span style={{ marginLeft: "8px", fontSize: "10px", opacity: 0.6 }}>
+                <span style={{ marginLeft: "8px", fontSize: "12px", opacity: 0.65 }}>
                   {selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0]}
                 </span>
               </div>
@@ -1314,34 +1344,42 @@ function Content() {
       </PanelSection>
 
       <PanelSection title="Notifications">
-        <ToggleField
-          label="All Notifications"
-          highlightOnFocus={true}
-          checked={settings.notifications.enabled}
-          disabled={isBusy}
-          onChange={(enabled: boolean) => void toggleNotificationSetting("enabled", enabled)}
-        />
-        <ToggleField
-          label="Manual Operations"
-          highlightOnFocus={true}
-          checked={settings.notifications.manual_operations}
-          disabled={!settings.notifications.enabled || isBusy}
-          onChange={(enabled: boolean) => void toggleNotificationSetting("manual_operations", enabled)}
-        />
-        <ToggleField
-          label="Refresh Status"
-          highlightOnFocus={true}
-          checked={settings.notifications.refresh_status}
-          disabled={!settings.notifications.enabled || isBusy}
-          onChange={(enabled: boolean) => void toggleNotificationSetting("refresh_status", enabled)}
-        />
-        <ToggleField
-          label="Failures and Errors"
-          highlightOnFocus={true}
-          checked={settings.notifications.failures_errors}
-          disabled={!settings.notifications.enabled || isBusy}
-          onChange={(enabled: boolean) => void toggleNotificationSetting("failures_errors", enabled)}
-        />
+        <FullWidthToggle>
+          <ToggleField
+            label="All Notifications"
+            highlightOnFocus={true}
+            checked={settings.notifications.enabled}
+            disabled={isBusy}
+            onChange={(enabled: boolean) => void toggleNotificationSetting("enabled", enabled)}
+          />
+        </FullWidthToggle>
+        <FullWidthToggle>
+          <ToggleField
+            label="Manual Operations"
+            highlightOnFocus={true}
+            checked={settings.notifications.manual_operations}
+            disabled={!settings.notifications.enabled || isBusy}
+            onChange={(enabled: boolean) => void toggleNotificationSetting("manual_operations", enabled)}
+          />
+        </FullWidthToggle>
+        <FullWidthToggle>
+          <ToggleField
+            label="Refresh Status"
+            highlightOnFocus={true}
+            checked={settings.notifications.refresh_status}
+            disabled={!settings.notifications.enabled || isBusy}
+            onChange={(enabled: boolean) => void toggleNotificationSetting("refresh_status", enabled)}
+          />
+        </FullWidthToggle>
+        <FullWidthToggle>
+          <ToggleField
+            label="Failures and Errors"
+            highlightOnFocus={true}
+            checked={settings.notifications.failures_errors}
+            disabled={!settings.notifications.enabled || isBusy}
+            onChange={(enabled: boolean) => void toggleNotificationSetting("failures_errors", enabled)}
+          />
+        </FullWidthToggle>
       </PanelSection>
 
       <LudusaviPanel ludusaviCommand={ludusaviCommand} isLoading={busyLabel === "Loading"} />

@@ -10,6 +10,7 @@
   "tests_added": [
     "tests/test_frontend_static.py::test_frontend_qam_uses_global_and_game_panels",
     "tests/test_frontend_static.py::test_frontend_qam_uses_custom_plugin_icon_and_plain_title",
+    "tests/test_frontend_static.py::test_frontend_qam_toggle_focus_stretches_to_panel_edges",
     "tests/test_frontend_static.py::test_frontend_qam_rows_use_native_full_row_focus",
     "tests/test_frontend_static.py::test_frontend_qam_last_operation_uses_single_line_ellipsis",
     "tests/test_frontend_static.py::test_frontend_versions_order_places_decky_last"
@@ -19,7 +20,10 @@
     "Used a local inline PluginIcon component with currentColor instead of the LuDatabaseBackup react-icon.",
     "Split the QAM controls into GLOBAL and GAME panels so automatic sync and refresh are separated from selected-game controls.",
     "Used Decky Field and highlightOnFocus/focusable props for full-row focus behavior where the installed @decky/ui types support them.",
-    "Kept the titleView scoped to plugin-owned plain markup rather than using staticClasses.Title."
+    "Kept the titleView scoped to plugin-owned plain markup rather than using staticClasses.Title.",
+    "Matched the custom QAM icon to react-icons sizing by setting width and height to 1em.",
+    "Wrapped toggle fields in a scoped full-width container because ToggleField does not expose className or style props.",
+    "Increased the last-operation value text to 14px while retaining no-wrap ellipsis behavior."
   ],
   "results": [
     "Verified the new static frontend tests failed before implementation.",
