@@ -1,0 +1,24 @@
+{
+  "date": "2026-05-20",
+  "task_objective": "Merge the QAM UI cleanup branch to main, start a new branch, reduce duplicate first-load Ludusavi probes, and downgrade no-context QAM selection misses from warning to debug.",
+  "files_modified": [
+    "docs/plans/first_load_probe_cleanup.md",
+    "py_modules/sdh_ludusavi/ludusavi.py",
+    "src/index.tsx",
+    "tests/test_adapter_cache.py",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "tests/test_adapter_cache.py::test_pyludusavi_adapter_reuses_diagnostic_first_load_probes",
+    "tests/test_frontend_static.py::test_frontend_logs_current_game_context_and_match_reason"
+  ],
+  "design_decisions": [
+    "Cache Ludusavi adapter versions after diagnostics so the first versions RPC reuses the existing --version probe.",
+    "Reuse the diagnostics config path for config marker mtime checks so first load does not run config path twice.",
+    "Keep warning-level QAM no-match logs only for real sessions that fail matching; no session context is expected and logs at debug."
+  ],
+  "results": [
+    "Fast-forwarded main through feat/qam-ui-cleanup and created fix/first-load-probe-cleanup.",
+    "Focused red tests failed before implementation and passed after implementation."
+  ]
+}

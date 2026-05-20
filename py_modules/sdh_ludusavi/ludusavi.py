@@ -48,6 +48,8 @@ class PyludusaviAdapter:
         LOGGER.debug("Using Ludusavi environment overrides: %s", env)
         self._client = Ludusavi(flatpak_id=flatpak_id, env=env)
         self._cached_config_path: str | None = None
+        self._cached_versions: dict[str, str] | None = None
+        self._cached_diagnostics: dict[str, object] | None = None
 
     def refresh_statuses(self) -> list[dict[str, object]]:
         preview = self._client.backup(preview=True).data
@@ -178,15 +180,33 @@ class PyludusaviAdapter:
     def get_versions(self) -> dict[str, str]:
         from pyludusavi import __version__ as pyludusavi_version
 
+        cached_versions = getattr(self, "_cached_versions", None)
+        if cached_versions is not None:
+            return dict(cached_versions)
+
         ludusavi = self._client.version()
         # Normalize the Ludusavi version string to be lowercase and without the "ludusavi " prefix, if present.
         ludusavi = ludusavi.lower().replace("ludusavi", "").strip() if ludusavi else "unknown"
-        return {
+        versions = {
             "ludusavi": ludusavi,
             "pyludusavi": pyludusavi_version,
         }
+        self._cached_versions = dict(versions)
+        return versions
+
+    def _config_path(self) -> str:
+        if getattr(self, "_cached_config_path", None) is None:
+            self._cached_config_path = self._client.config_path()
+        cached_config_path = self._cached_config_path
+        if cached_config_path is None:
+            raise RuntimeError("Ludusavi config path discovery returned no path")
+        return cached_config_path
 
     def get_diagnostics(self) -> dict[str, object]:
+        cached_diagnostics = getattr(self, "_cached_diagnostics", None)
+        if cached_diagnostics is not None:
+            return dict(cached_diagnostics)
+
         command_prefix = list(getattr(self._client, "command_prefix", []))
         command_type = "unknown"
         command_path = "unknown"
@@ -198,7 +218,7 @@ class PyludusaviAdapter:
             command_path = command_prefix[0]
 
         version = self.get_versions().get("ludusavi", "unknown")
-        config_path = self._client.config_path()
+        config_path = self._config_path()
         backup_path = "unknown"
         try:
             backup_config = self._client.config_show().data.get("backup", {})
@@ -207,22 +227,22 @@ class PyludusaviAdapter:
         except Exception:
             pass
 
-        return {
+        diagnostics = {
             "version": version,
             "type": command_type,
             "path": command_path,
             "configPath": config_path,
             "backupPath": backup_path,
         }
+        self._cached_diagnostics = dict(diagnostics)
+        return diagnostics
 
     def get_log_contents(self) -> str:
         return self._client.log_show()
 
     def get_config_mtime_ns(self) -> int | None:
         try:
-            if self._cached_config_path is None:
-                self._cached_config_path = self._client.config_path()
-            return Path(self._cached_config_path).stat().st_mtime_ns
+            return Path(self._config_path()).stat().st_mtime_ns
         except Exception:
             LOGGER.debug(
                 "Unable to stat Ludusavi config path: %s", self._cached_config_path, exc_info=True

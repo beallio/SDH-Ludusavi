@@ -847,6 +847,13 @@ def test_frontend_logs_current_game_context_and_match_reason() -> None:
     ]:
         assert required_text in source
 
+    no_match = source[
+        source.index("function logCurrentGameNoMatch(") : source.index(
+            "function findScrollableParent("
+        )
+    ]
+    assert 'session ? "warning" : "debug"' in no_match
+
 
 def test_frontend_matches_current_game_through_ludusavi_aliases() -> None:
     source = FRONTEND.read_text()
