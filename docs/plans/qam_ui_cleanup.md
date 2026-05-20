@@ -49,8 +49,13 @@ Open-state and current-game refinements:
 - Prefer the current SteamOS running game from `Router.MainRunningApp` when it
   matches a Ludusavi dropdown game by Steam app id, then by display name. This
   follows the standard current-game pattern found in other Decky plugins.
-- Do not implement ambient Home/Library tile detection in this pass; researched
-  plugins either use `Router.MainRunningApp` or explicit context-menu routing.
+- Extend the current-game resolver beyond running games because QAM opens from
+  the Home/Library surfaces before a game is running. Prefer a focused or hovered
+  SteamUI app context, then the current Library app route, then
+  `Router.MainRunningApp`.
+- Keep the Home/Library resolver best-effort and read-only: inspect SteamUI
+  route, appStore/collectionStore metadata, and React-owned props on the focused
+  or hovered app element. Do not patch Steam's context menu or mutate SteamUI.
 
 ## Dependency Requirements
 
@@ -75,6 +80,10 @@ Follow red-green-refactor:
 - Assert `Router.MainRunningApp` is used to select a matching dropdown game ahead
   of the saved `selected_game`, while manual dropdown changes still persist via
   `setSelectedGameCall`.
+- Assert Home/Library focused or hovered app context is captured while QAM is
+  hidden and preferred over saved `selected_game` on QAM open.
+- Assert Library app routes such as `/routes/library/app/<appid>` can resolve a
+  Steam app id through appStore or collectionStore metadata.
 
 Final validation uses:
 

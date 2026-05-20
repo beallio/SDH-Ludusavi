@@ -782,6 +782,7 @@ def test_frontend_prefers_main_running_app_for_qam_game_selection() -> None:
 
     assert "function getMainRunningSession(): RunningSession | null" in source
     assert "return sessionFromAppOverview((Router as any).MainRunningApp);" in source
+    assert "function getPreferredSteamGameSession(): RunningSession | null" in source
     assert "function getGameSteamAppID(game: GameStatus): string | null" in source
     assert "function findGameForRunningSession(" in source
     assert "gameAppID === session.appID" in source
@@ -807,3 +808,54 @@ def test_frontend_applies_current_game_before_saved_selected_game() -> None:
     assert "pendingCurrentGameSelection.current = false;" in source
     assert "void onGameChange(data)" in source
     assert "const result = await setSelectedGameCall(value);" in source
+
+
+def test_frontend_captures_home_library_focused_game_context() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        "let lastSteamUiGameContext: RunningSession | null = null;",
+        "function captureSteamUiGameContext(): RunningSession | null",
+        "function getFocusedSteamGameSession(): RunningSession | null",
+        "function getSteamUiReactPropCandidates(",
+        "__reactProps$",
+        "__reactFiber$",
+        "__reactInternalInstance$",
+        'doc.querySelectorAll(":hover")',
+        'doc.querySelector(".gpfocus, .gpfocuswithin, :focus")',
+        "lastSteamUiGameContext = session;",
+        "window.setInterval(captureSteamUiGameContext, 500);",
+    ]:
+        assert required_text in source
+
+
+def test_frontend_resolves_selected_library_route_app_context() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        "function getRouteSteamGameSession(): RunningSession | null",
+        "function sessionFromRoutePath(path: string): RunningSession | null",
+        "match(/(?:\\/routes)?\\/library\\/app\\/(\\d+)/)",
+        "function getSteamAppNameFromStores(appID: string): string | null",
+        "appStore?.GetAppOverviewByAppID",
+        "collectionStore?.allGamesCollection?.allApps",
+        "mainWindow?.location?.pathname",
+        "mainWindow?.location?.hash",
+    ]:
+        assert required_text in source
+
+
+def test_frontend_prefers_focused_or_selected_game_before_running_game() -> None:
+    source = FRONTEND.read_text()
+
+    preferred = source[
+        source.index("function getPreferredSteamGameSession") : source.index(
+            "function findGameForRunningSession"
+        )
+    ]
+    assert "captureSteamUiGameContext()" in preferred
+    assert "getRecentSteamUiGameContext()" in preferred
+    assert "getMainRunningSession()" in preferred
+    assert preferred.index("captureSteamUiGameContext()") < preferred.index(
+        "getMainRunningSession()"
+    )

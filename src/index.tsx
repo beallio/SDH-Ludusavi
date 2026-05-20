@@ -246,16 +246,185 @@ const getInstalledAppIdsString = async (): Promise<string | undefined> => {
 };
 
 const sessionFromAppOverview = (app: any): RunningSession | null => {
-  const appID = app?.appid ? String(app.appid) : null;
-  const name = app?.display_name || null;
+  const appID = app?.appid ?? app?.m_unAppID ?? app?.nAppID ?? app?.m_nAppID ?? null;
+  const name =
+    app?.display_name ??
+    app?.m_strDisplayName ??
+    app?.strAppName ??
+    app?.name ??
+    app?.title ??
+    "";
   if (!appID || !name) {
     return null;
   }
-  return { appID, name };
+  return { appID: String(appID), name: String(name) };
 };
 
 function getMainRunningSession(): RunningSession | null {
   return sessionFromAppOverview((Router as any).MainRunningApp);
+}
+
+function getMainSteamWindow(): Window | null {
+  return (Router as any).WindowStore?.GamepadUIMainWindowInstance?.BrowserWindow ?? null;
+}
+
+function getSteamAppNameFromStores(appID: string): string | null {
+  const numericAppID = Number(appID);
+  const appStore = (globalThis as any).appStore ?? (window as any).appStore;
+  const overview = Number.isFinite(numericAppID)
+    ? appStore?.GetAppOverviewByAppID?.(numericAppID)
+    : null;
+  const overviewSession = sessionFromAppOverview(overview);
+  if (overviewSession?.name) {
+    return overviewSession.name;
+  }
+
+  const collectionApps = (globalThis as any).collectionStore?.allGamesCollection?.allApps
+    ?? (window as any).collectionStore?.allGamesCollection?.allApps;
+  if (collectionApps && typeof collectionApps.forEach === "function") {
+    let foundName: string | null = null;
+    collectionApps.forEach((app: any) => {
+      if (foundName) {
+        return;
+      }
+      const candidateID = app?.appid ?? app?.nAppID ?? app?.m_unAppID;
+      if (String(candidateID) === appID) {
+        foundName = app?.display_name ?? app?.strAppName ?? app?.m_strDisplayName ?? null;
+      }
+    });
+    if (foundName) {
+      return foundName;
+    }
+  }
+
+  return null;
+}
+
+function sessionFromRoutePath(path: string): RunningSession | null {
+  const match = path.match(/(?:\/routes)?\/library\/app\/(\d+)/);
+  const appID = match?.[1];
+  if (!appID) {
+    return null;
+  }
+  const name = getSteamAppNameFromStores(appID) ?? "";
+  return { appID, name };
+}
+
+function getRouteSteamGameSession(): RunningSession | null {
+  const mainWindow = getMainSteamWindow();
+  return (
+    sessionFromRoutePath(mainWindow?.location?.pathname ?? "") ??
+    sessionFromRoutePath(mainWindow?.location?.hash ?? "") ??
+    sessionFromRoutePath(window.location.pathname) ??
+    sessionFromRoutePath(window.location.hash)
+  );
+}
+
+function sessionFromSteamUiCandidate(candidate: any): RunningSession | null {
+  if (!candidate) {
+    return null;
+  }
+
+  const direct = sessionFromAppOverview(candidate);
+  if (direct) {
+    return direct;
+  }
+
+  const nestedCandidates = [
+    candidate.app,
+    candidate.overview,
+    candidate.game,
+    candidate.props?.app,
+    candidate.props?.overview,
+    candidate.props?.game,
+    candidate.pendingProps?.app,
+    candidate.pendingProps?.overview,
+    candidate.pendingProps?.game,
+    candidate.memoizedProps?.app,
+    candidate.memoizedProps?.overview,
+    candidate.memoizedProps?.game,
+    candidate.stateNode?.props?.app,
+    candidate.stateNode?.props?.overview,
+    candidate.stateNode?.props?.game
+  ];
+
+  for (const nested of nestedCandidates) {
+    const session = sessionFromAppOverview(nested);
+    if (session) {
+      return session;
+    }
+  }
+
+  return null;
+}
+
+function getSteamUiReactPropCandidates(element: Element | null): any[] {
+  if (!element) {
+    return [];
+  }
+
+  const candidates: any[] = [];
+  for (const key of Object.keys(element as any)) {
+    if (key.startsWith("__reactProps$")) {
+      candidates.push((element as any)[key]);
+    }
+    if (key.startsWith("__reactFiber$") || key.startsWith("__reactInternalInstance$")) {
+      let fiber = (element as any)[key];
+      for (let depth = 0; fiber && depth < 12; depth += 1) {
+        candidates.push(fiber.pendingProps, fiber.memoizedProps, fiber.stateNode?.props);
+        fiber = fiber.return;
+      }
+    }
+  }
+  return candidates.filter(Boolean);
+}
+
+function getFocusedSteamGameSession(): RunningSession | null {
+  const mainWindow = getMainSteamWindow();
+  const doc = mainWindow?.document ?? document;
+  const focusedElements = [
+    doc.activeElement,
+    doc.querySelector(".gpfocus, .gpfocuswithin, :focus"),
+    ...Array.from(doc.querySelectorAll(":hover")).reverse()
+  ];
+
+  for (const element of focusedElements) {
+    for (const candidate of getSteamUiReactPropCandidates(element)) {
+      const session = sessionFromSteamUiCandidate(candidate);
+      if (session) {
+        return session;
+      }
+    }
+  }
+
+  return null;
+}
+
+function captureSteamUiGameContext(): RunningSession | null {
+  const session = getFocusedSteamGameSession() ?? getRouteSteamGameSession();
+  if (session) {
+    lastSteamUiGameContext = session;
+    lastSteamUiGameContextCapturedAt = Date.now();
+  }
+  return session;
+}
+
+function getRecentSteamUiGameContext(): RunningSession | null {
+  if (!lastSteamUiGameContext) {
+    return null;
+  }
+  if (Date.now() - lastSteamUiGameContextCapturedAt > STEAM_UI_GAME_CONTEXT_TTL_MS) {
+    return null;
+  }
+  return lastSteamUiGameContext;
+}
+
+function getPreferredSteamGameSession(): RunningSession | null {
+  return (
+    captureSteamUiGameContext() ??
+    getRecentSteamUiGameContext() ??
+    getMainRunningSession()
+  );
 }
 
 function getGameSteamAppID(game: GameStatus): string | null {
@@ -276,6 +445,10 @@ function findGameForRunningSession(
   });
   if (appIDMatch) {
     return appIDMatch;
+  }
+
+  if (!session.name) {
+    return null;
   }
 
   return currentGames.find((game) => normalize(game.name) === normalize(session.name)) ?? null;
@@ -946,6 +1119,9 @@ let trackedAppIDs = new Set<string>();
 let trackedNames = new Set<string>();
 let autoSyncNotificationsEnabled = false;
 let notificationSettingsMirror: NotificationSettings = { ...defaultNotificationSettings };
+let lastSteamUiGameContext: RunningSession | null = null;
+let lastSteamUiGameContextCapturedAt = 0;
+const STEAM_UI_GAME_CONTEXT_TTL_MS = 10_000;
 
 /** Normalize a game name for fuzzy matching, mirroring backend _normalize. */
 function normalize(name: string): string {
@@ -1050,7 +1226,7 @@ function Content() {
   const isBusy = operation.is_running || busyLabel !== null || backgroundRefreshBusy;
 
   function selectCurrentSteamGameIfAvailable(currentGames: GameStatus[]): boolean {
-    const runningSession = getMainRunningSession();
+    const runningSession = getPreferredSteamGameSession();
     if (!runningSession) {
       return false;
     }
@@ -1085,6 +1261,16 @@ function Content() {
     selectCurrentSteamGameIfAvailable(games);
     pendingCurrentGameSelection.current = false;
   }, [games, isQuickAccessVisible]);
+
+  useEffect(() => {
+    if (isQuickAccessVisible) {
+      return;
+    }
+
+    captureSteamUiGameContext();
+    const contextIntervalID = window.setInterval(captureSteamUiGameContext, 500);
+    return () => window.clearInterval(contextIntervalID);
+  }, [isQuickAccessVisible]);
 
   const loadInitial = async () => {
     const isWarmed = globalSettings !== null && globalGames !== null;
