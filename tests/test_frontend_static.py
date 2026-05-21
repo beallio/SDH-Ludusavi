@@ -804,7 +804,7 @@ def test_frontend_qam_rows_use_native_full_row_focus() -> None:
 
     versions_panel = source[source.index('PanelSection title="Versions"') :]
     assert (
-        '<Field highlightOnFocus={true} focusable={true} padding="standard" bottomSeparator="none">'
+        '<Field highlightOnFocus={true} focusable={true} childrenLayout="below" padding="standard" bottomSeparator="none">'
         in versions_panel
     )
 
@@ -841,6 +841,7 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert versions_panel.index("Ludusavi:") < versions_panel.index("pyludusavi:")
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
     assert 'className="sdh-ludusavi-versions-list"' in versions_panel
+    assert 'childrenLayout="below"' in versions_panel
 
 
 def test_frontend_gates_warmed_background_refresh_without_loading_label() -> None:
