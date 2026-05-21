@@ -1722,16 +1722,16 @@ function Content() {
           <DropdownItem
             menuLabel="Select Game"
             highlightOnFocus={true}
-              focusable={true}
-              bottomSeparator="none"
-              disabled={isBusy}
-              rgOptions={games.map((game) => ({
-                label: game.name,
-                data: game.name
-              }))}
-              selectedOption={selectedGame}
-              onChange={(data: any) => void onGameChange(data)}
-            />
+            focusable={true}
+            bottomSeparator="none"
+            disabled={isBusy}
+            rgOptions={games.map((game) => ({
+              label: game.name,
+              data: game.name
+            }))}
+            selectedOption={selectedGame}
+            onChange={(data: any) => void onGameChange(data)}
+          />
         </PanelSectionRow>
 
         <PanelSectionRow>
@@ -1877,7 +1877,7 @@ function Content() {
       <PanelSection title="Versions">
         <PanelSectionRow>
           <Field highlightOnFocus={true} focusable={true} padding="standard" bottomSeparator="none">
-            <div className="sdh-ludusavi-versions-list" style={{ textAlign: "left", alignItems: "flex-start" }}>
+            <div className="sdh-ludusavi-versions-list">
               <div>SDH-Ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
               <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
               <div>pyludusavi: {versions.pyludusavi ?? "Unknown"}</div>

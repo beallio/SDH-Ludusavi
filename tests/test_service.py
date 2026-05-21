@@ -1222,3 +1222,55 @@ def test_concurrent_state_saves_do_not_share_temp_file(tmp_path: Path) -> None:
     assert errors == []
     state = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
     assert state["selected_game"].startswith("Game ")
+
+
+def test_cache_keys_do_not_override_settings(tmp_path: Path) -> None:
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text(
+        json.dumps(
+            {
+                "auto_sync_enabled": True,
+                "selected_game": "Hades",
+                "notifications": {
+                    "enabled": True,
+                    "auto_sync_progress": True,
+                    "auto_sync_results": True,
+                    "manual_operations": True,
+                    "refresh_status": True,
+                    "failures_errors": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cache_file = tmp_path / "cache.json"
+    cache_file.write_text(
+        json.dumps(
+            {
+                "auto_sync_enabled": False,
+                "selected_game": "Celeste",
+                "notifications": {
+                    "enabled": False,
+                    "auto_sync_progress": False,
+                    "auto_sync_results": False,
+                    "manual_operations": False,
+                    "refresh_status": False,
+                    "failures_errors": False,
+                },
+                "ludusaviLauncherShortcutAppId": 12345,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = SDHLudusaviService(
+        adapter=FakeAdapter(),
+        settings_store=JsonSettingsStore(settings_file),
+        cache_path=cache_file,
+    )
+
+    assert service.get_settings()["auto_sync_enabled"] is True
+    assert service.get_settings()["selected_game"] == "Hades"
+    assert service.get_settings()["notifications"]["enabled"] is True
+    assert service._ludusavi_launcher_shortcut_id == 12345

@@ -446,3 +446,27 @@ def test_service_ignores_legacy_decky_settings_dir_for_plugin_dirs(
 
     assert FakeSettingsManager.created == [("settings", decky.DECKY_PLUGIN_SETTINGS_DIR)]
     assert captured["cache_path"] == Path(decky.DECKY_PLUGIN_RUNTIME_DIR) / "cache.json"
+
+
+def test_decky_settings_store_read_failure_handled_gracefully(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    class FailingSettingsManager(FakeSettingsManager):
+        def read(self) -> None:
+            raise OSError("permission denied")
+
+    decky, logger = fake_decky_module(tmp_path)
+    module = import_main(monkeypatch, decky, settings_manager=FailingSettingsManager)
+
+    plugin = module.Plugin()
+    with caplog.at_level(logging.WARNING):
+        service = plugin._service()
+
+    assert service.get_settings()["auto_sync_enabled"] is False
+    assert any(
+        "unreadable settings: permission denied" in record.message for record in caplog.records
+    )

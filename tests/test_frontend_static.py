@@ -841,8 +841,6 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert versions_panel.index("Ludusavi:") < versions_panel.index("pyludusavi:")
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
     assert 'className="sdh-ludusavi-versions-list"' in versions_panel
-    assert 'textAlign: "left"' in versions_panel
-    assert 'alignItems: "flex-start"' in versions_panel
 
 
 def test_frontend_gates_warmed_background_refresh_without_loading_label() -> None:

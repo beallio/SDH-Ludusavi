@@ -21,9 +21,9 @@ CACHE_FILE_NAME = "cache.json"
 class DeckySettingsStore:
     def __init__(self, manager: Any) -> None:
         self._manager = manager
-        self._manager.read()
 
     def read(self) -> dict[str, object]:
+        self._manager.read()
         return {
             "auto_sync_enabled": self._manager.getSetting("auto_sync_enabled", False),
             "selected_game": self._manager.getSetting("selected_game", ""),

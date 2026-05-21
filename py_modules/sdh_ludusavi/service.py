@@ -1185,7 +1185,9 @@ class SDHLudusaviService:
         if not isinstance(cache, dict):
             self._warn_state_load("cache file must contain a JSON object")
             return
-        cache_data = cast(dict[str, object], cache)
+        cache_data = {
+            k: v for k, v in cast(dict[str, object], cache).items() if k not in SETTINGS_KEYS
+        }
         self._apply_state_data({**self.get_settings(), **cache_data})
 
     def _settings_payload(self) -> dict[str, object]:
