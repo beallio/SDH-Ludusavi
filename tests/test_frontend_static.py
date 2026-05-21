@@ -494,12 +494,24 @@ def test_frontend_lifecycle_resolution_handles_non_steam_shortcuts() -> None:
     assert "activeSessions.get(notification.nInstanceID)" in source
 
 
-def test_frontend_initial_load_fetches_logs_after_refresh() -> None:
+def test_frontend_initial_load_skips_logs_and_warmed_refresh_when_cache_current() -> None:
     source = FRONTEND.read_text()
 
-    assert "const loadedLogs = await getRecentLogs();" in source
-    assert source.index("applyRefreshResult(refreshed") < source.index(
-        "const loadedLogs = await getRecentLogs();"
+    load_initial = source[source.index("const loadInitial = async () => {") :]
+    load_initial = load_initial[: load_initial.index("const applyRefreshResult")]
+    assert "const loadedLogs = await getRecentLogs();" not in load_initial
+    assert "setLogs(await getRecentLogs().catch(() => []));" not in load_initial
+    assert (
+        "const installedAppIdsChanged = globalInstalledAppIds !== installedAppIds;" in load_initial
+    )
+    assert (
+        "const cacheCurrent = isWarmed && !installedAppIdsChanged && await "
+        "isGameCacheCurrentCall(installedAppIds);"
+    ) in load_initial
+    assert "if (cacheCurrent && globalGames) {" in load_initial
+    assert "applyCachedRefreshResult(" in load_initial
+    assert load_initial.index("isGameCacheCurrentCall(installedAppIds)") < load_initial.index(
+        "refreshGamesCall(false, installedAppIds)"
     )
 
 
@@ -535,7 +547,11 @@ def test_frontend_uses_decky_log_modal() -> None:
         'borderRadius: "4px"',
         'userSelect: "text"',
         'logs.length === 0 ? "No recent logs" : logs.map(formatLogEntry).join("\\n")',
-        "showModal(<LogModal logs={logs} />)",
+        "const showPluginLogs = async () => {",
+        "const currentLogs = await getRecentLogs();",
+        "setLogs(currentLogs);",
+        "showModal(<LogModal logs={currentLogs} />)",
+        "onClick={() => void showPluginLogs()}",
     ]:
         assert required_text in source
 
@@ -766,12 +782,16 @@ def test_frontend_logs_and_retries_qam_scroll_reset() -> None:
 
     for required_text in [
         'function resetQuickAccessScroll(container: HTMLElement | null, reason = "qam_open")',
-        "const resetDelays = [0, 50, 150, 350];",
+        "const resetDelays = [50, 150, 350];",
         "resetDelays.forEach((delay) => {",
         "window.setTimeout(() => resetQuickAccessScroll(qamContentRef.current, `qam_open_retry_${delay}`), delay);",
+        "const beforeContainerTop = container?.getBoundingClientRect?.().top ?? -1;",
+        "Math.abs(beforeContainerTop - containerTop) <= QUICK_ACCESS_TOP_EPSILON_PX",
         "`QAM scroll reset (${reason}): before=${beforeTop}, after=${afterTop}, containerTop=${containerTop}, scrollable=${scrollableTag}`",
     ]:
         assert required_text in source
+
+    assert "qam_open_retry_0" not in source
 
 
 def test_frontend_preserves_always_render_for_lifecycle_and_status_surface() -> None:

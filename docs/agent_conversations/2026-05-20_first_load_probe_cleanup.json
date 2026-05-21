@@ -1,24 +1,38 @@
 {
   "date": "2026-05-20",
-  "task_objective": "Merge the QAM UI cleanup branch to main, start a new branch, reduce duplicate first-load Ludusavi probes, and downgrade no-context QAM selection misses from warning to debug.",
+  "task_objective": "Merge the QAM UI cleanup branch to main, start a new branch, reduce duplicate first-load Ludusavi probes, downgrade no-context QAM selection misses from warning to debug, and reduce warmed QAM mount work.",
   "files_modified": [
     "docs/plans/first_load_probe_cleanup.md",
+    "main.py",
+    "py_modules/sdh_ludusavi/service.py",
     "py_modules/sdh_ludusavi/ludusavi.py",
     "src/index.tsx",
     "tests/test_adapter_cache.py",
+    "tests/test_launcher_backend.py",
+    "tests/test_service.py",
     "tests/test_frontend_static.py"
   ],
   "tests_added": [
     "tests/test_adapter_cache.py::test_pyludusavi_adapter_reuses_diagnostic_first_load_probes",
+    "tests/test_launcher_backend.py::test_get_ludusavi_command",
+    "tests/test_service.py::test_game_cache_current_uses_installed_app_and_config_markers",
+    "tests/test_frontend_static.py::test_frontend_initial_load_skips_logs_and_warmed_refresh_when_cache_current",
+    "tests/test_frontend_static.py::test_frontend_uses_decky_log_modal",
+    "tests/test_frontend_static.py::test_frontend_logs_and_retries_qam_scroll_reset",
     "tests/test_frontend_static.py::test_frontend_logs_current_game_context_and_match_reason"
   ],
   "design_decisions": [
     "Cache Ludusavi adapter versions after diagnostics so the first versions RPC reuses the existing --version probe.",
     "Reuse the diagnostics config path for config marker mtime checks so first load does not run config path twice.",
-    "Keep warning-level QAM no-match logs only for real sessions that fail matching; no session context is expected and logs at debug."
+    "Keep warning-level QAM no-match logs only for real sessions that fail matching; no session context is expected and logs at debug.",
+    "Cache successful Ludusavi launcher discovery while preserving retry behavior when discovery fails.",
+    "Use a lightweight backend cache-current RPC on warmed frontend loads before skipping refresh_games.",
+    "Fetch plugin logs only when the log modal opens or after operations that already refresh logs.",
+    "Drop the immediate qam_open_retry_0 retry and suppress no-op scroll reset logs."
   ],
   "results": [
     "Fast-forwarded main through feat/qam-ui-cleanup and created fix/first-load-probe-cleanup.",
-    "Focused red tests failed before implementation and passed after implementation."
+    "Focused red tests failed before implementation and passed after implementation.",
+    "Warmed QAM mount work now avoids repeated launcher discovery, log fetches, no-op scroll logging, and refresh_games when backend cache markers are current."
   ]
 }

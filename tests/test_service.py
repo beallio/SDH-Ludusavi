@@ -249,6 +249,19 @@ def test_ludusavi_adapter_factory_is_reused_after_success(tmp_path: Path) -> Non
     assert calls == 1
 
 
+def test_game_cache_current_uses_installed_app_and_config_markers(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+
+    assert service.is_game_cache_current("222,111") is False
+
+    service.refresh_games(installed_app_ids="222,111")
+    assert service.is_game_cache_current("111,222") is True
+
+    adapter.config_mtime_ns = 200
+    assert service.is_game_cache_current("111,222") is False
+
+
 def test_ludusavi_adapter_initialization_is_thread_safe(tmp_path: Path) -> None:
     calls = 0
     factory_entered = threading.Event()

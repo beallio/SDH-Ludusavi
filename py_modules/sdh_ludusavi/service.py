@@ -195,6 +195,7 @@ class SDHLudusaviService:
         self._aliases: dict[str, str] = {}
         self._ids: dict[str, str] = {}
         self._versions: dict[str, str] | None = None
+        self._ludusavi_command: dict[str, object] | None = None
         self._installed_app_ids: str | None = None
         self._ludusavi_config_mtime_ns: int | None = None
         self._game_history: dict[str, dict[str, Any]] = {}
@@ -354,6 +355,14 @@ class SDHLudusaviService:
         Return the command path and args used by the plugin for GUI launching.
         Returns None if Ludusavi is not found.
         """
+        if self._ludusavi_command is not None:
+            args = self._ludusavi_command.get("args", [])
+            return {
+                "commandPath": str(self._ludusavi_command["commandPath"]),
+                "args": list(args) if isinstance(args, list) else [],
+                "compatTool": str(self._ludusavi_command["compatTool"]),
+            }
+
         from pyludusavi.discovery import LudusaviNotFoundError, find_ludusavi
 
         from .ludusavi import FLATPAK_ID, _ludusavi_env
@@ -368,11 +377,35 @@ class SDHLudusaviService:
         if not prefix:
             return None
 
-        return {
+        command: dict[str, object] = {
             "commandPath": prefix[0],
-            "args": prefix[1:],
+            "args": list(prefix[1:]),
             "compatTool": "",  # Standard launcher doesn't need compat tool for native/flatpak
         }
+        self._ludusavi_command = command
+        args = command["args"]
+        return {
+            "commandPath": str(command["commandPath"]),
+            "args": list(args) if isinstance(args, list) else [],
+            "compatTool": str(command["compatTool"]),
+        }
+
+    def is_game_cache_current(self, installed_app_ids: str | None = None) -> bool:
+        if not self._games:
+            return False
+
+        normalized_installed_app_ids = _normalize_installed_app_ids(installed_app_ids)
+        if (
+            normalized_installed_app_ids is not None
+            and self._installed_app_ids != normalized_installed_app_ids
+        ):
+            return False
+
+        config_mtime_ns = self._current_ludusavi_config_mtime_ns()
+        if config_mtime_ns is _CONFIG_MARKER_READ_FAILED:
+            return False
+
+        return self._ludusavi_config_mtime_ns == cast(int | None, config_mtime_ns)
 
     def _coerce_history_entry(self, entry: Any) -> dict[str, Any] | None:
         """Validate and sanitize a history entry dictionary."""

@@ -208,6 +208,7 @@ const setAutoSyncEnabled = callable<[enabled: boolean], RpcResult<Settings>>("se
 const setNotificationSettings = callable<[settings: NotificationSettings], RpcResult<Settings>>("set_notification_settings");
 const setSelectedGameCall = callable<[gameName: string], RpcResult<Settings>>("set_selected_game");
 const refreshGamesCall = callable<[force: boolean, installed_app_ids?: string], RpcResult<RefreshResult>>("refresh_games");
+const isGameCacheCurrentCall = callable<[installed_app_ids?: string], boolean>("is_game_cache_current");
 const forceBackupCall = callable<[gameName: string], RpcResult<OperationResult>>("force_backup");
 const forceRestoreCall = callable<[gameName: string], RpcResult<OperationResult>>("force_restore");
 const getVersions = callable<[], RpcResult<Versions>>("get_versions");
@@ -548,6 +549,7 @@ function resetQuickAccessScroll(container: HTMLElement | null, reason = "qam_ope
   window.requestAnimationFrame(() => {
     const scrollable = findScrollableParent(container);
     const beforeTop = scrollable?.scrollTop ?? -1;
+    const beforeContainerTop = container?.getBoundingClientRect?.().top ?? -1;
     if (scrollable) {
       scrollable.scrollTo({ top: 0, left: 0, behavior: "auto" });
     }
@@ -556,6 +558,12 @@ function resetQuickAccessScroll(container: HTMLElement | null, reason = "qam_ope
     }
     const afterTop = scrollable?.scrollTop ?? -1;
     const containerTop = container?.getBoundingClientRect?.().top ?? -1;
+    if (
+      beforeTop === afterTop &&
+      Math.abs(beforeContainerTop - containerTop) <= QUICK_ACCESS_TOP_EPSILON_PX
+    ) {
+      return;
+    }
     const scrollableTag = scrollable
       ? `${scrollable.tagName.toLowerCase()}${scrollable.id ? `#${scrollable.id}` : ""}`
       : "none";
@@ -1208,6 +1216,7 @@ let notificationSettingsMirror: NotificationSettings = { ...defaultNotificationS
 let lastSteamUiGameContext: RunningSession | null = null;
 let lastSteamUiGameContextCapturedAt = 0;
 const STEAM_UI_GAME_CONTEXT_TTL_MS = 10_000;
+const QUICK_ACCESS_TOP_EPSILON_PX = 1;
 
 /** Normalize a game name for fuzzy matching, mirroring backend _normalize. */
 function normalize(name: string): string {
@@ -1258,6 +1267,7 @@ let globalSettings: Settings | null = null;
 let globalGames: GameStatus[] | null = null;
 let globalGameAliases: Record<string, string> | null = null;
 let globalGameHistory: Record<string, GameOperationHistory> | null = null;
+let globalInstalledAppIds: string | undefined = undefined;
 let globalVersions: Versions | null = null;
 let globalLudusaviCommand: LudusaviLaunchCommand | null = null;
 
@@ -1348,7 +1358,7 @@ function Content() {
   useEffect(() => {
     if (isQuickAccessVisible && !wasQuickAccessVisible.current) {
       pendingCurrentGameSelection.current = true;
-      const resetDelays = [0, 50, 150, 350];
+      const resetDelays = [50, 150, 350];
       resetQuickAccessScroll(qamContentRef.current);
       resetDelays.forEach((delay) => {
         window.setTimeout(() => resetQuickAccessScroll(qamContentRef.current, `qam_open_retry_${delay}`), delay);
@@ -1420,20 +1430,52 @@ function Content() {
 
       log("debug", "Initializing game list (cached)");
       const installedAppIds = await getInstalledAppIdsString();
-      const refreshed = await refreshGamesCall(false, installedAppIds);
-      applyRefreshResult(refreshed, isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game);
+      const installedAppIdsChanged = globalInstalledAppIds !== installedAppIds;
+      const cacheCurrent = isWarmed && !installedAppIdsChanged && await isGameCacheCurrentCall(installedAppIds);
+      if (cacheCurrent && globalGames) {
+        applyCachedRefreshResult(isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game);
+      } else {
+        const refreshed = await refreshGamesCall(false, installedAppIds);
+        if (applyRefreshResult(refreshed, isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game)) {
+          globalInstalledAppIds = installedAppIds;
+        }
+      }
 
       const loadedOperation = await getOperationStatus();
       setOperation(loadedOperation);
-      const loadedLogs = await getRecentLogs();
-      setLogs(loadedLogs);
     } catch (error) {
       log("error", `Initial load failed: ${error}`);
-      setLogs(await getRecentLogs().catch(() => []));
     } finally {
       setBackgroundRefreshBusy(false);
       setBusyLabel(null);
     }
+  };
+
+  const applyCachedRefreshResult = (preferredGame?: string): boolean => {
+    if (!globalGames) {
+      return false;
+    }
+
+    const cachedAliases = globalGameAliases || {};
+    const cachedHistory = globalGameHistory || {};
+    setGames(globalGames);
+    setGameAliases(cachedAliases);
+    setGameHistory(cachedHistory);
+
+    if (selectCurrentSteamGameIfAvailable(globalGames, cachedAliases)) {
+      return true;
+    }
+
+    const target = preferredGame || selectedGame;
+    if (target && globalGames.some((game) => game.name === target)) {
+      setSelectedGame(target);
+      syncSelectedGameCache(target);
+    } else {
+      const firstGame = globalGames[0]?.name ?? "";
+      setSelectedGame(firstGame);
+      syncSelectedGameCache(firstGame);
+    }
+    return true;
   };
 
   const applyRefreshResult = (result: RpcResult<RefreshResult>, preferredGame?: string): boolean => {
@@ -1494,6 +1536,7 @@ function Content() {
       const installedAppIds = await getInstalledAppIdsString();
       const result = await refreshGamesCall(true, installedAppIds);
       if (applyRefreshResult(result)) {
+        globalInstalledAppIds = installedAppIds;
         setOperation(await getOperationStatus());
         setLogs(await getRecentLogs());
         notify("refresh_status", "SDH-ludusavi", "Ludusavi game status refreshed", <IoMdRefresh />);
@@ -1514,6 +1557,18 @@ function Content() {
     } catch (error) {
       log("error", `Failed to fetch Ludusavi logs: ${error}`);
       notify("failures_errors", "SDH-ludusavi", "Failed to fetch Ludusavi logs", <FaExclamationTriangle />);
+    }
+  };
+
+  const showPluginLogs = async () => {
+    try {
+      log("debug", `Fetching plugin logs (cached=${logs.length})`, "logs");
+      const currentLogs = await getRecentLogs();
+      setLogs(currentLogs);
+      showModal(<LogModal logs={currentLogs} />);
+    } catch (error) {
+      log("error", `Failed to fetch plugin logs: ${error}`);
+      notify("failures_errors", "SDH-ludusavi", "Failed to fetch plugin logs", <FaExclamationTriangle />);
     }
   };
 
@@ -1783,7 +1838,7 @@ function Content() {
 
       <PanelSection title="Logs">
         <PanelSectionRow>
-          <ButtonItem layout="below" onClick={() => showModal(<LogModal logs={logs} />)}>
+          <ButtonItem layout="below" onClick={() => void showPluginLogs()}>
             View Logs
           </ButtonItem>
         </PanelSectionRow>

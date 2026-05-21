@@ -102,6 +102,9 @@ class Plugin:
             "refresh_games", lambda: self._service().refresh_games(force, installed_app_ids)
         )
 
+    async def is_game_cache_current(self, installed_app_ids: str | None = None) -> bool:
+        return self._service().is_game_cache_current(installed_app_ids)
+
     async def handle_game_start(
         self, game_name: str, app_id: str | None = None
     ) -> dict[str, object]:
