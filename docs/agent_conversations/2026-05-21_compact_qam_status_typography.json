@@ -1,0 +1,19 @@
+{
+  "date": "2026-05-21",
+  "task_objective": "Decrease the font size of the Status and Last Operation labels in the QAM panel after researching Decky plugin formatting patterns.",
+  "files_modified": [
+    "docs/plans/decrease_status_and_last_operation_font_size.md",
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py::test_frontend_qam_status_and_last_operation_use_compact_typography"
+  ],
+  "design_decisions": [
+    "Kept the change frontend-only with no backend RPC, settings schema, dependency, or packaging changes.",
+    "Used scoped QAM CSS on plugin-owned Field classes, matching Decky plugin patterns that inject container-scoped CSS or target generated field-label classes.",
+    "Set both Status and Last Operation labels to 11px while keeping both values at 12px.",
+    "Preserved the existing native padding split: Status remains standard and Last Operation remains compact."
+  ],
+  "results": "Added a failing static regression test first, implemented the minimal QAM typography change, and prepared the change for full validation."
+}

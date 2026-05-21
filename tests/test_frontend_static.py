@@ -833,6 +833,28 @@ def test_frontend_qam_last_operation_uses_single_line_ellipsis() -> None:
         assert text in last_operation
 
 
+def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None:
+    source = FRONTEND.read_text()
+
+    status_field = source[
+        source.index('label="Status:"') : source.index("</Field>", source.index('label="Status:"'))
+    ]
+    last_operation_field = source[
+        source.index('label="Last Operation:"') : source.index(
+            "</Field>", source.index('label="Last Operation:"')
+        )
+    ]
+
+    assert 'className="sdh-ludusavi-status-field"' in status_field
+    assert 'padding="standard"' in status_field
+    assert 'fontSize: "12px"' in status_field
+    assert 'className="sdh-ludusavi-last-operation-field"' in last_operation_field
+    assert 'padding="compact"' in last_operation_field
+    assert '.sdh-ludusavi-status-field [class*="Label"],' in source
+    assert '.sdh-ludusavi-last-operation-field [class*="Label"]' in source
+    assert "font-size: 11px;" in source
+
+
 def test_frontend_versions_order_places_decky_last() -> None:
     source = FRONTEND.read_text()
 

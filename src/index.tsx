@@ -51,8 +51,9 @@ const qamPanelStyles = `
   margin-top: -6px;
 }
 
+.sdh-ludusavi-status-field [class*="Label"],
 .sdh-ludusavi-last-operation-field [class*="Label"] {
-  font-size: 12px;
+  font-size: 11px;
 }
 `;
 
@@ -1761,13 +1762,14 @@ function Content() {
         <PanelSectionRow>
           <Field
             label="Status:"
+            className="sdh-ludusavi-status-field"
             highlightOnFocus={true}
             focusable={true}
             childrenLayout="inline"
             padding="standard"
             bottomSeparator="none"
           >
-            <div style={{ color: "#cbd5e1", fontSize: "14px", minWidth: 0 }}>
+            <div style={{ color: "#cbd5e1", fontSize: "12px", minWidth: 0 }}>
               {isBusy && busyLabel === "Loading" ? (
                 <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Loading game list...</span>
               ) : isBusy && busyLabel === "Refreshing games" ? (
