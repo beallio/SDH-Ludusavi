@@ -13,7 +13,8 @@
     "Kept the change frontend-only with no backend RPC, settings schema, dependency, or packaging changes.",
     "Used a plugin-owned CompactFieldLabel React helper through Field's public label prop after the generated-class selector failed to affect the visible label text.",
     "Removed broad [class*=\"Label\"] CSS selector usage to avoid depending on Decky internal CSS module class names.",
-    "Set both Status and Last Operation labels to 11px while keeping both values at 12px.",
+    "Set both Status and Last Operation labels to 13px after 11px proved too small, while keeping both values at 12px.",
+    "Added childrenContainerWidth=\"min\" to both inline Fields to reduce the horizontal spacing between labels and values.",
     "Preserved the existing native padding split: Status remains standard and Last Operation remains compact."
   ],
   "results": "Added a failing static regression test first, implemented the minimal QAM typography change, and prepared the change for full validation."

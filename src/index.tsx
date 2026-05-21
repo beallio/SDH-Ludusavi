@@ -1225,7 +1225,7 @@ function LudusaviLogModal({ logs, closeModal }: LudusaviLogModalProps) {
 }
 
 function CompactFieldLabel({ children }: { children: ReactNode }) {
-  return <span style={{ fontSize: "11px" }}>{children}</span>;
+  return <span style={{ fontSize: "13px" }}>{children}</span>;
 }
 
 let trackedAppIDs = new Set<string>();
@@ -1765,6 +1765,7 @@ function Content() {
             highlightOnFocus={true}
             focusable={true}
             childrenLayout="inline"
+            childrenContainerWidth="min"
             padding="standard"
             bottomSeparator="none"
           >
@@ -1792,6 +1793,7 @@ function Content() {
               highlightOnFocus={true}
               focusable={true}
               childrenLayout="inline"
+              childrenContainerWidth="min"
               padding="compact"
               bottomSeparator="none"
             >
