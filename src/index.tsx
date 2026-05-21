@@ -949,17 +949,25 @@ function destroyAutoSyncStatusBrowserView() {
   clearAutoSyncStatusShowTimeout();
   try {
     const browserView = autoSyncStatusBrowserView;
-    if (!browserView) {
+    const browserViewOwner = autoSyncStatusBrowserViewOwner;
+    if (!browserView && !browserViewOwner) {
       return;
     }
-    browserView.SetVisible?.(false);
-    if (typeof browserView.Destroy === "function") {
+    browserView?.SetVisible?.(false);
+    let needsSteamClientDestroy = true;
+    if (browserView && browserView !== browserViewOwner && typeof browserView.Destroy === "function") {
       browserView.Destroy();
-    } else if (typeof autoSyncStatusBrowserViewOwner?.Destroy === "function") {
-      autoSyncStatusBrowserViewOwner.Destroy();
-    } else {
+      if (!browserViewOwner) {
+        needsSteamClientDestroy = false;
+      }
+    }
+    if (typeof browserViewOwner?.Destroy === "function") {
+      browserViewOwner.Destroy();
+      needsSteamClientDestroy = false;
+    }
+    if (needsSteamClientDestroy) {
       const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
-      steamClient?.BrowserView?.Destroy?.(autoSyncStatusBrowserViewOwner ?? browserView);
+      steamClient?.BrowserView?.Destroy?.(browserViewOwner ?? browserView);
     }
   } catch (err) {
     log("warning", `Could not destroy status strip BrowserView: ${err}`, "autosync_status");

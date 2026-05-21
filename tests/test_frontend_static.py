@@ -315,6 +315,33 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
     assert "clearAutoSyncStatusShowTimeout();" in dismount_source
 
 
+def test_frontend_status_strip_destroy_disposes_owner_and_nested_view() -> None:
+    source = FRONTEND.read_text()
+
+    destroy_source = source[
+        source.index("function destroyAutoSyncStatusBrowserView()") : source.index(
+            "type AutoSyncStatusPublishOptions"
+        )
+    ]
+
+    for required_text in [
+        "const browserView = autoSyncStatusBrowserView;",
+        "const browserViewOwner = autoSyncStatusBrowserViewOwner;",
+        "browserView?.SetVisible?.(false);",
+        "browserView !== browserViewOwner",
+        'typeof browserView.Destroy === "function"',
+        "browserView.Destroy();",
+        'typeof browserViewOwner?.Destroy === "function"',
+        "browserViewOwner.Destroy();",
+        "steamClient?.BrowserView?.Destroy?.(browserViewOwner ?? browserView);",
+        "autoSyncStatusBrowserView = null;",
+        "autoSyncStatusBrowserViewOwner = null;",
+    ]:
+        assert required_text in destroy_source
+
+    assert "else if" not in destroy_source
+
+
 def test_frontend_recreates_status_strip_before_lifecycle_verification() -> None:
     source = FRONTEND.read_text()
 
