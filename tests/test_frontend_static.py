@@ -246,6 +246,10 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         "type AutoSyncStatusBrowserViewOwner",
         "let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;",
         "let autoSyncStatusBrowserViewOwner: AutoSyncStatusBrowserViewOwner | null = null;",
+        "let autoSyncStatusShowTimeoutID: number | null = null;",
+        "let autoSyncStatusShowGeneration = 0;",
+        "const AUTO_SYNC_STATUS_SHOW_DELAY = 100;",
+        "function clearAutoSyncStatusShowTimeout()",
         "function ensureAutoSyncStatusBrowserView()",
         "function normalizeAutoSyncStatusBrowserView(",
         "candidate?.m_browserView",
@@ -263,6 +267,11 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         "browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);",
         "browserView.SetVisible(false);",
         "browserView.SetVisible?.(true);",
+        "const showGeneration = ++autoSyncStatusShowGeneration;",
+        "clearAutoSyncStatusShowTimeout();",
+        "autoSyncStatusShowTimeoutID = window.setTimeout(() => {",
+        "if (showGeneration !== autoSyncStatusShowGeneration || !currentAutoSyncStatusState.visible)",
+        "}, AUTO_SYNC_STATUS_SHOW_DELAY);",
         "syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);",
         "destroyAutoSyncStatusBrowserView();",
         "autoSyncStatusBrowserViewOwner",
@@ -282,6 +291,25 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
     assert source.index("rootWindow?.CreateBrowserView") < source.index(
         "steamClient?.BrowserView?.Create"
     )
+
+    sync_source = source[
+        source.index("function syncAutoSyncStatusBrowserView(") : source.index(
+            "function destroyAutoSyncStatusBrowserView()"
+        )
+    ]
+    assert sync_source.index("browserView.SetVisible(false);") < sync_source.index(
+        "browserView.LoadURL(url);"
+    )
+
+    destroy_source = source[
+        source.index("function destroyAutoSyncStatusBrowserView()") : source.index(
+            "type AutoSyncStatusPublishOptions"
+        )
+    ]
+    assert "clearAutoSyncStatusShowTimeout();" in destroy_source
+
+    dismount_source = source[source.index("onDismount()") :]
+    assert "clearAutoSyncStatusShowTimeout();" in dismount_source
 
 
 def test_frontend_status_strip_logs_status_provenance() -> None:

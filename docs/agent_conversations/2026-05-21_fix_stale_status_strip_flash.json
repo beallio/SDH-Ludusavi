@@ -1,0 +1,21 @@
+{
+  "date": "2026-05-21",
+  "task_objective": "Prevent stale GAME SAVE UP TO DATE BrowserView content from flashing before VERIFYING GAME SAVE on lifecycle start and exit.",
+  "files_modified": [
+    "docs/agent_conversations/2026-05-21_fix_stale_status_strip_flash.json",
+    "docs/plans/fix_stale_status_strip_flash.md",
+    "docs/specs/custom_status_bar_ui.md",
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py::test_frontend_status_strip_uses_browserview_overlay_surface"
+  ],
+  "design_decisions": [
+    "Kept the BrowserView-only status strip architecture.",
+    "Hid the reused BrowserView before loading each visible status document to prevent stale HTML flashes.",
+    "Added a named 100ms reveal delay guarded by a generation counter so older callbacks cannot show stale state.",
+    "Cleared pending show timers on sync, hide, destroy, and dismount."
+  ],
+  "results": "Added the red static regression first, implemented guarded BrowserView reveal behavior, and prepared the change for full validation."
+}

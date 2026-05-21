@@ -699,11 +699,14 @@ let currentAutoSyncStatusState: AutoSyncStatusState = {
 };
 let autoSyncStatusTimedOut = false;
 let autoSyncStatusHideTimeoutID: number | null = null;
+let autoSyncStatusShowTimeoutID: number | null = null;
+let autoSyncStatusShowGeneration = 0;
 let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;
 let autoSyncStatusBrowserViewOwner: AutoSyncStatusBrowserViewOwner | null = null;
 
 const STATUS_STRIP_HEIGHT_RATIO = 0.0475;
 const STEAM_BOTTOM_MENU_HEIGHT_RATIO = 0.02625;
+const AUTO_SYNC_STATUS_SHOW_DELAY = 100;
 
 function getAutoSyncStatusBounds() {
   const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance?.BrowserWindow;
@@ -902,6 +905,8 @@ body {
 }
 
 function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
+  clearAutoSyncStatusShowTimeout();
+  const showGeneration = ++autoSyncStatusShowGeneration;
   const browserView = ensureAutoSyncStatusBrowserView();
   if (!browserView) {
     return;
@@ -919,14 +924,19 @@ function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
     log("debug", `Syncing BrowserView: visible=${state.visible}, bounds=${JSON.stringify(bounds)}`, "autosync_status");
 
     if (state.visible) {
+      browserView.SetVisible(false);
       browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);
       browserView.LoadURL(url);
       
-      setTimeout(() => {
+      autoSyncStatusShowTimeoutID = window.setTimeout(() => {
+        autoSyncStatusShowTimeoutID = null;
+        if (showGeneration !== autoSyncStatusShowGeneration || !currentAutoSyncStatusState.visible) {
+          return;
+        }
         browserView.SetVisible?.(true);
         browserView.SetWindowStackingOrder?.(50);
         browserView.SetFocus?.(false);
-      }, 0);
+      }, AUTO_SYNC_STATUS_SHOW_DELAY);
     } else {
       browserView.SetVisible(false);
     }
@@ -936,6 +946,7 @@ function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
 }
 
 function destroyAutoSyncStatusBrowserView() {
+  clearAutoSyncStatusShowTimeout();
   try {
     const browserView = autoSyncStatusBrowserView;
     if (!browserView) {
@@ -983,6 +994,14 @@ function clearAutoSyncStatusHideTimeout() {
   autoSyncStatusHideTimeoutID = null;
 }
 
+function clearAutoSyncStatusShowTimeout() {
+  if (autoSyncStatusShowTimeoutID === null) {
+    return;
+  }
+  window.clearTimeout(autoSyncStatusShowTimeoutID);
+  autoSyncStatusShowTimeoutID = null;
+}
+
 function scheduleAutoSyncStatusHide(state: AutoSyncStatusState) {
   clearAutoSyncStatusHideTimeout();
   if (!state.visible) {
@@ -1025,6 +1044,7 @@ function publishAutoSyncStatus(status: AutoSyncStatusKind, options: AutoSyncStat
 
 function hideAutoSyncStatus(options: Partial<AutoSyncStatusPublishOptions> = {}) {
   clearAutoSyncStatusHideTimeout();
+  clearAutoSyncStatusShowTimeout();
   currentAutoSyncStatusState = {
     ...currentAutoSyncStatusState,
     visible: false,
@@ -2425,6 +2445,7 @@ export default definePlugin(() => {
         source: "hide"
       };
       clearAutoSyncStatusHideTimeout();
+      clearAutoSyncStatusShowTimeout();
       destroyAutoSyncStatusBrowserView();
       console.log("SDH-Ludusavi unloading");
     },

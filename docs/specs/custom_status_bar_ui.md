@@ -32,6 +32,12 @@ Module-level timers own status expiry. Running states hide after 10 seconds, res
 states hide after 2 seconds, hide events clear pending timers, and plugin dismount
 clears pending timers before destroying the BrowserView.
 
+BrowserView updates hide the reused BrowserView before loading each new visible
+`data:text/html` document. The view is revealed only after a short guarded delay so
+the previous status document, such as `GAME SAVE UP TO DATE`, cannot flash before a
+new `VERIFYING GAME SAVE` document finishes navigating. The reveal callback is
+invalidated by a generation counter on every sync, hide, destroy, and dismount path.
+
 React global components, React DOM portals, diagnostic surface cycling, and SteamUI
 composition-hook fallback paths are not production surfaces for this feature.
 
@@ -126,6 +132,8 @@ Frontend static tests must verify:
 - Autosync start/result success toasts are removed.
 - Autosync failure still routes through the `failures_errors` notification category.
 - Module-level timers clear on hide and dismount.
+- BrowserView visible updates hide stale content before `LoadURL` and reveal through
+  a guarded delayed show callback.
 - Direct `SetOverlayState` and `SetComposition` calls are not used.
 
 Validation commands:
