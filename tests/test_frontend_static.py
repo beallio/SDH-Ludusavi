@@ -345,6 +345,18 @@ def test_frontend_status_strip_destroy_disposes_owner_and_nested_view() -> None:
 def test_frontend_recreates_status_strip_before_lifecycle_verification() -> None:
     source = FRONTEND.read_text()
 
+    for required_text in [
+        "let autoSyncStatusSyncTimeoutID: number | null = null;",
+        "function clearAutoSyncStatusSyncTimeout()",
+        "function syncAutoSyncStatusBrowserViewDeferred(",
+        "autoSyncStatusSyncTimeoutID = window.setTimeout(() => {",
+        "if (state !== currentAutoSyncStatusState || !state.visible)",
+        "syncAutoSyncStatusBrowserView(state);",
+        "scheduleAutoSyncStatusHide(state);",
+        "}, 0);",
+    ]:
+        assert required_text in source
+
     reset_source = source[
         source.index("function shouldResetStatusStripSurfaceBeforeVerification(") : source.index(
             "function publishAutoSyncStatus("
@@ -367,7 +379,30 @@ def test_frontend_recreates_status_strip_before_lifecycle_verification() -> None
     ) < publish_source.index("currentAutoSyncStatusState = {")
     assert publish_source.index(
         "resetStatusStripSurfaceBeforeVerification();"
-    ) < publish_source.index("syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);")
+    ) < publish_source.index("currentAutoSyncStatusState = {")
+    assert publish_source.index(
+        "logAutoSyncStatusChange(currentAutoSyncStatusState);"
+    ) < publish_source.index("syncAutoSyncStatusBrowserViewDeferred(currentAutoSyncStatusState);")
+    assert publish_source.index(
+        "syncAutoSyncStatusBrowserViewDeferred(currentAutoSyncStatusState);"
+    ) < publish_source.index("return;")
+    assert publish_source.index("return;") < publish_source.index(
+        "syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);"
+    )
+
+    destroy_source = source[
+        source.index("function destroyAutoSyncStatusBrowserView()") : source.index(
+            "type AutoSyncStatusPublishOptions"
+        )
+    ]
+    assert "clearAutoSyncStatusSyncTimeout();" in destroy_source
+
+    hide_source = source[
+        source.index("function hideAutoSyncStatus(") : source.index(
+            "function completeAutoSyncStatus("
+        )
+    ]
+    assert "clearAutoSyncStatusSyncTimeout();" in hide_source
 
 
 def test_frontend_status_strip_logs_status_provenance() -> None:

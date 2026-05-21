@@ -700,6 +700,7 @@ let currentAutoSyncStatusState: AutoSyncStatusState = {
 let autoSyncStatusTimedOut = false;
 let autoSyncStatusHideTimeoutID: number | null = null;
 let autoSyncStatusShowTimeoutID: number | null = null;
+let autoSyncStatusSyncTimeoutID: number | null = null;
 let autoSyncStatusShowGeneration = 0;
 let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;
 let autoSyncStatusBrowserViewOwner: AutoSyncStatusBrowserViewOwner | null = null;
@@ -946,6 +947,7 @@ function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
 }
 
 function destroyAutoSyncStatusBrowserView() {
+  clearAutoSyncStatusSyncTimeout();
   clearAutoSyncStatusShowTimeout();
   try {
     const browserView = autoSyncStatusBrowserView;
@@ -1010,6 +1012,14 @@ function clearAutoSyncStatusShowTimeout() {
   autoSyncStatusShowTimeoutID = null;
 }
 
+function clearAutoSyncStatusSyncTimeout() {
+  if (autoSyncStatusSyncTimeoutID === null) {
+    return;
+  }
+  window.clearTimeout(autoSyncStatusSyncTimeoutID);
+  autoSyncStatusSyncTimeoutID = null;
+}
+
 function shouldResetStatusStripSurfaceBeforeVerification(
   status: AutoSyncStatusKind,
   options: AutoSyncStatusPublishOptions
@@ -1045,12 +1055,25 @@ function scheduleAutoSyncStatusHide(state: AutoSyncStatusState) {
   }, isRunning ? 10000 : 2000);
 }
 
+function syncAutoSyncStatusBrowserViewDeferred(state: AutoSyncStatusState) {
+  clearAutoSyncStatusSyncTimeout();
+  autoSyncStatusSyncTimeoutID = window.setTimeout(() => {
+    autoSyncStatusSyncTimeoutID = null;
+    if (state !== currentAutoSyncStatusState || !state.visible) {
+      return;
+    }
+    syncAutoSyncStatusBrowserView(state);
+    scheduleAutoSyncStatusHide(state);
+  }, 0);
+}
+
 function publishAutoSyncStatus(status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions) {
+  const shouldResetSurface = shouldResetStatusStripSurfaceBeforeVerification(status, options);
   if (status === "backing_up" || status === "restoring") {
     autoSyncStatusTimedOut = false;
   }
 
-  if (shouldResetStatusStripSurfaceBeforeVerification(status, options)) {
+  if (shouldResetSurface) {
     resetStatusStripSurfaceBeforeVerification();
   }
 
@@ -1064,11 +1087,17 @@ function publishAutoSyncStatus(status: AutoSyncStatusKind, options: AutoSyncStat
     resultStatus: options.resultStatus
   };
   logAutoSyncStatusChange(currentAutoSyncStatusState);
+  if (shouldResetSurface) {
+    syncAutoSyncStatusBrowserViewDeferred(currentAutoSyncStatusState);
+    return;
+  }
+  clearAutoSyncStatusSyncTimeout();
   syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);
   scheduleAutoSyncStatusHide(currentAutoSyncStatusState);
 }
 
 function hideAutoSyncStatus(options: Partial<AutoSyncStatusPublishOptions> = {}) {
+  clearAutoSyncStatusSyncTimeout();
   clearAutoSyncStatusHideTimeout();
   clearAutoSyncStatusShowTimeout();
   currentAutoSyncStatusState = {
@@ -2471,6 +2500,7 @@ export default definePlugin(() => {
         source: "hide"
       };
       clearAutoSyncStatusHideTimeout();
+      clearAutoSyncStatusSyncTimeout();
       clearAutoSyncStatusShowTimeout();
       destroyAutoSyncStatusBrowserView();
       console.log("SDH-Ludusavi unloading");

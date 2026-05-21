@@ -1,0 +1,22 @@
+{
+  "date": "2026-05-21",
+  "task_objective": "Defer status strip BrowserView recreation after lifecycle verification resets so Steam native teardown is not followed by same-tick recreation.",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py",
+    "docs/plans/defer_browserview_recreation.md",
+    "docs/agent_conversations/2026-05-21_defer_browserview_recreation.json"
+  ],
+  "tests_added": [
+    "Updated tests/test_frontend_static.py::test_frontend_recreates_status_strip_before_lifecycle_verification to require a deferred BrowserView sync helper and cleanup of pending deferred sync timers."
+  ],
+  "design_decisions": [
+    "Kept publishAutoSyncStatus synchronous and deferred only the BrowserView synchronization path with window.setTimeout(..., 0).",
+    "Guarded deferred callbacks against stale state object references and hidden status states.",
+    "Cleared pending deferred sync timers from hide, destroy, and dismount cleanup paths."
+  ],
+  "results": [
+    "Targeted red test failed before implementation and passed after implementation.",
+    "Static frontend tests passed after implementation."
+  ]
+}
