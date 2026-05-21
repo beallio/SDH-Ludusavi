@@ -8,7 +8,7 @@ from sdh_ludusavi import _version
 
 def write_release_metadata(root: Path, version: str = "0.1.0") -> None:
     (root / "plugin.json").write_text(
-        json.dumps({"name": "SDH-ludusavi", "version": version}),
+        json.dumps({"name": "SDH-Ludusavi", "version": version}),
         encoding="utf-8",
     )
     (root / "package.json").write_text(

@@ -162,7 +162,7 @@ function getAppOverviewEntries(): unknown[] {
   const apps = store.m_mapAppOverview || store.m_mapApps || store.allApps;
 
   if (!apps) {
-    console.warn("SDH-ludusavi: Could not find app list on appStore. Available keys:", Object.keys(store));
+    console.warn("SDH-Ludusavi: Could not find app list on appStore. Available keys:", Object.keys(store));
     return [];
   }
 
@@ -172,7 +172,7 @@ function getAppOverviewEntries(): unknown[] {
 function findLudusaviShortcutByName(): LauncherShortcutState | null {
   try {
     const iterable = getAppOverviewEntries();
-    console.log(`SDH-ludusavi: Searching ${iterable.length} apps for name "${SHORTCUT_NAME}"`);
+    console.log(`SDH-Ludusavi: Searching ${iterable.length} apps for name "${SHORTCUT_NAME}"`);
 
     for (const overview of iterable) {
       if (getOverviewName(overview) === SHORTCUT_NAME) {
@@ -183,10 +183,10 @@ function findLudusaviShortcutByName(): LauncherShortcutState | null {
       }
     }
   } catch (err) {
-    console.error("SDH-ludusavi: Failed to iterate appStore:", err);
+    console.error("SDH-Ludusavi: Failed to iterate appStore:", err);
   }
 
-  console.log(`SDH-ludusavi: No shortcut named "${SHORTCUT_NAME}" found in app list.`);
+  console.log(`SDH-Ludusavi: No shortcut named "${SHORTCUT_NAME}" found in app list.`);
   return null;
 }
 
@@ -207,7 +207,7 @@ async function createLudusaviShortcut(): Promise<LauncherShortcutState> {
   }
 
   console.log(
-    `SDH-ludusavi: No "Ludusavi" shortcut found. Created new shortcut (AppID: ${appId}) and updated cache.`
+    `SDH-Ludusavi: No "Ludusavi" shortcut found. Created new shortcut (AppID: ${appId}) and updated cache.`
   );
   return { appId, gameId };
 }
@@ -227,7 +227,7 @@ async function ensureLudusaviShortcut(): Promise<LauncherShortcutState> {
     }
 
     console.log(
-      `SDH-ludusavi: Found "Ludusavi" shortcut by name (AppID: ${namedShortcut.appId}). Cache was ${cacheStatus}.`
+      `SDH-Ludusavi: Found "Ludusavi" shortcut by name (AppID: ${namedShortcut.appId}). Cache was ${cacheStatus}.`
     );
     return namedShortcut;
   }
@@ -236,11 +236,11 @@ async function ensureLudusaviShortcut(): Promise<LauncherShortcutState> {
     const gameId = getGameIdFromAppId(savedAppId);
     if (gameId) {
       getSteamClient().Apps.SetShortcutName(savedAppId, SHORTCUT_NAME);
-      console.log(`SDH-ludusavi: Cached shortcut ${savedAppId} is valid. Using it.`);
+      console.log(`SDH-Ludusavi: Cached shortcut ${savedAppId} is valid. Using it.`);
       return { appId: savedAppId, gameId };
     }
     console.warn(
-      `SDH-ludusavi: Cached shortcut ${savedAppId} is invalid or missing. Recreating.`
+      `SDH-Ludusavi: Cached shortcut ${savedAppId} is invalid or missing. Recreating.`
     );
   }
 
@@ -284,7 +284,7 @@ export async function launchLudusavi(
         `Continuing launch after artwork failure for shortcut ${appId}: ${err instanceof Error ? err.message : String(err)}`,
         "artwork"
       );
-      console.warn("SDH-ludusavi: Continuing launch after artwork failure:", err);
+      console.warn("SDH-Ludusavi: Continuing launch after artwork failure:", err);
     }
   } else {
     options?.logger?.(
@@ -292,7 +292,7 @@ export async function launchLudusavi(
       `Skipping artwork for shortcut ${appId}; app overview unavailable.`,
       "artwork"
     );
-    console.warn(`SDH-ludusavi: Skipping artwork for shortcut ${appId}; app overview unavailable.`);
+    console.warn(`SDH-Ludusavi: Skipping artwork for shortcut ${appId}; app overview unavailable.`);
   }
   steamClient.Apps.RunGame(refreshedGameId, "", -1, 100);
 }

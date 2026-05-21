@@ -26,7 +26,7 @@ echo "Creating Decky plugin package..."
 
 if ssh -q -o BatchMode=yes -o ConnectTimeout=2 steamdeck exit >/dev/null 2>&1; then
   echo "Pushing plugin to Steam Deck..."
-  scp ./out/SDH-ludusavi.zip steamdeck:/home/deck/Downloads/
+  scp ./out/SDH-Ludusavi.zip steamdeck:/home/deck/Downloads/
 else
   echo "Steam Deck not reachable, skipping push."
 fi

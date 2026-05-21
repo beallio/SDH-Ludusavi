@@ -22,9 +22,9 @@ def load_package_module():
 def test_package_script_defines_decky_runtime_files_only() -> None:
     module = load_package_module()
 
-    assert module.PROJECT_NAME == "SDH-ludusavi"
-    assert module.ZIP_FILENAME == "SDH-ludusavi.zip"
-    assert module.ARCHIVE_ROOT == "SDH-ludusavi"
+    assert module.PROJECT_NAME == "SDH-Ludusavi"
+    assert module.ZIP_FILENAME == "SDH-Ludusavi.zip"
+    assert module.ARCHIVE_ROOT == "SDH-Ludusavi"
     assert module.REQUIRED_FILES == (
         "LICENSE",
         "main.py",
@@ -48,38 +48,38 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
         check=True,
     )
 
-    zip_path = tmp_path / "SDH-ludusavi.zip"
+    zip_path = tmp_path / "SDH-Ludusavi.zip"
     assert zip_path.exists()
 
     with zipfile.ZipFile(zip_path) as archive:
         names = set(archive.namelist())
-        plugin_metadata = json.loads(archive.read("SDH-ludusavi/plugin.json"))
-        package_metadata = json.loads(archive.read("SDH-ludusavi/package.json"))
+        plugin_metadata = json.loads(archive.read("SDH-Ludusavi/plugin.json"))
+        package_metadata = json.loads(archive.read("SDH-Ludusavi/package.json"))
 
     assert names == set(module.iter_required_archive_names(Path.cwd()))
-    assert all(name.startswith("SDH-ludusavi/") for name in names)
-    assert "SDH-ludusavi/plugin.json" in names
+    assert all(name.startswith("SDH-Ludusavi/") for name in names)
+    assert "SDH-Ludusavi/plugin.json" in names
 
     # Version should start with 0.1.0 and may include a git hash
     assert plugin_metadata["version"].startswith("0.1.0")
     assert package_metadata["version"] == plugin_metadata["version"]
-    assert "SDH-ludusavi/dist/index.js" in names
-    assert "SDH-ludusavi/dist/index.js.map" in names
+    assert "SDH-Ludusavi/dist/index.js" in names
+    assert "SDH-Ludusavi/dist/index.js.map" in names
     for asset_prefix in [
-        "SDH-ludusavi/dist/assets/grid_p-",
-        "SDH-ludusavi/dist/assets/grid_l-",
-        "SDH-ludusavi/dist/assets/hero-",
-        "SDH-ludusavi/dist/assets/logo-",
+        "SDH-Ludusavi/dist/assets/grid_p-",
+        "SDH-Ludusavi/dist/assets/grid_l-",
+        "SDH-Ludusavi/dist/assets/hero-",
+        "SDH-Ludusavi/dist/assets/logo-",
     ]:
         assert any(name.startswith(asset_prefix) and name.endswith(".png") for name in names)
     assert "README.md" not in names
-    assert "SDH-ludusavi/README.md" not in names
+    assert "SDH-Ludusavi/README.md" not in names
     assert "src/index.tsx" not in names
-    assert "SDH-ludusavi/src/index.tsx" not in names
+    assert "SDH-Ludusavi/src/index.tsx" not in names
     assert "docs/plans/sdh_ludusavi.md" not in names
-    assert "SDH-ludusavi/docs/plans/sdh_ludusavi.md" not in names
+    assert "SDH-Ludusavi/docs/plans/sdh_ludusavi.md" not in names
     assert "node_modules/.modules.yaml" not in names
-    assert "SDH-ludusavi/node_modules/.modules.yaml" not in names
+    assert "SDH-Ludusavi/node_modules/.modules.yaml" not in names
 
 
 def test_package_script_rebuilds_missing_runtime_bundle(
@@ -122,7 +122,7 @@ def test_package_metadata_versions_match_release_version() -> None:
 def test_package_validation_rejects_mismatched_metadata(tmp_path: Path) -> None:
     module = load_package_module()
     (tmp_path / "plugin.json").write_text(
-        json.dumps({"name": "SDH-ludusavi", "version": "0.1.0"}),
+        json.dumps({"name": "SDH-Ludusavi", "version": "0.1.0"}),
         encoding="utf-8",
     )
     (tmp_path / "package.json").write_text(

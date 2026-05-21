@@ -576,7 +576,7 @@ function resetQuickAccessScroll(container: HTMLElement | null, reason = "qam_ope
 }
 
 const log = (level: "info" | "debug" | "warning" | "error", message: string, operation?: string, gameName?: string) => {
-  const prefix = `SDH-ludusavi${operation ? `:${operation}` : ""}${gameName ? ` [${gameName}]` : ""}`;
+  const prefix = `SDH-Ludusavi${operation ? `:${operation}` : ""}${gameName ? ` [${gameName}]` : ""}`;
   const fullMsg = `${prefix}: ${message}`;
   
   console.log(fullMsg);
@@ -640,7 +640,7 @@ function PluginIcon() {
     <svg
       viewBox="0 0 1536 1536"
       role="img"
-      aria-label="SDH-ludusavi"
+      aria-label="SDH-Ludusavi"
       fill="currentColor"
       width="1em"
       height="1em"
@@ -1486,7 +1486,7 @@ function Content() {
 
     if (result.dependency_error) {
       log("error", `Ludusavi refresh failed: ${result.dependency_error}`, "refresh");
-      notify("failures_errors", "SDH-ludusavi refresh failed", result.dependency_error, <FaExclamationTriangle />);
+      notify("failures_errors", "SDH-Ludusavi refresh failed", result.dependency_error, <FaExclamationTriangle />);
       return false;
     }
 
@@ -1539,7 +1539,7 @@ function Content() {
         globalInstalledAppIds = installedAppIds;
         setOperation(await getOperationStatus());
         setLogs(await getRecentLogs());
-        notify("refresh_status", "SDH-ludusavi", "Ludusavi game status refreshed", <IoMdRefresh />);
+        notify("refresh_status", "SDH-Ludusavi", "Ludusavi game status refreshed", <IoMdRefresh />);
       }
     } catch (error) {
       log("error", `Manual refresh failed: ${error}`);
@@ -1556,7 +1556,7 @@ function Content() {
       showModal(<LudusaviLogModal logs={logs} />);
     } catch (error) {
       log("error", `Failed to fetch Ludusavi logs: ${error}`);
-      notify("failures_errors", "SDH-ludusavi", "Failed to fetch Ludusavi logs", <FaExclamationTriangle />);
+      notify("failures_errors", "SDH-Ludusavi", "Failed to fetch Ludusavi logs", <FaExclamationTriangle />);
     }
   };
 
@@ -1568,7 +1568,7 @@ function Content() {
       showModal(<LogModal logs={currentLogs} />);
     } catch (error) {
       log("error", `Failed to fetch plugin logs: ${error}`);
-      notify("failures_errors", "SDH-ludusavi", "Failed to fetch plugin logs", <FaExclamationTriangle />);
+      notify("failures_errors", "SDH-Ludusavi", "Failed to fetch plugin logs", <FaExclamationTriangle />);
     }
   };
 
@@ -1592,7 +1592,7 @@ function Content() {
       // Rollback
       setSettings(s => ({ ...s, auto_sync_enabled: previous }));
       autoSyncNotificationsEnabled = previous;
-      notify("failures_errors", "SDH-ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+      notify("failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
       setBusyLabel(null);
     }
@@ -1616,7 +1616,7 @@ function Content() {
       log("error", `Failed to update notification settings: ${error}`);
       setSettings(s => ({ ...s, notifications: previous }));
       notificationSettingsMirror = previous;
-      notify("failures_errors", "SDH-ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+      notify("failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
       setBusyLabel(null);
     }
@@ -1642,7 +1642,7 @@ function Content() {
       log("error", `Failed to persist selected game: ${error}`);
       // Rollback
       setSelectedGame(previous);
-      notify("failures_errors", "SDH-ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+      notify("failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
       setBusyLabel(null);
     }
@@ -1658,20 +1658,20 @@ function Content() {
     log("info", `Triggering force ${label} for ${selectedGame}`, label, selectedGame);
     setBusyLabel(`${label} running`);
     const icon = label === "Backup" ? <FaSave /> : <FaDownload />;
-    notify("manual_operations", `SDH-ludusavi ${label}`, `${label} started for ${selectedGame}`, icon);
+    notify("manual_operations", `SDH-Ludusavi ${label}`, `${label} started for ${selectedGame}`, icon);
     try {
       const result = await operationCall(selectedGame);
       log("info", `Force ${label} completed: ${JSON.stringify(result)}`, label, selectedGame);
       const resultIcon = result.status === "failed" ? <FaExclamationTriangle /> : icon;
       const category = result.status === "failed" ? "failures_errors" : "manual_operations";
-      notify(category, `SDH-ludusavi ${label}`, summarizeOperationResult(result, label), resultIcon);
+      notify(category, `SDH-Ludusavi ${label}`, summarizeOperationResult(result, label), resultIcon);
       const refreshed = await refreshGamesCall(false);
       applyRefreshResult(refreshed);
       setOperation(await getOperationStatus());
       setLogs(await getRecentLogs());
     } catch (error) {
       log("error", `Force ${label} failed: ${error}`, label, selectedGame);
-      notify("failures_errors", `SDH-ludusavi ${label} failed`, error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+      notify("failures_errors", `SDH-Ludusavi ${label} failed`, error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
       setBusyLabel(null);
     }
@@ -1853,7 +1853,7 @@ function Content() {
         <PanelSectionRow>
           <Field highlightOnFocus={true} focusable={true} padding="standard">
             <div style={{ color: "#cbd5e1", fontSize: "14px", display: "flex", flexDirection: "column", gap: "4px", minWidth: 0 }}>
-              <div>SDH-ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
+              <div>SDH-Ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
               <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
               <div>pyludusavi: {versions.pyludusavi ?? "Unknown"}</div>
               <div>Decky: {versions.decky ?? "Unknown"}</div>
@@ -1959,7 +1959,7 @@ function LudusaviPanel({
 }
 
 export default definePlugin(() => {
-  console.log("SDH-ludusavi plugin initializing");
+  console.log("SDH-Ludusavi plugin initializing");
 
   const activeSessions = new Map<number, RunningSession>();
   let fallbackIntervalID: number | null = null;
@@ -2047,7 +2047,7 @@ export default definePlugin(() => {
             message: "Launch gate unavailable; restore skipped while game is loading."
           };
           completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-          notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+          notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
           return;
         }
         publishAutoSyncStatus("restoring", {
@@ -2061,7 +2061,7 @@ export default definePlugin(() => {
         log("info", `restore_game_on_start result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
         completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
-          notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+          notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
         }
         return;
       }
@@ -2075,7 +2075,7 @@ export default definePlugin(() => {
           resultStatus: checkResult.status
         });
         if (!paused) {
-          notify("failures_errors", "SDH-ludusavi Auto-sync", "Launch gate unavailable; conflict resolution skipped while game is loading.", <FaExclamationTriangle />);
+          notify("failures_errors", "SDH-Ludusavi Auto-sync", "Launch gate unavailable; conflict resolution skipped while game is loading.", <FaExclamationTriangle />);
           return;
         }
         const resolution = await showConflictResolutionModal(checkResult);
@@ -2086,14 +2086,14 @@ export default definePlugin(() => {
         const result = await resolveGameStartConflictCall(checkResult.game ?? name, appID, resolution);
         completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
-          notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+          notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
         }
         return;
       }
 
       completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
       if (checkResult.status === "failed") {
-        notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
+        notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
       }
     } finally {
       if (paused && typeof instanceID === "number") {
@@ -2142,14 +2142,14 @@ export default definePlugin(() => {
       log("info", `backup_game_on_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
       completeAutoSyncStatus(result, { gameName: name, appID, tracked });
       if (result.status === "failed") {
-        notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+        notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
       }
       return;
     }
 
     completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
     if (checkResult.status === "failed") {
-      notify("failures_errors", "SDH-ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
+      notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
     }
   };
 
@@ -2258,7 +2258,7 @@ export default definePlugin(() => {
       }
       void handleAppExit(session.name, session.appID);
     } catch (err) {
-      console.error("SDH-ludusavi: app lifetime notification failed", err);
+      console.error("SDH-Ludusavi: app lifetime notification failed", err);
     }
   };
 
@@ -2281,7 +2281,7 @@ export default definePlugin(() => {
         fallbackPreviousAppName = currentAppName;
       }
     } catch (err) {
-      console.error("SDH-ludusavi: watcher loop failed", err);
+      console.error("SDH-Ludusavi: watcher loop failed", err);
     }
   };
 
@@ -2331,8 +2331,8 @@ export default definePlugin(() => {
   }
 
   return {
-    name: "SDH-ludusavi",
-    titleView: <div className="sdh-ludusavi-title">SDH-ludusavi</div>,
+    name: "SDH-Ludusavi",
+    titleView: <div className="sdh-ludusavi-title">SDH-Ludusavi</div>,
     content: <Content />,
     icon: <PluginIcon />,
     alwaysRender: true,
@@ -2349,7 +2349,7 @@ export default definePlugin(() => {
       };
       clearAutoSyncStatusHideTimeout();
       destroyAutoSyncStatusBrowserView();
-      console.log("SDH-ludusavi unloading");
+      console.log("SDH-Ludusavi unloading");
     },
   };
 });

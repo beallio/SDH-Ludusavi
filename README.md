@@ -1,6 +1,6 @@
-# SDH-ludusavi
+# SDH-Ludusavi
 
-SDH-ludusavi is a Decky Loader plugin that surfaces Ludusavi save backup and
+SDH-Ludusavi is a Decky Loader plugin that surfaces Ludusavi save backup and
 restore controls in the Steam Deck side panel.
 
 Ludusavi remains the source of truth for configured games, backup paths, cloud
@@ -24,7 +24,7 @@ game status, operation status, and recent operation logs.
 - **Manual Overrides:** Refresh Games, Force Backup, and Force Restore actions are always available, even when Automatic Sync is disabled.
 - **Shortcut Artwork:** The plugin-managed Ludusavi launcher shortcut uses bundled local
   capsule, hero, and logo artwork and does not fetch SteamGridDB assets at runtime.
-- **Version Display:** SDH-ludusavi, Decky, Ludusavi, and pyludusavi version information.
+- **Version Display:** SDH-Ludusavi, Decky, Ludusavi, and pyludusavi version information.
 
 ## Requirements
 
@@ -116,8 +116,8 @@ Create the Decky plugin zip:
 ./run.sh uv run python scripts/package_plugin.py
 ```
 
-The package is written to `out/SDH-ludusavi.zip` and contains a top-level
-`SDH-ludusavi/` plugin directory. The local post-commit hook runs
+The package is written to `out/SDH-Ludusavi.zip` and contains a top-level
+`SDH-Ludusavi/` plugin directory. The local post-commit hook runs
 `scripts/post_commit.sh`, which rebuilds `dist/` and recreates that zip after each
 commit.
 

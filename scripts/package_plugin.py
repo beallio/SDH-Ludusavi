@@ -7,9 +7,9 @@ import subprocess
 import zipfile
 from pathlib import Path
 
-PROJECT_NAME = "SDH-ludusavi"
-ZIP_FILENAME = "SDH-ludusavi.zip"
-ARCHIVE_ROOT = "SDH-ludusavi"
+PROJECT_NAME = "SDH-Ludusavi"
+ZIP_FILENAME = "SDH-Ludusavi.zip"
+ARCHIVE_ROOT = "SDH-Ludusavi"
 
 REQUIRED_FILES = (
     "LICENSE",
@@ -180,7 +180,7 @@ def parse_args() -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=Path("out"),
-        help="Directory where SDH-ludusavi.zip will be written.",
+        help="Directory where SDH-Ludusavi.zip will be written.",
     )
     parser.add_argument(
         "--release",

@@ -8,7 +8,7 @@ def test_frontend_exposes_sdh_ludusavi_panel_controls() -> None:
     source = FRONTEND.read_text()
 
     for text in [
-        "SDH-ludusavi",
+        "SDH-Ludusavi",
         "Automatic Sync",
         "Refresh Games",
         "Force Backup",
@@ -94,8 +94,8 @@ def test_frontend_toggle_reports_busy_and_failures() -> None:
 
     assert 'setBusyLabel("Updating settings")' in source
     assert "await setAutoSyncEnabled(enabled)" in source
-    assert '"SDH-ludusavi settings failed"' in source
-    assert 'notify("failures_errors", "SDH-ludusavi settings failed"' in source
+    assert '"SDH-Ludusavi settings failed"' in source
+    assert 'notify("failures_errors", "SDH-Ludusavi settings failed"' in source
 
 
 def test_frontend_silences_lifecycle_toasts_when_auto_sync_is_disabled() -> None:
@@ -233,7 +233,7 @@ def test_frontend_status_strip_replaces_autosync_success_toasts() -> None:
         'publishAutoSyncStatus("has_backup", {',
         'publishAutoSyncStatus("unknown", {',
         'publishAutoSyncStatus("error", {',
-        'notify("failures_errors", "SDH-ludusavi Auto-sync"',
+        'notify("failures_errors", "SDH-Ludusavi Auto-sync"',
     ]:
         assert required_text in source
 
@@ -520,9 +520,9 @@ def test_frontend_exposes_sdh_ludusavi_version_row() -> None:
 
     assert "sdh_ludusavi?: string;" in source
     assert "decky?: string;" in source
-    assert '<div>SDH-ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>' in source
+    assert '<div>SDH-Ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>' in source
     assert '<div>Decky: {versions.decky ?? "Unknown"}</div>' in source
-    assert source.index("SDH-ludusavi:") < source.index("Ludusavi:")
+    assert source.index("SDH-Ludusavi:") < source.index("Ludusavi:")
 
 
 def test_frontend_uses_decky_log_modal() -> None:
@@ -669,7 +669,7 @@ def test_frontend_qam_uses_custom_plugin_icon_and_plain_title() -> None:
     assert 'height="1em"' in source
     assert "LuDatabaseBackup" not in source
     assert "staticClasses.Title" not in source
-    assert 'titleView: <div className="sdh-ludusavi-title">SDH-ludusavi</div>' in source
+    assert 'titleView: <div className="sdh-ludusavi-title">SDH-Ludusavi</div>' in source
 
 
 def test_frontend_qam_toggle_focus_stretches_to_panel_edges() -> None:
@@ -730,7 +730,7 @@ def test_frontend_versions_order_places_decky_last() -> None:
     source = FRONTEND.read_text()
 
     versions_panel = source[source.index('PanelSection title="Versions"') :]
-    assert versions_panel.index("SDH-ludusavi:") < versions_panel.index("Ludusavi:")
+    assert versions_panel.index("SDH-Ludusavi:") < versions_panel.index("Ludusavi:")
     assert versions_panel.index("Ludusavi:") < versions_panel.index("pyludusavi:")
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
 
@@ -797,7 +797,7 @@ def test_frontend_logs_and_retries_qam_scroll_reset() -> None:
 def test_frontend_preserves_always_render_for_lifecycle_and_status_surface() -> None:
     source = FRONTEND.read_text()
 
-    plugin_return = source[source.index('return {\n    name: "SDH-ludusavi"') :]
+    plugin_return = source[source.index('return {\n    name: "SDH-Ludusavi"') :]
     assert "alwaysRender: true" in plugin_return
     assert "onDismount()" in plugin_return
     for required_text in [

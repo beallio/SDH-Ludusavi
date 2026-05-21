@@ -135,7 +135,7 @@ export async function applyLocalArtworkAsset({
       `Failed to apply ${assetType} artwork to shortcut ${appId}: ${formatArtworkError(error)}`,
       "artwork"
     );
-    console.error("SDH-ludusavi: Failed to apply local shortcut artwork:", error);
+    console.error("SDH-Ludusavi: Failed to apply local shortcut artwork:", error);
     throw error;
   }
 }

@@ -178,10 +178,10 @@ def test_ludusavi_launcher_logs_shortcut_resolution_decisions() -> None:
     source = LAUNCHER.read_text(encoding="utf-8")
 
     for required_text in [
-        'SDH-ludusavi: Found "Ludusavi" shortcut by name',
+        'SDH-Ludusavi: Found "Ludusavi" shortcut by name',
         "Cache was",
-        "SDH-ludusavi: Cached shortcut",
-        'SDH-ludusavi: No "Ludusavi" shortcut found. Created new shortcut',
+        "SDH-Ludusavi: Cached shortcut",
+        'SDH-Ludusavi: No "Ludusavi" shortcut found. Created new shortcut',
         "updated cache",
     ]:
         assert required_text in source
