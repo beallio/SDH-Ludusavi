@@ -123,9 +123,10 @@ def test_run_blocking_awaits_threadsafe_future_without_polling() -> None:
     assert "pipe" not in attributes
     assert "add_reader" not in attributes
     assert "remove_reader" not in attributes
+    assert "wait_for" not in attributes
+    assert "TimeoutError" not in names
     assert "call_soon_threadsafe" in attributes
     assert "create_future" in attributes
-    assert "wait_for" in attributes
     assert "shield" in attributes
 
 

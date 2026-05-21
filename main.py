@@ -327,11 +327,7 @@ async def _run_blocking(callback: Any) -> Any:
     threading.Thread(target=worker, name="sdh-ludusavi-worker", daemon=True).start()
 
     try:
-        while True:
-            try:
-                return await asyncio.wait_for(asyncio.shield(future), timeout=0.05)
-            except TimeoutError:
-                continue
+        return await asyncio.shield(future)
     except asyncio.CancelledError:
         decky.logger.warning(
             "SDH-ludusavi operation was cancelled while worker may still be running"
