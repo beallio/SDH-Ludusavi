@@ -38,6 +38,9 @@ def _format_log(message: str, args: tuple[object, ...]) -> str:
 def fake_decky_module(
     tmp_path: Path,
     settings_dir: Path | str | None = None,
+    plugin_settings_dir: Path | str | None = None,
+    runtime_dir: Path | str | None = None,
+    plugin_dirs: bool = True,
 ) -> tuple[types.SimpleNamespace, FakeLogger]:
     logger = FakeLogger()
     decky = types.SimpleNamespace(
@@ -48,13 +51,53 @@ def fake_decky_module(
         migrate_settings=lambda *args: None,
         migrate_runtime=lambda *args: None,
     )
+    if plugin_dirs:
+        decky.DECKY_PLUGIN_SETTINGS_DIR = str(plugin_settings_dir or tmp_path / "plugin-settings")
+        decky.DECKY_PLUGIN_RUNTIME_DIR = str(runtime_dir or tmp_path / "plugin-data")
     if settings_dir is not None:
         decky.DECKY_SETTINGS_DIR = str(settings_dir)
+    if plugin_settings_dir is not None:
+        decky.DECKY_PLUGIN_SETTINGS_DIR = str(plugin_settings_dir)
+    if runtime_dir is not None:
+        decky.DECKY_PLUGIN_RUNTIME_DIR = str(runtime_dir)
     return decky, logger
 
 
-def import_main(monkeypatch: pytest.MonkeyPatch, decky: types.SimpleNamespace) -> Any:
+class FakeSettingsManager:
+    created: list[tuple[str, str | None]] = []
+
+    def __init__(self, name: str, settings_directory: str | None = None) -> None:
+        self.name = name
+        self.settings_directory = settings_directory
+        self.values: dict[str, object] = {}
+        FakeSettingsManager.created.append((name, settings_directory))
+
+    def read(self) -> None:
+        return None
+
+    def getSetting(self, key: str, default: object = None) -> object:
+        return self.values.get(key, default)
+
+    def setSetting(self, key: str, value: object) -> None:
+        self.values[key] = value
+
+    def commit(self) -> None:
+        return None
+
+
+def import_main(
+    monkeypatch: pytest.MonkeyPatch,
+    decky: types.SimpleNamespace,
+    *,
+    settings_manager: type[FakeSettingsManager] | None = None,
+) -> Any:
     monkeypatch.setitem(sys.modules, "decky", decky)
+    FakeSettingsManager.created = []
+    monkeypatch.setitem(
+        sys.modules,
+        "settings",
+        types.SimpleNamespace(SettingsManager=settings_manager or FakeSettingsManager),
+    )
     sys.modules.pop("main", None)
     spec = importlib.util.spec_from_file_location("main", Path("main.py"))
     if spec is None or spec.loader is None:
@@ -177,8 +220,9 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
     calls: list[tuple[str, str, str | None]] = []
 
     class CapturingService:
-        def __init__(self, state_path: Path) -> None:
-            self.state_path = state_path
+        def __init__(self, settings_store: object, cache_path: Path) -> None:
+            self.settings_store = settings_store
+            self.cache_path = cache_path
 
         def check_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
             calls.append(("check_start", game_name, app_id))
@@ -253,8 +297,9 @@ def test_plugin_exposes_process_pause_resume_rpcs(
     calls: list[tuple[str, int]] = []
 
     class CapturingService:
-        def __init__(self, state_path: Path) -> None:
-            self.state_path = state_path
+        def __init__(self, settings_store: object, cache_path: Path) -> None:
+            self.settings_store = settings_store
+            self.cache_path = cache_path
 
         def pause_game_process(self, pid: int) -> dict[str, object]:
             calls.append(("pause", pid))
@@ -275,46 +320,65 @@ def test_plugin_exposes_process_pause_resume_rpcs(
     assert calls == [("pause", 1234), ("resume", 1234)]
 
 
-def test_service_uses_decky_settings_dir_when_present(
+def test_service_uses_decky_plugin_settings_and_runtime_dirs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings_dir = tmp_path / "settings"
-    decky, _logger = fake_decky_module(tmp_path, settings_dir=settings_dir)
-    module = import_main(monkeypatch, decky)
-    captured: dict[str, Path] = {}
+    plugin_settings_dir = tmp_path / "homebrew" / "settings" / "SDH-ludusavi"
+    runtime_dir = tmp_path / "homebrew" / "data" / "SDH-ludusavi"
+    decky, _logger = fake_decky_module(
+        tmp_path,
+        plugin_settings_dir=plugin_settings_dir,
+        runtime_dir=runtime_dir,
+    )
+    module = import_main(monkeypatch, decky, settings_manager=FakeSettingsManager)
+    captured: dict[str, object] = {}
 
     class CapturingService:
-        def __init__(self, state_path: Path) -> None:
-            captured["state_path"] = state_path
+        def __init__(self, settings_store: object, cache_path: Path) -> None:
+            captured["settings_store"] = settings_store
+            captured["cache_path"] = cache_path
 
     monkeypatch.setattr(module, "SDHLudusaviService", CapturingService)
 
     module.Plugin()._service()
 
-    assert captured["state_path"] == settings_dir / "sdh_ludusavi.json"
+    assert FakeSettingsManager.created == [("settings", str(plugin_settings_dir))]
+    assert captured["cache_path"] == runtime_dir / "cache.json"
 
 
-def test_service_falls_back_when_primary_state_directory_is_unusable(
+def test_storage_resolvers_require_decky_plugin_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decky, _logger = fake_decky_module(tmp_path, plugin_dirs=False)
+    module = import_main(monkeypatch, decky, settings_manager=FakeSettingsManager)
+
+    with pytest.raises(RuntimeError, match="DECKY_PLUGIN_SETTINGS_DIR"):
+        module._settings_store()
+
+    decky.DECKY_PLUGIN_SETTINGS_DIR = str(tmp_path / "settings")
+
+    with pytest.raises(RuntimeError, match="DECKY_PLUGIN_RUNTIME_DIR"):
+        module._cache_path()
+
+
+def test_storage_resolver_surfaces_unusable_decky_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     primary_dir = tmp_path / "primary"
-    decky, logger = fake_decky_module(tmp_path, settings_dir=primary_dir)
+    decky, _logger = fake_decky_module(tmp_path, plugin_settings_dir=primary_dir)
     module = import_main(monkeypatch, decky)
-    fallback_path = tmp_path / "fallback" / "sdh_ludusavi.json"
 
     def fake_ensure_private_directory(path: Path) -> None:
         if path == primary_dir:
             raise OSError("readonly")
 
     monkeypatch.setattr(module, "_ensure_private_directory", fake_ensure_private_directory)
-    monkeypatch.setattr(module, "_fallback_state_path", lambda: fallback_path)
 
-    assert module._state_path() == fallback_path
-    assert logger.warnings == [
-        f"Unable to use primary SDH-ludusavi settings directory {primary_dir}: readonly; falling back"
-    ]
+    with pytest.raises(OSError, match="readonly"):
+        module._settings_store()
 
 
 def test_service_initializes_once_when_called_concurrently(
@@ -332,11 +396,12 @@ def test_service_initializes_once_when_called_concurrently(
     service_count = 0
 
     class CapturingService:
-        def __init__(self, state_path: Path) -> None:
+        def __init__(self, settings_store: object, cache_path: Path) -> None:
             nonlocal service_count
             with count_lock:
                 service_count += 1
-            self.state_path = state_path
+            self.settings_store = settings_store
+            self.cache_path = cache_path
             time.sleep(0.05)
 
     def load_service() -> None:
@@ -361,24 +426,23 @@ def test_service_initializes_once_when_called_concurrently(
 
 
 @pytest.mark.parametrize("settings_dir", [None, ""])
-def test_service_fallback_uses_private_user_config_and_logs_warning(
+def test_service_ignores_legacy_decky_settings_dir_for_plugin_dirs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     settings_dir: str | None,
 ) -> None:
-    decky, logger = fake_decky_module(tmp_path, settings_dir=settings_dir)
-    module = import_main(monkeypatch, decky)
-    captured: dict[str, Path] = {}
+    decky, _logger = fake_decky_module(tmp_path, settings_dir=settings_dir)
+    module = import_main(monkeypatch, decky, settings_manager=FakeSettingsManager)
+    captured: dict[str, object] = {}
 
     class CapturingService:
-        def __init__(self, state_path: Path) -> None:
-            captured["state_path"] = state_path
+        def __init__(self, settings_store: object, cache_path: Path) -> None:
+            captured["settings_store"] = settings_store
+            captured["cache_path"] = cache_path
 
     monkeypatch.setattr(module, "SDHLudusaviService", CapturingService)
 
     module.Plugin()._service()
 
-    expected = Path(decky.DECKY_USER_HOME) / ".config" / "sdh-ludusavi" / "sdh_ludusavi.json"
-    assert captured["state_path"] == expected
-    assert expected.parent.stat().st_mode & 0o777 == 0o700
-    assert any("DECKY_PLUGIN_SETTINGS_DIR" in warning for warning in logger.warnings)
+    assert FakeSettingsManager.created == [("settings", decky.DECKY_PLUGIN_SETTINGS_DIR)]
+    assert captured["cache_path"] == Path(decky.DECKY_PLUGIN_RUNTIME_DIR) / "cache.json"

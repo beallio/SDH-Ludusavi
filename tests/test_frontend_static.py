@@ -737,30 +737,56 @@ def test_frontend_qam_toggles_explain_their_scope() -> None:
         assert text in source
 
 
-def test_frontend_qam_removes_unwanted_row_separators() -> None:
+def test_frontend_qam_uses_requested_row_separators() -> None:
     source = FRONTEND.read_text()
 
     for text in [
         'label="Automatic Sync"',
-        'label="All Notifications"',
-        'label="Manual Operations"',
-        'label="Refresh Status"',
-        'label="Failures and Errors"',
-        'menuLabel="Select Game"',
         'label="Status:"',
         'label="Last Operation:"',
     ]:
         control = source[source.index(text) : source.index("/>", source.index(text))]
         assert 'bottomSeparator="none"' in control
 
+    game_panel = source[
+        source.index('PanelSection title="GAME"') : source.index(
+            'PanelSection title="Notifications"'
+        )
+    ]
+    force_backup_start = game_panel.rindex("<SpinnerButton", 0, game_panel.index("Force Backup"))
+    force_backup = game_panel[force_backup_start : game_panel.index("Force Restore")]
+    assert 'bottomSeparator="none"' in force_backup
+
+    notifications_panel = source[
+        source.index('PanelSection title="Notifications"') : source.index("<LudusaviPanel")
+    ]
     for text in [
-        "View Logs",
-        "View Ludusavi Logs",
-        '<Field highlightOnFocus={true} focusable={true} padding="standard"',
+        'label="All Notifications"',
+        'label="Manual Operations"',
+        'label="Refresh Status"',
     ]:
-        control_start = source.rindex("<", 0, source.index(text) + 1)
-        control = source[control_start : source.index(">", control_start)]
-        assert 'bottomSeparator="none"' in control
+        control = notifications_panel[
+            notifications_panel.index(text) : notifications_panel.index(
+                "/>", notifications_panel.index(text)
+            )
+        ]
+        assert 'bottomSeparator="standard"' in control
+
+    failures = notifications_panel[
+        notifications_panel.index('label="Failures and Errors"') : notifications_panel.index(
+            "/>", notifications_panel.index('label="Failures and Errors"')
+        )
+    ]
+    assert 'bottomSeparator="none"' in failures
+
+    logs_panel = source[
+        source.index('PanelSection title="Logs"') : source.index('PanelSection title="Versions"')
+    ]
+    ludusavi_logs_start = logs_panel.rindex(
+        "<ButtonItem", 0, logs_panel.index("View Ludusavi Logs")
+    )
+    ludusavi_logs = logs_panel[ludusavi_logs_start : logs_panel.index(">", ludusavi_logs_start)]
+    assert 'bottomSeparator="standard"' in ludusavi_logs
 
 
 def test_frontend_qam_rows_use_native_full_row_focus() -> None:
@@ -814,6 +840,9 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert versions_panel.index("SDH-Ludusavi:") < versions_panel.index("Ludusavi:")
     assert versions_panel.index("Ludusavi:") < versions_panel.index("pyludusavi:")
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
+    assert 'className="sdh-ludusavi-versions-list"' in versions_panel
+    assert 'textAlign: "left"' in versions_panel
+    assert 'alignItems: "flex-start"' in versions_panel
 
 
 def test_frontend_gates_warmed_background_refresh_without_loading_label() -> None:

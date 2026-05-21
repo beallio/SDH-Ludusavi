@@ -89,7 +89,12 @@ def test_history_load_validation_hardened(tmp_path: Path) -> None:
             }
         },
     }
-    (tmp_path / "state.json").write_text(json.dumps(state))
+    (tmp_path / "settings.json").write_text(
+        json.dumps({"auto_sync_enabled": True, "selected_game": ""})
+    )
+    (tmp_path / "cache.json").write_text(
+        json.dumps({key: value for key, value in state.items() if key != "auto_sync_enabled"})
+    )
 
     service = service_with_state(tmp_path)
     refresh = service.refresh_games()
@@ -206,7 +211,12 @@ def test_history_load_validation_trigger(tmp_path: Path) -> None:
             }
         },
     }
-    (tmp_path / "state.json").write_text(json.dumps(state))
+    (tmp_path / "settings.json").write_text(
+        json.dumps({"auto_sync_enabled": True, "selected_game": ""})
+    )
+    (tmp_path / "cache.json").write_text(
+        json.dumps({key: value for key, value in state.items() if key != "auto_sync_enabled"})
+    )
 
     service = service_with_state(tmp_path)
     refresh = service.refresh_games()

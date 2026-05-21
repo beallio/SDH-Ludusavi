@@ -35,6 +35,17 @@ const qamPanelStyles = `
   padding-left: 32px;
   padding-right: 32px;
 }
+
+.sdh-ludusavi-versions-list {
+  color: #cbd5e1;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  text-align: left;
+}
 `;
 
 type NotificationSettings = {
@@ -1711,16 +1722,16 @@ function Content() {
           <DropdownItem
             menuLabel="Select Game"
             highlightOnFocus={true}
-            focusable={true}
-            bottomSeparator="none"
-            disabled={isBusy}
-            rgOptions={games.map((game) => ({
-              label: game.name,
-              data: game.name
-            }))}
-            selectedOption={selectedGame}
-            onChange={(data: any) => void onGameChange(data)}
-          />
+              focusable={true}
+              bottomSeparator="none"
+              disabled={isBusy}
+              rgOptions={games.map((game) => ({
+                label: game.name,
+                data: game.name
+              }))}
+              selectedOption={selectedGame}
+              onChange={(data: any) => void onGameChange(data)}
+            />
         </PanelSectionRow>
 
         <PanelSectionRow>
@@ -1779,6 +1790,7 @@ function Content() {
           <SpinnerButton
             layout="below"
             highlightOnFocus={true}
+            bottomSeparator="none"
             disabled={isBusy || !selectedStatus}
             loading={busyLabel === "Backup running"}
             onClick={() => void runForceOperation("Backup", forceBackupCall)}
@@ -1806,7 +1818,7 @@ function Content() {
             label="All Notifications"
             description="Enables or silences all SDH-Ludusavi toast notifications."
             highlightOnFocus={true}
-            bottomSeparator="none"
+            bottomSeparator="standard"
             checked={settings.notifications.enabled}
             disabled={isBusy}
             onChange={(enabled: boolean) => void toggleNotificationSetting("enabled", enabled)}
@@ -1817,7 +1829,7 @@ function Content() {
             label="Manual Operations"
             description="Shows toasts for Force Backup and Force Restore results."
             highlightOnFocus={true}
-            bottomSeparator="none"
+            bottomSeparator="standard"
             checked={settings.notifications.manual_operations}
             disabled={!settings.notifications.enabled || isBusy}
             onChange={(enabled: boolean) => void toggleNotificationSetting("manual_operations", enabled)}
@@ -1828,7 +1840,7 @@ function Content() {
             label="Refresh Status"
             description="Shows toasts when the game list refresh completes or fails."
             highlightOnFocus={true}
-            bottomSeparator="none"
+            bottomSeparator="standard"
             checked={settings.notifications.refresh_status}
             disabled={!settings.notifications.enabled || isBusy}
             onChange={(enabled: boolean) => void toggleNotificationSetting("refresh_status", enabled)}
@@ -1856,7 +1868,7 @@ function Content() {
           </ButtonItem>
         </PanelSectionRow>
         <PanelSectionRow>
-          <ButtonItem layout="below" bottomSeparator="none" onClick={() => void showLudusaviLogs()}>
+          <ButtonItem layout="below" bottomSeparator="standard" onClick={() => void showLudusaviLogs()}>
             View Ludusavi Logs
           </ButtonItem>
         </PanelSectionRow>
@@ -1865,7 +1877,7 @@ function Content() {
       <PanelSection title="Versions">
         <PanelSectionRow>
           <Field highlightOnFocus={true} focusable={true} padding="standard" bottomSeparator="none">
-            <div style={{ color: "#cbd5e1", fontSize: "14px", display: "flex", flexDirection: "column", gap: "4px", minWidth: 0 }}>
+            <div className="sdh-ludusavi-versions-list" style={{ textAlign: "left", alignItems: "flex-start" }}>
               <div>SDH-Ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
               <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
               <div>pyludusavi: {versions.pyludusavi ?? "Unknown"}</div>

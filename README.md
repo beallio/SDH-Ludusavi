@@ -50,12 +50,12 @@ The wrapper stores Python tooling state under `/tmp/sdh_ludusavi`.
 
 ## State and Runtime Privileges
 
-Runtime settings are stored in Decky/plugin-owned settings space at
-`DECKY_SETTINGS_DIR/sdh_ludusavi.json` when Decky provides that directory. If Decky does
-not provide a settings directory, the backend falls back to
-`DECKY_USER_HOME/.config/sdh-ludusavi/sdh_ludusavi.json` with a private `0700` config
-directory, then to the current user's home config directory if `DECKY_USER_HOME` is not
-available. Tooling caches still live under `/tmp/sdh_ludusavi`; plugin settings do not.
+Runtime settings are stored through Decky's `SettingsManager` in
+`DECKY_PLUGIN_SETTINGS_DIR/settings.json`. Runtime cache data is stored separately in
+`DECKY_PLUGIN_RUNTIME_DIR/cache.json`, including cached Ludusavi game status, app ID
+markers, shortcut IDs, and operation history. The plugin does not write mutable data
+under `DECKY_PLUGIN_DIR`, because Decky can replace that directory during updates.
+Tooling caches still live under `/tmp/sdh_ludusavi`.
 
 `plugin.json` does not request Decky's `_root` flag. The backend runs as the Decky user
 so the Ludusavi Flatpak can see that user's Ludusavi configuration, backup metadata,

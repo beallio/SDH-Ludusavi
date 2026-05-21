@@ -9,9 +9,33 @@ from typing import Any
 
 import decky
 
-from sdh_ludusavi.service import OperationLockedError, SDHLudusaviService
+from sdh_ludusavi.service import (
+    DEFAULT_NOTIFICATION_SETTINGS,
+    OperationLockedError,
+    SDHLudusaviService,
+)
 
-STATE_FILE_NAME = "sdh_ludusavi.json"
+CACHE_FILE_NAME = "cache.json"
+
+
+class DeckySettingsStore:
+    def __init__(self, manager: Any) -> None:
+        self._manager = manager
+        self._manager.read()
+
+    def read(self) -> dict[str, object]:
+        return {
+            "auto_sync_enabled": self._manager.getSetting("auto_sync_enabled", False),
+            "selected_game": self._manager.getSetting("selected_game", ""),
+            "notifications": self._manager.getSetting(
+                "notifications", dict(DEFAULT_NOTIFICATION_SETTINGS)
+            ),
+        }
+
+    def write(self, settings: dict[str, object]) -> None:
+        for key, value in settings.items():
+            self._manager.setSetting(key, value)
+        self._manager.commit()
 
 
 class Plugin:
@@ -31,7 +55,10 @@ class Plugin:
         if self._backend is None:
             with self._backend_lock:
                 if self._backend is None:
-                    self._backend = SDHLudusaviService(state_path=_state_path())
+                    self._backend = SDHLudusaviService(
+                        settings_store=_settings_store(),
+                        cache_path=_cache_path(),
+                    )
         return self._backend
 
     async def get_settings(self) -> dict[str, Any]:
@@ -234,73 +261,25 @@ class Plugin:
             return {"status": "failed", "message": str(exc)}
 
 
-def _state_path() -> Path:
-    """
-    Determine the optimal directory to store the plugin's persistent state file.
-
-    Checks DECKY_PLUGIN_RUNTIME_DIR (as requested for ~/homebrew/data/SDH-ludusavi/)
-    and falls back to standard settings directories if necessary.
-    """
-    data_dir = getattr(decky, "DECKY_PLUGIN_RUNTIME_DIR", None) or os.environ.get(
-        "DECKY_PLUGIN_RUNTIME_DIR"
-    )
-    if not data_dir:
-        # Compatibility with older Decky or missing runtime dir env
-        data_dir = getattr(
-            decky, "DECKY_PLUGIN_SETTINGS_DIR", getattr(decky, "DECKY_SETTINGS_DIR", None)
-        )
-
-    primary_unusable = False
-    if data_dir:
-        path = Path(data_dir)
-        try:
-            _ensure_private_directory(path)
-            return path / STATE_FILE_NAME
-        except OSError as exc:
-            primary_unusable = True
-            decky.logger.warning(
-                "Unable to use primary SDH-ludusavi settings directory %s: %s; falling back",
-                path,
-                exc,
-            )
-
-    fallback_path = _fallback_state_path()
-    if not primary_unusable:
-        decky.logger.warning(
-            "DECKY_PLUGIN_SETTINGS_DIR/DECKY_PLUGIN_RUNTIME_DIR is unavailable; storing SDH-ludusavi settings at %s",
-            fallback_path,
-        )
-    return fallback_path
+def _decky_directory(name: str) -> Path:
+    value = getattr(decky, name, None) or os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"{name} is required for SDH-ludusavi storage")
+    path = Path(str(value))
+    _ensure_private_directory(path)
+    return path
 
 
-def _fallback_state_path() -> Path:
-    """
-    Search for a suitable fallback configuration directory when Decky Loader's
-    standard settings directory is unavailable.
-    """
-    candidates: list[Path] = []
-    decky_user_home = getattr(decky, "DECKY_USER_HOME", None) or os.environ.get("DECKY_USER_HOME")
-    if decky_user_home:
-        candidates.append(Path(decky_user_home))
+def _settings_store() -> DeckySettingsStore:
+    from settings import SettingsManager
 
-    home = Path.home()
-    if home not in candidates:
-        candidates.append(home)
+    settings_dir = _decky_directory("DECKY_PLUGIN_SETTINGS_DIR")
+    manager = SettingsManager(name="settings", settings_directory=str(settings_dir))
+    return DeckySettingsStore(manager)
 
-    for user_home in candidates:
-        config_dir = user_home / ".config" / "sdh-ludusavi"
-        try:
-            _ensure_private_directory(config_dir)
-        except OSError as exc:
-            decky.logger.warning(
-                "Unable to use SDH-ludusavi settings fallback %s: %s",
-                config_dir,
-                exc,
-            )
-            continue
-        return config_dir / STATE_FILE_NAME
 
-    raise RuntimeError("Unable to resolve an SDH-ludusavi settings path")
+def _cache_path() -> Path:
+    return _decky_directory("DECKY_PLUGIN_RUNTIME_DIR") / CACHE_FILE_NAME
 
 
 def _ensure_private_directory(path: Path) -> None:

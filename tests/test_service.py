@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from sdh_ludusavi.service import OperationLockedError, SDHLudusaviService
+from sdh_ludusavi.service import JsonSettingsStore, OperationLockedError, SDHLudusaviService
 
 
 class FakeAdapter:
@@ -103,7 +103,11 @@ class RaisingConfigMarkerAdapter(FakeAdapter):
 
 
 def service_with_state(tmp_path: Path, adapter: FakeAdapter | None = None) -> SDHLudusaviService:
-    return SDHLudusaviService(adapter=adapter or FakeAdapter(), state_path=tmp_path / "state.json")
+    return SDHLudusaviService(
+        adapter=adapter or FakeAdapter(),
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
+    )
 
 
 DEFAULT_NOTIFICATIONS = {
@@ -183,9 +187,9 @@ def test_notification_settings_default_to_enabled_and_persist(tmp_path: Path) ->
     assert reloaded.get_settings() == expected_settings(notifications=expected_notifications)
 
 
-def test_notification_settings_load_legacy_and_malformed_state_safely(tmp_path: Path) -> None:
-    state_path = tmp_path / "state.json"
-    state_path.write_text(
+def test_notification_settings_load_malformed_settings_safely(tmp_path: Path) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
         json.dumps(
             {
                 "auto_sync_enabled": True,
@@ -418,17 +422,101 @@ def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
     reloaded = service_with_state(tmp_path)
 
     assert reloaded.get_settings() == expected_settings(auto_sync_enabled=True)
-    assert json.loads((tmp_path / "state.json").read_text()) == {
+    assert json.loads((tmp_path / "settings.json").read_text()) == {
         "auto_sync_enabled": True,
         "selected_game": "",
         "notifications": DEFAULT_NOTIFICATIONS,
-        "ludusaviLauncherShortcutAppId": -1,
-        "games": [],
+    }
+
+
+def test_persists_settings_and_cache_separately(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+
+    service.set_auto_sync_enabled(True)
+    service.set_selected_game("Hades")
+    service.set_ludusavi_launcher_shortcut_id(12345)
+    service.refresh_games(force=True, installed_app_ids="111,222")
+
+    settings = json.loads((tmp_path / "settings.json").read_text())
+    cache = json.loads((tmp_path / "cache.json").read_text())
+
+    assert settings == {
+        "auto_sync_enabled": True,
+        "selected_game": "Hades",
+        "notifications": DEFAULT_NOTIFICATIONS,
+    }
+    assert "games" not in settings
+    assert "ludusaviLauncherShortcutAppId" not in settings
+    assert cache == {
+        "ludusaviLauncherShortcutAppId": 12345,
+        "games": [
+            {
+                "name": "Hades",
+                "steam_id": None,
+                "configured": True,
+                "has_backup": True,
+                "needs_first_backup": False,
+                "error": None,
+                "status": "has_backup",
+            },
+            {
+                "name": "Celeste",
+                "steam_id": None,
+                "configured": True,
+                "has_backup": False,
+                "needs_first_backup": True,
+                "error": None,
+                "status": "needs_first_backup",
+            },
+        ],
         "aliases": {},
         "ids": {},
-        "installed_app_ids": None,
-        "ludusavi_config_mtime_ns": None,
+        "installed_app_ids": "111,222",
+        "ludusavi_config_mtime_ns": 100,
         "game_history": {},
+    }
+    assert "auto_sync_enabled" not in cache
+    assert "selected_game" not in cache
+    assert "notifications" not in cache
+
+
+def test_does_not_load_old_combined_state_file(tmp_path: Path) -> None:
+    (tmp_path / "state.json").write_text(
+        json.dumps({"auto_sync_enabled": True, "selected_game": "Legacy"}),
+        encoding="utf-8",
+    )
+
+    service = service_with_state(tmp_path)
+
+    assert service.get_settings() == expected_settings()
+    assert not (tmp_path / "settings.json").exists()
+    assert not (tmp_path / "cache.json").exists()
+
+
+def test_cache_save_failure_keeps_existing_cache_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text('{"ludusaviLauncherShortcutAppId": 111}', encoding="utf-8")
+    service = service_with_state(tmp_path)
+    original_write_text = Path.write_text
+
+    def fail_after_partial_temp_write(
+        path: Path, data: str, *args: object, **kwargs: object
+    ) -> int:
+        if path.parent == tmp_path and path.name == ".cache.json.tmp":
+            original_write_text(path, '{"ludusaviLauncherShortcutAppId":', *args, **kwargs)
+            raise OSError("disk full")
+        return original_write_text(path, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_after_partial_temp_write)
+
+    with pytest.raises(OSError, match="disk full"):
+        service.set_ludusavi_launcher_shortcut_id(222)
+
+    assert json.loads(cache_path.read_text(encoding="utf-8")) == {
+        "ludusaviLauncherShortcutAppId": 111
     }
 
 
@@ -436,7 +524,7 @@ def test_failed_state_save_keeps_existing_state_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state_path = tmp_path / "state.json"
+    state_path = tmp_path / "settings.json"
     state_path.write_text('{"auto_sync_enabled": false}', encoding="utf-8")
     service = service_with_state(tmp_path)
     original_write_text = Path.write_text
@@ -457,13 +545,13 @@ def test_failed_state_save_keeps_existing_state_file(
     assert json.loads(state_path.read_text(encoding="utf-8")) == {"auto_sync_enabled": False}
 
 
-@pytest.mark.parametrize("contents", ["", "{", "[]"])
-def test_invalid_state_files_load_defaults_and_log_warning(
+@pytest.mark.parametrize("contents", ["{", "[]"])
+def test_invalid_cache_files_load_defaults_and_log_warning(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
     contents: str,
 ) -> None:
-    state_path = tmp_path / "state.json"
+    state_path = tmp_path / "cache.json"
     state_path.write_text(contents, encoding="utf-8")
 
     with caplog.at_level(logging.WARNING, logger="sdh_ludusavi.service"):
@@ -473,12 +561,12 @@ def test_invalid_state_files_load_defaults_and_log_warning(
     assert "Ignoring SDH-ludusavi state" in caplog.text
 
 
-def test_unreadable_state_file_loads_defaults_and_logs_warning(
+def test_unreadable_cache_file_loads_defaults_and_logs_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    state_path = tmp_path / "state.json"
+    state_path = tmp_path / "cache.json"
     state_path.write_text('{"auto_sync_enabled": true}', encoding="utf-8")
     original_read_text = Path.read_text
 
@@ -825,8 +913,8 @@ def test_get_ludusavi_logs(tmp_path, monkeypatch):
 
 def test_refresh_games_cache_invalidation_via_app_ids(tmp_path: Path) -> None:
     # Setup cache with a "ghost" game and an initial app IDs string
-    state_path = tmp_path / "state.json"
-    state_path.write_text(
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text(
         json.dumps(
             {
                 "games": [
@@ -876,15 +964,15 @@ def test_refresh_games_normalizes_installed_app_ids_before_persisting(
 
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
     assert service._installed_app_ids == "1,2,3"
-    saved_state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    saved_state = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
     assert saved_state["installed_app_ids"] == "1,2,3"
 
 
 def test_refresh_games_preserves_empty_installed_app_ids_marker(
     tmp_path: Path,
 ) -> None:
-    state_path = tmp_path / "state.json"
-    state_path.write_text(
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text(
         json.dumps(
             {
                 "games": [
@@ -908,7 +996,7 @@ def test_refresh_games_preserves_empty_installed_app_ids_marker(
 
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
     assert service._installed_app_ids == ""
-    saved_state = json.loads(state_path.read_text(encoding="utf-8"))
+    saved_state = json.loads(cache_path.read_text(encoding="utf-8"))
     assert saved_state["installed_app_ids"] == ""
 
 
@@ -920,7 +1008,7 @@ def test_refresh_games_rejects_malformed_installed_app_ids(tmp_path: Path) -> No
 
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
     assert service._installed_app_ids is None
-    saved_state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    saved_state = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
     assert saved_state["installed_app_ids"] is None
 
 
@@ -933,15 +1021,15 @@ def test_refresh_games_rejects_oversized_installed_app_ids(tmp_path: Path) -> No
 
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
     assert service._installed_app_ids is None
-    saved_state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    saved_state = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
     assert saved_state["installed_app_ids"] is None
 
 
 def test_refresh_games_cache_invalidation_via_ludusavi_config_mtime(
     tmp_path: Path,
 ) -> None:
-    state_path = tmp_path / "state.json"
-    state_path.write_text(
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text(
         json.dumps(
             {
                 "games": [
@@ -968,13 +1056,13 @@ def test_refresh_games_cache_invalidation_via_ludusavi_config_mtime(
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
     assert service._installed_app_ids == "1,2,3"
     assert service._ludusavi_config_mtime_ns == 101
-    saved_state = json.loads(state_path.read_text(encoding="utf-8"))
+    saved_state = json.loads(cache_path.read_text(encoding="utf-8"))
     assert saved_state["ludusavi_config_mtime_ns"] == 101
 
 
 def test_failed_refresh_does_not_persist_pending_cache_markers(tmp_path: Path) -> None:
-    state_path = tmp_path / "state.json"
-    state_path.write_text(
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text(
         json.dumps(
             {
                 "games": [
@@ -1043,8 +1131,8 @@ def test_concurrent_refresh_does_not_overwrite_first_refresh_cache_markers(
 def test_config_marker_read_failure_forces_refresh_instead_of_cache_hit(
     tmp_path: Path,
 ) -> None:
-    state_path = tmp_path / "state.json"
-    state_path.write_text(
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text(
         json.dumps(
             {
                 "games": [
@@ -1132,5 +1220,5 @@ def test_concurrent_state_saves_do_not_share_temp_file(tmp_path: Path) -> None:
 
     assert all(not thread.is_alive() for thread in threads)
     assert errors == []
-    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    state = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
     assert state["selected_game"].startswith("Game ")

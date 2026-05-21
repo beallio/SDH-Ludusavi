@@ -177,7 +177,7 @@ def test_history_does_not_alter_cache_markers(tmp_path: Path) -> None:
     service.refresh_games(installed_app_ids="123")
     service.force_backup("Hades")
 
-    state = json.loads((tmp_path / "state.json").read_text())
+    state = json.loads((tmp_path / "cache.json").read_text())
     assert state["installed_app_ids"] == "123"
     assert state["ludusavi_config_mtime_ns"] == 100
     assert "Hades" in state["game_history"]

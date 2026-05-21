@@ -28,6 +28,45 @@ DEFAULT_NOTIFICATION_SETTINGS: dict[str, bool] = {
     "refresh_status": True,
     "failures_errors": True,
 }
+SETTINGS_KEYS = ("auto_sync_enabled", "selected_game", "notifications")
+
+
+class SettingsStore(Protocol):
+    def read(self) -> dict[str, object]: ...
+
+    def write(self, settings: dict[str, object]) -> None: ...
+
+
+class JsonSettingsStore:
+    """Small JSON settings store for tests and non-Decky local execution."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def read(self) -> dict[str, object]:
+        if not self._path.exists():
+            return {}
+        raw_settings = self._path.read_text(encoding="utf-8")
+        if not raw_settings.strip():
+            return {}
+        data = json.loads(raw_settings)
+        if not isinstance(data, dict):
+            return {}
+        return cast(dict[str, object], data)
+
+    def write(self, settings: dict[str, object]) -> None:
+        self._path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        temp_path = self._path.with_name(f".{self._path.name}.tmp")
+        try:
+            temp_path.write_text(
+                json.dumps(settings, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            os.replace(temp_path, self._path)
+        except OSError:
+            temp_path.unlink(missing_ok=True)
+            raise
+
 
 try:
     import decky
@@ -178,15 +217,23 @@ class SDHLudusaviService:
         adapter: LudusaviAdapter | None = None,
         adapter_factory: Callable[[], LudusaviAdapter] | None = None,
         state_path: Path | None = None,
+        settings_store: SettingsStore | None = None,
+        cache_path: Path | None = None,
         log_limit: int = 100,
     ) -> None:
         if adapter is not None and adapter_factory is not None:
             raise ValueError("adapter and adapter_factory cannot both be provided")
+        if state_path is not None and (settings_store is not None or cache_path is not None):
+            raise ValueError("state_path cannot be combined with split settings/cache storage")
 
         self._adapter = adapter
         self._adapter_lock = threading.Lock()
         self._adapter_factory = adapter_factory or _default_adapter_factory
-        self._state_path = state_path or Path("/tmp/sdh_ludusavi/state.json")
+        self._combined_state_path = state_path
+        self._settings_store = settings_store or JsonSettingsStore(
+            state_path or Path("/tmp/sdh_ludusavi/settings.json")
+        )
+        self._cache_path = cache_path or state_path or Path("/tmp/sdh_ludusavi/cache.json")
         self._auto_sync_enabled = False
         self._selected_game = ""
         self._notification_settings = dict(DEFAULT_NOTIFICATION_SETTINGS)
@@ -1006,12 +1053,86 @@ class SDHLudusaviService:
         """Return the most recent log entries from the ring buffer in chronological order."""
         return [entry.to_dict() for entry in self._logs]
 
-    def _load_state(self) -> None:
-        """Load the plugin settings and game cache from the persistent state file."""
-        if not self._state_path.exists():
+    def _apply_state_data(self, data: dict[str, object]) -> None:
+        self._auto_sync_enabled = bool(data.get("auto_sync_enabled", False))
+        self._selected_game = str(data.get("selected_game", ""))
+        self._notification_settings = self._coerce_notification_settings(
+            data.get("notifications", {})
+        )
+
+        raw_shortcut_id = data.get("ludusaviLauncherShortcutAppId", -1)
+        if isinstance(raw_shortcut_id, str | int | float):
+            try:
+                self._ludusavi_launcher_shortcut_id = int(raw_shortcut_id)
+            except ValueError:
+                self._warn_state_load("invalid ludusaviLauncherShortcutAppId; using -1")
+                self._ludusavi_launcher_shortcut_id = -1
+        else:
+            self._warn_state_load("invalid ludusaviLauncherShortcutAppId; using -1")
+            self._ludusavi_launcher_shortcut_id = -1
+
+        # Load cached games
+        cached_games = data.get("games", [])
+        if isinstance(cached_games, list):
+            self._games = {}
+            for g in cached_games:
+                if not isinstance(g, dict):
+                    continue
+                try:
+                    game = self._coerce_game_status(cast(dict[str, object], g))
+                    self._games[game.name] = game
+                except Exception:
+                    continue
+
+        # Load cached aliases and IDs
+        raw_aliases = data.get("aliases", {})
+        self._aliases = (
+            {str(key): str(value) for key, value in raw_aliases.items()}
+            if isinstance(raw_aliases, dict)
+            else {}
+        )
+        raw_ids = data.get("ids", {})
+        self._ids = (
+            {str(key): str(value) for key, value in raw_ids.items()}
+            if isinstance(raw_ids, dict)
+            else {}
+        )
+
+        raw_installed_app_ids = data.get("installed_app_ids")
+        self._installed_app_ids = (
+            raw_installed_app_ids if isinstance(raw_installed_app_ids, str) else None
+        )
+        raw_config_mtime_ns = data.get("ludusavi_config_mtime_ns")
+        if isinstance(raw_config_mtime_ns, int):
+            self._ludusavi_config_mtime_ns = raw_config_mtime_ns
+
+        raw_history = data.get("game_history", {})
+        if isinstance(raw_history, dict):
+            self._game_history = {}
+            for game_name, history in raw_history.items():
+                if not isinstance(history, dict):
+                    continue
+                typed_history = cast(dict[str, object], history)
+
+                # Sanitize inner fields: each must be a dict or None
+                validated_history = {}
+                for field in ("last_backup", "last_restore", "last_skip", "last_failure"):
+                    val = typed_history.get(field)
+                    validated_history[field] = self._coerce_history_entry(val)
+
+                self._update_last_operation(validated_history)
+                self._game_history[str(game_name)] = validated_history
+
+        self.log(
+            "debug",
+            f"Loaded state: auto_sync_enabled={self._auto_sync_enabled}, selected_game={self._selected_game}, {len(self._games)} games cached",
+        )
+
+    def _load_combined_state(self, state_path: Path) -> None:
+        if not state_path.exists():
             return
         try:
-            raw_state = self._state_path.read_text(encoding="utf-8")
+            raw_state = state_path.read_text(encoding="utf-8")
         except OSError as exc:
             self._warn_state_load(f"unreadable state file: {exc}")
             return
@@ -1026,83 +1147,99 @@ class SDHLudusaviService:
         if not isinstance(data, dict):
             self._warn_state_load("state file must contain a JSON object")
             return
+        self._apply_state_data(cast(dict[str, object], data))
 
-        self._auto_sync_enabled = bool(data.get("auto_sync_enabled", False))
-        self._selected_game = str(data.get("selected_game", ""))
-        self._notification_settings = self._coerce_notification_settings(
-            data.get("notifications", {})
-        )
+    def _load_state(self) -> None:
+        """Load plugin settings and runtime cache from persistent storage."""
+        if self._combined_state_path is not None:
+            self._load_combined_state(self._combined_state_path)
+            return
 
-        raw_shortcut_id = data.get("ludusaviLauncherShortcutAppId", -1)
         try:
-            self._ludusavi_launcher_shortcut_id = int(raw_shortcut_id)
-        except (TypeError, ValueError):
-            self._warn_state_load("invalid ludusaviLauncherShortcutAppId; using -1")
-            self._ludusavi_launcher_shortcut_id = -1
+            settings = self._settings_store.read()
+        except (OSError, json.JSONDecodeError) as exc:
+            self._warn_state_load(f"unreadable settings: {exc}")
+            settings = {}
+        if isinstance(settings, dict):
+            self._auto_sync_enabled = bool(settings.get("auto_sync_enabled", False))
+            self._selected_game = str(settings.get("selected_game", ""))
+            self._notification_settings = self._coerce_notification_settings(
+                settings.get("notifications", {})
+            )
 
-        # Load cached games
-        cached_games = data.get("games", [])
-        if isinstance(cached_games, list):
-            self._games = {}
-            for g in cached_games:
-                try:
-                    game = self._coerce_game_status(g)
-                    self._games[game.name] = game
-                except Exception:
-                    continue
+        if not self._cache_path.exists():
+            return
+        try:
+            raw_cache = self._cache_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            self._warn_state_load(f"unreadable cache: {exc}")
+            return
+        if not raw_cache.strip():
+            self._warn_state_load("empty cache file")
+            return
+        try:
+            cache = json.loads(raw_cache)
+        except json.JSONDecodeError as exc:
+            self._warn_state_load(f"invalid cache JSON: {exc}")
+            return
+        if not isinstance(cache, dict):
+            self._warn_state_load("cache file must contain a JSON object")
+            return
+        cache_data = cast(dict[str, object], cache)
+        self._apply_state_data({**self.get_settings(), **cache_data})
 
-        # Load cached aliases and IDs
-        self._aliases = data.get("aliases", {})
-        self._ids = data.get("ids", {})
+    def _settings_payload(self) -> dict[str, object]:
+        return {
+            "auto_sync_enabled": self._auto_sync_enabled,
+            "selected_game": self._selected_game,
+            "notifications": dict(self._notification_settings),
+        }
 
-        self._installed_app_ids = data.get("installed_app_ids")
-        raw_config_mtime_ns = data.get("ludusavi_config_mtime_ns")
-        if isinstance(raw_config_mtime_ns, int):
-            self._ludusavi_config_mtime_ns = raw_config_mtime_ns
-
-        raw_history = data.get("game_history", {})
-        if isinstance(raw_history, dict):
-            self._game_history = {}
-            for game_name, history in raw_history.items():
-                if not isinstance(history, dict):
-                    continue
-
-                # Sanitize inner fields: each must be a dict or None
-                validated_history = {}
-                for field in ("last_backup", "last_restore", "last_skip", "last_failure"):
-                    val = history.get(field)
-                    validated_history[field] = self._coerce_history_entry(val)
-
-                self._update_last_operation(validated_history)
-                self._game_history[str(game_name)] = validated_history
-
-        self.log(
-            "debug",
-            f"Loaded state: auto_sync_enabled={self._auto_sync_enabled}, selected_game={self._selected_game}, {len(self._games)} games cached",
-        )
+    def _cache_payload(self) -> dict[str, object]:
+        return {
+            "ludusaviLauncherShortcutAppId": self._ludusavi_launcher_shortcut_id,
+            "games": [game.to_dict() for game in self._games.values()],
+            "aliases": self._aliases,
+            "ids": self._ids,
+            "installed_app_ids": self._installed_app_ids,
+            "ludusavi_config_mtime_ns": self._ludusavi_config_mtime_ns,
+            "game_history": self._game_history,
+        }
 
     def _save_state(self) -> None:
-        """Persist the current plugin settings and game cache to the state file."""
+        """Persist current plugin settings and runtime cache."""
         with self._state_lock:
-            self._state_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-            temp_path = self._state_path.with_name(f".{self._state_path.name}.tmp")
+            settings_data = self._settings_payload()
+            cache_data = self._cache_payload()
 
-            data = self.get_settings()
-            data["ludusaviLauncherShortcutAppId"] = self._ludusavi_launcher_shortcut_id
-            data["games"] = [game.to_dict() for game in self._games.values()]
-            data["aliases"] = self._aliases
-            data["ids"] = self._ids
-            data["installed_app_ids"] = self._installed_app_ids
-            data["ludusavi_config_mtime_ns"] = self._ludusavi_config_mtime_ns
-            data["game_history"] = self._game_history
+            if self._combined_state_path is not None:
+                data = {**settings_data, **cache_data}
+                state_path = self._combined_state_path
+                state_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+                temp_path = state_path.with_name(f".{state_path.name}.tmp")
+                try:
+                    temp_path.write_text(
+                        json.dumps(data, indent=2, sort_keys=True),
+                        encoding="utf-8",
+                    )
+                    os.replace(temp_path, state_path)
+                    self.log("debug", f"Saved state to {state_path}")
+                except OSError:
+                    temp_path.unlink(missing_ok=True)
+                    raise
+                return
+
+            self._settings_store.write(settings_data)
+            self._cache_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+            temp_path = self._cache_path.with_name(f".{self._cache_path.name}.tmp")
 
             try:
                 temp_path.write_text(
-                    json.dumps(data, indent=2, sort_keys=True),
+                    json.dumps(cache_data, indent=2, sort_keys=True),
                     encoding="utf-8",
                 )
-                os.replace(temp_path, self._state_path)
-                self.log("debug", f"Saved state to {self._state_path}")
+                os.replace(temp_path, self._cache_path)
+                self.log("debug", f"Saved cache to {self._cache_path}")
             except OSError:
                 temp_path.unlink(missing_ok=True)
                 raise
@@ -1311,7 +1448,8 @@ class SDHLudusaviService:
 
     def _warn_state_load(self, reason: str) -> None:
         """Log a warning about a failed state load."""
-        LOGGER.warning("Ignoring SDH-ludusavi state at %s: %s", self._state_path, reason)
+        state_path = self._combined_state_path or self._cache_path
+        LOGGER.warning("Ignoring SDH-ludusavi state at %s: %s", state_path, reason)
 
     def _ludusavi(self) -> LudusaviAdapter:
         """Lazy initializer for the Ludusavi adapter."""
