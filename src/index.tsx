@@ -59,6 +59,7 @@ const qamPanelStyles = `
   gap: 12px;
   min-width: 0;
   width: 100%;
+  font-size: 12px;
 }
 
 .sdh-ludusavi-last-operation-result {
@@ -1916,7 +1917,7 @@ function Content() {
         {selectedHistory && !isBusy && (
           <PanelSectionRow>
             <Field
-              label="Last Operation"
+              label={<CompactFieldLabel>Last Operation</CompactFieldLabel>}
               className="sdh-ludusavi-last-operation-field"
               childrenLayout="below"
               childrenContainerWidth="max"
