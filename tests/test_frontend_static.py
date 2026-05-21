@@ -784,7 +784,7 @@ def test_frontend_displays_durable_operation_history() -> None:
         in source
     )
     assert "setGameHistory(result.history ?? {});" in source
-    assert "Last Operation" in source
+    assert "Last Operation:" in source
 
 
 def test_frontend_qam_uses_global_and_game_panels() -> None:
@@ -812,7 +812,7 @@ def test_frontend_qam_uses_global_and_game_panels() -> None:
     for text in [
         "Select Game",
         "Status:",
-        "Last Operation",
+        "Last Operation:",
         "Force Backup",
         "Force Restore",
     ]:
@@ -864,7 +864,7 @@ def test_frontend_qam_uses_requested_row_separators() -> None:
     for text, end_marker in [
         ('label="Automatic Sync"', "/>"),
         ("label={<CompactFieldLabel>Status:</CompactFieldLabel>}", "</Field>"),
-        ("label={<CompactFieldLabel>Last Operation</CompactFieldLabel>}", "</Field>"),
+        ("label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}", "</Field>"),
     ]:
         control = source[source.index(text) : source.index(end_marker, source.index(text))]
         assert 'bottomSeparator="none"' in control
@@ -919,7 +919,7 @@ def test_frontend_qam_rows_use_native_full_row_focus() -> None:
         "focusable={true}",
         '<ToggleField\n            label="Automatic Sync"\n            description="Runs Ludusavi automatically when configured games start or exit."\n            highlightOnFocus={true}',
         "<Field\n            label={<CompactFieldLabel>Status:</CompactFieldLabel>}",
-        "<Field\n              label={<CompactFieldLabel>Last Operation</CompactFieldLabel>}",
+        "<Field\n              label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}",
     ]:
         assert text in source
 
@@ -940,13 +940,13 @@ def test_frontend_qam_last_operation_uses_single_line_ellipsis() -> None:
     ]
     last_operation = source[
         source.index(
-            "label={<CompactFieldLabel>Last Operation</CompactFieldLabel>}"
+            "label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}"
         ) : source.index(
             "Force Backup",
-            source.index("label={<CompactFieldLabel>Last Operation</CompactFieldLabel>}"),
+            source.index("label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}"),
         )
     ]
-    assert "label={<CompactFieldLabel>Last Operation</CompactFieldLabel>}" in game_panel
+    assert "label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}" in game_panel
     for text in [
         'className="sdh-ludusavi-last-operation-row"',
         'className="sdh-ludusavi-last-operation-result"',
@@ -965,10 +965,10 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
     ]
     last_operation_field = source[
         source.index(
-            "label={<CompactFieldLabel>Last Operation</CompactFieldLabel>}"
+            "label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}"
         ) : source.index(
             "</Field>",
-            source.index("label={<CompactFieldLabel>Last Operation</CompactFieldLabel>}"),
+            source.index("label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}"),
         )
     ]
 

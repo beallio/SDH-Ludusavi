@@ -1917,7 +1917,7 @@ function Content() {
         {selectedHistory && !isBusy && (
           <PanelSectionRow>
             <Field
-              label={<CompactFieldLabel>Last Operation</CompactFieldLabel>}
+              label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}
               className="sdh-ludusavi-last-operation-field"
               childrenLayout="below"
               childrenContainerWidth="max"
