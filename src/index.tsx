@@ -50,11 +50,6 @@ const qamPanelStyles = `
 .sdh-ludusavi-last-operation-field {
   margin-top: -6px;
 }
-
-.sdh-ludusavi-status-field [class*="Label"],
-.sdh-ludusavi-last-operation-field [class*="Label"] {
-  font-size: 11px;
-}
 `;
 
 type NotificationSettings = {
@@ -1229,6 +1224,10 @@ function LudusaviLogModal({ logs, closeModal }: LudusaviLogModalProps) {
   );
 }
 
+function CompactFieldLabel({ children }: { children: ReactNode }) {
+  return <span style={{ fontSize: "11px" }}>{children}</span>;
+}
+
 let trackedAppIDs = new Set<string>();
 let trackedNames = new Set<string>();
 let autoSyncNotificationsEnabled = false;
@@ -1761,7 +1760,7 @@ function Content() {
 
         <PanelSectionRow>
           <Field
-            label="Status:"
+            label={<CompactFieldLabel>Status:</CompactFieldLabel>}
             className="sdh-ludusavi-status-field"
             highlightOnFocus={true}
             focusable={true}
@@ -1788,7 +1787,7 @@ function Content() {
         {selectedHistory && !isBusy && (
           <PanelSectionRow>
             <Field
-              label="Last Operation:"
+              label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}
               className="sdh-ludusavi-last-operation-field"
               highlightOnFocus={true}
               focusable={true}

@@ -740,12 +740,12 @@ def test_frontend_qam_toggles_explain_their_scope() -> None:
 def test_frontend_qam_uses_requested_row_separators() -> None:
     source = FRONTEND.read_text()
 
-    for text in [
-        'label="Automatic Sync"',
-        'label="Status:"',
-        'label="Last Operation:"',
+    for text, end_marker in [
+        ('label="Automatic Sync"', "/>"),
+        ("label={<CompactFieldLabel>Status:</CompactFieldLabel>}", "</Field>"),
+        ("label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}", "</Field>"),
     ]:
-        control = source[source.index(text) : source.index("/>", source.index(text))]
+        control = source[source.index(text) : source.index(end_marker, source.index(text))]
         assert 'bottomSeparator="none"' in control
 
     game_panel = source[
@@ -797,8 +797,8 @@ def test_frontend_qam_rows_use_native_full_row_focus() -> None:
         "highlightOnFocus={true}",
         "focusable={true}",
         '<ToggleField\n            label="Automatic Sync"\n            description="Runs Ludusavi automatically when configured games start or exit."\n            highlightOnFocus={true}',
-        '<Field\n            label="Status:"',
-        '<Field\n              label="Last Operation:"',
+        "<Field\n            label={<CompactFieldLabel>Status:</CompactFieldLabel>}",
+        "<Field\n              label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}",
     ]:
         assert text in source
 
@@ -837,22 +837,27 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
     source = FRONTEND.read_text()
 
     status_field = source[
-        source.index('label="Status:"') : source.index("</Field>", source.index('label="Status:"'))
+        source.index("label={<CompactFieldLabel>Status:</CompactFieldLabel>}") : source.index(
+            "</Field>", source.index("label={<CompactFieldLabel>Status:</CompactFieldLabel>}")
+        )
     ]
     last_operation_field = source[
-        source.index('label="Last Operation:"') : source.index(
-            "</Field>", source.index('label="Last Operation:"')
+        source.index(
+            "label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}"
+        ) : source.index(
+            "</Field>",
+            source.index("label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}"),
         )
     ]
 
+    assert "function CompactFieldLabel" in source
+    assert 'fontSize: "11px"' in source
+    assert '[class*="Label"]' not in source
     assert 'className="sdh-ludusavi-status-field"' in status_field
     assert 'padding="standard"' in status_field
     assert 'fontSize: "12px"' in status_field
     assert 'className="sdh-ludusavi-last-operation-field"' in last_operation_field
     assert 'padding="compact"' in last_operation_field
-    assert '.sdh-ludusavi-status-field [class*="Label"],' in source
-    assert '.sdh-ludusavi-last-operation-field [class*="Label"]' in source
-    assert "font-size: 11px;" in source
 
 
 def test_frontend_versions_order_places_decky_last() -> None:

@@ -11,7 +11,8 @@
   ],
   "design_decisions": [
     "Kept the change frontend-only with no backend RPC, settings schema, dependency, or packaging changes.",
-    "Used scoped QAM CSS on plugin-owned Field classes, matching Decky plugin patterns that inject container-scoped CSS or target generated field-label classes.",
+    "Used a plugin-owned CompactFieldLabel React helper through Field's public label prop after the generated-class selector failed to affect the visible label text.",
+    "Removed broad [class*=\"Label\"] CSS selector usage to avoid depending on Decky internal CSS module class names.",
     "Set both Status and Last Operation labels to 11px while keeping both values at 12px.",
     "Preserved the existing native padding split: Status remains standard and Last Operation remains compact."
   ],
