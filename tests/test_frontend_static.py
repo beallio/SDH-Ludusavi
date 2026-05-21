@@ -860,6 +860,7 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
     assert 'className="sdh-ludusavi-last-operation-field"' in last_operation_field
     assert 'childrenContainerWidth="min"' in last_operation_field
     assert 'padding="compact"' in last_operation_field
+    assert 'maxWidth: "60%"' in last_operation_field
 
 
 def test_frontend_versions_order_places_decky_last() -> None:

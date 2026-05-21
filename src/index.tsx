@@ -1797,7 +1797,7 @@ function Content() {
               padding="compact"
               bottomSeparator="none"
             >
-              <div style={{ color: "#cbd5e1", fontSize: "12px", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" }}>
+              <div style={{ color: "#cbd5e1", fontSize: "12px", minWidth: 0, maxWidth: "60%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" }}>
                 <span style={{ 
                   color: selectedHistory.status === "failed" ? "#f87171" : "#cbd5e1" 
                 }}>
