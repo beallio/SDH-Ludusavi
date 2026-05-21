@@ -250,6 +250,9 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         "let autoSyncStatusShowGeneration = 0;",
         "const AUTO_SYNC_STATUS_SHOW_DELAY = 100;",
         "function clearAutoSyncStatusShowTimeout()",
+        "function shouldResetStatusStripSurfaceBeforeVerification(",
+        "function resetStatusStripSurfaceBeforeVerification(",
+        "shouldResetStatusStripSurfaceBeforeVerification(status, options)",
         "function ensureAutoSyncStatusBrowserView()",
         "function normalizeAutoSyncStatusBrowserView(",
         "candidate?.m_browserView",
@@ -310,6 +313,34 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
 
     dismount_source = source[source.index("onDismount()") :]
     assert "clearAutoSyncStatusShowTimeout();" in dismount_source
+
+
+def test_frontend_recreates_status_strip_before_lifecycle_verification() -> None:
+    source = FRONTEND.read_text()
+
+    reset_source = source[
+        source.index("function shouldResetStatusStripSurfaceBeforeVerification(") : source.index(
+            "function publishAutoSyncStatus("
+        )
+    ]
+    for required_text in [
+        'status === "checking"',
+        '(options.source === "lifecycle_start" || options.source === "lifecycle_exit")',
+        "destroyAutoSyncStatusBrowserView();",
+    ]:
+        assert required_text in reset_source
+
+    publish_source = source[
+        source.index("function publishAutoSyncStatus(") : source.index(
+            "function hideAutoSyncStatus("
+        )
+    ]
+    assert publish_source.index(
+        "shouldResetStatusStripSurfaceBeforeVerification(status, options)"
+    ) < publish_source.index("currentAutoSyncStatusState = {")
+    assert publish_source.index(
+        "resetStatusStripSurfaceBeforeVerification();"
+    ) < publish_source.index("syncAutoSyncStatusBrowserView(currentAutoSyncStatusState);")
 
 
 def test_frontend_status_strip_logs_status_provenance() -> None:

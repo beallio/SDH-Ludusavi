@@ -1002,6 +1002,20 @@ function clearAutoSyncStatusShowTimeout() {
   autoSyncStatusShowTimeoutID = null;
 }
 
+function shouldResetStatusStripSurfaceBeforeVerification(
+  status: AutoSyncStatusKind,
+  options: AutoSyncStatusPublishOptions
+) {
+  return (
+    status === "checking" &&
+    (options.source === "lifecycle_start" || options.source === "lifecycle_exit")
+  );
+}
+
+function resetStatusStripSurfaceBeforeVerification() {
+  destroyAutoSyncStatusBrowserView();
+}
+
 function scheduleAutoSyncStatusHide(state: AutoSyncStatusState) {
   clearAutoSyncStatusHideTimeout();
   if (!state.visible) {
@@ -1026,6 +1040,10 @@ function scheduleAutoSyncStatusHide(state: AutoSyncStatusState) {
 function publishAutoSyncStatus(status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions) {
   if (status === "backing_up" || status === "restoring") {
     autoSyncStatusTimedOut = false;
+  }
+
+  if (shouldResetStatusStripSurfaceBeforeVerification(status, options)) {
+    resetStatusStripSurfaceBeforeVerification();
   }
 
   currentAutoSyncStatusState = {

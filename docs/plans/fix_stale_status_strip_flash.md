@@ -11,7 +11,9 @@ immediately after `LoadURL` can expose the previous document.
 
 Keep the BrowserView-only status strip and existing lifecycle RPC flow. Hide the
 BrowserView before loading every visible status, then reveal it after a short guarded
-delay so the previous document cannot flash.
+delay so the previous document cannot flash. For lifecycle verification publishes,
+destroy the reused BrowserView first so game start and game exit load
+`VERIFYING GAME SAVE` into a fresh surface.
 
 ## Core Data Structures
 
@@ -19,6 +21,8 @@ delay so the previous document cannot flash.
 - `autoSyncStatusShowGeneration`: monotonically increasing guard that invalidates
   stale show callbacks.
 - `AUTO_SYNC_STATUS_SHOW_DELAY`: named reveal delay in milliseconds.
+- `shouldResetStatusStripSurfaceBeforeVerification`: lifecycle start/exit guard for
+  fresh verification surfaces.
 
 ## Public Interfaces
 
@@ -36,4 +40,6 @@ None.
   for visible BrowserView updates.
 - Verify delayed reveal uses `AUTO_SYNC_STATUS_SHOW_DELAY` and a generation guard.
 - Verify pending show timers clear during sync, hide, destroy, and plugin dismount.
+- Verify lifecycle start/exit `checking` destroys the prior BrowserView surface before
+  publishing the verification document.
 - Run the standard `./run.sh` Python, type, frontend, and packaging checks.

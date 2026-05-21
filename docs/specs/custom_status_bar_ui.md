@@ -37,6 +37,9 @@ BrowserView updates hide the reused BrowserView before loading each new visible
 the previous status document, such as `GAME SAVE UP TO DATE`, cannot flash before a
 new `VERIFYING GAME SAVE` document finishes navigating. The reveal callback is
 invalidated by a generation counter on every sync, hide, destroy, and dismount path.
+Lifecycle verification states also reset the BrowserView surface before publishing
+`VERIFYING GAME SAVE` so game start and game exit never reuse a surface that can
+retain stale result pixels.
 
 React global components, React DOM portals, diagnostic surface cycling, and SteamUI
 composition-hook fallback paths are not production surfaces for this feature.
@@ -134,6 +137,8 @@ Frontend static tests must verify:
 - Module-level timers clear on hide and dismount.
 - BrowserView visible updates hide stale content before `LoadURL` and reveal through
   a guarded delayed show callback.
+- Lifecycle verification publishes recreate the BrowserView surface before the
+  verification document is loaded.
 - Direct `SetOverlayState` and `SetComposition` calls are not used.
 
 Validation commands:
