@@ -1,0 +1,20 @@
+{
+  "date": "2026-05-21",
+  "task_objective": "Optimize initial startup latency of the SDH-Ludusavi QAM panel when opened for the first time by removing slow subprocess-querying RPCs (getVersions and getLudusaviCommandCall) from the critical loading path.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/service.py",
+    "src/index.tsx",
+    "tests/test_frontend_static.py",
+    "tests/test_service.py"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py::test_frontend_load_initial_optimizations",
+    "tests/test_service.py::test_ludusavi_diagnostics_logging_is_asynchronous"
+  ],
+  "design_decisions": [
+    "Refactor frontend loadInitial sequence to only await getSettings() before resolving the UI loading spinner, deferring getVersions() and getLudusaviCommandCall() asynchronously in the background.",
+    "Initialize versions state with 'Loading...' placeholders, transitioning to real values upon successful resolution or falling back to 'Unknown' or specific error message upon RpcStatus/rejection.",
+    "Offload slow backend diagnostics checks (get_diagnostics) to a daemon thread during adapter lazy initialization to ensure RPC commands are non-blocking."
+  ],
+  "results": "All checks passed: typechecks (pnpm & ty), formatting/lints (ruff), and the full 232-test pytest suite."
+}

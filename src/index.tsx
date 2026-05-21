@@ -1292,7 +1292,14 @@ function Content() {
   const [gameAliases, setGameAliases] = useState<Record<string, string>>(globalGameAliases ?? {});
   const [gameHistory, setGameHistory] = useState<Record<string, GameOperationHistory>>(globalGameHistory ?? {});
   const [selectedGame, setSelectedGame] = useState(globalSettings?.selected_game ?? "");
-  const [versions, setVersions] = useState<Versions>(globalVersions ?? {});
+  const [versions, setVersions] = useState<Versions>(
+    globalVersions ?? {
+      sdh_ludusavi: "Loading...",
+      ludusavi: "Loading...",
+      pyludusavi: "Loading...",
+      decky: "Loading..."
+    }
+  );
   const [operation, setOperation] = useState<OperationStatus>({
     is_running: false,
     name: null,
@@ -1404,13 +1411,39 @@ function Content() {
     }
     setBackgroundRefreshBusy(isWarmed);
 
+    // Load versions and commands in the background asynchronously.
+    void (async () => {
+      try {
+        const [loadedVersions, loadedCommand] = await Promise.all([
+          getVersions(),
+          getLudusaviCommandCall()
+        ]);
+
+        log("debug", `Loaded versions: ${JSON.stringify(loadedVersions)}`);
+        if (isRpcStatus(loadedVersions)) {
+          logRpcStatus(loadedVersions, "versions");
+          setVersions({ message: loadedVersions.message || "Error" });
+        } else {
+          setVersions(loadedVersions);
+          globalVersions = loadedVersions;
+        }
+
+        log("debug", `Loaded command: ${JSON.stringify(loadedCommand)}`);
+        if (isRpcStatus(loadedCommand)) {
+          logRpcStatus(loadedCommand, "command discovery");
+        } else {
+          globalLudusaviCommand = loadedCommand;
+          setLudusaviCommand(loadedCommand);
+        }
+      } catch (error) {
+        log("error", `Background load of versions/command failed: ${error}`);
+        setVersions({ message: "Error" });
+      }
+    })();
+
     try {
       log("debug", `Starting initial load (warmed=${isWarmed})`);
-      const [loadedSettings, loadedVersions, loadedCommand] = await Promise.all([
-        getSettings(),
-        getVersions(),
-        getLudusaviCommandCall()
-      ]);
+      const loadedSettings = await getSettings();
 
       log("debug", `Loaded settings: ${JSON.stringify(loadedSettings)}`);
       if (isRpcStatus(loadedSettings)) {
@@ -1420,23 +1453,6 @@ function Content() {
         if (normalizedSettings.selected_game) {
           setSelectedGame(normalizedSettings.selected_game);
         }
-      }
-
-      log("debug", `Loaded versions: ${JSON.stringify(loadedVersions)}`);
-      if (isRpcStatus(loadedVersions)) {
-        logRpcStatus(loadedVersions, "versions");
-      } else {
-        setVersions(loadedVersions);
-        globalVersions = loadedVersions;
-      }
-
-      log("debug", `Loaded command: ${JSON.stringify(loadedCommand)}`);
-      if (isRpcStatus(loadedCommand)) {
-        // If discovery failed, keep existing cached command if any.
-        logRpcStatus(loadedCommand, "command discovery");
-      } else {
-        globalLudusaviCommand = loadedCommand;
-        setLudusaviCommand(loadedCommand);
       }
 
       log("debug", "Initializing game list (cached)");

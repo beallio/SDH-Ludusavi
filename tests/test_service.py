@@ -886,6 +886,13 @@ def test_ludusavi_diagnostics_are_logged_after_adapter_initialization(tmp_path: 
 
     service.refresh_games()
 
+    # Wait for the background diagnostics logging to finish
+    for _ in range(50):
+        messages = [entry["message"] for entry in service.get_recent_logs()]
+        if any("Ludusavi version: 0.31.0" in message for message in messages):
+            break
+        time.sleep(0.01)
+
     messages = [entry["message"] for entry in service.get_recent_logs()]
     assert any("Ludusavi version: 0.31.0" in message for message in messages)
     assert any(
@@ -896,6 +903,44 @@ def test_ludusavi_diagnostics_are_logged_after_adapter_initialization(tmp_path: 
     assert any(
         "Ludusavi backup path: /home/deck/ludusavi-backups" in message for message in messages
     )
+
+
+def test_ludusavi_diagnostics_logging_is_asynchronous(tmp_path: Path) -> None:
+    diagnostics_called = threading.Event()
+    diagnostics_can_continue = threading.Event()
+
+    class BlockedAdapter(FakeAdapter):
+        def get_diagnostics(self) -> dict[str, object]:
+            diagnostics_called.set()
+            diagnostics_can_continue.wait(timeout=5.0)
+            return super().get_diagnostics()
+
+    adapter = BlockedAdapter()
+    service = service_with_state(tmp_path, adapter)
+
+    # Triggering lazy-load diagnostics should run in background without blocking
+    service.refresh_games()
+
+    # Verify that get_diagnostics was triggered in the background
+    assert diagnostics_called.wait(timeout=2.0)
+
+    # At this point, get_diagnostics is still blocked in the thread.
+    # Verify that the diagnostic messages are NOT logged yet.
+    messages = [entry["message"] for entry in service.get_recent_logs()]
+    assert not any("Ludusavi version: 0.31.0" in message for message in messages)
+
+    # Let the background thread complete
+    diagnostics_can_continue.set()
+
+    # Wait for the logs to be populated
+    for _ in range(50):
+        messages = [entry["message"] for entry in service.get_recent_logs()]
+        if any("Ludusavi version: 0.31.0" in message for message in messages):
+            break
+        time.sleep(0.01)
+
+    messages = [entry["message"] for entry in service.get_recent_logs()]
+    assert any("Ludusavi version: 0.31.0" in message for message in messages)
 
 
 def test_get_ludusavi_logs(tmp_path, monkeypatch):

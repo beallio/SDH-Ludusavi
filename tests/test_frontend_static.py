@@ -1049,3 +1049,30 @@ def test_frontend_prefers_focused_or_selected_game_before_running_game() -> None
     assert preferred.index("captureSteamUiGameContext()") < preferred.index(
         "getMainRunningSession()"
     )
+
+
+def test_frontend_load_initial_optimizations() -> None:
+    source = FRONTEND.read_text()
+
+    # Verify placeholder state for versions on initialization
+    assert 'sdh_ludusavi: "Loading..."' in source
+    assert 'ludusavi: "Loading..."' in source
+    assert 'pyludusavi: "Loading..."' in source
+    assert 'decky: "Loading..."' in source
+
+    # Verify loadInitial structure (non-blocking versions and command loading)
+    load_initial = source[source.index("const loadInitial = async () => {") :]
+    load_initial = load_initial[: load_initial.index("const applyRefreshResult")]
+
+    assert "Load versions and commands in the background" in load_initial
+    assert "const loadedSettings = await getSettings();" in load_initial
+
+    # Verify the Promise.all for settings is NOT there (since settings is loaded on its own now)
+    assert (
+        "Promise.all([\n        getSettings(),\n        getVersions(),\n        getLudusaviCommandCall()\n      ])"
+        not in load_initial
+    )
+
+    # Verify background loader handles error states appropriately
+    assert 'setVersions({ message: loadedVersions.message || "Error" });' in load_initial
+    assert 'setVersions({ message: "Error" });' in load_initial

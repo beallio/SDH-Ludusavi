@@ -1468,21 +1468,25 @@ class SDHLudusaviService:
         if self._diagnostics_logged:
             return
         self._diagnostics_logged = True
-        try:
-            diagnostics = adapter.get_diagnostics()
-        except Exception as exc:
-            self.log("debug", f"Ludusavi diagnostics unavailable: {exc}", "init")
-            return
 
-        version = diagnostics.get("version", "unknown")
-        ludusavi_type = diagnostics.get("type", "unknown")
-        path = diagnostics.get("path", "unknown")
-        config_path = diagnostics.get("configPath", "unknown")
-        backup_path = diagnostics.get("backupPath", "unknown")
-        self.log("info", f"Ludusavi version: {version}", "init")
-        self.log("info", f"Ludusavi type/path: {ludusavi_type} {path}", "init")
-        self.log("info", f"Ludusavi config path: {config_path}", "init")
-        self.log("info", f"Ludusavi backup path: {backup_path}", "init")
+        def run() -> None:
+            try:
+                diagnostics = adapter.get_diagnostics()
+            except Exception as exc:
+                self.log("debug", f"Ludusavi diagnostics unavailable: {exc}", "init")
+                return
+
+            version = diagnostics.get("version", "unknown")
+            ludusavi_type = diagnostics.get("type", "unknown")
+            path = diagnostics.get("path", "unknown")
+            config_path = diagnostics.get("configPath", "unknown")
+            backup_path = diagnostics.get("backupPath", "unknown")
+            self.log("info", f"Ludusavi version: {version}", "init")
+            self.log("info", f"Ludusavi type/path: {ludusavi_type} {path}", "init")
+            self.log("info", f"Ludusavi config path: {config_path}", "init")
+            self.log("info", f"Ludusavi backup path: {backup_path}", "init")
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _current_ludusavi_config_mtime_ns(self) -> int | None | object:
         try:
