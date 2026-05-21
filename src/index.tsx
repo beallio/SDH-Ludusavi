@@ -46,6 +46,14 @@ const qamPanelStyles = `
   min-width: 0;
   text-align: left;
 }
+
+.sdh-ludusavi-last-operation-field {
+  margin-top: -6px;
+}
+
+.sdh-ludusavi-last-operation-field [class*="Label"] {
+  font-size: 12px;
+}
 `;
 
 type NotificationSettings = {
@@ -1779,13 +1787,14 @@ function Content() {
           <PanelSectionRow>
             <Field
               label="Last Operation:"
+              className="sdh-ludusavi-last-operation-field"
               highlightOnFocus={true}
               focusable={true}
               childrenLayout="inline"
-              padding="standard"
+              padding="compact"
               bottomSeparator="none"
             >
-              <div style={{ color: "#cbd5e1", fontSize: "14px", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" }}>
+              <div style={{ color: "#cbd5e1", fontSize: "12px", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" }}>
                 <span style={{ 
                   color: selectedHistory.status === "failed" ? "#f87171" : "#cbd5e1" 
                 }}>
@@ -1794,7 +1803,7 @@ function Content() {
                    selectedHistory.status === "restored" ? "Restored" :
                    `Skipped${selectedHistory.reason ? ` (${selectedHistory.reason.replace(/_/g, " ")})` : ""}`}
                 </span>
-                <span style={{ marginLeft: "8px", fontSize: "12px", opacity: 0.65 }}>
+                <span style={{ marginLeft: "8px", fontSize: "10px", opacity: 0.65 }}>
                   {selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0]}
                 </span>
               </div>

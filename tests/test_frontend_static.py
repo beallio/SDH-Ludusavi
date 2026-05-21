@@ -825,7 +825,7 @@ def test_frontend_qam_last_operation_uses_single_line_ellipsis() -> None:
     assert "Last Operation:" in game_panel
     for text in [
         "minWidth: 0",
-        'fontSize: "14px"',
+        'fontSize: "12px"',
         'whiteSpace: "nowrap"',
         'overflow: "hidden"',
         'textOverflow: "ellipsis"',
