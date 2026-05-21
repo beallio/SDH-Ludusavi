@@ -940,6 +940,11 @@ function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
       }, AUTO_SYNC_STATUS_SHOW_DELAY);
     } else {
       browserView.SetVisible(false);
+      try {
+        browserView.LoadURL?.("about:blank");
+      } catch (err) {
+        log("debug", `Could not navigate BrowserView to blank: ${err}`, "autosync_status");
+      }
     }
   } catch (err) {
     log("warning", `Could not update status strip BrowserView: ${err}`, "autosync_status");

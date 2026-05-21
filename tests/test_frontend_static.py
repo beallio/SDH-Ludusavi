@@ -1227,3 +1227,14 @@ def test_frontend_load_initial_optimizations() -> None:
     # Verify background loader handles error states appropriately
     assert 'setVersions({ message: loadedVersions.message || "Error" });' in load_initial
     assert 'setVersions({ message: "Error" });' in load_initial
+
+
+def test_frontend_status_strip_clears_on_hide() -> None:
+    source = FRONTEND.read_text()
+
+    sync_source = source[
+        source.index("function syncAutoSyncStatusBrowserView(") : source.index(
+            "function destroyAutoSyncStatusBrowserView()"
+        )
+    ]
+    assert 'browserView.LoadURL?.("about:blank");' in sync_source
