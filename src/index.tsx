@@ -49,8 +49,56 @@ const qamPanelStyles = `
 
 .sdh-ludusavi-last-operation-field {
   margin-top: -6px;
+  width: 100%;
+}
+
+.sdh-ludusavi-last-operation-row {
+  display: flex;
+  align-items: baseline;
+  justify-content:space-between;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+}
+
+.sdh-ludusavi-last-operation-result {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sdh-ludusavi-last-operation-time {
+  flex: 0 0 auto;
+  opacity: 0.65;
+  font-size: 0.85em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 `;
+
+function getLastOperationText(status: string, reason: string | null): string {
+  switch (status) {
+    case "backed_up":
+      return "Backup complete";
+    case "restored":
+      return "Restore complete";
+    case "failed":
+      return "Failed — check logs";
+    case "skipped":
+      if (reason === "local_current") {
+        return "Skipped — local backup is current";
+      }
+      if (reason === "remote_current") {
+        return "Skipped — cloud backup is current";
+      }
+      return `Skipped${reason ? ` — ${reason.replace(/_/g, " ")}` : ""}`;
+    default:
+      return "No operation yet";
+  }
+}
+
 
 type NotificationSettings = {
   enabled: boolean;
@@ -1868,27 +1916,40 @@ function Content() {
         {selectedHistory && !isBusy && (
           <PanelSectionRow>
             <Field
-              label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}
+              label="Last Operation"
               className="sdh-ludusavi-last-operation-field"
-              highlightOnFocus={true}
-              focusable={true}
-              childrenLayout="inline"
-              childrenContainerWidth="min"
+              childrenLayout="below"
+              childrenContainerWidth="max"
               padding="compact"
               bottomSeparator="none"
+              focusable={false}
+              highlightOnFocus={false}
             >
-              <div style={{ color: "#cbd5e1", fontSize: "12px", minWidth: 0, maxWidth: "60%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" }}>
-                <span style={{ 
-                  color: selectedHistory.status === "failed" ? "#f87171" : "#cbd5e1" 
-                }}>
-                  {selectedHistory.status === "failed" ? "Failed" : 
-                   selectedHistory.status === "backed_up" ? "Backed up" :
-                   selectedHistory.status === "restored" ? "Restored" :
-                   `Skipped${selectedHistory.reason ? ` (${selectedHistory.reason.replace(/_/g, " ")})` : ""}`}
-                </span>
-                <span style={{ marginLeft: "8px", fontSize: "10px", opacity: 0.65 }}>
-                  {selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0]}
-                </span>
+              <div
+                className="sdh-ludusavi-last-operation-row"
+                title={
+                  selectedHistory.timestamp
+                    ? `${getLastOperationText(
+                        selectedHistory.status,
+                        selectedHistory.reason
+                      )} ${selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0]}`
+                    : getLastOperationText(selectedHistory.status, selectedHistory.reason)
+                }
+              >
+                <div
+                  className="sdh-ludusavi-last-operation-result"
+                  style={{
+                    color: selectedHistory.status === "failed" ? "#f87171" : "#cbd5e1"
+                  }}
+                >
+                  {getLastOperationText(selectedHistory.status, selectedHistory.reason)}
+                </div>
+                {selectedHistory.timestamp &&
+                selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0] ? (
+                  <div className="sdh-ludusavi-last-operation-time">
+                    {selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0]}
+                  </div>
+                ) : null}
               </div>
             </Field>
           </PanelSectionRow>
