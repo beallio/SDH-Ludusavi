@@ -193,7 +193,7 @@ def test_frontend_status_strip_matches_steamos_visual_contract() -> None:
         "justify-content: center;",
         "min-width: 245px;",
         'state.status === "unknown" ? "#f59e0b"',
-        '"#66c0f4"',
+        '"#1a9fff"',
         '"#ef4444"',
         "border-top: 1px solid rgba(255, 255, 255, 0.10);",
     ]:
@@ -217,6 +217,8 @@ def test_frontend_status_strip_uses_inline_browserview_icons() -> None:
         "transform: rotate(180deg);",
         '<svg viewBox="0 0 20 20"',
         'stroke="#0b151f"',
+        "@keyframes spin {",
+        "icon-spin",
     ]:
         assert required_text in source
 
