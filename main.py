@@ -300,6 +300,14 @@ async def _run_blocking(callback: Any) -> Any:
     future = loop.create_future()
     context = contextvars.copy_context()
 
+    def _clean_exception(f: asyncio.Future) -> None:
+        try:
+            f.exception()
+        except BaseException:
+            pass
+
+    future.add_done_callback(_clean_exception)
+
     def set_result(payload: Any) -> None:
         if not future.cancelled():
             future.set_result(payload)

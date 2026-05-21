@@ -1461,7 +1461,9 @@ class SDHLudusaviService:
                     self._adapter = self._adapter_factory()
                     self._log_ludusavi_diagnostics(self._adapter)
         if not self._diagnostics_logged:
-            self._log_ludusavi_diagnostics(self._adapter)
+            with self._adapter_lock:
+                if not self._diagnostics_logged:
+                    self._log_ludusavi_diagnostics(self._adapter)
         return self._adapter
 
     def _log_ludusavi_diagnostics(self, adapter: LudusaviAdapter) -> None:

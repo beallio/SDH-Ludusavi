@@ -949,7 +949,7 @@ def test_frontend_qam_last_operation_uses_single_line_ellipsis() -> None:
     assert "label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}" in game_panel
     for text in [
         'className="sdh-ludusavi-last-operation-row"',
-        'className="sdh-ludusavi-last-operation-result"',
+        "sdh-ludusavi-last-operation-result",
         'className="sdh-ludusavi-last-operation-time"',
     ]:
         assert text in last_operation
@@ -978,7 +978,7 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
     assert 'className="sdh-ludusavi-status-field"' in status_field
     assert 'childrenContainerWidth="min"' in status_field
     assert 'padding="standard"' in status_field
-    assert 'fontSize: "12px"' in status_field
+    assert 'className="sdh-ludusavi-status-value"' in status_field
     assert 'className="sdh-ludusavi-last-operation-field"' in last_operation_field
     assert 'childrenContainerWidth="max"' in last_operation_field
     assert 'padding="compact"' in last_operation_field

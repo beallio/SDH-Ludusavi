@@ -68,6 +68,7 @@ const qamPanelStyles = `
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: #cbd5e1;
 }
 
 .sdh-ludusavi-last-operation-time {
@@ -76,6 +77,21 @@ const qamPanelStyles = `
   font-size: 0.85em;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.sdh-ludusavi-status-value {
+  color: #cbd5e1;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.sdh-ludusavi-status-busy {
+  color: #60a5fa;
+  font-weight: bold;
+}
+
+.sdh-ludusavi-status-failed {
+  color: #f87171 !important;
 }
 `;
 
@@ -1424,6 +1440,7 @@ function Content() {
   const qamContentRef = useRef<HTMLDivElement | null>(null);
   const wasQuickAccessVisible = useRef(false);
   const pendingCurrentGameSelection = useRef(false);
+  const isMounted = useRef(true);
   const [settings, setSettings] = useState<Settings>(globalSettings ?? defaultSettings());
   const [games, setGames] = useState<GameStatus[]>(globalGames ?? []);
   const [gameAliases, setGameAliases] = useState<Record<string, string>>(globalGameAliases ?? {});
@@ -1506,8 +1523,12 @@ function Content() {
   }
 
   useEffect(() => {
+    isMounted.current = true;
     log("info", "Plugin mounted, starting initial load");
     void loadInitial();
+    return () => {
+      isMounted.current = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -1543,6 +1564,7 @@ function Content() {
 
   const loadInitial = async () => {
     const isWarmed = globalSettings !== null && globalGames !== null;
+    if (!isMounted.current) return;
     if (!isWarmed) {
       setBusyLabel("Loading");
     }
@@ -1555,6 +1577,8 @@ function Content() {
           getVersions(),
           getLudusaviCommandCall()
         ]);
+
+        if (!isMounted.current) return;
 
         log("debug", `Loaded versions: ${JSON.stringify(loadedVersions)}`);
         if (isRpcStatus(loadedVersions)) {
@@ -1573,6 +1597,7 @@ function Content() {
           setLudusaviCommand(loadedCommand);
         }
       } catch (error) {
+        if (!isMounted.current) return;
         log("error", `Background load of versions/command failed: ${error}`);
         setVersions({ message: "Error" });
       }
@@ -1581,6 +1606,8 @@ function Content() {
     try {
       log("debug", `Starting initial load (warmed=${isWarmed})`);
       const loadedSettings = await getSettings();
+
+      if (!isMounted.current) return;
 
       log("debug", `Loaded settings: ${JSON.stringify(loadedSettings)}`);
       if (isRpcStatus(loadedSettings)) {
@@ -1595,23 +1622,29 @@ function Content() {
       log("debug", "Initializing game list (cached)");
       const installedAppIds = await getInstalledAppIdsString();
       const installedAppIdsChanged = globalInstalledAppIds !== installedAppIds;
+      if (!isMounted.current) return;
       const cacheCurrent = isWarmed && !installedAppIdsChanged && await isGameCacheCurrentCall(installedAppIds);
+      if (!isMounted.current) return;
       if (cacheCurrent && globalGames) {
         applyCachedRefreshResult(isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game);
       } else {
         const refreshed = await refreshGamesCall(false, installedAppIds);
+        if (!isMounted.current) return;
         if (applyRefreshResult(refreshed, isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game)) {
           globalInstalledAppIds = installedAppIds;
         }
       }
 
       const loadedOperation = await getOperationStatus();
+      if (!isMounted.current) return;
       setOperation(loadedOperation);
     } catch (error) {
       log("error", `Initial load failed: ${error}`);
     } finally {
-      setBackgroundRefreshBusy(false);
-      setBusyLabel(null);
+      if (isMounted.current) {
+        setBackgroundRefreshBusy(false);
+        setBusyLabel(null);
+      }
     }
   };
 
@@ -1898,15 +1931,15 @@ function Content() {
             padding="standard"
             bottomSeparator="none"
           >
-            <div style={{ color: "#cbd5e1", fontSize: "12px", minWidth: 0 }}>
+            <div className="sdh-ludusavi-status-value">
               {isBusy && busyLabel === "Loading" ? (
-                <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Loading game list...</span>
+                <span className="sdh-ludusavi-status-busy">Loading game list...</span>
               ) : isBusy && busyLabel === "Refreshing games" ? (
-                <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Game refresh in progress...</span>
+                <span className="sdh-ludusavi-status-busy">Game refresh in progress...</span>
               ) : isBusy && busyLabel === "Backup running" ? (
-                <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Backup in progress...</span>
+                <span className="sdh-ludusavi-status-busy">Backup in progress...</span>
               ) : isBusy && busyLabel === "Restore running" ? (
-                <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Restore in progress...</span>
+                <span className="sdh-ludusavi-status-busy">Restore in progress...</span>
               ) : (
                 selectedStatus ? statusLabels[selectedStatus.status] : "No Ludusavi games found"
               )}
@@ -1938,10 +1971,7 @@ function Content() {
                 }
               >
                 <div
-                  className="sdh-ludusavi-last-operation-result"
-                  style={{
-                    color: selectedHistory.status === "failed" ? "#f87171" : "#cbd5e1"
-                  }}
+                  className={`sdh-ludusavi-last-operation-result${selectedHistory.status === "failed" ? " sdh-ludusavi-status-failed" : ""}`}
                 >
                   {getLastOperationText(selectedHistory.status, selectedHistory.reason)}
                 </div>
