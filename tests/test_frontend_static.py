@@ -685,6 +685,45 @@ def test_frontend_qam_toggle_focus_stretches_to_panel_edges() -> None:
     assert "box-sizing: border-box;" in source
 
 
+def test_frontend_qam_toggles_explain_their_scope() -> None:
+    source = FRONTEND.read_text()
+
+    for text in [
+        'description="Runs Ludusavi automatically when configured games start or exit."',
+        'description="Enables or silences all SDH-Ludusavi toast notifications."',
+        'description="Shows toasts for Force Backup and Force Restore results."',
+        'description="Shows toasts when the game list refresh completes or fails."',
+        'description="Shows warning toasts when sync or Ludusavi operations fail."',
+    ]:
+        assert text in source
+
+
+def test_frontend_qam_removes_unwanted_row_separators() -> None:
+    source = FRONTEND.read_text()
+
+    for text in [
+        'label="Automatic Sync"',
+        'label="All Notifications"',
+        'label="Manual Operations"',
+        'label="Refresh Status"',
+        'label="Failures and Errors"',
+        'menuLabel="Select Game"',
+        'label="Status:"',
+        'label="Last Operation:"',
+    ]:
+        control = source[source.index(text) : source.index("/>", source.index(text))]
+        assert 'bottomSeparator="none"' in control
+
+    for text in [
+        "View Logs",
+        "View Ludusavi Logs",
+        '<Field highlightOnFocus={true} focusable={true} padding="standard"',
+    ]:
+        control_start = source.rindex("<", 0, source.index(text) + 1)
+        control = source[control_start : source.index(">", control_start)]
+        assert 'bottomSeparator="none"' in control
+
+
 def test_frontend_qam_rows_use_native_full_row_focus() -> None:
     source = FRONTEND.read_text()
 
@@ -692,14 +731,17 @@ def test_frontend_qam_rows_use_native_full_row_focus() -> None:
         "Field",
         "highlightOnFocus={true}",
         "focusable={true}",
-        '<ToggleField\n            label="Automatic Sync"\n            highlightOnFocus={true}',
+        '<ToggleField\n            label="Automatic Sync"\n            description="Runs Ludusavi automatically when configured games start or exit."\n            highlightOnFocus={true}',
         '<Field\n            label="Status:"',
         '<Field\n              label="Last Operation:"',
     ]:
         assert text in source
 
     versions_panel = source[source.index('PanelSection title="Versions"') :]
-    assert '<Field highlightOnFocus={true} focusable={true} padding="standard">' in versions_panel
+    assert (
+        '<Field highlightOnFocus={true} focusable={true} padding="standard" bottomSeparator="none">'
+        in versions_panel
+    )
 
 
 def test_frontend_qam_last_operation_uses_single_line_ellipsis() -> None:

@@ -1684,7 +1684,9 @@ function Content() {
         <FullWidthToggle>
           <ToggleField
             label="Automatic Sync"
+            description="Runs Ludusavi automatically when configured games start or exit."
             highlightOnFocus={true}
+            bottomSeparator="none"
             checked={settings.auto_sync_enabled}
             disabled={isBusy}
             onChange={(enabled: boolean) => void toggleAutoSync(enabled)}
@@ -1710,6 +1712,7 @@ function Content() {
             menuLabel="Select Game"
             highlightOnFocus={true}
             focusable={true}
+            bottomSeparator="none"
             disabled={isBusy}
             rgOptions={games.map((game) => ({
               label: game.name,
@@ -1727,6 +1730,7 @@ function Content() {
             focusable={true}
             childrenLayout="inline"
             padding="standard"
+            bottomSeparator="none"
           >
             <div style={{ color: "#cbd5e1", fontSize: "14px", minWidth: 0 }}>
               {isBusy && busyLabel === "Loading" ? (
@@ -1752,6 +1756,7 @@ function Content() {
               focusable={true}
               childrenLayout="inline"
               padding="standard"
+              bottomSeparator="none"
             >
               <div style={{ color: "#cbd5e1", fontSize: "14px", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" }}>
                 <span style={{ 
@@ -1799,7 +1804,9 @@ function Content() {
         <FullWidthToggle>
           <ToggleField
             label="All Notifications"
+            description="Enables or silences all SDH-Ludusavi toast notifications."
             highlightOnFocus={true}
+            bottomSeparator="none"
             checked={settings.notifications.enabled}
             disabled={isBusy}
             onChange={(enabled: boolean) => void toggleNotificationSetting("enabled", enabled)}
@@ -1808,7 +1815,9 @@ function Content() {
         <FullWidthToggle>
           <ToggleField
             label="Manual Operations"
+            description="Shows toasts for Force Backup and Force Restore results."
             highlightOnFocus={true}
+            bottomSeparator="none"
             checked={settings.notifications.manual_operations}
             disabled={!settings.notifications.enabled || isBusy}
             onChange={(enabled: boolean) => void toggleNotificationSetting("manual_operations", enabled)}
@@ -1817,7 +1826,9 @@ function Content() {
         <FullWidthToggle>
           <ToggleField
             label="Refresh Status"
+            description="Shows toasts when the game list refresh completes or fails."
             highlightOnFocus={true}
+            bottomSeparator="none"
             checked={settings.notifications.refresh_status}
             disabled={!settings.notifications.enabled || isBusy}
             onChange={(enabled: boolean) => void toggleNotificationSetting("refresh_status", enabled)}
@@ -1826,7 +1837,9 @@ function Content() {
         <FullWidthToggle>
           <ToggleField
             label="Failures and Errors"
+            description="Shows warning toasts when sync or Ludusavi operations fail."
             highlightOnFocus={true}
+            bottomSeparator="none"
             checked={settings.notifications.failures_errors}
             disabled={!settings.notifications.enabled || isBusy}
             onChange={(enabled: boolean) => void toggleNotificationSetting("failures_errors", enabled)}
@@ -1838,12 +1851,12 @@ function Content() {
 
       <PanelSection title="Logs">
         <PanelSectionRow>
-          <ButtonItem layout="below" onClick={() => void showPluginLogs()}>
+          <ButtonItem layout="below" bottomSeparator="none" onClick={() => void showPluginLogs()}>
             View Logs
           </ButtonItem>
         </PanelSectionRow>
         <PanelSectionRow>
-          <ButtonItem layout="below" onClick={() => void showLudusaviLogs()}>
+          <ButtonItem layout="below" bottomSeparator="none" onClick={() => void showLudusaviLogs()}>
             View Ludusavi Logs
           </ButtonItem>
         </PanelSectionRow>
@@ -1851,7 +1864,7 @@ function Content() {
 
       <PanelSection title="Versions">
         <PanelSectionRow>
-          <Field highlightOnFocus={true} focusable={true} padding="standard">
+          <Field highlightOnFocus={true} focusable={true} padding="standard" bottomSeparator="none">
             <div style={{ color: "#cbd5e1", fontSize: "14px", display: "flex", flexDirection: "column", gap: "4px", minWidth: 0 }}>
               <div>SDH-Ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
               <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
