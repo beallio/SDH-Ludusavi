@@ -199,6 +199,7 @@ class SDHLudusaviService:
         self._installed_app_ids: str | None = None
         self._ludusavi_config_mtime_ns: int | None = None
         self._game_history: dict[str, dict[str, Any]] = {}
+        self._state_lock = threading.RLock()
         self._operation = OperationState()
         self._operation_lock = threading.Lock()
         self._paused_pids: set[int] = set()
@@ -1082,28 +1083,29 @@ class SDHLudusaviService:
 
     def _save_state(self) -> None:
         """Persist the current plugin settings and game cache to the state file."""
-        self._state_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-        temp_path = self._state_path.with_name(f".{self._state_path.name}.tmp")
+        with self._state_lock:
+            self._state_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+            temp_path = self._state_path.with_name(f".{self._state_path.name}.tmp")
 
-        data = self.get_settings()
-        data["ludusaviLauncherShortcutAppId"] = self._ludusavi_launcher_shortcut_id
-        data["games"] = [game.to_dict() for game in self._games.values()]
-        data["aliases"] = self._aliases
-        data["ids"] = self._ids
-        data["installed_app_ids"] = self._installed_app_ids
-        data["ludusavi_config_mtime_ns"] = self._ludusavi_config_mtime_ns
-        data["game_history"] = self._game_history
+            data = self.get_settings()
+            data["ludusaviLauncherShortcutAppId"] = self._ludusavi_launcher_shortcut_id
+            data["games"] = [game.to_dict() for game in self._games.values()]
+            data["aliases"] = self._aliases
+            data["ids"] = self._ids
+            data["installed_app_ids"] = self._installed_app_ids
+            data["ludusavi_config_mtime_ns"] = self._ludusavi_config_mtime_ns
+            data["game_history"] = self._game_history
 
-        try:
-            temp_path.write_text(
-                json.dumps(data, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
-            os.replace(temp_path, self._state_path)
-            self.log("debug", f"Saved state to {self._state_path}")
-        except OSError:
-            temp_path.unlink(missing_ok=True)
-            raise
+            try:
+                temp_path.write_text(
+                    json.dumps(data, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+                os.replace(temp_path, self._state_path)
+                self.log("debug", f"Saved state to {self._state_path}")
+            except OSError:
+                temp_path.unlink(missing_ok=True)
+                raise
 
     def _refresh_statuses_unlocked(
         self,
@@ -1138,14 +1140,15 @@ class SDHLudusaviService:
                     "refresh",
                 )
 
-        self._games = {game.name: game for game in games}
-        self._aliases = getattr(self._ludusavi(), "get_aliases", lambda: {})()
-        self._ids = {game.steam_id: game.name for game in games if game.steam_id}
+        with self._state_lock:
+            self._games = {game.name: game for game in games}
+            self._aliases = getattr(self._ludusavi(), "get_aliases", lambda: {})()
+            self._ids = {game.steam_id: game.name for game in games if game.steam_id}
 
-        if installed_app_ids is not _CACHE_MARKER_UNCHANGED:
-            self._installed_app_ids = cast(str | None, installed_app_ids)
-        if ludusavi_config_mtime_ns is not _CACHE_MARKER_UNCHANGED:
-            self._ludusavi_config_mtime_ns = cast(int | None, ludusavi_config_mtime_ns)
+            if installed_app_ids is not _CACHE_MARKER_UNCHANGED:
+                self._installed_app_ids = cast(str | None, installed_app_ids)
+            if ludusavi_config_mtime_ns is not _CACHE_MARKER_UNCHANGED:
+                self._ludusavi_config_mtime_ns = cast(int | None, ludusavi_config_mtime_ns)
 
         self.log(
             "info",
@@ -1178,9 +1181,10 @@ class SDHLudusaviService:
         """
         game_name = self._sanitize_name(game_name)
         self.log("debug", f"Attempting to match '{game_name}' (app_id: {app_id})")
-        if not self._games:
-            self.log("debug", f"_match_game triggering refresh for {game_name}", "refresh")
-            self._refresh_statuses_unlocked()
+        with self._state_lock:
+            if not self._games:
+                self.log("debug", f"_match_game triggering refresh for {game_name}", "refresh")
+                self._run_locked("refresh", None, self._refresh_statuses_unlocked)
 
         # 1. Match by Steam ID (Highest Priority)
         if app_id and app_id in self._ids:
@@ -1218,7 +1222,7 @@ class SDHLudusaviService:
             normalized_target = _normalize(game.name)
             if normalized_input in normalized_target or normalized_target in normalized_input:
                 # Minimum length check to avoid matching e.g. "A" to every game with "A"
-                if len(normalized_input) > 4 and len(normalized_target) > 4:
+                if _fuzzy_match_allowed(normalized_input, normalized_target, game.configured):
                     self.log("info", f"Matched '{game_name}' via fuzzy substring to '{game.name}'")
                     return game
 
@@ -1359,28 +1363,18 @@ def _normalize(game_name: str) -> str:
 
 
 def _child_pids(pid: int) -> list[int]:
-    try:
-        with subprocess.Popen(
-            ["ps", "--ppid", str(pid), "-o", "pid="],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        ) as process:
-            stdout, _ = process.communicate(timeout=2)
-    except Exception:
-        return []
-    return [int(line.strip()) for line in stdout.splitlines() if line.strip().isdigit()]
+    return _process_tree(pid)[1:]
 
 
 def _send_signal_tree(pid: int, sig: signal.Signals) -> bool:
     sent = False
-    try:
-        os.kill(pid, sig)
-        sent = True
-    except OSError:
-        return False
-    for child_pid in _child_pids(pid):
-        _send_signal_tree(child_pid, sig)
+    for target_pid in _process_tree(pid):
+        try:
+            os.kill(target_pid, sig)
+            sent = True
+        except OSError:
+            if target_pid == pid:
+                return False
     return sent
 
 
@@ -1400,11 +1394,59 @@ def _normalize_installed_app_ids(raw: str | None) -> str | None:
         return None
     if len(raw) > MAX_INSTALLED_APP_IDS_BYTES:
         return None
+    if not raw.strip():
+        return ""
     tokens = raw.split(",")
     if any(not token.isdecimal() for token in tokens):
         return None
     app_ids = sorted({int(token) for token in tokens})
     return ",".join(str(app_id) for app_id in app_ids)
+
+
+def _process_tree(pid: int) -> list[int]:
+    try:
+        with subprocess.Popen(
+            ["ps", "-eo", "pid=,ppid="],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ) as process:
+            stdout, _ = process.communicate(timeout=2)
+    except Exception:
+        return [pid]
+
+    children_by_parent: dict[int, list[int]] = {}
+    for line in stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+            continue
+        child_pid = int(parts[0])
+        parent_pid = int(parts[1])
+        children_by_parent.setdefault(parent_pid, []).append(child_pid)
+
+    ordered: list[int] = []
+
+    def visit(target_pid: int) -> None:
+        ordered.append(target_pid)
+        for child_pid in sorted(children_by_parent.get(target_pid, [])):
+            visit(child_pid)
+
+    visit(pid)
+    return ordered
+
+
+def _fuzzy_match_allowed(normalized_input: str, normalized_target: str, configured: bool) -> bool:
+    if len(normalized_input) > 4 and len(normalized_target) > 4:
+        return True
+    if not configured:
+        return False
+    if len(normalized_target) != 4:
+        return False
+    if not normalized_input.startswith(normalized_target):
+        return False
+    if len(normalized_input) == len(normalized_target):
+        return True
+    return normalized_input[len(normalized_target)] in {" ", ".", "-"}
 
 
 def _default_adapter_factory() -> LudusaviAdapter:

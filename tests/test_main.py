@@ -77,8 +77,13 @@ def test_run_blocking_awaits_threadsafe_future_without_polling() -> None:
 
     assert "queue" not in names
     assert "sleep" not in attributes
+    assert "pipe" not in attributes
+    assert "add_reader" not in attributes
+    assert "remove_reader" not in attributes
     assert "call_soon_threadsafe" in attributes
     assert "create_future" in attributes
+    assert "wait_for" in attributes
+    assert "shield" in attributes
 
 
 def test_call_does_not_block_event_loop_while_callback_runs(
@@ -288,6 +293,28 @@ def test_service_uses_decky_settings_dir_when_present(
     module.Plugin()._service()
 
     assert captured["state_path"] == settings_dir / "sdh_ludusavi.json"
+
+
+def test_service_falls_back_when_primary_state_directory_is_unusable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    primary_dir = tmp_path / "primary"
+    decky, logger = fake_decky_module(tmp_path, settings_dir=primary_dir)
+    module = import_main(monkeypatch, decky)
+    fallback_path = tmp_path / "fallback" / "sdh_ludusavi.json"
+
+    def fake_ensure_private_directory(path: Path) -> None:
+        if path == primary_dir:
+            raise OSError("readonly")
+
+    monkeypatch.setattr(module, "_ensure_private_directory", fake_ensure_private_directory)
+    monkeypatch.setattr(module, "_fallback_state_path", lambda: fallback_path)
+
+    assert module._state_path() == fallback_path
+    assert logger.warnings == [
+        f"Unable to use primary SDH-ludusavi settings directory {primary_dir}: readonly; falling back"
+    ]
 
 
 def test_service_initializes_once_when_called_concurrently(

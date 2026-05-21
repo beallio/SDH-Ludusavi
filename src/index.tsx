@@ -2108,9 +2108,22 @@ export default definePlugin(() => {
       if (checkResult.status === "failed") {
         notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
       }
+    } catch (err) {
+      log("error", `App start handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
+      hideAutoSyncStatus({
+        source: "hide",
+        gameName: name,
+        appID,
+        tracked,
+        resultStatus: "failed"
+      });
     } finally {
       if (paused && typeof instanceID === "number") {
-        await resumeGameProcessCall(instanceID);
+        try {
+          await resumeGameProcessCall(instanceID);
+        } catch (err) {
+          log("error", `Failed to resume game process ${instanceID}: ${err}`, "lifecycle", name);
+        }
       }
     }
   };
@@ -2128,41 +2141,52 @@ export default definePlugin(() => {
       });
     }
     
-    log("info", `Calling check_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-    const checkResult = await checkGameExitCall(name, appID);
-    log("info", `check_game_exit result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
-    const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
-    if (checkResult.status === "skipped" && silentReasons.includes(checkResult.reason ?? "")) {
+    try {
+      log("info", `Calling check_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
+      const checkResult = await checkGameExitCall(name, appID);
+      log("info", `check_game_exit result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
+      const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
+      if (checkResult.status === "skipped" && silentReasons.includes(checkResult.reason ?? "")) {
+        hideAutoSyncStatus({
+          source: "hide",
+          gameName: name,
+          appID,
+          tracked,
+          resultStatus: checkResult.status
+        });
+        return;
+      }
+
+      if (checkResult.status === "needed" && checkResult.operation === "backup") {
+        publishAutoSyncStatus("backing_up", {
+          source: "lifecycle_exit",
+          gameName: name,
+          appID,
+          tracked
+        });
+        log("info", `Calling backup_game_on_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
+        const result = await backupGameOnExitCall(name, appID);
+        log("info", `backup_game_on_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
+        completeAutoSyncStatus(result, { gameName: name, appID, tracked });
+        if (result.status === "failed") {
+          notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+        }
+        return;
+      }
+
+      completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
+      if (checkResult.status === "failed") {
+        notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
+      }
+    } catch (err) {
+      log("error", `App exit handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
       hideAutoSyncStatus({
         source: "hide",
         gameName: name,
         appID,
         tracked,
-        resultStatus: checkResult.status
+        resultStatus: "failed"
       });
-      return;
-    }
-
-    if (checkResult.status === "needed" && checkResult.operation === "backup") {
-      publishAutoSyncStatus("backing_up", {
-        source: "lifecycle_exit",
-        gameName: name,
-        appID,
-        tracked
-      });
-      log("info", `Calling backup_game_on_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-      const result = await backupGameOnExitCall(name, appID);
-      log("info", `backup_game_on_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
-      completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-      if (result.status === "failed") {
-        notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
-      }
-      return;
-    }
-
-    completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
-    if (checkResult.status === "failed") {
-      notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
     }
   };
 

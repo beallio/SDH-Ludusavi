@@ -23,6 +23,14 @@ class FakeAdapter:
                 "needs_first_backup": False,
                 "error": None,
             },
+            {
+                "name": "Doom",
+                "steam_id": None,
+                "configured": True,
+                "has_backup": True,
+                "needs_first_backup": False,
+                "error": None,
+            },
         ]
         self.aliases = {"Custom Alias": "Hades", "Shortcut Name": "The Witcher 3: Wild Hunt"}
 
@@ -86,6 +94,16 @@ def test_match_by_fuzzy_substring(tmp_path: Path) -> None:
     game2 = service._match_game("Hades: Battle Out of Hell")
     assert game2 is not None
     assert game2.name == "Hades"
+
+
+def test_short_configured_game_name_matches_boundary_safe_launcher_name(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+    service.refresh_games()
+
+    game = service._match_game("Doom v1.0")
+
+    assert game is not None
+    assert game.name == "Doom"
 
 
 def test_normalization_retains_special_chars(tmp_path: Path) -> None:

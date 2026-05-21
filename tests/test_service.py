@@ -4,7 +4,9 @@ import ast
 import json
 import logging
 import signal
+import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -48,8 +50,10 @@ class FakeAdapter:
         }
         self.refresh_error: Exception | None = None
         self.config_mtime_ns: int | None = 100
+        self.refresh_count = 0
 
     def refresh_statuses(self) -> list[dict[str, object]]:
+        self.refresh_count += 1
         if self.refresh_error:
             raise self.refresh_error
         return [dict(game) for game in self.games]
@@ -308,10 +312,9 @@ def test_pause_and_resume_game_process_signal_process_tree(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = service_with_state(tmp_path)
-    children = {100: [101, 102], 101: [201], 102: [], 201: []}
     signals: list[tuple[int, signal.Signals]] = []
 
-    monkeypatch.setattr("sdh_ludusavi.service._child_pids", lambda pid: children[pid])
+    monkeypatch.setattr("sdh_ludusavi.service._process_tree", lambda pid: [100, 101, 201, 102])
     monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
 
     assert service.pause_game_process(100) == {"status": "paused", "pid": 100}
@@ -329,6 +332,61 @@ def test_pause_and_resume_game_process_signal_process_tree(
     ]
 
 
+def test_signal_process_tree_snapshots_process_table_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = service_with_state(tmp_path)
+    ps_calls: list[list[str]] = []
+    signals: list[tuple[int, signal.Signals]] = []
+
+    class FakeProcess:
+        def __enter__(self) -> "FakeProcess":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def communicate(self, timeout: int) -> tuple[str, str]:
+            assert timeout == 2
+            return ("100 1\n101 100\n102 100\n201 101\n", "")
+
+    def fake_popen(args: list[str], **kwargs: object) -> FakeProcess:
+        ps_calls.append(args)
+        return FakeProcess()
+
+    monkeypatch.setattr("sdh_ludusavi.service.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
+
+    assert service.pause_game_process(100) == {"status": "paused", "pid": 100}
+
+    assert len(ps_calls) == 1
+    assert signals == [
+        (100, signal.SIGSTOP),
+        (101, signal.SIGSTOP),
+        (201, signal.SIGSTOP),
+        (102, signal.SIGSTOP),
+    ]
+
+
+def test_signal_process_tree_falls_back_to_root_when_snapshot_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = service_with_state(tmp_path)
+    signals: list[tuple[int, signal.Signals]] = []
+
+    def fail_popen(*args: object, **kwargs: object) -> object:
+        raise subprocess.SubprocessError("ps unavailable")
+
+    monkeypatch.setattr("sdh_ludusavi.service.subprocess.Popen", fail_popen)
+    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
+
+    assert service.pause_game_process(100) == {"status": "paused", "pid": 100}
+
+    assert signals == [(100, signal.SIGSTOP)]
+
+
 def test_resume_all_paused_processes_resumes_remaining_pids(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -336,7 +394,7 @@ def test_resume_all_paused_processes_resumes_remaining_pids(
     service = service_with_state(tmp_path)
     signals: list[tuple[int, signal.Signals]] = []
 
-    monkeypatch.setattr("sdh_ludusavi.service._child_pids", lambda pid: [])
+    monkeypatch.setattr("sdh_ludusavi.service._process_tree", lambda pid: [pid])
     monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
 
     service.pause_game_process(100)
@@ -822,6 +880,38 @@ def test_refresh_games_normalizes_installed_app_ids_before_persisting(
     assert saved_state["installed_app_ids"] == "1,2,3"
 
 
+def test_refresh_games_preserves_empty_installed_app_ids_marker(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "games": [
+                    {
+                        "name": "Ghost Game",
+                        "configured": True,
+                        "has_backup": False,
+                        "needs_first_backup": True,
+                    }
+                ],
+                "installed_app_ids": "1,2,3",
+                "ludusavi_config_mtime_ns": 100,
+            }
+        ),
+        encoding="utf-8",
+    )
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+
+    result = service.refresh_games(force=False, installed_app_ids="")
+
+    assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
+    assert service._installed_app_ids == ""
+    saved_state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert saved_state["installed_app_ids"] == ""
+
+
 def test_refresh_games_rejects_malformed_installed_app_ids(tmp_path: Path) -> None:
     adapter = FakeAdapter()
     service = service_with_state(tmp_path, adapter)
@@ -979,3 +1069,68 @@ def test_config_marker_read_failure_forces_refresh_instead_of_cache_hit(
     assert [game["name"] for game in result["games"]] == ["Hades", "Celeste"]
     assert service._installed_app_ids == "1,2,3"
     assert service._ludusavi_config_mtime_ns is None
+
+
+def test_match_game_serializes_lazy_refresh_for_concurrent_callers(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    release_refresh = threading.Event()
+    entered_refresh = threading.Event()
+    original_refresh = adapter.refresh_statuses
+
+    def slow_refresh() -> list[dict[str, object]]:
+        entered_refresh.set()
+        release_refresh.wait(timeout=1)
+        time.sleep(0.01)
+        return original_refresh()
+
+    adapter.refresh_statuses = slow_refresh
+    service = service_with_state(tmp_path, adapter)
+    service._games = {}
+    matches: list[str | None] = []
+    errors: list[BaseException] = []
+
+    def match() -> None:
+        try:
+            game = service._match_game("Hades")
+            matches.append(game.name if game else None)
+        except BaseException as exc:  # pragma: no cover - asserted below.
+            errors.append(exc)
+
+    first = threading.Thread(target=match)
+    second = threading.Thread(target=match)
+    first.start()
+    assert entered_refresh.wait(timeout=1)
+    second.start()
+    release_refresh.set()
+    first.join(timeout=1)
+    second.join(timeout=1)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert matches == ["Hades", "Hades"]
+    assert adapter.refresh_count == 1
+
+
+def test_concurrent_state_saves_do_not_share_temp_file(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+    errors: list[BaseException] = []
+
+    def save_selected_game(name: str) -> None:
+        try:
+            service.set_selected_game(name)
+        except BaseException as exc:  # pragma: no cover - asserted below.
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=save_selected_game, args=(f"Game {index}",)) for index in range(20)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=1)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == []
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["selected_game"].startswith("Game ")

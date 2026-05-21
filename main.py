@@ -250,16 +250,26 @@ def _state_path() -> Path:
             decky, "DECKY_PLUGIN_SETTINGS_DIR", getattr(decky, "DECKY_SETTINGS_DIR", None)
         )
 
+    primary_unusable = False
     if data_dir:
         path = Path(data_dir)
-        _ensure_private_directory(path)
-        return path / STATE_FILE_NAME
+        try:
+            _ensure_private_directory(path)
+            return path / STATE_FILE_NAME
+        except OSError as exc:
+            primary_unusable = True
+            decky.logger.warning(
+                "Unable to use primary SDH-ludusavi settings directory %s: %s; falling back",
+                path,
+                exc,
+            )
 
     fallback_path = _fallback_state_path()
-    decky.logger.warning(
-        "DECKY_PLUGIN_SETTINGS_DIR/DECKY_PLUGIN_RUNTIME_DIR is unavailable; storing SDH-ludusavi settings at %s",
-        fallback_path,
-    )
+    if not primary_unusable:
+        decky.logger.warning(
+            "DECKY_PLUGIN_SETTINGS_DIR/DECKY_PLUGIN_RUNTIME_DIR is unavailable; storing SDH-ludusavi settings at %s",
+            fallback_path,
+        )
     return fallback_path
 
 
@@ -310,24 +320,6 @@ async def _run_blocking(callback: Any) -> Any:
     loop = asyncio.get_running_loop()
     future = loop.create_future()
     context = contextvars.copy_context()
-    wake_reader, wake_writer = os.pipe()
-    os.set_blocking(wake_reader, False)
-    os.set_blocking(wake_writer, False)
-
-    def drain_wake() -> None:
-        try:
-            while os.read(wake_reader, 1024):
-                pass
-        except BlockingIOError:
-            pass
-
-    def wake_loop() -> None:
-        try:
-            os.write(wake_writer, b"\0")
-        except OSError:
-            pass
-
-    loop.add_reader(wake_reader, drain_wake)
 
     def set_result(payload: Any) -> None:
         if not future.cancelled():
@@ -350,21 +342,19 @@ async def _run_blocking(callback: Any) -> Any:
             result = context.run(callback)
         except BaseException as exc:
             signal_completion(set_exception, exc)
-            wake_loop()
             return
         signal_completion(set_result, result)
-        wake_loop()
 
     threading.Thread(target=worker, name="sdh-ludusavi-worker", daemon=True).start()
 
     try:
-        return await future
+        while True:
+            try:
+                return await asyncio.wait_for(asyncio.shield(future), timeout=0.05)
+            except TimeoutError:
+                continue
     except asyncio.CancelledError:
         decky.logger.warning(
             "SDH-ludusavi operation was cancelled while worker may still be running"
         )
         raise
-    finally:
-        loop.remove_reader(wake_reader)
-        os.close(wake_reader)
-        os.close(wake_writer)

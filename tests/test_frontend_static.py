@@ -419,6 +419,45 @@ def test_frontend_launch_gate_pauses_before_start_check_and_resumes_in_finally()
     )
 
 
+def test_frontend_lifecycle_handlers_catch_rpc_failures_and_resume_failures() -> None:
+    source = FRONTEND.read_text()
+    start_source = source[
+        source.index("const handleAppStart = async") : source.index("const handleAppExit = async")
+    ]
+    exit_source = source[
+        source.index("const handleAppExit = async") : source.index(
+            "const findRunningSessionByAppID"
+        )
+    ]
+
+    for required_text in [
+        "} catch (err) {",
+        'log("error", `App start handling failed for ${name} (${appID}): ${err}`',
+        'resultStatus: "failed"',
+        "try {",
+        "await resumeGameProcessCall(instanceID);",
+        'log("error", `Failed to resume game process ${instanceID}: ${err}`',
+    ]:
+        assert required_text in start_source
+
+    for required_text in [
+        "} catch (err) {",
+        'log("error", `App exit handling failed for ${name} (${appID}): ${err}`',
+        'resultStatus: "failed"',
+        "hideAutoSyncStatus({",
+    ]:
+        assert required_text in exit_source
+
+    assert start_source.index(
+        "const checkResult = await checkGameStartCall(name, appID);"
+    ) < start_source.index(
+        'log("error", `App start handling failed for ${name} (${appID}): ${err}`'
+    )
+    assert exit_source.index(
+        "const checkResult = await checkGameExitCall(name, appID);"
+    ) < exit_source.index('log("error", `App exit handling failed for ${name} (${appID}): ${err}`')
+
+
 def test_frontend_conflict_modal_uses_backup_save_copy_not_cloud_save() -> None:
     source = FRONTEND.read_text()
 
