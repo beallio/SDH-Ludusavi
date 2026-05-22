@@ -67,22 +67,49 @@ import {
 
 
 
-function getLastOperationText(status: string, reason: string | null): string {
+function getLastOperationText(
+  status: string,
+  reason: string | null,
+  message: string | null = null
+): string {
   switch (status) {
     case "backed_up":
       return "Backup complete";
     case "restored":
       return "Restore complete";
     case "failed":
-      return "Failed — check logs";
+      const err = message || reason;
+      return err ? `Failed — ${err}` : "Failed — check logs";
     case "skipped":
-      if (reason === "local_current") {
-        return "Skipped — local backup is current";
+      if (reason) {
+        switch (reason) {
+          case "local_current":
+            return "Skipped — local save is already current";
+          case "remote_current":
+            return "Skipped — cloud save is already current";
+          case "not_processed":
+            return "Skipped — game is deselected in Ludusavi";
+          case "no_backup":
+            return "Skipped — no backup found";
+          case "ambiguous_recency":
+            return "Skipped — recency is ambiguous";
+          case "conflict_unresolved":
+            return "Skipped — save conflict was not resolved";
+          case "no_files_found":
+            return "Skipped — no files found";
+          case "preview_failed":
+            return "Skipped — preview failed";
+          case "auto_sync_disabled":
+            return "Skipped — feature disabled";
+          case "operation_running":
+            return "Skipped — another operation is running";
+          case "unmatched_game":
+            return "Skipped — could not match game name";
+          default:
+            return `Skipped — ${reason.replace(/_/g, " ")}`;
+        }
       }
-      if (reason === "remote_current") {
-        return "Skipped — cloud backup is current";
-      }
-      return `Skipped${reason ? ` — ${reason.replace(/_/g, " ")}` : ""}`;
+      return message ? `Skipped — ${message}` : "Skipped";
     default:
       return "No operation yet";
   }
@@ -1341,15 +1368,24 @@ function Content() {
                   selectedHistory.timestamp
                     ? `${getLastOperationText(
                         selectedHistory.status,
-                        selectedHistory.reason
+                        selectedHistory.reason,
+                        selectedHistory.message
                       )} ${selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0]}`
-                    : getLastOperationText(selectedHistory.status, selectedHistory.reason)
+                    : getLastOperationText(
+                        selectedHistory.status,
+                        selectedHistory.reason,
+                        selectedHistory.message
+                      )
                 }
               >
                 <div
                   className={`sdh-ludusavi-last-operation-result${selectedHistory.status === "failed" ? " sdh-ludusavi-status-failed" : ""}`}
                 >
-                  {getLastOperationText(selectedHistory.status, selectedHistory.reason)}
+                  {getLastOperationText(
+                    selectedHistory.status,
+                    selectedHistory.reason,
+                    selectedHistory.message
+                  )}
                 </div>
                 {selectedHistory.timestamp &&
                 selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0] ? (

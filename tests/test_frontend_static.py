@@ -1272,3 +1272,21 @@ def test_frontend_status_strip_clears_on_hide() -> None:
         )
     ]
     assert 'browserView.LoadURL?.("about:blank");' in sync_source
+
+
+def test_frontend_operation_history_translation() -> None:
+    source = FRONTEND.read_text()
+
+    # Check function signature
+    assert "function getLastOperationText(" in source
+    assert "status: string" in source
+    assert "reason: string | null" in source
+    assert "message:" in source
+
+    # Check translations for reasons
+    assert '"local_current"' in source
+    assert "local save is already current" in source
+    assert "game is deselected in Ludusavi" in source
+
+    # Check that the call sites pass selectedHistory.message
+    assert "selectedHistory.message" in source
