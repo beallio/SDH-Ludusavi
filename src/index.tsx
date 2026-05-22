@@ -22,78 +22,50 @@ import { IoMdRefresh } from "react-icons/io";
 
 import { launchLudusavi, LudusaviLaunchCommand } from "./ludusaviLauncher";
 
-const qamPanelStyles = `
-.sdh-ludusavi-full-width-toggle {
-  display: block;
-  margin-left: -32px;
-  margin-right: -32px;
-}
+import "./index.css";
+import {
+  NotificationSettings,
+  NotificationCategory,
+  Settings,
+  GameOperationHistory,
+  GameStatus,
+  RefreshResult,
+  OperationStatus,
+  OperationResult,
+  ConflictResolution,
+  LifecycleCheckResult,
+  ProcessSignalResult,
+  AppLifetimeNotification,
+  RunningSession,
+  RpcStatus,
+  RpcResult,
+  AutoSyncStatusKind,
+  AutoSyncStatusSource,
+  AutoSyncStatusState,
+  AutoSyncStatusBrowserView,
+  AutoSyncStatusBrowserViewOwner,
+  Versions,
+  LogEntry
+} from "./types";
+import { LogModal, LudusaviLogModal } from "./components/LogModal";
+import { log } from "./utils/logging";
+import {
+  normalize,
+  getInstalledAppIdsString,
+  sessionFromAppOverview,
+  getMainRunningSession,
+  captureSteamUiGameContext,
+  getPreferredSteamGameSession,
+  findGameForRunningSession,
+  logCurrentGameSelection,
+  logCurrentGameNoMatch,
+  resetQuickAccessScroll,
+  getAutoSyncStatusBounds,
+  objectKeys
+} from "./utils/steam";
 
-.sdh-ludusavi-full-width-toggle > * {
-  box-sizing: border-box;
-  width: 100%;
-  padding-left: 32px;
-  padding-right: 32px;
-}
 
-.sdh-ludusavi-versions-list {
-  color: #cbd5e1;
-  font-size: 14px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  min-width: 0;
-  text-align: left;
-}
 
-.sdh-ludusavi-last-operation-field {
-  margin-top: -6px;
-  width: 100%;
-}
-
-.sdh-ludusavi-last-operation-row {
-  display: flex;
-  align-items: baseline;
-  justify-content:space-between;
-  gap: 12px;
-  min-width: 0;
-  width: 100%;
-  font-size: 12px;
-}
-
-.sdh-ludusavi-last-operation-result {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #cbd5e1;
-}
-
-.sdh-ludusavi-last-operation-time {
-  flex: 0 0 auto;
-  opacity: 0.65;
-  font-size: 0.85em;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.sdh-ludusavi-status-value {
-  color: #cbd5e1;
-  font-size: 12px;
-  min-width: 0;
-}
-
-.sdh-ludusavi-status-busy {
-  color: #60a5fa;
-  font-weight: bold;
-}
-
-.sdh-ludusavi-status-failed {
-  color: #f87171 !important;
-}
-`;
 
 function getLastOperationText(status: string, reason: string | null): string {
   switch (status) {
@@ -117,171 +89,7 @@ function getLastOperationText(status: string, reason: string | null): string {
 }
 
 
-type NotificationSettings = {
-  enabled: boolean;
-  auto_sync_progress: boolean;
-  auto_sync_results: boolean;
-  manual_operations: boolean;
-  refresh_status: boolean;
-  failures_errors: boolean;
-};
 
-type NotificationCategory = keyof Omit<NotificationSettings, "enabled">;
-
-type Settings = {
-  auto_sync_enabled: boolean;
-  selected_game: string;
-  notifications: NotificationSettings;
-};
-
-type GameOperationHistoryEntry = {
-  operation: "backup" | "restore" | "start" | "exit";
-  trigger: "manual_backup" | "manual_restore" | "auto_start" | "auto_exit";
-  status: "backed_up" | "restored" | "skipped" | "failed";
-  reason: string | null;
-  message: string | null;
-  timestamp: string;
-};
-
-type GameOperationHistory = {
-  last_backup: GameOperationHistoryEntry | null;
-  last_restore: GameOperationHistoryEntry | null;
-  last_skip: GameOperationHistoryEntry | null;
-  last_failure: GameOperationHistoryEntry | null;
-  last_operation: GameOperationHistoryEntry | null;
-};
-
-type GameStatus = {
-  name: string;
-  steam_id?: string | number | null;
-  configured: boolean;
-  has_backup: boolean;
-  needs_first_backup: boolean;
-  error: string | null;
-  status: "configured" | "has_backup" | "needs_first_backup" | "error";
-};
-
-type RefreshResult = {
-  games: GameStatus[];
-  aliases: Record<string, string>;
-  history: Record<string, GameOperationHistory>;
-  dependency_error: string | null;
-};
-
-type OperationStatus = {
-  is_running: boolean;
-  name: string | null;
-  game_name: string | null;
-  last_result: string | null;
-  last_error: string | null;
-};
-
-type OperationResult = {
-  status: "backed_up" | "restored" | "skipped" | "failed";
-  game?: string;
-  reason?: string;
-  message?: string;
-};
-
-type ConflictResolution = "keep_local" | "restore_backup";
-
-type LifecycleCheckResult = {
-  status: "needed" | "conflict" | "skipped" | "failed";
-  operation?: "backup" | "restore";
-  game?: string;
-  reason?: string;
-  message?: string;
-  localModifiedAt?: string | null;
-  backupModifiedAt?: string | null;
-  backupPath?: string | null;
-  localLabel?: string;
-  backupLabel?: string;
-};
-
-type ProcessSignalResult = {
-  status: "paused" | "resumed" | "skipped" | "failed";
-  pid?: number;
-  reason?: string;
-  message?: string;
-};
-
-type AppLifetimeNotification = {
-  unAppID: number;
-  nInstanceID: number;
-  bRunning: boolean;
-};
-
-type RunningSession = {
-  appID: string;
-  name: string;
-  source?: "focused" | "route" | "cached" | "running";
-};
-
-type RpcStatus = {
-  status: "skipped" | "failed";
-  reason?: string;
-  message?: string;
-};
-
-type RpcResult<T> = T | RpcStatus;
-
-type AutoSyncStatusKind = "checking" | "backing_up" | "restoring" | "conflict" | "has_backup" | "unknown" | "error";
-
-type AutoSyncStatusSource = "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";
-
-type AutoSyncStatusState = {
-  status: AutoSyncStatusKind;
-  visible: boolean;
-  source: AutoSyncStatusSource;
-  gameName?: string;
-  appID?: string;
-  tracked?: boolean;
-  resultStatus?: OperationResult["status"] | LifecycleCheckResult["status"] | RpcStatus["status"];
-};
-
-type AutoSyncStatusBrowserView = {
-  LoadURL?: (url: string) => void;
-  SetBounds?: (x: number, y: number, width: number, height: number) => void;
-  SetFocus?: (value: boolean) => void;
-  SetName?: (name: string) => void;
-  SetVisible?: (value: boolean) => void;
-  SetWindowStackingOrder?: (value: number) => void;
-  Destroy?: () => void;
-};
-
-type AutoSyncStatusBrowserViewOwner = AutoSyncStatusBrowserView & {
-  browserView?: AutoSyncStatusBrowserView;
-  BrowserView?: AutoSyncStatusBrowserView;
-  m_browserView?: AutoSyncStatusBrowserViewOwner;
-};
-
-type Versions = {
-  sdh_ludusavi?: string;
-  decky?: string;
-  ludusavi?: string;
-  pyludusavi?: string;
-  rclone?: string;
-  status?: string;
-  message?: string;
-};
-
-type LogEntry = {
-  level: string;
-  message: string;
-  timestamp: string;
-  operation: string | null;
-  game_name: string | null;
-};
-
-type LogModalProps = {
-  logs: LogEntry[];
-  closeModal?: () => void;
-};
-
-type LudusaviLogModalProps = {
-  logs: string;
-  closeModal?: () => void;
-};
 
 const getSettings = callable<[], RpcResult<Settings>>("get_settings");
 const setAutoSyncEnabled = callable<[enabled: boolean], RpcResult<Settings>>("set_auto_sync_enabled");
@@ -295,7 +103,7 @@ const getVersions = callable<[], RpcResult<Versions>>("get_versions");
 const getOperationStatus = callable<[], OperationStatus>("get_operation_status");
 const getRecentLogs = callable<[], LogEntry[]>("get_recent_logs");
 const getLudusaviLogs = callable<[], RpcResult<string>>("get_ludusavi_logs");
-const logCall = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
+
 const getLudusaviCommandCall = callable<[], RpcResult<LudusaviLaunchCommand | null>>("get_ludusavi_command");
 const pauseGameProcessCall = callable<[pid: number], RpcResult<ProcessSignalResult>>("pause_game_process");
 const resumeGameProcessCall = callable<[pid: number], RpcResult<ProcessSignalResult>>("resume_game_process");
@@ -305,364 +113,7 @@ const resolveGameStartConflictCall = callable<[gameName: string, app_id: string 
 const checkGameExitCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_exit");
 const backupGameOnExitCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("backup_game_on_exit");
 
-const getInstalledAppIdsString = async (): Promise<string | undefined> => {
-  try {
-    const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
-    if (!steamClient?.Apps?.GetInstalledApps) {
-      return undefined;
-    }
-    const appsResult = steamClient.Apps.GetInstalledApps();
-    const apps = appsResult instanceof Promise ? await appsResult : appsResult;
-    
-    if (!Array.isArray(apps)) return undefined;
-    
-    const appIds = apps
-      .map((app: any) => parseInt(app?.appid ?? app?.nAppID ?? app?.unAppID ?? app?.id, 10))
-      .filter((id: number) => !isNaN(id));
-      
-    appIds.sort((a, b) => a - b);
-    return appIds.join(",");
-  } catch (err) {
-    return undefined;
-  }
-};
 
-const sessionFromAppOverview = (app: any): RunningSession | null => {
-  const appID = app?.appid ?? app?.m_unAppID ?? app?.nAppID ?? app?.m_nAppID ?? null;
-  const name =
-    app?.display_name ??
-    app?.m_strDisplayName ??
-    app?.strAppName ??
-    app?.name ??
-    app?.title ??
-    "";
-  if (!appID || !name) {
-    return null;
-  }
-  return { appID: String(appID), name: String(name) };
-};
-
-function getMainRunningSession(): RunningSession | null {
-  const session = sessionFromAppOverview((Router as any).MainRunningApp);
-  return session ? { ...session, source: "running" } : null;
-}
-
-function getMainSteamWindow(): Window | null {
-  return (Router as any).WindowStore?.GamepadUIMainWindowInstance?.BrowserWindow ?? null;
-}
-
-function getSteamAppNameFromStores(appID: string): string | null {
-  const numericAppID = Number(appID);
-  const appStore = (globalThis as any).appStore ?? (window as any).appStore;
-  const overview = Number.isFinite(numericAppID)
-    ? appStore?.GetAppOverviewByAppID?.(numericAppID)
-    : null;
-  const overviewSession = sessionFromAppOverview(overview);
-  if (overviewSession?.name) {
-    return overviewSession.name;
-  }
-
-  const collectionApps = (globalThis as any).collectionStore?.allGamesCollection?.allApps
-    ?? (window as any).collectionStore?.allGamesCollection?.allApps;
-  if (collectionApps && typeof collectionApps.forEach === "function") {
-    let foundName: string | null = null;
-    collectionApps.forEach((app: any) => {
-      if (foundName) {
-        return;
-      }
-      const candidateID = app?.appid ?? app?.nAppID ?? app?.m_unAppID;
-      if (String(candidateID) === appID) {
-        foundName = app?.display_name ?? app?.strAppName ?? app?.m_strDisplayName ?? null;
-      }
-    });
-    if (foundName) {
-      return foundName;
-    }
-  }
-
-  return null;
-}
-
-function sessionFromRoutePath(path: string): RunningSession | null {
-  const match = path.match(/(?:\/routes)?\/library\/app\/(\d+)/);
-  const appID = match?.[1];
-  if (!appID) {
-    return null;
-  }
-  const name = getSteamAppNameFromStores(appID) ?? "";
-  return { appID, name, source: "route" };
-}
-
-function getRouteSteamGameSession(): RunningSession | null {
-  const mainWindow = getMainSteamWindow();
-  return (
-    sessionFromRoutePath(mainWindow?.location?.pathname ?? "") ??
-    sessionFromRoutePath(mainWindow?.location?.hash ?? "") ??
-    sessionFromRoutePath(window.location.pathname) ??
-    sessionFromRoutePath(window.location.hash)
-  );
-}
-
-function sessionFromSteamUiCandidate(candidate: any): RunningSession | null {
-  if (!candidate) {
-    return null;
-  }
-
-  const direct = sessionFromAppOverview(candidate);
-  if (direct) {
-    return direct;
-  }
-
-  const nestedCandidates = [
-    candidate.app,
-    candidate.overview,
-    candidate.game,
-    candidate.props?.app,
-    candidate.props?.overview,
-    candidate.props?.game,
-    candidate.pendingProps?.app,
-    candidate.pendingProps?.overview,
-    candidate.pendingProps?.game,
-    candidate.memoizedProps?.app,
-    candidate.memoizedProps?.overview,
-    candidate.memoizedProps?.game,
-    candidate.stateNode?.props?.app,
-    candidate.stateNode?.props?.overview,
-    candidate.stateNode?.props?.game
-  ];
-
-  for (const nested of nestedCandidates) {
-    const session = sessionFromAppOverview(nested);
-    if (session) {
-      return session;
-    }
-  }
-
-  return null;
-}
-
-function getSteamUiReactPropCandidates(element: Element | null): any[] {
-  if (!element) {
-    return [];
-  }
-
-  const candidates: any[] = [];
-  for (const key of Object.keys(element as any)) {
-    if (key.startsWith("__reactProps$")) {
-      candidates.push((element as any)[key]);
-    }
-    if (key.startsWith("__reactFiber$") || key.startsWith("__reactInternalInstance$")) {
-      let fiber = (element as any)[key];
-      for (let depth = 0; fiber && depth < 12; depth += 1) {
-        candidates.push(fiber.pendingProps, fiber.memoizedProps, fiber.stateNode?.props);
-        fiber = fiber.return;
-      }
-    }
-  }
-  return candidates.filter(Boolean);
-}
-
-function getFocusedSteamGameSession(): RunningSession | null {
-  const mainWindow = getMainSteamWindow();
-  const doc = mainWindow?.document ?? document;
-  const focusedElements = [
-    doc.activeElement,
-    doc.querySelector(".gpfocus, .gpfocuswithin, :focus"),
-    ...Array.from(doc.querySelectorAll(":hover")).reverse()
-  ];
-
-  for (const element of focusedElements) {
-    for (const candidate of getSteamUiReactPropCandidates(element)) {
-      const session = sessionFromSteamUiCandidate(candidate);
-      if (session) {
-        return { ...session, source: "focused" };
-      }
-    }
-  }
-
-  return null;
-}
-
-function captureSteamUiGameContext(): RunningSession | null {
-  const session = getFocusedSteamGameSession() ?? getRouteSteamGameSession();
-  if (session) {
-    if (
-      lastSteamUiGameContext?.appID !== session.appID ||
-      lastSteamUiGameContext?.name !== session.name ||
-      lastSteamUiGameContext?.source !== session.source
-    ) {
-      log(
-        "debug",
-        `QAM context captured: ${describeSteamGameSession(session)}`,
-        "qam_context",
-        session.name
-      );
-    }
-    lastSteamUiGameContext = session;
-    lastSteamUiGameContextCapturedAt = Date.now();
-  }
-  return session;
-}
-
-function getRecentSteamUiGameContext(): RunningSession | null {
-  if (!lastSteamUiGameContext) {
-    return null;
-  }
-  if (Date.now() - lastSteamUiGameContextCapturedAt > STEAM_UI_GAME_CONTEXT_TTL_MS) {
-    return null;
-  }
-  return { ...lastSteamUiGameContext, source: "cached" };
-}
-
-function getPreferredSteamGameSession(): RunningSession | null {
-  return (
-    captureSteamUiGameContext() ??
-    getRecentSteamUiGameContext() ??
-    getMainRunningSession()
-  );
-}
-
-function getGameSteamAppID(game: GameStatus): string | null {
-  const steamID = game.steam_id;
-  if (steamID === undefined || steamID === null || steamID === "") {
-    return null;
-  }
-  return String(steamID);
-}
-
-function findAliasTargetForSession(
-  session: RunningSession,
-  currentAliases: Record<string, string>
-): string | null {
-  const normalizedSessionName = normalize(session.name);
-  for (const [alias, target] of Object.entries(currentAliases)) {
-    if (normalize(alias) === normalizedSessionName || normalize(target) === normalizedSessionName) {
-      return target;
-    }
-  }
-  return null;
-}
-
-function findGameForRunningSession(
-  currentGames: GameStatus[],
-  session: RunningSession,
-  currentAliases: Record<string, string>
-): { game: GameStatus; reason: "steam_id" | "name" | "alias" } | null {
-  const appIDMatch = currentGames.find((game) => {
-    const gameAppID = getGameSteamAppID(game);
-    return gameAppID === session.appID;
-  });
-  if (appIDMatch) {
-    return { game: appIDMatch, reason: "steam_id" };
-  }
-
-  if (!session.name) {
-    return null;
-  }
-
-  const nameMatch = currentGames.find((game) => normalize(game.name) === normalize(session.name));
-  if (nameMatch) {
-    return { game: nameMatch, reason: "name" };
-  }
-
-  const aliasTarget = findAliasTargetForSession(session, currentAliases);
-  if (!aliasTarget) {
-    return null;
-  }
-
-  const aliasMatch = currentGames.find((game) => normalize(game.name) === normalize(aliasTarget));
-  if (aliasMatch) {
-    return { game: aliasMatch, reason: "alias" };
-  }
-
-  return null;
-}
-
-function describeSteamGameSession(session: RunningSession): string {
-  return `source=${session.source ?? "unknown"} appID=${session.appID || "unknown"} name=${session.name || "unknown"} normalized=${normalize(session.name || "")}`;
-}
-
-function logCurrentGameSelection(
-  session: RunningSession,
-  runningGame: GameStatus,
-  reason: string,
-  currentGames: GameStatus[],
-  currentAliases: Record<string, string>
-) {
-  log(
-    "info",
-    `QAM current game selected: context=${describeSteamGameSession(session)} match=${runningGame.name} reason=${reason} games=${currentGames.length} aliasKeys=${Object.keys(currentAliases).length}`,
-    "qam_context",
-    runningGame.name
-  );
-}
-
-function logCurrentGameNoMatch(
-  session: RunningSession | null,
-  currentGames: GameStatus[],
-  currentAliases: Record<string, string>
-) {
-  log(
-    session ? "warning" : "debug",
-    `QAM current game not selected: context=${session ? describeSteamGameSession(session) : "none"} games=${currentGames.length} aliasKeys=${Object.keys(currentAliases).length}`,
-    "qam_context",
-    session?.name
-  );
-}
-
-function findScrollableParent(element: HTMLElement | null): HTMLElement | null {
-  let current = element?.parentElement ?? null;
-  while (current) {
-    const style = window.getComputedStyle(current);
-    if (
-      ["auto", "scroll", "overlay"].includes(style.overflowY) &&
-      current.scrollHeight > current.clientHeight
-    ) {
-      return current;
-    }
-    current = current.parentElement;
-  }
-  return null;
-}
-
-function resetQuickAccessScroll(container: HTMLElement | null, reason = "qam_open") {
-  window.requestAnimationFrame(() => {
-    const scrollable = findScrollableParent(container);
-    const beforeTop = scrollable?.scrollTop ?? -1;
-    const beforeContainerTop = container?.getBoundingClientRect?.().top ?? -1;
-    if (scrollable) {
-      scrollable.scrollTo({ top: 0, left: 0, behavior: "auto" });
-    }
-    if (container) {
-      container.scrollIntoView({ block: "start" });
-    }
-    const afterTop = scrollable?.scrollTop ?? -1;
-    const containerTop = container?.getBoundingClientRect?.().top ?? -1;
-    if (
-      beforeTop === afterTop &&
-      Math.abs(beforeContainerTop - containerTop) <= QUICK_ACCESS_TOP_EPSILON_PX
-    ) {
-      return;
-    }
-    const scrollableTag = scrollable
-      ? `${scrollable.tagName.toLowerCase()}${scrollable.id ? `#${scrollable.id}` : ""}`
-      : "none";
-    log(
-      "debug",
-      `QAM scroll reset (${reason}): before=${beforeTop}, after=${afterTop}, containerTop=${containerTop}, scrollable=${scrollableTag}`,
-      "qam_scroll"
-    );
-  });
-}
-
-const log = (level: "info" | "debug" | "warning" | "error", message: string, operation?: string, gameName?: string) => {
-  const prefix = `SDH-Ludusavi${operation ? `:${operation}` : ""}${gameName ? ` [${gameName}]` : ""}`;
-  const fullMsg = `${prefix}: ${message}`;
-  
-  console.log(fullMsg);
-
-  void logCall(level, message, operation, gameName);
-};
 
 const statusLabels: Record<GameStatus["status"], string> = {
   configured: "Configured",
@@ -770,38 +221,7 @@ let autoSyncStatusShowGeneration = 0;
 let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;
 let autoSyncStatusBrowserViewOwner: AutoSyncStatusBrowserViewOwner | null = null;
 
-const STATUS_STRIP_HEIGHT_RATIO = 0.0475;
-const STEAM_BOTTOM_MENU_HEIGHT_RATIO = 0.02625;
 const AUTO_SYNC_STATUS_SHOW_DELAY = 100;
-
-function getAutoSyncStatusBounds() {
-  const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance?.BrowserWindow;
-  const viewWindow = rootWindow ?? window;
-  const pixelRatio = window.devicePixelRatio || 1;
-  const rawWidth = viewWindow?.innerWidth || viewWindow?.outerWidth || 1280;
-  const rawHeight = viewWindow?.innerHeight || viewWindow?.outerHeight || 800;
-  
-  log("debug", `Window dimensions: raw=${rawWidth}x${rawHeight}, ratio=${pixelRatio}`, "autosync_status");
-
-  const width = Math.round(rawWidth);
-  const height = Math.round(rawHeight * STATUS_STRIP_HEIGHT_RATIO);
-  const bottomOffset = Math.round(rawHeight * STEAM_BOTTOM_MENU_HEIGHT_RATIO);
-
-  return {
-    x: 0,
-    y: Math.max(0, Math.round(rawHeight - height - bottomOffset)),
-    width,
-    height,
-    pixelRatio
-  };
-}
-
-function objectKeys(value: unknown): string {
-  if (typeof value !== "object" || value === null) {
-    return "none";
-  }
-  return Object.keys(value).join(",");
-}
 
 function getPrototypeKeys(value: unknown): string {
   if (typeof value !== "object" || value === null) {
@@ -1253,32 +673,7 @@ function completeAutoSyncStatus(
   }
 }
 
-function LogModal({ logs, closeModal }: LogModalProps) {
-  return (
-    <ConfirmModal
-      bAlertDialog={true}
-      strTitle="Plugin Logs"
-      onOK={closeModal}
-      onCancel={closeModal}
-    >
-      <div
-        style={{
-          maxHeight: "60vh",
-          overflowY: "auto",
-          fontFamily: "monospace",
-          fontSize: "12px",
-          whiteSpace: "pre-wrap",
-          backgroundColor: "rgba(0, 0, 0, 0.3)",
-          padding: "10px",
-          borderRadius: "4px",
-          userSelect: "text",
-        }}
-      >
-        {logs.length === 0 ? "No recent logs" : logs.map(formatLogEntry).join("\n")}
-      </div>
-    </ConfirmModal>
-  );
-}
+
 
 type ConflictResolutionModalProps = {
   conflict: LifecycleCheckResult;
@@ -1350,32 +745,7 @@ function showConflictResolutionModal(
   });
 }
 
-function LudusaviLogModal({ logs, closeModal }: LudusaviLogModalProps) {
-  return (
-    <ConfirmModal
-      bAlertDialog={true}
-      strTitle="Ludusavi Logs"
-      onOK={closeModal}
-      onCancel={closeModal}
-    >
-      <div
-        style={{
-          maxHeight: "60vh",
-          overflowY: "auto",
-          fontFamily: "monospace",
-          fontSize: "12px",
-          whiteSpace: "pre-wrap",
-          backgroundColor: "rgba(0, 0, 0, 0.3)",
-          padding: "10px",
-          borderRadius: "4px",
-          userSelect: "text",
-        }}
-      >
-        {logs || "No Ludusavi logs available"}
-      </div>
-    </ConfirmModal>
-  );
-}
+
 
 function CompactFieldLabel({ children }: { children: ReactNode }) {
   return <span style={{ fontSize: "13px" }}>{children}</span>;
@@ -1385,15 +755,7 @@ let trackedAppIDs = new Set<string>();
 let trackedNames = new Set<string>();
 let autoSyncNotificationsEnabled = false;
 let notificationSettingsMirror: NotificationSettings = { ...defaultNotificationSettings };
-let lastSteamUiGameContext: RunningSession | null = null;
-let lastSteamUiGameContextCapturedAt = 0;
-const STEAM_UI_GAME_CONTEXT_TTL_MS = 10_000;
-const QUICK_ACCESS_TOP_EPSILON_PX = 1;
 
-/** Normalize a game name for fuzzy matching, mirroring backend _normalize. */
-function normalize(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9.-]+/g, " ").trim();
-}
 
 function shouldShowNotification(category: NotificationCategory): boolean {
   return notificationSettingsMirror.enabled && notificationSettingsMirror[category];
@@ -1484,7 +846,7 @@ function Content() {
   };
 
   const syncSelectedGameCache = (nextSelectedGame: string) => {
-    setSettings((current) => {
+    setSettings((current: Settings) => {
       const nextSettings = { ...current, selected_game: nextSelectedGame };
       globalSettings = globalSettings
         ? { ...globalSettings, selected_game: nextSelectedGame }
@@ -1710,11 +1072,11 @@ function Content() {
     globalGameHistory = result.history ?? {};
     
     // Update global tracking sets for toast filtering
-    trackedAppIDs = new Set(result.games.map(g => (g as any).steam_id).filter(id => !!id) as string[]);
+    trackedAppIDs = new Set(result.games.map((g: GameStatus) => (g as any).steam_id).filter((id): id is string => !!id) as string[]);
     
     const names = new Set<string>();
-    result.games.forEach(g => names.add(normalize(g.name)));
-    Object.entries(result.aliases || {}).forEach(([alias, target]) => {
+    result.games.forEach((g: GameStatus) => names.add(normalize(g.name)));
+    Object.entries(result.aliases || {}).forEach(([alias, target]: [string, string]) => {
       names.add(normalize(alias));
       names.add(normalize(target));
     });
@@ -1727,7 +1089,7 @@ function Content() {
     }
 
     const target = preferredGame || selectedGame;
-    if (target && result.games.some((game) => game.name === target)) {
+    if (target && result.games.some((game: GameStatus) => game.name === target)) {
       setSelectedGame(target);
       syncSelectedGameCache(target);
     } else {
@@ -1789,7 +1151,7 @@ function Content() {
     setBusyLabel("Updating settings");
     
     // Optimistic update
-    setSettings(s => ({ ...s, auto_sync_enabled: enabled }));
+    setSettings((s: Settings) => ({ ...s, auto_sync_enabled: enabled }));
     autoSyncNotificationsEnabled = enabled;
 
     try {
@@ -1801,7 +1163,7 @@ function Content() {
     } catch (error) {
       log("error", `Failed to toggle auto-sync: ${error}`);
       // Rollback
-      setSettings(s => ({ ...s, auto_sync_enabled: previous }));
+      setSettings((s: Settings) => ({ ...s, auto_sync_enabled: previous }));
       autoSyncNotificationsEnabled = previous;
       notify("failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
@@ -1810,11 +1172,11 @@ function Content() {
   };
 
   const toggleNotificationSetting = async (key: keyof NotificationSettings, enabled: boolean) => {
-    log("info", `Toggling notification setting ${key} to ${enabled}`);
+    log("info", `Toggling notification setting ${String(key)} to ${enabled}`);
     const previous = settings.notifications;
     const nextNotifications = { ...previous, [key]: enabled };
     setBusyLabel("Updating settings");
-    setSettings(s => ({ ...s, notifications: nextNotifications }));
+    setSettings((s: Settings) => ({ ...s, notifications: nextNotifications }));
     notificationSettingsMirror = nextNotifications;
 
     try {
@@ -1825,7 +1187,7 @@ function Content() {
       applySettings(result);
     } catch (error) {
       log("error", `Failed to update notification settings: ${error}`);
-      setSettings(s => ({ ...s, notifications: previous }));
+      setSettings((s: Settings) => ({ ...s, notifications: previous }));
       notificationSettingsMirror = previous;
       notify("failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
@@ -1890,7 +1252,7 @@ function Content() {
 
   return (
     <div ref={qamContentRef}>
-      <style>{qamPanelStyles}</style>
+
       <PanelSection title="GLOBAL">
         <FullWidthToggle>
           <ToggleField
@@ -2127,11 +1489,6 @@ function summarizeOperationResult(result: OperationResult | LifecycleCheckResult
   }
   const action = result.status === "backed_up" ? "Backup" : "Restore";
   return `${action} completed for ${result.game}`;
-}
-
-function formatLogEntry(entry: LogEntry) {
-  const game = entry.game_name ? ` ${entry.game_name}` : "";
-  return `[${entry.timestamp}] [${entry.level}]${game} ${entry.message}`;
 }
 
 function LudusaviPanel({ 

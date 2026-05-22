@@ -1,7 +1,30 @@
 from pathlib import Path
 
 
-FRONTEND = Path("src/index.tsx")
+class ConcatenatedFrontendPath:
+    def __init__(self, main_path: Path):
+        self.main_path = main_path
+
+    def read_text(self, encoding: str = "utf-8") -> str:
+        files = [
+            Path("src/types/index.ts"),
+            Path("src/utils/logging.ts"),
+            Path("src/components/LogModal.tsx"),
+            Path("src/utils/steam.ts"),
+            Path("src/index.css"),
+            Path("src/index.tsx"),
+        ]
+        contents = []
+        for f in files:
+            if f.exists():
+                contents.append(f.read_text(encoding=encoding))
+        return "\n".join(contents)
+
+    def __getattr__(self, name):
+        return getattr(self.main_path, name)
+
+
+FRONTEND = ConcatenatedFrontendPath(Path("src/index.tsx"))
 
 
 def test_frontend_exposes_sdh_ludusavi_panel_controls() -> None:
