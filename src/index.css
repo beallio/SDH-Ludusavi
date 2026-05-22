@@ -23,7 +23,7 @@
 .sdh-ludusavi-versions-list,
 .sdh-ludusavi-versions-list div {
   color: #cbd5e1;
-  font-size: 12px !important;
+  font-size: 10px !important;
 }
 
 .sdh-ludusavi-last-operation-field {
@@ -42,7 +42,7 @@
 
 .sdh-ludusavi-last-operation-row,
 .sdh-ludusavi-last-operation-result {
-  font-size: 12px !important;
+  font-size: 10px !important;
 }
 
 .sdh-ludusavi-last-operation-result {
@@ -65,7 +65,7 @@
 .sdh-ludusavi-status-value,
 .sdh-ludusavi-status-value span {
   color: #cbd5e1;
-  font-size: 12px !important;
+  font-size: 10px !important;
   min-width: 0;
 }
 

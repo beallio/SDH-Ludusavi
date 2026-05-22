@@ -8,7 +8,7 @@ A regression was introduced in the typography rebase/conflict-resolution:
 
 We must fix this regression:
 - Set field labels ("Status:" and "Last Operation:") to 13px (via `CompactFieldLabel`).
-- Reduce the status messages, last operation values, and the versions list box content to 12px so they are smaller than the labels.
+- Reduce the status messages, last operation values, and the versions list box content to 10px so they are smaller than the labels.
 - Set the last operation timestamp to 10px.
 - Enforce the font sizes using `!important` in CSS to override Decky UI defaults.
 - Fix CSS selector scoping so layout properties are only applied to the container, while typography/color rules are applied to the container and relevant descendants.
@@ -17,10 +17,10 @@ We must fix this regression:
 - We will modify `CompactFieldLabel` in [src/index.tsx](file:///home/beallio/Dropbox/Scripts/SDH-ludusavi/src/index.tsx) to set `fontSize: "13px"` instead of `"12px"`.
 - We will update the CSS classes in [src/index.css](file:///home/beallio/Dropbox/Scripts/SDH-ludusavi/src/index.css) to:
   - Separate container layout styles from typography styles.
-  - Enforce `12px !important` on `.sdh-ludusavi-versions-list` and nested `div`s.
-  - Enforce `12px !important` on `.sdh-ludusavi-last-operation-row` and `.sdh-ludusavi-last-operation-result`.
+  - Enforce `10px !important` on `.sdh-ludusavi-versions-list` and nested `div`s.
+  - Enforce `10px !important` on `.sdh-ludusavi-last-operation-row` and `.sdh-ludusavi-last-operation-result`.
   - Enforce `10px !important` on `.sdh-ludusavi-last-operation-time`.
-  - Enforce `12px !important` on `.sdh-ludusavi-status-value` and its child `span` elements.
+  - Enforce `10px !important` on `.sdh-ludusavi-status-value` and its child `span` elements.
 - We will update the frontend static test suite assertions to match these requirements.
 
 ## Core Data Structures

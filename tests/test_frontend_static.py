@@ -1016,7 +1016,7 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
         in source
     )
     assert (
-        ".sdh-ludusavi-last-operation-row,\n.sdh-ludusavi-last-operation-result {\n  font-size: 12px !important;\n}"
+        ".sdh-ludusavi-last-operation-row,\n.sdh-ludusavi-last-operation-result {\n  font-size: 10px !important;\n}"
         in source
     )
     assert (
@@ -1024,7 +1024,7 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
         in source
     )
     assert (
-        ".sdh-ludusavi-status-value,\n.sdh-ludusavi-status-value span {\n  color: #cbd5e1;\n  font-size: 12px !important;\n  min-width: 0;\n}"
+        ".sdh-ludusavi-status-value,\n.sdh-ludusavi-status-value span {\n  color: #cbd5e1;\n  font-size: 10px !important;\n  min-width: 0;\n}"
         in source
     )
 
@@ -1039,7 +1039,7 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert 'className="sdh-ludusavi-versions-list"' in versions_panel
     assert 'childrenLayout="below"' in versions_panel
     assert (
-        ".sdh-ludusavi-versions-list,\n.sdh-ludusavi-versions-list div {\n  color: #cbd5e1;\n  font-size: 12px !important;"
+        ".sdh-ludusavi-versions-list,\n.sdh-ludusavi-versions-list div {\n  color: #cbd5e1;\n  font-size: 10px !important;"
         in source
     )
 
