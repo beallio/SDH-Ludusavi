@@ -1,17 +1,17 @@
 # Code Review Refactors
 
 ## Problem Definition
-Four issues were identified in recent commits and reviews:
-1. **Log Pollution in `_run_blocking`**: When `_run_blocking` is cancelled, it raises a `CancelledError` but the underlying thread's future completes in the background and sets an exception. Since the caller has cancelled, the future is never awaited, leading to "Future exception was never retrieved" warnings on garbage collection.
-2. **Diagnostics Race Condition**: `service.py::_ludusavi` checks `_diagnostics_logged` outside of the double-checked locking block, allowing concurrent threads to spawn duplicate background logging processes.
-3. **React State Memory Leak**: `index.tsx::loadInitial` executes background RPC resolutions for versions and commands without tracking mount-state checks, resulting in state setter calls on unmounted components or out-of-order race conditions.
-4. **Clean Code styling**: Ad-hoc inline CSS properties are mixed in JSX status layouts instead of residing in the file's injected stylesheet.
+Four issues were identified in recent reviews:
+1. **Config Stat failures**: In `py_modules/sdh_ludusavi/service.py`, `_current_ludusavi_config_mtime_ns` attempts to catch exceptions thrown by `get_config_mtime_ns()` in order to return `_CONFIG_MARKER_READ_FAILED` and force a cache refresh. However, the adapter implementation in `py_modules/sdh_ludusavi/ludusavi.py` catches all exceptions internally and returns `None`. Consequently, a stat failure (e.g. permission denied or missing file) propagates `None` to the service caller, resulting in a silent failure to refresh the games list.
+2. **Truthy RpcStatus check**: In `src/index.tsx::loadInitial`, `cacheCurrent` is assigned the returned promise of `isGameCacheCurrentCall`. If the RPC call fails, the backend returns an `RpcStatus` object instead of a boolean. In JavaScript, all objects are truthy, meaning the check `if (cacheCurrent && globalGames)` will falsely evaluate to `true`, skipping cache refresh.
+3. **Promise.all fail-fast**: In `src/index.tsx::loadInitial`, independent operations `getVersions()` and `getLudusaviCommandCall()` are resolved using `Promise.all`. If one rejects, both are aborted, showing an error for both.
+4. **Sleep-based test sync**: The test `test_run_blocking_retrieves_exception_on_cancellation` uses fixed-duration sleeps to coordinate thread cancellation timing, causing potential flakiness under high CPU load.
 
 ## Architecture Overview
-- **Future Exception Cleanups**: Attach a done callback to the future inside `_run_blocking` to consume the exception if the caller is cancelled.
-- **Diagnostics Thread-Safety**: Protect `_diagnostics_logged` check and call under `self._adapter_lock` inside `service.py` to prevent duplicate diagnostics logs.
-- **React Mount Tracking**: Use a React `useRef` to track component mount status in `src/index.tsx` and guard all state updates in `loadInitial`.
-- **CSS Cleanups**: Replace inline styles in the status field and last operation elements with new CSS rules in the injected `qamPanelStyles`.
+- **Propagate mtime exceptions**: Modify `LudusaviAdapter.get_config_mtime_ns` to propagate exceptions rather than returning `None`. Update callers and tests accordingly.
+- **isRpcStatus guard**: Update cache status check to explicitly verify it is a boolean and strictly `true` using `isRpcStatus`.
+- **Promise.allSettled**: Replace `Promise.all` with `Promise.allSettled` to resolve independent background tasks separately.
+- **Event-based test sync**: Use `threading.Event` to coordinate test thread execution deterministically.
 
 ## Core Data Structures
 No changes to persistent data structures.
@@ -23,6 +23,7 @@ Public API signatures remain unchanged.
 No new dependencies.
 
 ## Testing Strategy
-- Run the full test suite to ensure no regressions.
-- Specifically verify async execution and cancellation behavior.
-- Validate that the type checker and linters pass.
+- Update existing tests for mtime stat failures.
+- Add new test cases to verify that config read failures force a refresh.
+- Run all tests using pytest.
+- Verify typescript linting and compiling.
