@@ -1002,7 +1002,7 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
     ]
 
     assert "function CompactFieldLabel" in source
-    assert 'fontSize: "13px"' in source
+    assert 'fontSize: "11px"' in source
     assert '[class*="Label"]' not in source
     assert 'className="sdh-ludusavi-status-field"' in status_field
     assert 'childrenContainerWidth="min"' in status_field
@@ -1026,6 +1026,7 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
     assert 'className="sdh-ludusavi-versions-list"' in versions_panel
     assert 'childrenLayout="below"' in versions_panel
+    assert ".sdh-ludusavi-versions-list {\n  color: #cbd5e1;\n  font-size: 12px;" in source
 
 
 def test_frontend_gates_warmed_background_refresh_without_loading_label() -> None:
