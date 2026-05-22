@@ -4,7 +4,6 @@ import ast
 import json
 import logging
 import signal
-import subprocess
 import threading
 import time
 from pathlib import Path
@@ -354,30 +353,30 @@ def test_signal_process_tree_snapshots_process_table_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = service_with_state(tmp_path)
-    ps_calls: list[list[str]] = []
+    listdir_calls: list[str] = []
     signals: list[tuple[int, signal.Signals]] = []
 
-    class FakeProcess:
-        def __enter__(self) -> "FakeProcess":
-            return self
+    # Simulate /proc with PIDs: 100 (ppid=1), 101 (ppid=100), 102 (ppid=100), 201 (ppid=101)
+    proc_status: dict[str, str] = {
+        "100": "Name:\tbash\nPid:\t100\nPPid:\t1\n",
+        "101": "Name:\tgame\nPid:\t101\nPPid:\t100\n",
+        "102": "Name:\twine\nPid:\t102\nPPid:\t100\n",
+        "201": "Name:\tchild\nPid:\t201\nPPid:\t101\n",
+    }
 
-        def __exit__(self, *args: object) -> None:
-            return None
+    def fake_listdir(path: str) -> list[str]:
+        listdir_calls.append(path)
+        return ["1", "100", "101", "102", "201", "self", "sys"]
 
-        def communicate(self, timeout: int) -> tuple[str, str]:
-            assert timeout == 2
-            return ("100 1\n101 100\n102 100\n201 101\n", "")
+    import sdh_ludusavi.service as svc_mod
 
-    def fake_popen(args: list[str], **kwargs: object) -> FakeProcess:
-        ps_calls.append(args)
-        return FakeProcess()
-
-    monkeypatch.setattr("sdh_ludusavi.service.subprocess.Popen", fake_popen)
+    monkeypatch.setattr(svc_mod, "_read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str))
+    monkeypatch.setattr("sdh_ludusavi.service.os.listdir", fake_listdir)
     monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
 
     assert service.pause_game_process(100) == {"status": "paused", "pid": 100}
 
-    assert len(ps_calls) == 1
+    assert len(listdir_calls) == 1
     assert signals == [
         (100, signal.SIGSTOP),
         (101, signal.SIGSTOP),
@@ -393,15 +392,142 @@ def test_signal_process_tree_falls_back_to_root_when_snapshot_fails(
     service = service_with_state(tmp_path)
     signals: list[tuple[int, signal.Signals]] = []
 
-    def fail_popen(*args: object, **kwargs: object) -> object:
-        raise subprocess.SubprocessError("ps unavailable")
+    def fail_listdir(path: str) -> list[str]:
+        raise OSError("/proc unavailable")
 
-    monkeypatch.setattr("sdh_ludusavi.service.subprocess.Popen", fail_popen)
+    monkeypatch.setattr("sdh_ludusavi.service.os.listdir", fail_listdir)
     monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
 
     assert service.pause_game_process(100) == {"status": "paused", "pid": 100}
 
     assert signals == [(100, signal.SIGSTOP)]
+
+
+def _parse_ppid(proc_status: dict[str, str], pid_str: str) -> int | None:
+    """Test helper: extract PPid from fake /proc status content."""
+    content = proc_status.get(pid_str)
+    if content is None:
+        return None
+    for line in content.splitlines():
+        if line.startswith("PPid:"):
+            return int(line.split(":")[1])
+    return None
+
+
+def test_process_tree_reads_proc_filesystem(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify _process_tree builds a correct tree from mocked /proc entries."""
+    import sdh_ludusavi.service as svc_mod
+
+    proc_status: dict[str, str] = {
+        "1": "Name:\tinit\nPid:\t1\nPPid:\t0\n",
+        "100": "Name:\tbash\nPid:\t100\nPPid:\t1\n",
+        "101": "Name:\tgame\nPid:\t101\nPPid:\t100\n",
+        "102": "Name:\twine\nPid:\t102\nPPid:\t100\n",
+        "201": "Name:\tchild\nPid:\t201\nPPid:\t101\n",
+    }
+
+    monkeypatch.setattr(
+        "sdh_ludusavi.service.os.listdir",
+        lambda path: ["1", "100", "101", "102", "201", "self", "sys"],
+    )
+    monkeypatch.setattr(svc_mod, "_read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str))
+
+    result = svc_mod._process_tree(100)
+
+    assert result == [100, 101, 201, 102]
+
+
+def test_process_tree_skips_vanished_processes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Processes that vanish between listdir and read are silently skipped."""
+    import sdh_ludusavi.service as svc_mod
+
+    proc_status: dict[str, str] = {
+        "100": "Name:\tbash\nPid:\t100\nPPid:\t1\n",
+        "101": "Name:\tgame\nPid:\t101\nPPid:\t100\n",
+        # 102 intentionally missing — simulates vanished process
+    }
+
+    monkeypatch.setattr(
+        "sdh_ludusavi.service.os.listdir",
+        lambda path: ["100", "101", "102"],
+    )
+    monkeypatch.setattr(svc_mod, "_read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str))
+
+    result = svc_mod._process_tree(100)
+
+    assert result == [100, 101]
+
+
+def test_process_tree_falls_back_on_listdir_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If os.listdir('/proc') raises OSError, fall back to [pid]."""
+    import sdh_ludusavi.service as svc_mod
+
+    monkeypatch.setattr(
+        "sdh_ludusavi.service.os.listdir",
+        lambda path: (_ for _ in ()).throw(OSError("/proc unavailable")),
+    )
+
+    result = svc_mod._process_tree(42)
+
+    assert result == [42]
+
+
+def test_read_ppid_parses_status_file(tmp_path: Path) -> None:
+    """_read_ppid correctly extracts PPid from a /proc status file."""
+    from sdh_ludusavi.service import _read_ppid
+
+    status_file = tmp_path / "status"
+    status_file.write_text(
+        "Name:\tbash\n"
+        "Umask:\t0022\n"
+        "State:\tS (sleeping)\n"
+        "Tgid:\t12345\n"
+        "Pid:\t12345\n"
+        "PPid:\t100\n"
+        "TracerPid:\t0\n",
+        encoding="utf-8",
+    )
+
+    # _read_ppid reads /proc/{pid_str}/status, so we construct a fake /proc tree
+    proc_dir = tmp_path / "proc" / "12345"
+    proc_dir.mkdir(parents=True)
+    (proc_dir / "status").write_text(
+        status_file.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    # We test _read_ppid by monkeypatching the path prefix — but since _read_ppid
+    # uses a hardcoded "/proc/" prefix, we test it indirectly through _process_tree
+    # or directly if it accepts a path. For now, test the parsing logic:
+    assert _read_ppid("12345", proc_root=str(tmp_path / "proc")) == 100
+
+
+def test_read_ppid_returns_none_on_missing_file() -> None:
+    """_read_ppid returns None for a nonexistent PID."""
+    from sdh_ludusavi.service import _read_ppid
+
+    assert _read_ppid("999999999") is None
+
+
+def test_process_tree_has_no_subprocess_usage() -> None:
+    """Static regression: _process_tree and _read_ppid must not use subprocess."""
+    source = Path("py_modules/sdh_ludusavi/service.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    target_funcs = {"_process_tree", "_read_ppid"}
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in target_funcs:
+            names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+            attrs = {n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)}
+            assert "subprocess" not in names, f"{node.name} must not reference subprocess"
+            assert "Popen" not in attrs, f"{node.name} must not reference Popen"
+            assert "communicate" not in attrs, f"{node.name} must not reference communicate"
 
 
 def test_resume_all_paused_processes_resumes_remaining_pids(

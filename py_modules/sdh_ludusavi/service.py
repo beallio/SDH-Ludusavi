@@ -5,7 +5,6 @@ import logging
 import os
 import re
 import signal
-import subprocess
 import threading
 from datetime import datetime
 from collections.abc import Callable
@@ -1549,26 +1548,35 @@ def _normalize_installed_app_ids(raw: str | None) -> str | None:
     return ",".join(str(app_id) for app_id in app_ids)
 
 
+def _read_ppid(pid_str: str, *, proc_root: str = "/proc") -> int | None:
+    """Read the parent PID from /proc/<pid>/status.
+
+    Returns None if the process has vanished or the file is unreadable.
+    """
+    try:
+        with open(f"{proc_root}/{pid_str}/status", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("PPid:"):
+                    return int(line.split(":")[1])
+    except (OSError, ValueError):
+        return None
+    return None
+
+
 def _process_tree(pid: int) -> list[int]:
     try:
-        with subprocess.Popen(
-            ["ps", "-eo", "pid=,ppid="],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        ) as process:
-            stdout, _ = process.communicate(timeout=2)
-    except Exception:
+        entries = os.listdir("/proc")
+    except OSError:
         return [pid]
 
     children_by_parent: dict[int, list[int]] = {}
-    for line in stdout.splitlines():
-        parts = line.split()
-        if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+    for entry in entries:
+        if not entry.isdigit():
             continue
-        child_pid = int(parts[0])
-        parent_pid = int(parts[1])
-        children_by_parent.setdefault(parent_pid, []).append(child_pid)
+        ppid = _read_ppid(entry)
+        if ppid is None:
+            continue
+        children_by_parent.setdefault(ppid, []).append(int(entry))
 
     ordered: list[int] = []
 
