@@ -1580,14 +1580,15 @@ function Content() {
 
     // Load versions and commands in the background asynchronously.
     void (async () => {
-      try {
-        const [loadedVersions, loadedCommand] = await Promise.all([
-          getVersions(),
-          getLudusaviCommandCall()
-        ]);
+      const [versionsResult, commandResult] = await Promise.allSettled([
+        getVersions(),
+        getLudusaviCommandCall()
+      ]);
 
-        if (!isMounted.current) return;
+      if (!isMounted.current) return;
 
+      if (versionsResult.status === "fulfilled") {
+        const loadedVersions = versionsResult.value;
         log("debug", `Loaded versions: ${JSON.stringify(loadedVersions)}`);
         if (isRpcStatus(loadedVersions)) {
           logRpcStatus(loadedVersions, "versions");
@@ -1596,7 +1597,13 @@ function Content() {
           setVersions(loadedVersions);
           globalVersions = loadedVersions;
         }
+      } else {
+        log("error", `Background load of versions failed: ${versionsResult.reason}`);
+        setVersions({ message: "Error" });
+      }
 
+      if (commandResult.status === "fulfilled") {
+        const loadedCommand = commandResult.value;
         log("debug", `Loaded command: ${JSON.stringify(loadedCommand)}`);
         if (isRpcStatus(loadedCommand)) {
           logRpcStatus(loadedCommand, "command discovery");
@@ -1604,10 +1611,8 @@ function Content() {
           globalLudusaviCommand = loadedCommand;
           setLudusaviCommand(loadedCommand);
         }
-      } catch (error) {
-        if (!isMounted.current) return;
-        log("error", `Background load of versions/command failed: ${error}`);
-        setVersions({ message: "Error" });
+      } else {
+        log("error", `Background load of command failed: ${commandResult.reason}`);
       }
     })();
 
@@ -1631,8 +1636,9 @@ function Content() {
       const installedAppIds = await getInstalledAppIdsString();
       const installedAppIdsChanged = globalInstalledAppIds !== installedAppIds;
       if (!isMounted.current) return;
-      const cacheCurrent = isWarmed && !installedAppIdsChanged && await isGameCacheCurrentCall(installedAppIds);
+      const cacheCurrentResult = isWarmed && !installedAppIdsChanged ? await isGameCacheCurrentCall(installedAppIds) : false;
       if (!isMounted.current) return;
+      const cacheCurrent = !isRpcStatus(cacheCurrentResult) && cacheCurrentResult === true;
       if (cacheCurrent && globalGames) {
         applyCachedRefreshResult(isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game);
       } else {

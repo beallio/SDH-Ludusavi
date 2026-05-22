@@ -669,8 +669,10 @@ def test_frontend_initial_load_skips_logs_and_warmed_refresh_when_cache_current(
         "const installedAppIdsChanged = globalInstalledAppIds !== installedAppIds;" in load_initial
     )
     assert (
-        "const cacheCurrent = isWarmed && !installedAppIdsChanged && await "
-        "isGameCacheCurrentCall(installedAppIds);"
+        "const cacheCurrentResult = isWarmed && !installedAppIdsChanged ? await isGameCacheCurrentCall(installedAppIds) : false;"
+    ) in load_initial
+    assert (
+        "const cacheCurrent = !isRpcStatus(cacheCurrentResult) && cacheCurrentResult === true;"
     ) in load_initial
     assert "if (cacheCurrent && globalGames) {" in load_initial
     assert "applyCachedRefreshResult(" in load_initial
