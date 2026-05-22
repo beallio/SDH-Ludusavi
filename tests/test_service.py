@@ -270,6 +270,19 @@ def test_game_cache_current_uses_installed_app_and_config_markers(tmp_path: Path
     assert service.is_game_cache_current("111,222") is False
 
 
+def test_game_cache_current_returns_false_on_config_stat_failure(tmp_path: Path) -> None:
+    adapter = RaisingConfigMarkerAdapter()
+    service = service_with_state(tmp_path, adapter)
+
+    # Populate cache first
+    service._games = {"Hades": {"name": "Hades", "configured": True}}
+    service._installed_app_ids = "111,222"
+    service._ludusavi_config_mtime_ns = 100
+
+    # Since the adapter raises an exception on config mtime check, it should return False
+    assert service.is_game_cache_current("111,222") is False
+
+
 def test_ludusavi_adapter_initialization_is_thread_safe(tmp_path: Path) -> None:
     calls = 0
     factory_entered = threading.Event()

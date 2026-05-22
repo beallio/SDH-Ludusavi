@@ -27,6 +27,8 @@ def test_pyludusavi_adapter_caches_config_path(tmp_path: Path) -> None:
 
 
 def test_pyludusavi_adapter_preserves_cached_path_on_stat_failure() -> None:
+    import pytest
+
     mock_client = MagicMock()
     mock_client.config_path.return_value = "/non/existent/path"
 
@@ -35,14 +37,14 @@ def test_pyludusavi_adapter_preserves_cached_path_on_stat_failure() -> None:
     adapter._cached_config_path = None
 
     # First call caches the path but stat fails
-    mtime1 = adapter.get_config_mtime_ns()
-    assert mtime1 is None
+    with pytest.raises(Exception):
+        adapter.get_config_mtime_ns()
     assert mock_client.config_path.call_count == 1
     assert adapter._cached_config_path == "/non/existent/path"
 
     # Second call should still use the cached path and not re-call config_path()
-    mtime2 = adapter.get_config_mtime_ns()
-    assert mtime2 is None
+    with pytest.raises(Exception):
+        adapter.get_config_mtime_ns()
     assert mock_client.config_path.call_count == 1
 
 

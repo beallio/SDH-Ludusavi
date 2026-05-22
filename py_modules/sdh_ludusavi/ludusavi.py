@@ -243,11 +243,11 @@ class PyludusaviAdapter:
     def get_config_mtime_ns(self) -> int | None:
         try:
             return Path(self._config_path()).stat().st_mtime_ns
-        except Exception:
+        except Exception as exc:
             LOGGER.debug(
                 "Unable to stat Ludusavi config path: %s", self._cached_config_path, exc_info=True
             )
-            return None
+            raise exc
 
 
 def _games_from_output(output: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
