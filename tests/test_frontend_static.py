@@ -219,6 +219,8 @@ def test_frontend_status_strip_uses_inline_browserview_icons() -> None:
         'stroke="#0b151f"',
         "@keyframes spin {",
         "icon-spin",
+        'stroke-width="3"',
+        'opacity="0.8"',
     ]:
         assert required_text in source
 
