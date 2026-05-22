@@ -1,0 +1,19 @@
+{
+  "date": "2026-05-22",
+  "task_objective": "Fix selectedHistory.reason displaying raw reason keys instead of user-friendly messages in the Last Operation UI section",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py",
+    "docs/plans/translate_selected_history_reasons.md"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py::test_frontend_operation_history_translation"
+  ],
+  "design_decisions": [
+    "Added optional third parameter 'message' to getLastOperationText instead of changing the existing signature",
+    "Used a switch block inside the 'skipped' case to translate all known reason keys to human-readable descriptions consistent with summarizeOperationResult",
+    "For 'failed' status, prioritized message over reason with fallback to generic 'check logs' text",
+    "Also recovered from accidental rebase by aborting and re-applying fix cleanly on a new branch from main"
+  ],
+  "results": "All 246 tests pass. ruff check, ruff format, ty check, tsc typecheck, and rollup build all succeed."
+}
