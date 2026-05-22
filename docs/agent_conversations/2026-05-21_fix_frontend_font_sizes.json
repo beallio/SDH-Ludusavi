@@ -1,0 +1,18 @@
+{
+  "date": "2026-05-21",
+  "task_objective": "Fix font sizes of the versions section and QAM field labels 'Status:' and 'Last Operation:'.",
+  "files_modified": [
+    "src/index.css",
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py::test_frontend_versions_order_places_decky_last"
+  ],
+  "design_decisions": [
+    "Reduced CompactFieldLabel font size back to 11px to match the QAM layout design",
+    "Reduced .sdh-ludusavi-versions-list font size to 12px to keep it compact",
+    "Updated static frontend tests to verify the corrected typography styling constraints"
+  ],
+  "results": "All tests passed successfully, and styling was correctly packaged and verified."
+}
