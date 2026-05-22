@@ -1002,7 +1002,7 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
     ]
 
     assert "function CompactFieldLabel" in source
-    assert 'fontSize: "11px"' in source
+    assert 'fontSize: "12px"' in source
     assert '[class*="Label"]' not in source
     assert 'className="sdh-ludusavi-status-field"' in status_field
     assert 'childrenContainerWidth="min"' in status_field
@@ -1012,7 +1012,11 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
     assert 'childrenContainerWidth="max"' in last_operation_field
     assert 'padding="compact"' in last_operation_field
     assert (
-        ".sdh-ludusavi-last-operation-row {\n  display: flex;\n  align-items: baseline;\n  justify-content:space-between;\n  gap: 12px;\n  min-width: 0;\n  width: 100%;\n  font-size: 12px;\n}"
+        ".sdh-ludusavi-last-operation-row,\n.sdh-ludusavi-last-operation-row div,\n.sdh-ludusavi-last-operation-row span {\n  display: flex;\n  align-items: baseline;\n  justify-content:space-between;\n  gap: 12px;\n  min-width: 0;\n  width: 100%;\n  font-size: 11px !important;\n}"
+        in source
+    )
+    assert (
+        ".sdh-ludusavi-status-value,\n.sdh-ludusavi-status-value span {\n  color: #cbd5e1;\n  font-size: 11px !important;\n  min-width: 0;\n}"
         in source
     )
 
@@ -1026,7 +1030,10 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
     assert 'className="sdh-ludusavi-versions-list"' in versions_panel
     assert 'childrenLayout="below"' in versions_panel
-    assert ".sdh-ludusavi-versions-list {\n  color: #cbd5e1;\n  font-size: 12px;" in source
+    assert (
+        ".sdh-ludusavi-versions-list,\n.sdh-ludusavi-versions-list div {\n  color: #cbd5e1;\n  font-size: 11px !important;"
+        in source
+    )
 
 
 def test_frontend_gates_warmed_background_refresh_without_loading_label() -> None:

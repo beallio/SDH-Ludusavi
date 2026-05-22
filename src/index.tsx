@@ -775,7 +775,7 @@ function showConflictResolutionModal(
 
 
 function CompactFieldLabel({ children }: { children: ReactNode }) {
-  return <span style={{ fontSize: "11px" }}>{children}</span>;
+  return <span style={{ fontSize: "12px" }}>{children}</span>;
 }
 
 let trackedAppIDs = new Set<string>();

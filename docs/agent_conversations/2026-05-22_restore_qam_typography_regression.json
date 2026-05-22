@@ -1,0 +1,18 @@
+{
+  "date": "2026-05-22",
+  "task_objective": "Restore QAM typography regression by setting field labels to 12px and forcing status values/messages and versions list to 11px using CSS child selectors and !important overrides.",
+  "files_modified": [
+    "src/index.tsx",
+    "src/index.css",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "Updated tests/test_frontend_static.py::test_frontend_qam_status_and_last_operation_use_compact_typography",
+    "Updated tests/test_frontend_static.py::test_frontend_versions_order_places_decky_last"
+  ],
+  "design_decisions": [
+    "Set CompactFieldLabel to 12px for Status: and Last Operation: field labels to keep them legible but compact.",
+    "Forced status value, last operation row (and child span/div elements), and versions list content to 11px font-size using CSS child selectors with !important to prevent Decky Loader theme overrides."
+  ],
+  "results": "All python unit tests passed, Ruff check/format passed, ty typecheck passed, and frontend builds completed successfully."
+}

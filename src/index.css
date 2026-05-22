@@ -11,9 +11,10 @@
   padding-right: 32px;
 }
 
-.sdh-ludusavi-versions-list {
+.sdh-ludusavi-versions-list,
+.sdh-ludusavi-versions-list div {
   color: #cbd5e1;
-  font-size: 12px;
+  font-size: 11px !important;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -27,14 +28,16 @@
   width: 100%;
 }
 
-.sdh-ludusavi-last-operation-row {
+.sdh-ludusavi-last-operation-row,
+.sdh-ludusavi-last-operation-row div,
+.sdh-ludusavi-last-operation-row span {
   display: flex;
   align-items: baseline;
   justify-content:space-between;
   gap: 12px;
   min-width: 0;
   width: 100%;
-  font-size: 12px;
+  font-size: 11px !important;
 }
 
 .sdh-ludusavi-last-operation-result {
@@ -54,9 +57,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-.sdh-ludusavi-status-value {
+.sdh-ludusavi-status-value,
+.sdh-ludusavi-status-value span {
   color: #cbd5e1;
-  font-size: 12px;
+  font-size: 11px !important;
   min-width: 0;
 }
 
