@@ -1002,7 +1002,7 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
     ]
 
     assert "function CompactFieldLabel" in source
-    assert 'fontSize: "12px"' in source
+    assert 'fontSize: "13px"' in source
     assert '[class*="Label"]' not in source
     assert 'className="sdh-ludusavi-status-field"' in status_field
     assert 'childrenContainerWidth="min"' in status_field
@@ -1012,11 +1012,19 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
     assert 'childrenContainerWidth="max"' in last_operation_field
     assert 'padding="compact"' in last_operation_field
     assert (
-        ".sdh-ludusavi-last-operation-row,\n.sdh-ludusavi-last-operation-row div,\n.sdh-ludusavi-last-operation-row span {\n  display: flex;\n  align-items: baseline;\n  justify-content:space-between;\n  gap: 12px;\n  min-width: 0;\n  width: 100%;\n  font-size: 11px !important;\n}"
+        ".sdh-ludusavi-last-operation-row {\n  display: flex;\n  align-items: baseline;\n  justify-content:space-between;\n  gap: 12px;\n  min-width: 0;\n  width: 100%;\n}"
         in source
     )
     assert (
-        ".sdh-ludusavi-status-value,\n.sdh-ludusavi-status-value span {\n  color: #cbd5e1;\n  font-size: 11px !important;\n  min-width: 0;\n}"
+        ".sdh-ludusavi-last-operation-row,\n.sdh-ludusavi-last-operation-result {\n  font-size: 12px !important;\n}"
+        in source
+    )
+    assert (
+        ".sdh-ludusavi-last-operation-time {\n  flex: 0 0 auto;\n  opacity: 0.65;\n  font-size: 10px !important;\n  white-space: nowrap;\n  font-variant-numeric: tabular-nums;\n}"
+        in source
+    )
+    assert (
+        ".sdh-ludusavi-status-value,\n.sdh-ludusavi-status-value span {\n  color: #cbd5e1;\n  font-size: 12px !important;\n  min-width: 0;\n}"
         in source
     )
 
@@ -1031,7 +1039,7 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert 'className="sdh-ludusavi-versions-list"' in versions_panel
     assert 'childrenLayout="below"' in versions_panel
     assert (
-        ".sdh-ludusavi-versions-list,\n.sdh-ludusavi-versions-list div {\n  color: #cbd5e1;\n  font-size: 11px !important;"
+        ".sdh-ludusavi-versions-list,\n.sdh-ludusavi-versions-list div {\n  color: #cbd5e1;\n  font-size: 12px !important;"
         in source
     )
 

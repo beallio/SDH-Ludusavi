@@ -11,10 +11,7 @@
   padding-right: 32px;
 }
 
-.sdh-ludusavi-versions-list,
-.sdh-ludusavi-versions-list div {
-  color: #cbd5e1;
-  font-size: 11px !important;
+.sdh-ludusavi-versions-list {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -23,21 +20,29 @@
   text-align: left;
 }
 
+.sdh-ludusavi-versions-list,
+.sdh-ludusavi-versions-list div {
+  color: #cbd5e1;
+  font-size: 12px !important;
+}
+
 .sdh-ludusavi-last-operation-field {
   margin-top: -6px;
   width: 100%;
 }
 
-.sdh-ludusavi-last-operation-row,
-.sdh-ludusavi-last-operation-row div,
-.sdh-ludusavi-last-operation-row span {
+.sdh-ludusavi-last-operation-row {
   display: flex;
   align-items: baseline;
   justify-content:space-between;
   gap: 12px;
   min-width: 0;
   width: 100%;
-  font-size: 11px !important;
+}
+
+.sdh-ludusavi-last-operation-row,
+.sdh-ludusavi-last-operation-result {
+  font-size: 12px !important;
 }
 
 .sdh-ludusavi-last-operation-result {
@@ -52,7 +57,7 @@
 .sdh-ludusavi-last-operation-time {
   flex: 0 0 auto;
   opacity: 0.65;
-  font-size: 0.85em;
+  font-size: 10px !important;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -60,7 +65,7 @@
 .sdh-ludusavi-status-value,
 .sdh-ludusavi-status-value span {
   color: #cbd5e1;
-  font-size: 11px !important;
+  font-size: 12px !important;
   min-width: 0;
 }
 
