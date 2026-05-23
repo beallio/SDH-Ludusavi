@@ -219,8 +219,7 @@ Requirements:
 - Commits must follow the Conventional Commits specification.
 - Pre-commit hooks must run before commits.
 
-For review-only tasks that do not modify files, agents may stop after ANALYZE and
-DOCUMENT the findings in the response.
+For review-only tasks that do not modify files or execute project tooling, the handshake is not required unless the user explicitly requests protocol verification.
 
 ---
 
@@ -272,6 +271,8 @@ Implement the minimal code required to pass the test.
 Improve structure while maintaining passing tests.
 
 ## Enforcement Rule
+
+Strict TDD applies to behavior-changing implementation code. It does not apply to documentation-only changes, formatting-only changes, test refactors, or project metadata changes that do not alter runtime behavior.
 
 If an agent creates implementation code in the current session without a corresponding
 failing test created earlier in the same session, that agent's implementation is invalid.
@@ -470,7 +471,23 @@ Blind retries are forbidden.
 
 ---
 
-# 18. Required Confirmation
+# 18. User Work Protection
+
+Agents must preserve unrelated user work.
+
+Before modifying files, inspect `git status --short`.
+
+If uncommitted changes exist:
+
+- treat them as user-owned unless created during the current session
+- do not overwrite, stage, commit, revert, or format unrelated files
+- avoid broad formatting commands if they would touch unrelated modified files
+- prefer targeted formatting on files changed in the current session
+- report any overlap before proceeding
+
+---
+
+# 19. Required Confirmation
 
 After reviewing this file, confirm:
 
