@@ -775,7 +775,7 @@ function showConflictResolutionModal(
 
 
 function CompactFieldLabel({ children }: { children: ReactNode }) {
-  return <span style={{ fontSize: "13px" }}>{children}</span>;
+  return <span style={{ fontSize: "14px" }}>{children}</span>;
 }
 
 let trackedAppIDs = new Set<string>();
@@ -1327,22 +1327,22 @@ function Content() {
           <Field
             label={<CompactFieldLabel>Status:</CompactFieldLabel>}
             className="sdh-ludusavi-status-field"
-            highlightOnFocus={true}
-            focusable={true}
+            highlightOnFocus={false}
+            focusable={false}
             childrenLayout="inline"
             childrenContainerWidth="min"
             padding="standard"
             bottomSeparator="none"
           >
-            <div className="sdh-ludusavi-status-value" style={{ fontSize: "15px", color: "#cbd5e1", minWidth: 0 }}>
+            <div className="sdh-ludusavi-status-value" style={{ fontSize: "14px", color: "#cbd5e1", minWidth: 0 }}>
               {isBusy && busyLabel === "Loading" ? (
-                <span className="sdh-ludusavi-status-busy" style={{ fontSize: "15px", color: "#60a5fa", fontWeight: "bold" }}>Loading game list...</span>
+                <span className="sdh-ludusavi-status-busy" style={{ fontSize: "14px", color: "#60a5fa", fontWeight: "bold" }}>Loading game list...</span>
               ) : isBusy && busyLabel === "Refreshing games" ? (
-                <span className="sdh-ludusavi-status-busy" style={{ fontSize: "15px", color: "#60a5fa", fontWeight: "bold" }}>Game refresh in progress...</span>
+                <span className="sdh-ludusavi-status-busy" style={{ fontSize: "14px", color: "#60a5fa", fontWeight: "bold" }}>Game refresh in progress...</span>
               ) : isBusy && busyLabel === "Backup running" ? (
-                <span className="sdh-ludusavi-status-busy" style={{ fontSize: "15px", color: "#60a5fa", fontWeight: "bold" }}>Backup in progress...</span>
+                <span className="sdh-ludusavi-status-busy" style={{ fontSize: "14px", color: "#60a5fa", fontWeight: "bold" }}>Backup in progress...</span>
               ) : isBusy && busyLabel === "Restore running" ? (
-                <span className="sdh-ludusavi-status-busy" style={{ fontSize: "15px", color: "#60a5fa", fontWeight: "bold" }}>Restore in progress...</span>
+                <span className="sdh-ludusavi-status-busy" style={{ fontSize: "14px", color: "#60a5fa", fontWeight: "bold" }}>Restore in progress...</span>
               ) : (
                 selectedStatus ? statusLabels[selectedStatus.status] : "No Ludusavi games found"
               )}
@@ -1364,7 +1364,7 @@ function Content() {
             >
               <div
                 className="sdh-ludusavi-last-operation-row"
-                style={{ fontSize: "15px" }}
+                style={{ fontSize: "14px" }}
                 title={
                   selectedHistory.timestamp
                     ? `${getLastOperationText(
@@ -1382,7 +1382,7 @@ function Content() {
                 <div
                   className={`sdh-ludusavi-last-operation-result${selectedHistory.status === "failed" ? " sdh-ludusavi-status-failed" : ""}`}
                   style={{
-                    fontSize: "15px",
+                    fontSize: "14px",
                     color: selectedHistory.status === "failed" ? "#f87171" : "#cbd5e1"
                   }}
                 >
@@ -1397,7 +1397,7 @@ function Content() {
                   <div
                     className="sdh-ludusavi-last-operation-time"
                     style={{
-                      fontSize: "15px",
+                      fontSize: "14px",
                       opacity: 0.65,
                       fontVariantNumeric: "tabular-nums"
                     }}

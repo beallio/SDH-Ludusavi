@@ -1002,14 +1002,13 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
     ]
 
     assert "function CompactFieldLabel" in source
-    assert 'fontSize: "13px"' in source
     assert '[class*="Label"]' not in source
     assert 'className="sdh-ludusavi-status-field"' in status_field
     assert 'childrenContainerWidth="min"' in status_field
     assert 'padding="standard"' in status_field
     assert 'className="sdh-ludusavi-status-value"' in status_field
-    assert 'style={{ fontSize: "15px", color: "#cbd5e1", minWidth: 0 }}' in status_field
-    assert 'style={{ fontSize: "15px", color: "#60a5fa", fontWeight: "bold" }}' in status_field
+    assert 'style={{ fontSize: "14px", color: "#cbd5e1", minWidth: 0 }}' in status_field
+    assert 'style={{ fontSize: "14px", color: "#60a5fa", fontWeight: "bold" }}' in status_field
     assert 'className="sdh-ludusavi-last-operation-field"' in last_operation_field
     assert 'childrenContainerWidth="max"' in last_operation_field
     assert 'padding="compact"' in last_operation_field
