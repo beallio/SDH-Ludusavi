@@ -22,7 +22,6 @@ import { IoMdRefresh } from "react-icons/io";
 
 import { launchLudusavi, LudusaviLaunchCommand } from "./ludusaviLauncher";
 
-import "./index.css";
 import {
   NotificationSettings,
   NotificationCategory,
@@ -222,7 +221,13 @@ function PluginIcon() {
 }
 
 function FullWidthToggle({ children }: { children: ReactNode }) {
-  return <div className="sdh-ludusavi-full-width-toggle">{children}</div>;
+  return (
+    <div style={{ display: "block", marginLeft: "-32px", marginRight: "-32px" }}>
+      <div style={{ boxSizing: "border-box", width: "100%", paddingLeft: "32px", paddingRight: "32px" }}>
+        {children}
+      </div>
+    </div>
+  );
 }
 
 const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
@@ -1326,7 +1331,6 @@ function Content() {
         <PanelSectionRow>
           <Field
             label={<CompactFieldLabel>Status:</CompactFieldLabel>}
-            className="sdh-ludusavi-status-field"
             highlightOnFocus={false}
             focusable={false}
             childrenLayout="inline"
@@ -1334,15 +1338,15 @@ function Content() {
             padding="standard"
             bottomSeparator="none"
           >
-            <div className="sdh-ludusavi-status-value" style={{ fontSize: "14px", color: "#cbd5e1", minWidth: 0 }}>
+            <div style={{ fontSize: "12px", color: "#cbd5e1", minWidth: 0 }}>
               {isBusy && busyLabel === "Loading" ? (
-                <span className="sdh-ludusavi-status-busy" style={{ fontSize: "14px", color: "#60a5fa", fontWeight: "bold" }}>Loading game list...</span>
+                <span style={{ fontSize: "12px", color: "#60a5fa", fontWeight: "bold" }}>Loading game list...</span>
               ) : isBusy && busyLabel === "Refreshing games" ? (
-                <span className="sdh-ludusavi-status-busy" style={{ fontSize: "14px", color: "#60a5fa", fontWeight: "bold" }}>Game refresh in progress...</span>
+                <span style={{ fontSize: "12px", color: "#60a5fa", fontWeight: "bold" }}>Game refresh in progress...</span>
               ) : isBusy && busyLabel === "Backup running" ? (
-                <span className="sdh-ludusavi-status-busy" style={{ fontSize: "14px", color: "#60a5fa", fontWeight: "bold" }}>Backup in progress...</span>
+                <span style={{ fontSize: "12px", color: "#60a5fa", fontWeight: "bold" }}>Backup in progress...</span>
               ) : isBusy && busyLabel === "Restore running" ? (
-                <span className="sdh-ludusavi-status-busy" style={{ fontSize: "14px", color: "#60a5fa", fontWeight: "bold" }}>Restore in progress...</span>
+                <span style={{ fontSize: "12px", color: "#60a5fa", fontWeight: "bold" }}>Restore in progress...</span>
               ) : (
                 selectedStatus ? statusLabels[selectedStatus.status] : "No Ludusavi games found"
               )}
@@ -1354,8 +1358,7 @@ function Content() {
           <PanelSectionRow>
             <Field
               label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}
-              className="sdh-ludusavi-last-operation-field"
-              childrenLayout="below"
+              childrenLayout="inline"
               childrenContainerWidth="max"
               padding="compact"
               bottomSeparator="none"
@@ -1363,47 +1366,30 @@ function Content() {
               highlightOnFocus={false}
             >
               <div
-                className="sdh-ludusavi-last-operation-row"
-                style={{ fontSize: "14px" }}
-                title={
-                  selectedHistory.timestamp
-                    ? `${getLastOperationText(
-                        selectedHistory.status,
-                        selectedHistory.reason,
-                        selectedHistory.message
-                      )} ${selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0]}`
-                    : getLastOperationText(
-                        selectedHistory.status,
-                        selectedHistory.reason,
-                        selectedHistory.message
-                      )
-                }
+                style={{
+                  fontSize: "12px",
+                  color: selectedHistory.status === "failed" ? "#f87171" : "#cbd5e1",
+                  whiteSpace: "normal",
+                  wordBreak: "break-word"
+                }}
               >
-                <div
-                  className={`sdh-ludusavi-last-operation-result${selectedHistory.status === "failed" ? " sdh-ludusavi-status-failed" : ""}`}
-                  style={{
-                    fontSize: "14px",
-                    color: selectedHistory.status === "failed" ? "#f87171" : "#cbd5e1"
-                  }}
-                >
-                  {getLastOperationText(
-                    selectedHistory.status,
-                    selectedHistory.reason,
-                    selectedHistory.message
-                  )}
-                </div>
+                {getLastOperationText(
+                  selectedHistory.status,
+                  selectedHistory.reason,
+                  selectedHistory.message
+                )}
                 {selectedHistory.timestamp &&
                 selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0] ? (
-                  <div
-                    className="sdh-ludusavi-last-operation-time"
+                  <span
                     style={{
-                      fontSize: "14px",
+                      fontSize: "12px",
                       opacity: 0.65,
+                      marginLeft: "6px",
                       fontVariantNumeric: "tabular-nums"
                     }}
                   >
-                    {selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0]}
-                  </div>
+                    ({selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0]})
+                  </span>
                 ) : null}
               </div>
             </Field>
@@ -1501,7 +1487,18 @@ function Content() {
       <PanelSection title="Versions">
         <PanelSectionRow>
           <Field highlightOnFocus={true} focusable={true} childrenLayout="below" padding="standard" bottomSeparator="none">
-            <div className="sdh-ludusavi-versions-list" style={{ fontSize: "15px", color: "#cbd5e1" }}>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                gap: "8px",
+                minWidth: 0,
+                textAlign: "left",
+                fontSize: "12px",
+                color: "#cbd5e1"
+              }}
+            >
               <div>SDH-Ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
               <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
               <div>pyludusavi: {versions.pyludusavi ?? "Unknown"}</div>

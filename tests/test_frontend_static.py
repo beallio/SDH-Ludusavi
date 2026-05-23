@@ -11,7 +11,6 @@ class ConcatenatedFrontendPath:
             Path("src/utils/logging.ts"),
             Path("src/components/LogModal.tsx"),
             Path("src/utils/steam.ts"),
-            Path("src/index.css"),
             Path("src/index.tsx"),
         ]
         contents = []
@@ -865,13 +864,13 @@ def test_frontend_qam_toggle_focus_stretches_to_panel_edges() -> None:
     source = FRONTEND.read_text()
 
     assert "function FullWidthToggle" in source
-    assert 'className="sdh-ludusavi-full-width-toggle"' in source
     assert source.count("<FullWidthToggle>") == 5
-    assert ".sdh-ludusavi-full-width-toggle" in source
-    assert "margin-left: -32px;" in source
-    assert "margin-right: -32px;" in source
-    assert "width: 100%;" in source
-    assert "box-sizing: border-box;" in source
+    assert 'marginLeft: "-32px"' in source
+    assert 'marginRight: "-32px"' in source
+    assert 'boxSizing: "border-box"' in source
+    assert 'width: "100%"' in source
+    assert 'paddingLeft: "32px"' in source
+    assert 'paddingRight: "32px"' in source
 
 
 def test_frontend_qam_toggles_explain_their_scope() -> None:
@@ -959,7 +958,7 @@ def test_frontend_qam_rows_use_native_full_row_focus() -> None:
     )
 
 
-def test_frontend_qam_last_operation_uses_single_line_ellipsis() -> None:
+def test_frontend_qam_last_operation_uses_inline_wrapping_layout() -> None:
     source = FRONTEND.read_text()
 
     game_panel = source[
@@ -976,12 +975,11 @@ def test_frontend_qam_last_operation_uses_single_line_ellipsis() -> None:
         )
     ]
     assert "label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}" in game_panel
-    for text in [
-        'className="sdh-ludusavi-last-operation-row"',
-        "sdh-ludusavi-last-operation-result",
-        'className="sdh-ludusavi-last-operation-time"',
-    ]:
-        assert text in last_operation
+    assert 'childrenLayout="inline"' in last_operation
+    assert 'whiteSpace: "normal"' in last_operation
+    assert 'wordBreak: "break-word"' in last_operation
+    assert 'fontSize: "12px"' in last_operation
+    assert 'fontVariantNumeric: "tabular-nums"' in last_operation
 
 
 def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None:
@@ -1003,24 +1001,12 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
 
     assert "function CompactFieldLabel" in source
     assert '[class*="Label"]' not in source
-    assert 'className="sdh-ludusavi-status-field"' in status_field
     assert 'childrenContainerWidth="min"' in status_field
     assert 'padding="standard"' in status_field
-    assert 'className="sdh-ludusavi-status-value"' in status_field
-    assert 'style={{ fontSize: "14px", color: "#cbd5e1", minWidth: 0 }}' in status_field
-    assert 'style={{ fontSize: "14px", color: "#60a5fa", fontWeight: "bold" }}' in status_field
-    assert 'className="sdh-ludusavi-last-operation-field"' in last_operation_field
+    assert 'style={{ fontSize: "12px", color: "#cbd5e1", minWidth: 0 }}' in status_field
+    assert 'style={{ fontSize: "12px", color: "#60a5fa", fontWeight: "bold" }}' in status_field
     assert 'childrenContainerWidth="max"' in last_operation_field
     assert 'padding="compact"' in last_operation_field
-    assert (
-        ".sdh-ludusavi-last-operation-result {\n  flex: 1 1 auto;\n  min-width: 0;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}"
-        in source
-    )
-    assert (
-        ".sdh-ludusavi-last-operation-time {\n  flex: 0 0 auto;\n  white-space: nowrap;\n}"
-        in source
-    )
-    assert ".sdh-ludusavi-status-value {\n  min-width: 0;\n}" in source
 
 
 def test_frontend_versions_order_places_decky_last() -> None:
@@ -1030,9 +1016,9 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert versions_panel.index("SDH-Ludusavi:") < versions_panel.index("Ludusavi:")
     assert versions_panel.index("Ludusavi:") < versions_panel.index("pyludusavi:")
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
-    assert 'className="sdh-ludusavi-versions-list"' in versions_panel
     assert 'childrenLayout="below"' in versions_panel
-    assert 'style={{ fontSize: "15px", color: "#cbd5e1" }}' in versions_panel
+    assert 'fontSize: "12px"' in versions_panel
+    assert 'gap: "8px"' in versions_panel
 
 
 def test_frontend_gates_warmed_background_refresh_without_loading_label() -> None:
