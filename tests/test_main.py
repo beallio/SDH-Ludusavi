@@ -125,8 +125,9 @@ def test_run_blocking_awaits_threadsafe_future_without_polling() -> None:
     assert "remove_reader" not in attributes
     assert "wait_for" not in attributes
     assert "TimeoutError" not in names
-    assert "call_soon_threadsafe" in attributes
-    assert "create_future" in attributes
+    assert "call_soon_threadsafe" not in attributes
+    assert "create_future" not in attributes
+    assert "to_thread" in attributes
     assert "shield" in attributes
 
 

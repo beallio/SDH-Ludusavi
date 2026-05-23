@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import os
 from pathlib import Path
 import threading
@@ -210,7 +209,7 @@ class Plugin:
 
     async def _unload(self) -> None:
         if self._backend is not None:
-            self._backend.resume_all_paused_processes()
+            self._backend.stop()
         decky.logger.info("SDH-ludusavi backend unloaded")
 
     async def _uninstall(self) -> None:
@@ -296,46 +295,8 @@ async def _run_blocking(callback: Any) -> Any:
     Helper to run a synchronous callback in a dedicated thread while
     maintaining the async event loop's responsiveness.
     """
-    loop = asyncio.get_running_loop()
-    future = loop.create_future()
-    context = contextvars.copy_context()
-
-    def _clean_exception(f: asyncio.Future) -> None:
-        try:
-            f.exception()
-        except BaseException:
-            pass
-
-    future.add_done_callback(_clean_exception)
-
-    def set_result(payload: Any) -> None:
-        if not future.cancelled():
-            future.set_result(payload)
-
-    def set_exception(exc: BaseException) -> None:
-        if not future.cancelled():
-            future.set_exception(exc)
-
-    def signal_completion(callback: Any, payload: Any) -> None:
-        if loop.is_closed():
-            return
-        try:
-            loop.call_soon_threadsafe(callback, payload)
-        except RuntimeError:
-            return
-
-    def worker() -> None:
-        try:
-            result = context.run(callback)
-        except BaseException as exc:
-            signal_completion(set_exception, exc)
-            return
-        signal_completion(set_result, result)
-
-    threading.Thread(target=worker, name="sdh-ludusavi-worker", daemon=True).start()
-
     try:
-        return await asyncio.shield(future)
+        return await asyncio.shield(asyncio.to_thread(callback))
     except asyncio.CancelledError:
         decky.logger.warning(
             "SDH-ludusavi operation was cancelled while worker may still be running"

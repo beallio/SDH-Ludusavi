@@ -1458,3 +1458,99 @@ def test_cache_keys_do_not_override_settings(tmp_path: Path) -> None:
     assert service.get_settings()["selected_game"] == "Hades"
     assert service.get_settings()["notifications"]["enabled"] is True
     assert service._ludusavi_launcher_shortcut_id == 12345
+
+
+def test_watchdog_lazy_initialization_and_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = service_with_state(tmp_path)
+    monkeypatch.setattr("sdh_ludusavi.service._process_tree", lambda pid: [pid])
+    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: None)
+
+    assert not service._watchdog_active
+    assert service._watchdog_thread is None
+
+    # Pause a PID
+    service.pause_game_process(123)
+    assert service._watchdog_active
+    assert service._watchdog_thread is not None
+    assert service._watchdog_thread.is_alive()
+
+    # Resume the PID
+    service.resume_game_process(123)
+
+    # Wait for the watchdog loop to detect the empty list and exit
+    service._watchdog_thread.join(timeout=2.0)
+    assert not service._watchdog_active
+    assert not service._watchdog_thread.is_alive()
+
+
+def test_watchdog_auto_resumption_on_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = service_with_state(tmp_path)
+    signals: list[tuple[int, signal.Signals]] = []
+
+    monkeypatch.setattr("sdh_ludusavi.service._process_tree", lambda pid: [pid])
+    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
+
+    # Start by pausing a PID
+    service.pause_game_process(123)
+    assert 123 in service._paused_pids
+
+    # Fast forward the paused timestamp to 20 seconds ago
+    with service._paused_pids_lock:
+        service._paused_pids[123] = time.time() - 20.0
+
+    # Wait for watchdog thread to run its loop check (within 2 seconds)
+    for _ in range(200):
+        if 123 not in service._paused_pids:
+            break
+        time.sleep(0.01)
+
+    # Assert watchdog automatically resumed it via SIGCONT
+    assert 123 not in service._paused_pids
+    assert (123, signal.SIGCONT) in signals
+
+    # Clean up service stop
+    service.stop()
+
+
+def test_watchdog_does_not_resume_during_active_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = service_with_state(tmp_path)
+    signals: list[tuple[int, signal.Signals]] = []
+
+    monkeypatch.setattr("sdh_ludusavi.service._process_tree", lambda pid: [pid])
+    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
+
+    # Pause a PID
+    service.pause_game_process(123)
+    assert 123 in service._paused_pids
+
+    # Fast forward paused timestamp to 20 seconds ago
+    with service._paused_pids_lock:
+        service._paused_pids[123] = time.time() - 20.0
+
+    # Simulate an active operation (like cloud sync) running
+    service._operation.is_running = True
+
+    # Sleep for a short while (0.2s) and verify watchdog hasn't resumed the PID
+    time.sleep(0.2)
+    assert 123 in service._paused_pids
+    assert (123, signal.SIGCONT) not in signals
+
+    # Mark the operation as finished
+    service._operation.is_running = False
+
+    # Wait for the watchdog to detect the inactive operation status and resume the PID
+    for _ in range(200):
+        if 123 not in service._paused_pids:
+            break
+        time.sleep(0.01)
+
+    assert 123 not in service._paused_pids
+    assert (123, signal.SIGCONT) in signals
+
+    service.stop()

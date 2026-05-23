@@ -6,6 +6,7 @@ import os
 import re
 import signal
 import threading
+import time
 from datetime import datetime
 from collections.abc import Callable
 from collections import deque
@@ -248,8 +249,11 @@ class SDHLudusaviService:
         self._state_lock = threading.RLock()
         self._operation = OperationState()
         self._operation_lock = threading.Lock()
-        self._paused_pids: set[int] = set()
+        self._paused_pids: dict[int, float] = {}
         self._paused_pids_lock = threading.Lock()
+        self._watchdog_active = False
+        self._watchdog_thread: threading.Thread | None = None
+        self._watchdog_stop = threading.Event()
         self._logs: deque[LogEntry] = deque(maxlen=log_limit)
         self._diagnostics_logged = False
         self._setup_logging()
@@ -285,7 +289,8 @@ class SDHLudusaviService:
             )
             return {"status": "failed", "pid": pid, "message": "Unable to pause game process"}
         with self._paused_pids_lock:
-            self._paused_pids.add(pid)
+            self._paused_pids[pid] = time.time()
+            self._ensure_watchdog_running()
         self.log("info", f"Paused game process tree rooted at PID {pid}", "launch_gate")
         return {"status": "paused", "pid": pid}
 
@@ -294,19 +299,74 @@ class SDHLudusaviService:
         pid = int(pid)
         _send_signal_tree(pid, signal.SIGCONT)
         with self._paused_pids_lock:
-            self._paused_pids.discard(pid)
+            self._paused_pids.pop(pid, None)
         self.log("info", f"Resumed game process tree rooted at PID {pid}", "launch_gate")
         return {"status": "resumed", "pid": pid}
 
     def resume_all_paused_processes(self) -> None:
         """Best-effort cleanup for plugin unload or launch-gate failures."""
         with self._paused_pids_lock:
-            paused_pids = sorted(self._paused_pids)
+            paused_pids = sorted(self._paused_pids.keys())
         for pid in paused_pids:
             try:
                 self.resume_game_process(pid)
             except Exception as exc:
                 self.log("warning", f"Unable to resume paused PID {pid}: {exc}", "launch_gate")
+
+    def _ensure_watchdog_running(self) -> None:
+        # Assumes caller holds self._paused_pids_lock
+        if not self._watchdog_active:
+            self._watchdog_active = True
+            self._watchdog_stop.clear()
+            self._watchdog_thread = threading.Thread(
+                target=self._watchdog_loop,
+                name="sdh-ludusavi-watchdog",
+                daemon=True,
+            )
+            self._watchdog_thread.start()
+
+    def _watchdog_loop(self) -> None:
+        while True:
+            if self._watchdog_stop.wait(timeout=1.0):
+                with self._paused_pids_lock:
+                    self._watchdog_active = False
+                break
+
+            now = time.time()
+            stuck_pids = []
+            with self._paused_pids_lock:
+                if not self._paused_pids:
+                    self._watchdog_active = False
+                    break
+                # If a Ludusavi operation is actively running (e.g., slow cloud sync),
+                # do not auto-resume any processes yet.
+                if self._operation.is_running:
+                    continue
+                for pid, paused_at in list(self._paused_pids.items()):
+                    if now - paused_at > 15.0:
+                        stuck_pids.append(pid)
+
+            for pid in stuck_pids:
+                self.log(
+                    "warning",
+                    f"Watchdog detected PID {pid} suspended for too long. Resuming automatically.",
+                    "watchdog",
+                )
+                try:
+                    self.resume_game_process(pid)
+                except Exception as exc:
+                    self.log(
+                        "error",
+                        f"Watchdog failed to resume stuck PID {pid}: {exc}",
+                        "watchdog",
+                    )
+
+    def stop(self) -> None:
+        """Shut down the watchdog thread and resume all paused processes."""
+        self._watchdog_stop.set()
+        if self._watchdog_thread is not None and self._watchdog_thread.is_alive():
+            self._watchdog_thread.join(timeout=1.0)
+        self.resume_all_paused_processes()
 
     def _setup_logging(self) -> None:
         """Configure the standard logging library to route through our handler."""
