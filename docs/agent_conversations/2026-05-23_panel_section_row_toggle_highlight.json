@@ -1,0 +1,17 @@
+{
+  "date": "2026-05-23",
+  "task_objective": "Wrap ToggleField components in PanelSectionRow and remove highlightOnFocus to delegate focus highlighting to the outer containers.",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "test_frontend_toggles_wrapped_in_panel_section_row_without_highlight_on_focus"
+  ],
+  "design_decisions": [
+    "Wrapped all QAM ToggleField components in `<PanelSectionRow>` containers to register them correctly in Decky's navigation grid and allow row-level highlighting.",
+    "Removed the `highlightOnFocus` prop from ToggleField components to prevent nested focus boundary conflicts and ensure the highlight outlines span the full width of the QAM.",
+    "Updated static test suite checks to enforce the wrapped configuration."
+  ],
+  "results": "All 250 tests passed successfully, frontend built and packaged cleanly, quality control audits passed."
+}

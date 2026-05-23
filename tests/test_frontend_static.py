@@ -943,7 +943,7 @@ def test_frontend_qam_rows_use_native_full_row_focus() -> None:
         "Field",
         "highlightOnFocus={true}",
         "focusable={true}",
-        '<ToggleField\n          label="Automatic Sync"\n          description="Runs Ludusavi automatically when configured games start or exit."\n          highlightOnFocus',
+        '<PanelSectionRow>\n          <ToggleField\n            label="Automatic Sync"\n            description="Runs Ludusavi automatically when configured games start or exit."',
         "highlightOnFocus={false}",
         "focusable={false}",
     ]:
@@ -1284,9 +1284,17 @@ def test_frontend_operation_history_translation() -> None:
     assert "selectedHistory.message" in source
 
 
-def test_frontend_toggles_not_wrapped_in_panel_section_row() -> None:
+def test_frontend_toggles_wrapped_in_panel_section_row_without_highlight_on_focus() -> None:
     source = FRONTEND.read_text()
 
-    # We assert that none of the ToggleField elements are wrapped inside a PanelSectionRow.
-    # This means `<PanelSectionRow>\n          <ToggleField` should not be present.
-    assert "<PanelSectionRow>\n          <ToggleField" not in source
+    # The 5 ToggleField elements must be wrapped inside a PanelSectionRow.
+    assert source.count("<PanelSectionRow>\n          <ToggleField") == 5
+
+    # ToggleField components should not contain 'highlightOnFocus' prop inside their definition.
+    idx = 0
+    for _ in range(5):
+        start = source.index("<ToggleField", idx)
+        end = source.index("/>", start)
+        toggle_block = source[start:end]
+        assert "highlightOnFocus" not in toggle_block
+        idx = end
