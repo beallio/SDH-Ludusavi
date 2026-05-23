@@ -1037,8 +1037,10 @@ function Content() {
 
     try {
       log("debug", `Starting initial load (warmed=${isWarmed})`);
-      const loadedSettings = await getSettings();
-      const loadedHistory = await getGameHistoryCall();
+      const [loadedSettings, loadedHistory] = await Promise.all([
+        getSettings(),
+        getGameHistoryCall()
+      ]);
 
       if (!isMounted.current) return;
 

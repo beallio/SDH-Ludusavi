@@ -1242,7 +1242,14 @@ def test_frontend_load_initial_optimizations() -> None:
     load_initial = load_initial[: load_initial.index("const applyRefreshResult")]
 
     assert "Load versions and commands in the background" in load_initial
-    assert "const loadedSettings = await getSettings();" in load_initial
+    assert (
+        "const [loadedSettings, loadedHistory] = await Promise.all([\n"
+        "        getSettings(),\n"
+        "        getGameHistoryCall()\n"
+        "      ]);"
+    ) in load_initial
+    assert "const loadedSettings = await getSettings();" not in load_initial
+    assert "const loadedHistory = await getGameHistoryCall();" not in load_initial
 
     # Verify the Promise.all for settings is NOT there (since settings is loaded on its own now)
     assert (
@@ -1253,6 +1260,17 @@ def test_frontend_load_initial_optimizations() -> None:
     # Verify background loader handles error states appropriately
     assert 'setVersions({ message: loadedVersions.message || "Error" });' in load_initial
     assert 'setVersions({ message: "Error" });' in load_initial
+
+
+def test_frontend_syncs_history_via_dedicated_rpc() -> None:
+    source = FRONTEND.read_text()
+
+    assert (
+        'const getGameHistoryCall = callable<[], RpcResult<Record<string, GameOperationHistory>>>("get_game_history");'
+        in source
+    )
+    assert "async function syncGlobalHistory()" in source
+    assert "await syncGlobalHistory();" in source
 
 
 def test_frontend_status_strip_clears_on_hide() -> None:
