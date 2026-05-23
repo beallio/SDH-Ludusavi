@@ -709,14 +709,8 @@ def test_frontend_exposes_sdh_ludusavi_version_row() -> None:
 
     assert "sdh_ludusavi?: string;" in source
     assert "decky?: string;" in source
-    assert (
-        '<div style={{ fontSize: "10px", color: "#cbd5e1" }}>SDH-Ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>'
-        in source
-    )
-    assert (
-        '<div style={{ fontSize: "10px", color: "#cbd5e1" }}>Decky: {versions.decky ?? "Unknown"}</div>'
-        in source
-    )
+    assert '<div>SDH-Ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>' in source
+    assert '<div>Decky: {versions.decky ?? "Unknown"}</div>' in source
     assert source.index("SDH-Ludusavi:") < source.index("Ludusavi:")
 
 
@@ -1014,8 +1008,8 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
     assert 'childrenContainerWidth="min"' in status_field
     assert 'padding="standard"' in status_field
     assert 'className="sdh-ludusavi-status-value"' in status_field
-    assert 'style={{ fontSize: "10px", color: "#cbd5e1", minWidth: 0 }}' in status_field
-    assert 'style={{ fontSize: "10px", color: "#60a5fa", fontWeight: "bold" }}' in status_field
+    assert 'style={{ fontSize: "11px", color: "#cbd5e1", minWidth: 0 }}' in status_field
+    assert 'style={{ fontSize: "11px", color: "#60a5fa", fontWeight: "bold" }}' in status_field
     assert 'className="sdh-ludusavi-last-operation-field"' in last_operation_field
     assert 'childrenContainerWidth="max"' in last_operation_field
     assert 'padding="compact"' in last_operation_field
@@ -1043,7 +1037,7 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
     assert 'className="sdh-ludusavi-versions-list"' in versions_panel
     assert 'childrenLayout="below"' in versions_panel
-    assert 'style={{ fontSize: "10px", color: "#cbd5e1" }}' in versions_panel
+    assert 'style={{ fontSize: "11px", color: "#cbd5e1" }}' in versions_panel
 
 
 def test_frontend_gates_warmed_background_refresh_without_loading_label() -> None:
