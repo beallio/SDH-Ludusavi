@@ -1,203 +1,77 @@
 # SDH-Ludusavi
 
-SDH-Ludusavi is a Decky Loader plugin that surfaces Ludusavi save backup and
-restore controls in the Steam Deck side panel.
-
-Ludusavi remains the source of truth for configured games, backup paths, cloud
-settings, and restore behavior. The plugin stores only local UI state, cached
-game status, operation status, and recent operation logs.
+SDH-Ludusavi is a Decky Loader plugin that surfaces Ludusavi save backup and restore controls in the Steam Deck side panel.
 
 ## Features
 
-- **Automatic Sync:** Automates save lifecycle management:
-  - **On Game Start:** Pauses the launched game process, restores your save if the Ludusavi backup is newer than the local files, and resumes the game afterward. If local and backup recency is ambiguous, the plugin asks whether to keep the local save or restore the backup save.
-  - **On Game Exit:** Automatically performs a backup immediately after closing the game, including cloud synchronization if Ludusavi/rclone is configured.
-  - **Safety First:** Skips operations if another operation is already running and always resumes any paused launch process after a start-sync decision.
-- **Unified Logging:** Frontend and backend logs are consolidated into the Decky Loader system log and accessible via a "View Logs" modal with timestamps and chronological ordering.
-- **Persistent Settings:** Remembers your selected game and sync preferences across plugin reloads.
-- **Autosync Status Strip:** Shows compact SteamOS-style backup and restore progress at
-  the bottom of the screen. Routine autosync progress and success states use the strip;
-  failures still use Decky toasts.
-- **Notification Preferences:** Toggle all plugin toasts off or control manual operation,
-  refresh status, and failure/error notifications independently.
-- **Ludusavi Integration:** Direct selector for Ludusavi game entries with real-time status display (e.g., "Backup ready", "Needs first backup").
-- **Manual Overrides:** Refresh Games, Force Backup, and Force Restore actions are always available, even when Automatic Sync is disabled.
-- **Shortcut Artwork:** The plugin-managed Ludusavi launcher shortcut uses bundled local
-  capsule, hero, and logo artwork and does not fetch SteamGridDB assets at runtime.
-- **Version Display:** SDH-Ludusavi, Decky, Ludusavi, and pyludusavi version information.
+- **Automatic Sync**: Restores your save if the backup is newer before a game starts, and automatically performs a backup after you exit.
+- **SteamOS Integration**: Shows compact progress strips for background sync events, just like official Steam Cloud sync.
+- **Launch Gate**: Pauses game launch if a save conflict is detected, allowing you to choose which save to keep.
+- **Manual Control**: Force backup or restore for any Ludusavi-managed game at any time.
+- **Unified Logging**: View backend and frontend logs directly within the plugin's "View Logs" modal.
 
-## Requirements
+## Installation (Early Access)
 
-- Decky Loader.
-- Ludusavi Flatpak: `com.github.mtkennerly.ludusavi`.
-- Python package dependency: `pyludusavi`.
-- Frontend dependencies from `package.json`.
+As the plugin is currently in development and not yet available in the Decky Store, follow these steps to install it manually.
 
-The backend locates Ludusavi through the vendored `pyludusavi` package. It constructs
-`pyludusavi.Ludusavi(flatpak_id="com.github.mtkennerly.ludusavi", env=...)` with
-Deck-compatible environment overrides. The overrides provide `XDG_RUNTIME_DIR` when
-Decky omits it and clear `LD_LIBRARY_PATH` for Ludusavi subprocesses.
+### 1. Enable Decky Loader Developer Mode
+1. Open the Decky Loader menu in the Steam Deck Quick Access Menu (QAM).
+2. Go to **Settings** (the gear icon).
+3. Under **General**, scroll down to find **Developer Mode** and toggle it **On**.
 
-## Development Setup
+### 2. Install the Plugin
+You have two options for manual installation through the Decky Loader's Developer menu:
 
-Use the wrapper so Python virtual environments and caches stay outside Dropbox:
+- **Option A: Install from URL**
+  1. In the Decky Settings, go to the **Developer** tab.
+  2. Select **Install from URL**.
+  3. Enter the URL for the latest SDH-Ludusavi release (e.g., `https://example.com/SDH-Ludusavi.zip`) and click **Install**.
 
-```bash
-./run.sh uv sync
-```
+- **Option B: Install from Local ZIP**
+  1. Download the latest `SDH-Ludusavi.zip` to your Steam Deck.
+  2. In the Decky Settings, go to the **Developer** tab.
+  3. Select **Install from Local ZIP**.
+  4. Navigate to and select the downloaded `.zip` file.
 
-The wrapper stores Python tooling state under `/tmp/sdh_ludusavi`.
+## Prerequisites
 
-## State and Runtime Privileges
+- **Decky Loader**: Installed and running on your Steam Deck.
+- **Ludusavi Flatpak**: This plugin requires the Ludusavi Flatpak to manage saves. You can install it from the Discover store or via terminal:
+  ```bash
+  flatpak install flathub com.github.mtkennerly.ludusavi
+  ```
 
-Runtime settings are stored through Decky's `SettingsManager` in
-`DECKY_PLUGIN_SETTINGS_DIR/settings.json`. Runtime cache data is stored separately in
-`DECKY_PLUGIN_RUNTIME_DIR/cache.json`, including cached Ludusavi game status, app ID
-markers, shortcut IDs, and operation history. The plugin does not write mutable data
-under `DECKY_PLUGIN_DIR`, because Decky can replace that directory during updates.
-Tooling caches still live under `/tmp/sdh_ludusavi`.
+## Recommended Workflow (The "Gold Standard")
 
-`plugin.json` does not request Decky's `_root` flag. The backend runs as the Decky user
-so the Ludusavi Flatpak can see that user's Ludusavi configuration, backup metadata,
-and Flatpak runtime state. If a future feature needs elevated privileges, it should be
-validated separately without regressing Ludusavi access.
+For the best experience, we recommend pairing SDH-Ludusavi with **SyncThingy** to ensure your saves are synchronized across devices without the lag or offline limitations of traditional cloud providers.
 
-## Project Structure
+### 1. Setup SyncThingy
+1. Install the SyncThingy Flatpak:
+   ```bash
+   flatpak install flathub com.github.zocker_160.SyncThingy
+   ```
+2. Open SyncThingy and follow its internal instructions to set up the systemd service for background synchronization.
+3. (Optional) Install the **Syncthing** plugin from the Decky Store to monitor sync status directly from Game Mode.
 
-The installable Decky plugin is built from these required files:
+### 2. Configure Save Sync
+1. In **Ludusavi**, set your backup directory to a folder that SyncThingy will watch (e.g., `/home/deck/ludusavi-backup`).
+2. In **SyncThingy**, share that folder with your other nodes (PC, other Deck, etc.).
+3. **Note**: Ensure that at least one node is online during sync events (game start/exit) to guarantee your saves propagate correctly.
 
-- `plugin.json`: Decky plugin metadata.
-- `package.json`: frontend package metadata and version.
-- `main.py`: Python backend entry point for Decky RPC calls.
-- `py_modules/sdh_ludusavi/`: Python backend modules on Decky's runtime import path.
-- `py_modules/pyludusavi/`: vendored pure-Python Ludusavi adapter dependency.
-- `src/index.tsx`: TypeScript frontend source.
-- `assets/steamgrid/ludusavi/`: bundled local artwork source files for the
-  plugin-managed Ludusavi launcher shortcut.
-- `dist/`: generated frontend bundle, source map, and built frontend assets from
-  `pnpm run build`, including hashed artwork files emitted from the local assets.
-- `LICENSE`: redistributable license text.
+### 3. Why Syncthing?
+While Ludusavi supports traditional cloud providers (rclone), using them can introduce significant lag during game launch and exit as files are uploaded/downloaded. Furthermore, cloud sync will fail if your Steam Deck is offline.
 
-Install frontend dependencies when needed:
+Using Syncthing allows for near-instant local backups that sync in the background. You can still use Ludusavi's [Backup Retention](https://github.com/mtkennerly/ludusavi/blob/master/docs/help/backup-retention.md) settings to manage versions and diffs.
 
-```bash
-pnpm install --frozen-lockfile --ignore-scripts
-```
+*See also: Ludusavi [Cloud Backup](https://github.com/mtkennerly/ludusavi/blob/master/docs/help/cloud-backup.md) documentation.*
 
-The repository uses `pnpm-lock.yaml` as the canonical frontend lockfile. Do not
-use `npm install` or add `package-lock.json`. The pnpm store and heavy virtual
-store are configured under `/tmp/sdh_ludusavi`; the local `node_modules/`
-directory is ignored and contains only pnpm links/bin shims needed by package
-scripts.
+## Understanding Status Messages
 
-## Usage
-
-Run backend tests:
-
-```bash
-./run.sh uv run pytest
-```
-
-Build the Decky frontend:
-
-```bash
-pnpm run build
-```
-
-Run frontend supply-chain checks:
-
-```bash
-pnpm run verify
-```
-
-Create the Decky plugin zip:
-
-```bash
-./run.sh uv run python scripts/package_plugin.py
-```
-
-The package is written to `out/SDH-Ludusavi.zip` and contains a top-level
-`SDH-Ludusavi/` plugin directory. The local post-commit hook runs
-`scripts/post_commit.sh`, which rebuilds `dist/` and recreates that zip after each
-commit.
-
-## Ludusavi Launcher Shortcut
-
-When launching the Ludusavi GUI, the plugin uses a visible non-Steam shortcut named
-`"Ludusavi"`. The plugin searches Steam's app list by that exact name before using the
-cached AppID. If a matching shortcut already exists, the plugin adopts the matching
-shortcut and refreshes its cached AppID instead of creating a duplicate.
-
-If no named shortcut exists, the plugin validates the cached AppID and renames that
-shortcut to `"Ludusavi"` when it is still present. If the cache points to a deleted
-shortcut, the plugin creates a new visible `"Ludusavi"` shortcut, stores the new AppID,
-and updates its executable, launch options, compatibility tool, and bundled artwork
-before launch. The plugin does not hide the shortcut.
-
-## Status Messages
-
-Game status values:
-
-- `has_backup`: Ludusavi recognizes at least one backup for the game. The UI labels this as `Backup ready`.
-- `needs_first_backup`: Ludusavi recognizes the game, but no backup exists yet. This is the normal no-backup state. The UI labels this as `Needs first backup`.
-- `configured`: Ludusavi recognizes the game, but the plugin has not marked it as `has_backup` or `needs_first_backup`. This is a fallback state for ambiguous status data.
-- `error`: Ludusavi reported a failed file, registry item, or invalid game state for the game.
-
-Operation result values:
-
-- `backed_up`: A backup operation completed for the selected or matched game.
-- `restored`: A restore operation completed for the selected or matched game.
-- `skipped`: The plugin intentionally did not run backup or restore. See the skip reasons below.
-- `failed`: The frontend caught an unexpected operation failure and displays the error message.
-
-Skip reasons:
-
-- `auto_sync_disabled`: Automatic Sync is off. Manual Force Backup and Force Restore remain available.
-- `operation_running`: Another refresh, backup, restore, or version lookup is already running.
-- `unmatched_game`: The provided game name did not confidently match a Ludusavi game name.
-- `no_backup`: Restore was requested or considered, but Ludusavi has no backup for that game.
-- `local_current`: On game start, Ludusavi data indicated the local save is already current.
-- `ambiguous_recency`: On game start, the plugin could not prove that the backup is newer than the local save. The launch-gated flow shows a conflict modal with `Keep Local Save` and `Restore Backup Save`.
-- `conflict_unresolved`: The user dismissed the conflict modal, so no save data was moved.
-
-Durable History entries:
-
-- `last_backup`: The latest successful backup for the game.
-- `last_restore`: The latest successful restore for the game.
-- `last_skip`: The latest intentional skip for the game (e.g., local files already current).
-- `last_failure`: The latest game-scoped exception during a backup or restore.
-
-Operation status fields:
-
-- `is_running`: `true` while the global operation lock is held.
-- `name`: The active operation name, such as `refresh`, `backup`, `restore`, or `versions`.
-- `game_name`: The game associated with the active operation, when applicable.
-- `last_result`: `ok` after a successful locked operation, `failed` after an exception, or `null` before any operation result is recorded.
-- `last_error`: The latest operation error text, or `null` when no error is recorded.
-
-Other UI states:
-
-- `dependency_error`: A refresh-time dependency or Ludusavi error shown directly in the panel.
-- `No Ludusavi games found`: The UI has no cached Ludusavi games to show in the selector.
-- `Unknown`: Version information is not available for Ludusavi or rclone.
-- Notification preferences live in their own panel above the Ludusavi launcher controls.
-  Turning off `All Notifications` suppresses every Decky toast from the plugin and disables
-  the granular notification controls until it is turned back on. Autosync progress and
-  successful results are shown through the bottom status strip instead of routine toasts.
-- Log levels are currently `info` for normal decisions and `error` for refresh or dependency failures.
-
-## Validation
-
-Before committing changes, run:
-
-```bash
-./run.sh uv run ruff check . --fix
-./run.sh uv run ruff format .
-./run.sh uv run ty check py_modules/sdh_ludusavi/
-./run.sh uv run pytest
-pnpm run build
-```
+- **Backup ready**: Ludusavi has a valid backup for this game.
+- **Needs first backup**: Ludusavi recognizes the game, but no backup has been created yet.
+- **Skipped — local save is already current**: The plugin detected that your local save matches or is newer than the backup, so no restore was performed.
+- **Skipped — recency is ambiguous**: The plugin couldn't determine which save is newer and will prompt you to choose.
 
 ## License
 
-MIT - See [LICENSE](LICENSE) for details.
+MIT - See [LICENSE](LICENSE) for details. For technical details, see [DEVELOPMENT.md](DEVELOPMENT.md).

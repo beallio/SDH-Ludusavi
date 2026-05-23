@@ -95,6 +95,7 @@ Generated projects use this structure:
 
 ```
 AGENTS.md
+DEVELOPMENT.md
 .protocol
 .envrc
 .python-version
@@ -384,6 +385,7 @@ Every project must include:
 
 ```
 README.md
+DEVELOPMENT.md
 docs/
 docs/plans/
 docs/specs/
