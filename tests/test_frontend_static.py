@@ -1015,10 +1015,10 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
     assert 'childrenLayout="below"' in versions_panel
     assert (
-        'fontSize: "16px",\n                color: "#cbd5e1",\n                paddingLeft: "10px"'
+        'fontSize: "14px",\n                color: "#cbd5e1",\n                paddingLeft: "10px"'
         in versions_panel
     )
-    assert 'gap: "8px"' in versions_panel
+    assert 'gap: "7px"' in versions_panel
 
 
 def test_frontend_gates_warmed_background_refresh_without_loading_label() -> None:

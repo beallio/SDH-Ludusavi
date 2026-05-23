@@ -119,11 +119,10 @@ function formatTime12h(timeStr: string): string {
   if (parts.length < 2) return timeStr;
   let hours = parseInt(parts[0], 10);
   const minutes = parts[1];
-  const seconds = parts[2] ? `:${parts[2]}` : "";
   const ampm = hours >= 12 ? "PM" : "AM";
   hours = hours % 12;
   hours = hours ? hours : 12;
-  return `${hours}:${minutes}${seconds} ${ampm}`;
+  return `${hours}:${minutes} ${ampm}`;
 }
 
 async function syncGlobalHistory() {
@@ -1530,10 +1529,10 @@ function Content() {
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "flex-start",
-                gap: "8px",
+                gap: "7px",
                 minWidth: 0,
                 textAlign: "left",
-                fontSize: "16px",
+                fontSize: "14px",
                 color: "#cbd5e1",
                 paddingLeft: "10px"
               }}
