@@ -860,19 +860,6 @@ def test_frontend_qam_uses_custom_plugin_icon_and_plain_title() -> None:
     assert 'titleView: <div className="sdh-ludusavi-title">SDH-Ludusavi</div>' in source
 
 
-def test_frontend_qam_toggle_focus_stretches_to_panel_edges() -> None:
-    source = FRONTEND.read_text()
-
-    assert "function FullWidthToggle" in source
-    assert source.count("<FullWidthToggle>") == 5
-    assert 'marginLeft: "-32px"' in source
-    assert 'marginRight: "-32px"' in source
-    assert 'boxSizing: "border-box"' in source
-    assert 'width: "100%"' in source
-    assert 'paddingLeft: "32px"' in source
-    assert 'paddingRight: "32px"' in source
-
-
 def test_frontend_qam_toggles_explain_their_scope() -> None:
     source = FRONTEND.read_text()
 
@@ -956,7 +943,7 @@ def test_frontend_qam_rows_use_native_full_row_focus() -> None:
         "Field",
         "highlightOnFocus={true}",
         "focusable={true}",
-        '<ToggleField\n            label="Automatic Sync"\n            description="Runs Ludusavi automatically when configured games start or exit."\n            highlightOnFocus={true}',
+        '<ToggleField\n            label="Automatic Sync"\n            description="Runs Ludusavi automatically when configured games start or exit."\n            highlightOnFocus',
         "highlightOnFocus={false}",
         "focusable={false}",
     ]:
