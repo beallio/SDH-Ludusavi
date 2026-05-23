@@ -988,6 +988,7 @@ def test_frontend_qam_last_operation_uses_inline_wrapping_layout() -> None:
     ]
     assert "Last Operation:" in game_panel
     assert 'width: "120px"' in last_operation
+    assert "minWidth: 0" in last_operation
     assert 'whiteSpace: "normal"' in last_operation
     assert 'wordBreak: "break-word"' in last_operation
     assert 'fontSize: "12px"' in last_operation
@@ -1027,7 +1028,7 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
     assert 'childrenLayout="below"' in versions_panel
     assert (
-        'fontSize: "15px",\n                color: "#cbd5e1",\n                paddingLeft: "12px"'
+        'fontSize: "16px",\n                color: "#cbd5e1",\n                paddingLeft: "24px"'
         in versions_panel
     )
     assert 'gap: "8px"' in versions_panel

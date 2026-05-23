@@ -1366,6 +1366,7 @@ function Content() {
                   <div
                     style={{
                       flexGrow: 1,
+                      minWidth: 0,
                       color: selectedHistory.status === "failed" ? "#f87171" : "#cbd5e1",
                       whiteSpace: "normal",
                       wordBreak: "break-word",
@@ -1496,9 +1497,9 @@ function Content() {
                 gap: "8px",
                 minWidth: 0,
                 textAlign: "left",
-                fontSize: "15px",
+                fontSize: "16px",
                 color: "#cbd5e1",
-                paddingLeft: "12px"
+                paddingLeft: "24px"
               }}
             >
               <div>SDH-Ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>

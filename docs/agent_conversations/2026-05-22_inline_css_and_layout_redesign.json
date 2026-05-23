@@ -18,9 +18,10 @@
     "Deleted the CSS stylesheet entirely because it appends styles to the background loader frame instead of the rendering window context.",
     "Inlined all CSS rules directly into the React components (FullWidthToggle, Versions container, Status and Last Operation fields).",
     "Combined Status and Last Operation into a single Field component inside a single PanelSectionRow. Used a vertical flex layout with gap='6px' to reduce the vertical spacing between the rows.",
-    "Implemented a custom 2-column flex layout within the combined Field children using a fixed-width left span (120px) to keep both labels perfectly left-aligned with each other and the panel edge, and a flex-grow right column with textAlign='left' for values. This lets values wrap cleanly within the remaining space.",
+    "Set childrenLayout='below' on the parent Field component. This bypasses the default 50% width limits applied by the Steam client to inline fields, allowing our custom 2-column layout to fill the full width of the panel.",
+    "Implemented a custom 2-column flex layout within the Field children using a fixed-width left span (120px) to keep both labels perfectly left-aligned with each other and the panel edge, and a flex-grow right column with textAlign='left' for values. This lets values wrap cleanly within the remaining space.",
     "Appended parenthesized timestamp (HH:MM:SS) inline at the end of the Last Operation text.",
-    "Increased the spacing between versions list items to a gap of 8px and set font-size of Versions to 14px."
+    "Increased the spacing between versions list items to a gap of 8px, set font-size of Versions to 15px, and added paddingLeft: '12px' to indent the versions records to the right."
   ],
   "results": "All 246 python unit tests passed, typescript check passed, and frontend rollup build compiled successfully."
 }
