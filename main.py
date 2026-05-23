@@ -63,6 +63,9 @@ class Plugin:
     async def get_settings(self) -> dict[str, Any]:
         return await self._call("get_settings", lambda: self._service().get_settings())
 
+    async def get_game_history(self) -> dict[str, dict[str, Any]]:
+        return await self._call("get_game_history", lambda: self._service().get_game_history())
+
     async def set_auto_sync_enabled(self, enabled: bool) -> dict[str, Any]:
         return await self._call(
             "set_auto_sync_enabled", lambda: self._service().set_auto_sync_enabled(enabled)

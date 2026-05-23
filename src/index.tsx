@@ -126,10 +126,25 @@ function formatTime12h(timeStr: string): string {
   return `${hours}:${minutes}${seconds} ${ampm}`;
 }
 
+async function syncGlobalHistory() {
+  try {
+    const historyRes = await getGameHistoryCall();
+    if (!isRpcStatus(historyRes)) {
+      globalGameHistory = historyRes;
+      if (updateGameHistoryListener) {
+        updateGameHistoryListener(historyRes);
+      }
+    }
+  } catch (err) {
+    log("error", `Failed to sync global history: ${err}`);
+  }
+}
+
 
 
 
 const getSettings = callable<[], RpcResult<Settings>>("get_settings");
+const getGameHistoryCall = callable<[], RpcResult<Record<string, GameOperationHistory>>>("get_game_history");
 const setAutoSyncEnabled = callable<[enabled: boolean], RpcResult<Settings>>("set_auto_sync_enabled");
 const setNotificationSettings = callable<[settings: NotificationSettings], RpcResult<Settings>>("set_notification_settings");
 const setSelectedGameCall = callable<[gameName: string], RpcResult<Settings>>("set_selected_game");
@@ -841,6 +856,7 @@ function logRpcStatus(result: RpcStatus, operation: string) {
   log(level, message, operation);
 }
 
+let updateGameHistoryListener: ((history: Record<string, GameOperationHistory>) => void) | null = null;
 let globalSettings: Settings | null = null;
 let globalGames: GameStatus[] | null = null;
 let globalGameAliases: Record<string, string> | null = null;
@@ -938,10 +954,16 @@ function Content() {
 
   useEffect(() => {
     isMounted.current = true;
+    updateGameHistoryListener = (history) => {
+      if (isMounted.current) {
+        setGameHistory(history);
+      }
+    };
     log("info", "Plugin mounted, starting initial load");
     void loadInitial();
     return () => {
       isMounted.current = false;
+      updateGameHistoryListener = null;
     };
   }, []);
 
@@ -1025,6 +1047,7 @@ function Content() {
     try {
       log("debug", `Starting initial load (warmed=${isWarmed})`);
       const loadedSettings = await getSettings();
+      const loadedHistory = await getGameHistoryCall();
 
       if (!isMounted.current) return;
 
@@ -1036,6 +1059,13 @@ function Content() {
         if (normalizedSettings.selected_game) {
           setSelectedGame(normalizedSettings.selected_game);
         }
+      }
+
+      if (isRpcStatus(loadedHistory)) {
+        logRpcStatus(loadedHistory, "history");
+      } else {
+        setGameHistory(loadedHistory);
+        globalGameHistory = loadedHistory;
       }
 
       log("debug", "Initializing game list (cached)");
@@ -1775,6 +1805,7 @@ export default definePlugin(() => {
           log("error", `Failed to resume game process ${instanceID}: ${err}`, "lifecycle", name);
         }
       }
+      await syncGlobalHistory();
     }
   };
 
@@ -1837,6 +1868,8 @@ export default definePlugin(() => {
         tracked,
         resultStatus: "failed"
       });
+    } finally {
+      await syncGlobalHistory();
     }
   };
 

@@ -401,6 +401,10 @@ class SDHLudusaviService:
             "notifications": dict(self._notification_settings),
         }
 
+    def get_game_history(self) -> dict[str, dict[str, Any]]:
+        """Return the current game operation history."""
+        return self._game_history
+
     def set_auto_sync_enabled(self, enabled: bool) -> dict[str, Any]:
         """Update the automatic sync setting and persist it to disk."""
         self._auto_sync_enabled = bool(enabled)
