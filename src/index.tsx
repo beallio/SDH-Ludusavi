@@ -1320,17 +1320,15 @@ function Content() {
     <div ref={qamContentRef}>
 
       <PanelSection title="GLOBAL">
-        <PanelSectionRow>
-          <ToggleField
-            label="Automatic Sync"
-            description="Runs Ludusavi automatically when configured games start or exit."
-            highlightOnFocus
-            bottomSeparator="none"
-            checked={settings.auto_sync_enabled}
-            disabled={isBusy}
-            onChange={(enabled: boolean) => void toggleAutoSync(enabled)}
-          />
-        </PanelSectionRow>
+        <ToggleField
+          label="Automatic Sync"
+          description="Runs Ludusavi automatically when configured games start or exit."
+          highlightOnFocus
+          bottomSeparator="none"
+          checked={settings.auto_sync_enabled}
+          disabled={isBusy}
+          onChange={(enabled: boolean) => void toggleAutoSync(enabled)}
+        />
 
         <PanelSectionRow>
           <SpinnerButton
@@ -1466,50 +1464,42 @@ function Content() {
       </PanelSection>
 
       <PanelSection title="Notifications">
-        <PanelSectionRow>
-          <ToggleField
-            label="All Notifications"
-            description="Enables or silences all SDH-Ludusavi toast notifications."
-            highlightOnFocus
-            bottomSeparator="standard"
-            checked={settings.notifications.enabled}
-            disabled={isBusy}
-            onChange={(enabled: boolean) => void toggleNotificationSetting("enabled", enabled)}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ToggleField
-            label="Manual Operations"
-            description="Shows toasts for Force Backup and Force Restore results."
-            highlightOnFocus
-            bottomSeparator="standard"
-            checked={settings.notifications.manual_operations}
-            disabled={!settings.notifications.enabled || isBusy}
-            onChange={(enabled: boolean) => void toggleNotificationSetting("manual_operations", enabled)}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ToggleField
-            label="Refresh Status"
-            description="Shows toasts when the game list refresh completes or fails."
-            highlightOnFocus
-            bottomSeparator="standard"
-            checked={settings.notifications.refresh_status}
-            disabled={!settings.notifications.enabled || isBusy}
-            onChange={(enabled: boolean) => void toggleNotificationSetting("refresh_status", enabled)}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ToggleField
-            label="Failures and Errors"
-            description="Shows warning toasts when sync or Ludusavi operations fail."
-            highlightOnFocus
-            bottomSeparator="none"
-            checked={settings.notifications.failures_errors}
-            disabled={!settings.notifications.enabled || isBusy}
-            onChange={(enabled: boolean) => void toggleNotificationSetting("failures_errors", enabled)}
-          />
-        </PanelSectionRow>
+        <ToggleField
+          label="All Notifications"
+          description="Enables or silences all SDH-Ludusavi toast notifications."
+          highlightOnFocus
+          bottomSeparator="standard"
+          checked={settings.notifications.enabled}
+          disabled={isBusy}
+          onChange={(enabled: boolean) => void toggleNotificationSetting("enabled", enabled)}
+        />
+        <ToggleField
+          label="Manual Operations"
+          description="Shows toasts for Force Backup and Force Restore results."
+          highlightOnFocus
+          bottomSeparator="standard"
+          checked={settings.notifications.manual_operations}
+          disabled={!settings.notifications.enabled || isBusy}
+          onChange={(enabled: boolean) => void toggleNotificationSetting("manual_operations", enabled)}
+        />
+        <ToggleField
+          label="Refresh Status"
+          description="Shows toasts when the game list refresh completes or fails."
+          highlightOnFocus
+          bottomSeparator="standard"
+          checked={settings.notifications.refresh_status}
+          disabled={!settings.notifications.enabled || isBusy}
+          onChange={(enabled: boolean) => void toggleNotificationSetting("refresh_status", enabled)}
+        />
+        <ToggleField
+          label="Failures and Errors"
+          description="Shows warning toasts when sync or Ludusavi operations fail."
+          highlightOnFocus
+          bottomSeparator="none"
+          checked={settings.notifications.failures_errors}
+          disabled={!settings.notifications.enabled || isBusy}
+          onChange={(enabled: boolean) => void toggleNotificationSetting("failures_errors", enabled)}
+        />
       </PanelSection>
 
       <LudusaviPanel ludusaviCommand={ludusaviCommand} isLoading={busyLabel === "Loading"} />

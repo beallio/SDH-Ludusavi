@@ -1,28 +1,30 @@
-# Plan: Fix Focus Highlight Width via PanelSectionRow Wrapper
+# Plan: Fix Focus Highlight Width via Native ToggleField Highlight
 
-Wrap all `ToggleField` elements in standard `<PanelSectionRow>` components to restore correct focus navigation and full-width highlighting in the QAM panel.
+Remove the `<PanelSectionRow>` wrappers from all `ToggleField` elements and configure them with native `highlightOnFocus` props to restore full-width focus highlights in the Quick Access Menu (QAM).
 
 ## Problem Definition
-- Removing the custom `FullWidthToggle` wrapper and placing `ToggleField` directly under `<PanelSection>` broke focus navigation and highlight rendering entirely.
-- In the Decky Loader UI framework (`@decky/ui`), all interactive controls inside a `<PanelSection>` must be wrapped in a `<PanelSectionRow>` to be registered correctly in the QAM's vertical navigation container and to receive native focus highlight styling.
-
-## Architecture Overview
-- We will modify `src/index.tsx` to wrap each of the 5 `ToggleField` elements in a `<PanelSectionRow>`.
-- We will update the test suite to ensure that these `ToggleField` elements are correctly identified as wrapped inside `PanelSectionRow` components.
+- In the previous approach, all `ToggleField` elements were wrapped in `<PanelSectionRow>` containers. This broke the native focus highlighting mechanism of `ToggleField`, making it fail to render correctly or function at all.
+- In `@decky/ui`, `ToggleField` is a self-contained row component designed to be a direct child of a `<PanelSection>`. Placing it inside `<PanelSectionRow>` causes focus/highlight rendering conflicts.
 
 ## Proposed Changes
 
 ### [Frontend Components]
 
 #### [MODIFY] [src/index.tsx](file:///home/beallio/Dropbox/Scripts/SDH-ludusavi/src/index.tsx)
-- Wrap the "Automatic Sync" `ToggleField` in `<PanelSectionRow>`.
-- Wrap the "All Notifications", "Manual Operations", "Refresh Status", and "Failures and Errors" `ToggleField` components in `<PanelSectionRow>` elements.
+- Remove the `<PanelSectionRow>` wrapper elements around the 5 `ToggleField` instances.
+- Ensure all 5 `ToggleField` components are direct children of their respective `<PanelSection>` elements and have `highlightOnFocus` set.
 
 ### [Tests]
 
 #### [MODIFY] [tests/test_frontend_static.py](file:///home/beallio/Dropbox/Scripts/SDH-ludusavi/tests/test_frontend_static.py)
-- Update static test assertions in `tests/test_frontend_static.py` to expect the `<PanelSectionRow>` wrappers.
+- Update static assertions to match the unwrapped layout structure.
+- Add a test checking that no `ToggleField` component is wrapped inside a `PanelSectionRow`.
 
-## Testing Strategy
-1. Build the frontend via `pnpm run build`.
-2. Run pytest suite `./run.sh uv run pytest` and verify all tests pass.
+## Verification Plan
+
+### Automated Tests
+- Build the frontend and run pytest:
+  ```bash
+  pnpm run build
+  ./run.sh uv run pytest
+  ```

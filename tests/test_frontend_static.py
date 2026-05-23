@@ -943,7 +943,7 @@ def test_frontend_qam_rows_use_native_full_row_focus() -> None:
         "Field",
         "highlightOnFocus={true}",
         "focusable={true}",
-        '<ToggleField\n            label="Automatic Sync"\n            description="Runs Ludusavi automatically when configured games start or exit."\n            highlightOnFocus',
+        '<ToggleField\n          label="Automatic Sync"\n          description="Runs Ludusavi automatically when configured games start or exit."\n          highlightOnFocus',
         "highlightOnFocus={false}",
         "focusable={false}",
     ]:
@@ -1282,3 +1282,11 @@ def test_frontend_operation_history_translation() -> None:
 
     # Check that the call sites pass selectedHistory.message
     assert "selectedHistory.message" in source
+
+
+def test_frontend_toggles_not_wrapped_in_panel_section_row() -> None:
+    source = FRONTEND.read_text()
+
+    # We assert that none of the ToggleField elements are wrapped inside a PanelSectionRow.
+    # This means `<PanelSectionRow>\n          <ToggleField` should not be present.
+    assert "<PanelSectionRow>\n          <ToggleField" not in source
