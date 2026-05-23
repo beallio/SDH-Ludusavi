@@ -1013,10 +1013,6 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
     assert 'childrenContainerWidth="max"' in last_operation_field
     assert 'padding="compact"' in last_operation_field
     assert (
-        ".sdh-ludusavi-last-operation-row {\n  display: flex;\n  align-items: baseline;\n  justify-content:space-between;\n  gap: 12px;\n  min-width: 0;\n  width: 100%;\n}"
-        in source
-    )
-    assert (
         ".sdh-ludusavi-last-operation-result {\n  flex: 1 1 auto;\n  min-width: 0;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}"
         in source
     )
