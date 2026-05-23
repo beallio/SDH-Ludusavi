@@ -114,6 +114,18 @@ function getLastOperationText(
   }
 }
 
+function formatTime12h(timeStr: string): string {
+  const parts = timeStr.split(":");
+  if (parts.length < 2) return timeStr;
+  let hours = parseInt(parts[0], 10);
+  const minutes = parts[1];
+  const seconds = parts[2] ? `:${parts[2]}` : "";
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  return `${hours}:${minutes}${seconds} ${ampm}`;
+}
+
 
 
 
@@ -1339,7 +1351,7 @@ function Content() {
             <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
               {/* Status Row */}
               <div style={{ display: "flex", width: "100%", alignItems: "center", fontSize: "12px" }}>
-                <span style={{ width: "120px", flexShrink: 0 }}>
+                <span style={{ width: "110px", flexShrink: 0 }}>
                   <CompactFieldLabel>Status:</CompactFieldLabel>
                 </span>
                 <div style={{ flexGrow: 1, color: "#cbd5e1", minWidth: 0, textAlign: "left" }}>
@@ -1360,36 +1372,43 @@ function Content() {
               {/* Last Operation Row */}
               {selectedHistory && !isBusy && (
                 <div style={{ display: "flex", width: "100%", alignItems: "baseline", fontSize: "12px" }}>
-                  <span style={{ width: "120px", flexShrink: 0 }}>
+                  <span style={{ width: "110px", flexShrink: 0 }}>
                     <CompactFieldLabel>Last Operation:</CompactFieldLabel>
                   </span>
                   <div
                     style={{
+                      display: "flex",
+                      flexDirection: "column",
                       flexGrow: 1,
                       minWidth: 0,
-                      color: selectedHistory.status === "failed" ? "#f87171" : "#cbd5e1",
-                      whiteSpace: "normal",
-                      wordBreak: "break-word",
                       textAlign: "left"
                     }}
                   >
-                    {getLastOperationText(
-                      selectedHistory.status,
-                      selectedHistory.reason,
-                      selectedHistory.message
-                    )}
+                    <div
+                      style={{
+                        color: selectedHistory.status === "failed" ? "#f87171" : "#cbd5e1",
+                        whiteSpace: "normal",
+                        wordBreak: "break-word"
+                      }}
+                    >
+                      {getLastOperationText(
+                        selectedHistory.status,
+                        selectedHistory.reason,
+                        selectedHistory.message
+                      )}
+                    </div>
                     {selectedHistory.timestamp &&
                     selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0] ? (
-                      <span
+                      <div
                         style={{
                           fontSize: "12px",
                           opacity: 0.65,
-                          marginLeft: "6px",
+                          marginTop: "2px",
                           fontVariantNumeric: "tabular-nums"
                         }}
                       >
-                        ({selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0]})
-                      </span>
+                        ({formatTime12h(selectedHistory.timestamp.split(/[T ]/)[1].split(".")[0])})
+                      </div>
                     ) : null}
                   </div>
                 </div>
@@ -1499,7 +1518,7 @@ function Content() {
                 textAlign: "left",
                 fontSize: "16px",
                 color: "#cbd5e1",
-                paddingLeft: "24px"
+                paddingLeft: "10px"
               }}
             >
               <div>SDH-Ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>

@@ -987,7 +987,7 @@ def test_frontend_qam_last_operation_uses_inline_wrapping_layout() -> None:
         )
     ]
     assert "Last Operation:" in game_panel
-    assert 'width: "120px"' in last_operation
+    assert 'width: "110px"' in last_operation
     assert "minWidth: 0" in last_operation
     assert 'whiteSpace: "normal"' in last_operation
     assert 'wordBreak: "break-word"' in last_operation
@@ -1009,7 +1009,7 @@ def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None
 
     assert "function CompactFieldLabel" in source
     assert '[class*="Label"]' not in source
-    assert 'width: "120px"' in combined_field
+    assert 'width: "110px"' in combined_field
     assert 'padding="standard"' in combined_field
     assert 'childrenLayout="below"' in combined_field
     assert (
@@ -1028,7 +1028,7 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
     assert 'childrenLayout="below"' in versions_panel
     assert (
-        'fontSize: "16px",\n                color: "#cbd5e1",\n                paddingLeft: "24px"'
+        'fontSize: "16px",\n                color: "#cbd5e1",\n                paddingLeft: "10px"'
         in versions_panel
     )
     assert 'gap: "8px"' in versions_panel
