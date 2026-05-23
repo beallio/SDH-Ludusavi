@@ -889,13 +889,24 @@ def test_frontend_qam_toggles_explain_their_scope() -> None:
 def test_frontend_qam_uses_requested_row_separators() -> None:
     source = FRONTEND.read_text()
 
-    for text, end_marker in [
-        ('label="Automatic Sync"', "/>"),
-        ("label={<CompactFieldLabel>Status:</CompactFieldLabel>}", "</Field>"),
-        ("label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}", "</Field>"),
-    ]:
-        control = source[source.index(text) : source.index(end_marker, source.index(text))]
-        assert 'bottomSeparator="none"' in control
+    # Automatic Sync toggle field
+    sync_control = source[
+        source.index('label="Automatic Sync"') : source.index(
+            "/>", source.index('label="Automatic Sync"')
+        )
+    ]
+    assert 'bottomSeparator="none"' in sync_control
+
+    # Status & Last Operation combined field
+    status_start = source.rindex(
+        "<Field", 0, source.index("<CompactFieldLabel>Status:</CompactFieldLabel>")
+    )
+    status_control = source[
+        status_start : source.index(
+            "</Field>", source.index("<CompactFieldLabel>Last Operation:</CompactFieldLabel>")
+        )
+    ]
+    assert 'bottomSeparator="none"' in status_control
 
     game_panel = source[
         source.index('PanelSection title="GAME"') : source.index(
@@ -946,8 +957,8 @@ def test_frontend_qam_rows_use_native_full_row_focus() -> None:
         "highlightOnFocus={true}",
         "focusable={true}",
         '<ToggleField\n            label="Automatic Sync"\n            description="Runs Ludusavi automatically when configured games start or exit."\n            highlightOnFocus={true}',
-        "<Field\n            label={<CompactFieldLabel>Status:</CompactFieldLabel>}",
-        "<Field\n              label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}",
+        "highlightOnFocus={false}",
+        "focusable={false}",
     ]:
         assert text in source
 
@@ -966,16 +977,17 @@ def test_frontend_qam_last_operation_uses_inline_wrapping_layout() -> None:
             'PanelSection title="Notifications"'
         )
     ]
-    last_operation = source[
-        source.index(
-            "label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}"
-        ) : source.index(
-            "Force Backup",
-            source.index("label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}"),
+    last_op_start = game_panel.rindex(
+        "<Field", 0, game_panel.index("<CompactFieldLabel>Last Operation:</CompactFieldLabel>")
+    )
+    last_operation = game_panel[
+        last_op_start : game_panel.index(
+            "</Field>",
+            last_op_start,
         )
     ]
-    assert "label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}" in game_panel
-    assert 'childrenLayout="inline"' in last_operation
+    assert "Last Operation:" in game_panel
+    assert 'width: "120px"' in last_operation
     assert 'whiteSpace: "normal"' in last_operation
     assert 'wordBreak: "break-word"' in last_operation
     assert 'fontSize: "12px"' in last_operation
@@ -985,28 +997,25 @@ def test_frontend_qam_last_operation_uses_inline_wrapping_layout() -> None:
 def test_frontend_qam_status_and_last_operation_use_compact_typography() -> None:
     source = FRONTEND.read_text()
 
-    status_field = source[
-        source.index("label={<CompactFieldLabel>Status:</CompactFieldLabel>}") : source.index(
-            "</Field>", source.index("label={<CompactFieldLabel>Status:</CompactFieldLabel>}")
-        )
-    ]
-    last_operation_field = source[
-        source.index(
-            "label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}"
-        ) : source.index(
-            "</Field>",
-            source.index("label={<CompactFieldLabel>Last Operation:</CompactFieldLabel>}"),
+    status_start = source.rindex(
+        "<Field", 0, source.index("<CompactFieldLabel>Status:</CompactFieldLabel>")
+    )
+    combined_field = source[
+        status_start : source.index(
+            "</Field>", source.index("<CompactFieldLabel>Last Operation:</CompactFieldLabel>")
         )
     ]
 
     assert "function CompactFieldLabel" in source
     assert '[class*="Label"]' not in source
-    assert 'childrenContainerWidth="min"' in status_field
-    assert 'padding="standard"' in status_field
-    assert 'style={{ fontSize: "12px", color: "#cbd5e1", minWidth: 0 }}' in status_field
-    assert 'style={{ fontSize: "12px", color: "#60a5fa", fontWeight: "bold" }}' in status_field
-    assert 'childrenContainerWidth="max"' in last_operation_field
-    assert 'padding="compact"' in last_operation_field
+    assert 'width: "120px"' in combined_field
+    assert 'padding="standard"' in combined_field
+    assert 'childrenLayout="below"' in combined_field
+    assert (
+        'style={{ flexGrow: 1, color: "#cbd5e1", minWidth: 0, textAlign: "left" }}'
+        in combined_field
+    )
+    assert 'style={{ color: "#60a5fa", fontWeight: "bold" }}' in combined_field
 
 
 def test_frontend_versions_order_places_decky_last() -> None:
@@ -1017,7 +1026,10 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert versions_panel.index("Ludusavi:") < versions_panel.index("pyludusavi:")
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
     assert 'childrenLayout="below"' in versions_panel
-    assert 'fontSize: "12px"' in versions_panel
+    assert (
+        'fontSize: "15px",\n                color: "#cbd5e1",\n                paddingLeft: "12px"'
+        in versions_panel
+    )
     assert 'gap: "8px"' in versions_panel
 
 
