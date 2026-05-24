@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+import queue
 import threading
 from typing import Any
 
@@ -298,8 +299,29 @@ async def _run_blocking(callback: Any) -> Any:
     Helper to run a synchronous callback in a dedicated thread while
     maintaining the async event loop's responsiveness.
     """
+    result_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
+
+    def worker() -> None:
+        try:
+            result = callback()
+        except BaseException as error:
+            result_queue.put(("error", error))
+        else:
+            result_queue.put(("result", result))
+
+    thread = threading.Thread(target=worker, name="sdh-ludusavi-worker", daemon=True)
+    thread.start()
+
     try:
-        return await asyncio.shield(asyncio.to_thread(callback))
+        while True:
+            try:
+                kind, payload = result_queue.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(0.01)
+                continue
+            if kind == "error":
+                raise payload
+            return payload
     except asyncio.CancelledError:
         decky.logger.warning(
             "SDH-ludusavi operation was cancelled while worker may still be running"

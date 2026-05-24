@@ -87,9 +87,12 @@ def test_frontend_centralizes_notification_aware_toasts() -> None:
     source = FRONTEND.read_text()
 
     assert "type NotificationCategory =" in source
-    assert "let notificationSettingsMirror" in source
+    assert (
+        "notificationSettings: NotificationSettings"
+        in Path("src/state/ludusaviState.tsx").read_text()
+    )
     assert "function notify(" in source
-    assert "shouldShowNotification(category)" in source
+    assert "store.shouldShowNotification(category)" in source
     assert "toaster.toast" in source
     assert source.count("toaster.toast") == 1
     for category in [
@@ -117,18 +120,25 @@ def test_frontend_toggle_reports_busy_and_failures() -> None:
     assert 'setBusyLabel("Updating settings")' in source
     assert "await setAutoSyncEnabled(enabled)" in source
     assert '"SDH-Ludusavi settings failed"' in source
-    assert 'notify("failures_errors", "SDH-Ludusavi settings failed"' in source
+    assert 'notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed"' in source
 
 
 def test_frontend_silences_lifecycle_toasts_when_auto_sync_is_disabled() -> None:
     source = FRONTEND.read_text()
+    store_source = Path("src/state/ludusaviState.tsx").read_text()
 
-    assert "let autoSyncNotificationsEnabled = false;" in source
-    assert "autoSyncNotificationsEnabled = normalized.auto_sync_enabled;" in source
+    assert "autoSyncNotificationsEnabled: boolean;" in store_source
+    assert "autoSyncNotificationsEnabled: normalized.auto_sync_enabled" in store_source
     assert "function shouldPublishAutoSyncStatusBeforeRpc(" in source
-    assert "globalSettings === null || autoSyncNotificationsEnabled" in source
-    assert "trackedAppIDs.size === 0 && trackedNames.size === 0" in source
-    assert source.count("if (shouldPublishAutoSyncStatusBeforeRpc(tracked))") == 2
+    assert (
+        "this.snapshot.settings === null || this.snapshot.autoSyncNotificationsEnabled"
+        in store_source
+    )
+    assert (
+        "this.snapshot.trackedAppIDs.size === 0 && this.snapshot.trackedNames.size === 0"
+        in store_source
+    )
+    assert source.count("if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked))") == 2
 
     start_status = 'publishAutoSyncStatus("checking", {'
     exit_status = 'publishAutoSyncStatus("checking", {'
@@ -250,8 +260,8 @@ def test_frontend_status_strip_uses_inline_browserview_icons() -> None:
 def test_frontend_status_strip_replaces_autosync_success_toasts() -> None:
     source = FRONTEND.read_text()
 
-    assert 'notify("auto_sync_progress"' not in source
-    assert 'notify("auto_sync_results"' not in source
+    assert 'notify(ludusaviStore, "auto_sync_progress"' not in source
+    assert 'notify(ludusaviStore, "auto_sync_results"' not in source
     assert '"auto_sync_progress"' not in source
     assert '"auto_sync_results"' not in source
 
@@ -259,7 +269,7 @@ def test_frontend_status_strip_replaces_autosync_success_toasts() -> None:
         'publishAutoSyncStatus("has_backup", {',
         'publishAutoSyncStatus("unknown", {',
         'publishAutoSyncStatus("error", {',
-        'notify("failures_errors", "SDH-Ludusavi Auto-sync"',
+        'notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync"',
     ]:
         assert required_text in source
 
@@ -688,7 +698,8 @@ def test_frontend_initial_load_skips_logs_and_warmed_refresh_when_cache_current(
     assert "const loadedLogs = await getRecentLogs();" not in load_initial
     assert "setLogs(await getRecentLogs().catch(() => []));" not in load_initial
     assert (
-        "const installedAppIdsChanged = globalInstalledAppIds !== installedAppIds;" in load_initial
+        "const installedAppIdsChanged = ludusaviState.installedAppIds !== installedAppIds;"
+        in load_initial
     )
     assert (
         "const cacheCurrentResult = isWarmed && !installedAppIdsChanged ? await isGameCacheCurrentCall(installedAppIds) : false;"
@@ -696,7 +707,7 @@ def test_frontend_initial_load_skips_logs_and_warmed_refresh_when_cache_current(
     assert (
         "const cacheCurrent = !isRpcStatus(cacheCurrentResult) && cacheCurrentResult === true;"
     ) in load_initial
-    assert "if (cacheCurrent && globalGames) {" in load_initial
+    assert "if (cacheCurrent && ludusaviState.games) {" in load_initial
     assert "applyCachedRefreshResult(" in load_initial
     assert load_initial.index("isGameCacheCurrentCall(installedAppIds)") < load_initial.index(
         "refreshGamesCall(false, installedAppIds)"
@@ -802,16 +813,15 @@ def test_frontend_guards_refresh_and_version_rpc_status_payloads() -> None:
 
 def test_frontend_displays_durable_operation_history() -> None:
     source = FRONTEND.read_text()
+    store_source = Path("src/state/ludusaviState.tsx").read_text()
 
     assert "type GameOperationHistoryEntry = {" in source
     assert "type GameOperationHistory = {" in source
     assert "last_operation: GameOperationHistoryEntry | null;" in source
     assert "history: Record<string, GameOperationHistory>;" in source
-    assert (
-        "const [gameHistory, setGameHistory] = useState<Record<string, GameOperationHistory>>(globalGameHistory ?? {});"
-        in source
-    )
-    assert "setGameHistory(result.history ?? {});" in source
+    assert "gameHistory: Record<string, GameOperationHistory>;" in store_source
+    assert "setGameHistory(history: Record<string, GameOperationHistory>)" in store_source
+    assert "gameHistory: result.history ?? {}" in store_source
     assert "Last Operation:" in source
 
 
@@ -1035,14 +1045,15 @@ def test_frontend_applies_backend_selected_game_after_persisting() -> None:
 
     assert "const result = await setSelectedGameCall(value);" in source
     assert "applySettings(result);" in source
-    assert "setSelectedGame(result.selected_game);" in source
+    assert "ludusaviStore.setSelectedGame(result.selected_game);" in source
 
 
 def test_frontend_syncs_warmed_settings_cache_when_refresh_defaults_selected_game() -> None:
     source = FRONTEND.read_text()
+    store_source = Path("src/state/ludusaviState.tsx").read_text()
 
     assert "const syncSelectedGameCache = (nextSelectedGame: string) => {" in source
-    assert "selected_game: nextSelectedGame" in source
+    assert "selected_game: selectedGame" in store_source
     assert "syncSelectedGameCache(target);" in source
     assert "syncSelectedGameCache(firstGame);" in source
 
@@ -1112,7 +1123,7 @@ def test_frontend_prefers_main_running_app_for_qam_game_selection() -> None:
         "const runningGame = findGameForRunningSession(currentGames, runningSession, currentAliases);"
         in source
     )
-    assert "setSelectedGame(runningGame.game.name);" in source
+    assert "ludusaviStore.setSelectedGame(runningGame.game.name);" in source
 
 
 def test_frontend_applies_current_game_before_saved_selected_game() -> None:
@@ -1258,8 +1269,100 @@ def test_frontend_load_initial_optimizations() -> None:
     )
 
     # Verify background loader handles error states appropriately
-    assert 'setVersions({ message: loadedVersions.message || "Error" });' in load_initial
-    assert 'setVersions({ message: "Error" });' in load_initial
+    assert (
+        'ludusaviStore.setVersions({ message: loadedVersions.message || "Error" });' in load_initial
+    )
+    assert 'ludusaviStore.setVersions({ message: "Error" });' in load_initial
+
+
+def test_frontend_uses_context_store_for_qam_persistent_state() -> None:
+    source = FRONTEND.read_text()
+    store_source = Path("src/state/ludusaviState.tsx").read_text()
+
+    for required_text in [
+        "createContext",
+        "useContext",
+        "useSyncExternalStore",
+        "export class LudusaviStateStore",
+        "export function createLudusaviStateStore()",
+        "export function LudusaviStateProvider(",
+        "export function useLudusaviState()",
+        "export function useLudusaviStateStore()",
+        "type LudusaviStateSnapshot",
+        "applySettings(settings: Settings)",
+        "applyRefreshResult(result: RefreshResult)",
+        "setGameHistory(history: Record<string, GameOperationHistory>)",
+        "setInstalledAppIds(installedAppIds: string | undefined)",
+    ]:
+        assert required_text in store_source
+
+    for required_text in [
+        'from "./state/ludusaviState";',
+        "LudusaviStateProvider",
+        "createLudusaviStateStore",
+        "useLudusaviState",
+        "useLudusaviStateStore",
+        "const ludusaviStore = createLudusaviStateStore();",
+        "<LudusaviStateProvider store={ludusaviStore}>",
+        "const ludusaviState = useLudusaviState();",
+        "const ludusaviStore = useLudusaviStateStore();",
+    ]:
+        assert required_text in source
+
+
+def test_frontend_removes_loose_app_cache_globals() -> None:
+    source = FRONTEND.read_text()
+
+    for stale_text in [
+        "let globalSettings",
+        "let globalGames",
+        "let globalGameAliases",
+        "let globalGameHistory",
+        "let globalInstalledAppIds",
+        "let globalVersions",
+        "let globalLudusaviCommand",
+        "let trackedAppIDs",
+        "let trackedNames",
+        "let autoSyncNotificationsEnabled",
+        "let notificationSettingsMirror",
+        "let updateGameHistoryListener",
+    ]:
+        assert stale_text not in source
+
+
+def test_frontend_warmed_qam_cache_uses_store_snapshot() -> None:
+    source = FRONTEND.read_text()
+
+    load_initial = source[source.index("const loadInitial = async () => {") :]
+    load_initial = load_initial[: load_initial.index("const applyRefreshResult")]
+
+    for required_text in [
+        "const isWarmed = ludusaviState.settings !== null && ludusaviState.games !== null;",
+        "const installedAppIdsChanged = ludusaviState.installedAppIds !== installedAppIds;",
+        "if (cacheCurrent && ludusaviState.games) {",
+        "ludusaviStore.setInstalledAppIds(installedAppIds);",
+    ]:
+        assert required_text in load_initial
+
+    assert "globalSettings" not in load_initial
+    assert "globalGames" not in load_initial
+    assert "globalInstalledAppIds" not in load_initial
+
+
+def test_frontend_notifications_and_history_sync_use_state_store() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        "function notify(",
+        "store: LudusaviStateStore",
+        "store.shouldShowNotification(category)",
+        "async function syncGlobalHistory(store: LudusaviStateStore)",
+        "store.setGameHistory(historyRes);",
+        "function shouldPublishAutoSyncStatusBeforeRpc(",
+        "store: LudusaviStateStore",
+        "store.shouldPublishAutoSyncStatusBeforeRpc(tracked)",
+    ]:
+        assert required_text in source
 
 
 def test_frontend_syncs_history_via_dedicated_rpc() -> None:
@@ -1269,8 +1372,8 @@ def test_frontend_syncs_history_via_dedicated_rpc() -> None:
         'const getGameHistoryCall = callable<[], RpcResult<Record<string, GameOperationHistory>>>("get_game_history");'
         in source
     )
-    assert "async function syncGlobalHistory()" in source
-    assert "await syncGlobalHistory();" in source
+    assert "async function syncGlobalHistory(store: LudusaviStateStore)" in source
+    assert "await syncGlobalHistory(ludusaviStore);" in source
 
 
 def test_frontend_status_strip_clears_on_hide() -> None:

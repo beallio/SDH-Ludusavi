@@ -49,6 +49,14 @@ import {
 import { LogModal, LudusaviLogModal } from "./components/LogModal";
 import { log } from "./utils/logging";
 import {
+  LudusaviStateProvider,
+  LudusaviStateStore,
+  createLudusaviStateStore,
+  defaultSettings,
+  useLudusaviState,
+  useLudusaviStateStore
+} from "./state/ludusaviState";
+import {
   normalize,
   getInstalledAppIdsString,
   sessionFromAppOverview,
@@ -125,14 +133,11 @@ function formatTime12h(timeStr: string): string {
   return `${hours}:${minutes} ${ampm}`;
 }
 
-async function syncGlobalHistory() {
+async function syncGlobalHistory(store: LudusaviStateStore) {
   try {
     const historyRes = await getGameHistoryCall();
     if (!isRpcStatus(historyRes)) {
-      globalGameHistory = historyRes;
-      if (updateGameHistoryListener) {
-        updateGameHistoryListener(historyRes);
-      }
+      store.setGameHistory(historyRes);
     }
   } catch (err) {
     log("error", `Failed to sync global history: ${err}`);
@@ -173,39 +178,6 @@ const statusLabels: Record<GameStatus["status"], string> = {
   needs_first_backup: "Needs first backup",
   error: "Error"
 };
-
-const defaultNotificationSettings: NotificationSettings = {
-  enabled: true,
-  auto_sync_progress: true,
-  auto_sync_results: true,
-  manual_operations: true,
-  refresh_status: true,
-  failures_errors: true
-};
-
-const defaultSettings = (): Settings => ({
-  auto_sync_enabled: false,
-  selected_game: "",
-  notifications: { ...defaultNotificationSettings }
-});
-
-function normalizeNotificationSettings(settings?: Partial<NotificationSettings>): NotificationSettings {
-  return {
-    enabled: typeof settings?.enabled === "boolean" ? settings.enabled : true,
-    auto_sync_progress: typeof settings?.auto_sync_progress === "boolean" ? settings.auto_sync_progress : true,
-    auto_sync_results: typeof settings?.auto_sync_results === "boolean" ? settings.auto_sync_results : true,
-    manual_operations: typeof settings?.manual_operations === "boolean" ? settings.manual_operations : true,
-    refresh_status: typeof settings?.refresh_status === "boolean" ? settings.refresh_status : true,
-    failures_errors: typeof settings?.failures_errors === "boolean" ? settings.failures_errors : true
-  };
-}
-
-function normalizeSettings(settings: Settings): Settings {
-  return {
-    ...settings,
-    notifications: normalizeNotificationSettings(settings.notifications)
-  };
-}
 
 function SpinnerButton({ children, loading, ...props }: any) {
   return (
@@ -801,19 +773,15 @@ function CompactFieldLabel({ children }: { children: ReactNode }) {
   return <span style={{ fontSize: "14px" }}>{children}</span>;
 }
 
-let trackedAppIDs = new Set<string>();
-let trackedNames = new Set<string>();
-let autoSyncNotificationsEnabled = false;
-let notificationSettingsMirror: NotificationSettings = { ...defaultNotificationSettings };
-
-
-function shouldShowNotification(category: NotificationCategory): boolean {
-  return notificationSettingsMirror.enabled && notificationSettingsMirror[category];
-}
-
-function notify(category: NotificationCategory, title: string, body: string, logo?: any) {
+function notify(
+  store: LudusaviStateStore,
+  category: NotificationCategory,
+  title: string,
+  body: string,
+  logo?: any
+) {
   log("debug", `notify call: category=${category}, title=${title}, body=${body}`, "autosync_status");
-  if (!shouldShowNotification(category)) {
+  if (!store.shouldShowNotification(category)) {
     log("debug", "notify skipped: disabled by settings", "autosync_status");
     return;
   }
@@ -847,34 +815,26 @@ function logRpcStatus(result: RpcStatus, operation: string) {
   log(level, message, operation);
 }
 
-let updateGameHistoryListener: ((history: Record<string, GameOperationHistory>) => void) | null = null;
-let globalSettings: Settings | null = null;
-let globalGames: GameStatus[] | null = null;
-let globalGameAliases: Record<string, string> | null = null;
-let globalGameHistory: Record<string, GameOperationHistory> | null = null;
-let globalInstalledAppIds: string | undefined = undefined;
-let globalVersions: Versions | null = null;
-let globalLudusaviCommand: LudusaviLaunchCommand | null = null;
-
 function Content() {
+  const ludusaviState = useLudusaviState();
+  const ludusaviStore = useLudusaviStateStore();
   const isQuickAccessVisible = useQuickAccessVisible();
   const qamContentRef = useRef<HTMLDivElement | null>(null);
   const wasQuickAccessVisible = useRef(false);
   const pendingCurrentGameSelection = useRef(false);
   const isMounted = useRef(true);
-  const [settings, setSettings] = useState<Settings>(globalSettings ?? defaultSettings());
-  const [games, setGames] = useState<GameStatus[]>(globalGames ?? []);
-  const [gameAliases, setGameAliases] = useState<Record<string, string>>(globalGameAliases ?? {});
-  const [gameHistory, setGameHistory] = useState<Record<string, GameOperationHistory>>(globalGameHistory ?? {});
-  const [selectedGame, setSelectedGame] = useState(globalSettings?.selected_game ?? "");
-  const [versions, setVersions] = useState<Versions>(
-    globalVersions ?? {
+  const settings = ludusaviState.settings ?? defaultSettings();
+  const games = ludusaviState.games ?? [];
+  const gameAliases = ludusaviState.gameAliases;
+  const gameHistory = ludusaviState.gameHistory;
+  const selectedGame = ludusaviState.selectedGame;
+  const versions =
+    ludusaviState.versions ?? {
       sdh_ludusavi: "Loading...",
       ludusavi: "Loading...",
       pyludusavi: "Loading...",
       decky: "Loading..."
-    }
-  );
+    };
   const [operation, setOperation] = useState<OperationStatus>({
     is_running: false,
     name: null,
@@ -885,25 +845,14 @@ function Content() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [backgroundRefreshBusy, setBackgroundRefreshBusy] = useState(false);
-  const [ludusaviCommand, setLudusaviCommand] = useState<LudusaviLaunchCommand | null>(globalLudusaviCommand);
+  const ludusaviCommand = ludusaviState.ludusaviCommand;
 
   const applySettings = (nextSettings: Settings) => {
-    const normalized = normalizeSettings(nextSettings);
-    setSettings(normalized);
-    globalSettings = normalized;
-    autoSyncNotificationsEnabled = normalized.auto_sync_enabled;
-    notificationSettingsMirror = normalized.notifications;
-    return normalized;
+    return ludusaviStore.applySettings(nextSettings);
   };
 
   const syncSelectedGameCache = (nextSelectedGame: string) => {
-    setSettings((current: Settings) => {
-      const nextSettings = { ...current, selected_game: nextSelectedGame };
-      globalSettings = globalSettings
-        ? { ...globalSettings, selected_game: nextSelectedGame }
-        : nextSettings;
-      return nextSettings;
-    });
+    ludusaviStore.syncSelectedGameCache(nextSelectedGame);
   };
 
   const selectedStatus = useMemo(
@@ -932,7 +881,7 @@ function Content() {
       return false;
     }
 
-    setSelectedGame(runningGame.game.name);
+    ludusaviStore.setSelectedGame(runningGame.game.name);
     logCurrentGameSelection(
       runningSession,
       runningGame.game,
@@ -945,16 +894,10 @@ function Content() {
 
   useEffect(() => {
     isMounted.current = true;
-    updateGameHistoryListener = (history) => {
-      if (isMounted.current) {
-        setGameHistory(history);
-      }
-    };
     log("info", "Plugin mounted, starting initial load");
     void loadInitial();
     return () => {
       isMounted.current = false;
-      updateGameHistoryListener = null;
     };
   }, []);
 
@@ -990,7 +933,7 @@ function Content() {
   }, [isQuickAccessVisible]);
 
   const loadInitial = async () => {
-    const isWarmed = globalSettings !== null && globalGames !== null;
+    const isWarmed = ludusaviState.settings !== null && ludusaviState.games !== null;
     if (!isMounted.current) return;
     if (!isWarmed) {
       setBusyLabel("Loading");
@@ -1011,14 +954,13 @@ function Content() {
         log("debug", `Loaded versions: ${JSON.stringify(loadedVersions)}`);
         if (isRpcStatus(loadedVersions)) {
           logRpcStatus(loadedVersions, "versions");
-          setVersions({ message: loadedVersions.message || "Error" });
+          ludusaviStore.setVersions({ message: loadedVersions.message || "Error" });
         } else {
-          setVersions(loadedVersions);
-          globalVersions = loadedVersions;
+          ludusaviStore.setVersions(loadedVersions);
         }
       } else {
         log("error", `Background load of versions failed: ${versionsResult.reason}`);
-        setVersions({ message: "Error" });
+        ludusaviStore.setVersions({ message: "Error" });
       }
 
       if (commandResult.status === "fulfilled") {
@@ -1027,8 +969,7 @@ function Content() {
         if (isRpcStatus(loadedCommand)) {
           logRpcStatus(loadedCommand, "command discovery");
         } else {
-          globalLudusaviCommand = loadedCommand;
-          setLudusaviCommand(loadedCommand);
+          ludusaviStore.setLudusaviCommand(loadedCommand);
         }
       } else {
         log("error", `Background load of command failed: ${commandResult.reason}`);
@@ -1050,31 +991,30 @@ function Content() {
       } else {
         const normalizedSettings = applySettings(loadedSettings);
         if (normalizedSettings.selected_game) {
-          setSelectedGame(normalizedSettings.selected_game);
+          ludusaviStore.setSelectedGame(normalizedSettings.selected_game);
         }
       }
 
       if (isRpcStatus(loadedHistory)) {
         logRpcStatus(loadedHistory, "history");
       } else {
-        setGameHistory(loadedHistory);
-        globalGameHistory = loadedHistory;
+        ludusaviStore.setGameHistory(loadedHistory);
       }
 
       log("debug", "Initializing game list (cached)");
       const installedAppIds = await getInstalledAppIdsString();
-      const installedAppIdsChanged = globalInstalledAppIds !== installedAppIds;
+      const installedAppIdsChanged = ludusaviState.installedAppIds !== installedAppIds;
       if (!isMounted.current) return;
       const cacheCurrentResult = isWarmed && !installedAppIdsChanged ? await isGameCacheCurrentCall(installedAppIds) : false;
       if (!isMounted.current) return;
       const cacheCurrent = !isRpcStatus(cacheCurrentResult) && cacheCurrentResult === true;
-      if (cacheCurrent && globalGames) {
+      if (cacheCurrent && ludusaviState.games) {
         applyCachedRefreshResult(isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game);
       } else {
         const refreshed = await refreshGamesCall(false, installedAppIds);
         if (!isMounted.current) return;
         if (applyRefreshResult(refreshed, isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game)) {
-          globalInstalledAppIds = installedAppIds;
+          ludusaviStore.setInstalledAppIds(installedAppIds);
         }
       }
 
@@ -1092,27 +1032,24 @@ function Content() {
   };
 
   const applyCachedRefreshResult = (preferredGame?: string): boolean => {
-    if (!globalGames) {
+    const cachedGames = ludusaviState.games;
+    if (!cachedGames) {
       return false;
     }
 
-    const cachedAliases = globalGameAliases || {};
-    const cachedHistory = globalGameHistory || {};
-    setGames(globalGames);
-    setGameAliases(cachedAliases);
-    setGameHistory(cachedHistory);
+    const cachedAliases = ludusaviState.gameAliases;
 
-    if (selectCurrentSteamGameIfAvailable(globalGames, cachedAliases)) {
+    if (selectCurrentSteamGameIfAvailable(cachedGames, cachedAliases)) {
       return true;
     }
 
     const target = preferredGame || selectedGame;
-    if (target && globalGames.some((game) => game.name === target)) {
-      setSelectedGame(target);
+    if (target && cachedGames.some((game) => game.name === target)) {
+      ludusaviStore.setSelectedGame(target);
       syncSelectedGameCache(target);
     } else {
-      const firstGame = globalGames[0]?.name ?? "";
-      setSelectedGame(firstGame);
+      const firstGame = cachedGames[0]?.name ?? "";
+      ludusaviStore.setSelectedGame(firstGame);
       syncSelectedGameCache(firstGame);
     }
     return true;
@@ -1126,30 +1063,13 @@ function Content() {
 
     if (result.dependency_error) {
       log("error", `Ludusavi refresh failed: ${result.dependency_error}`, "refresh");
-      notify("failures_errors", "SDH-Ludusavi refresh failed", result.dependency_error, <FaExclamationTriangle />);
-      return false;
-    }
+    notify(ludusaviStore, "failures_errors", "SDH-Ludusavi refresh failed", result.dependency_error, <FaExclamationTriangle />);
+    return false;
+  }
 
-    log("debug", `Applying refresh result (${result.games.length} games, ${Object.keys(result.aliases || {}).length} aliases)`);
-    setGames(result.games);
-    setGameAliases(result.aliases || {});
-    setGameHistory(result.history ?? {});
-    globalGames = result.games;
-    globalGameAliases = result.aliases || {};
-    globalGameHistory = result.history ?? {};
-    
-    // Update global tracking sets for toast filtering
-    trackedAppIDs = new Set(result.games.map((g: GameStatus) => (g as any).steam_id).filter((id): id is string => !!id) as string[]);
-    
-    const names = new Set<string>();
-    result.games.forEach((g: GameStatus) => names.add(normalize(g.name)));
-    Object.entries(result.aliases || {}).forEach(([alias, target]: [string, string]) => {
-      names.add(normalize(alias));
-      names.add(normalize(target));
-    });
-    trackedNames = names;
-    
-    log("info", `Tracked ${trackedNames.size} game names/aliases`);
+  log("debug", `Applying refresh result (${result.games.length} games, ${Object.keys(result.aliases || {}).length} aliases)`);
+    ludusaviStore.applyRefreshResult(result);
+    log("info", `Tracked ${ludusaviStore.getSnapshot().trackedNames.size} game names/aliases`);
 
     if (selectCurrentSteamGameIfAvailable(result.games, result.aliases || {})) {
       return true;
@@ -1157,12 +1077,12 @@ function Content() {
 
     const target = preferredGame || selectedGame;
     if (target && result.games.some((game: GameStatus) => game.name === target)) {
-      setSelectedGame(target);
+      ludusaviStore.setSelectedGame(target);
       syncSelectedGameCache(target);
     } else {
       const firstGame = result.games[0]?.name ?? "";
       log("debug", `Defaulting selected game to ${firstGame}`);
-      setSelectedGame(firstGame);
+      ludusaviStore.setSelectedGame(firstGame);
       syncSelectedGameCache(firstGame);
     }
 
@@ -1176,10 +1096,10 @@ function Content() {
       const installedAppIds = await getInstalledAppIdsString();
       const result = await refreshGamesCall(true, installedAppIds);
       if (applyRefreshResult(result)) {
-        globalInstalledAppIds = installedAppIds;
+        ludusaviStore.setInstalledAppIds(installedAppIds);
         setOperation(await getOperationStatus());
         setLogs(await getRecentLogs());
-        notify("refresh_status", "SDH-Ludusavi", "Ludusavi game status refreshed", <IoMdRefresh />);
+        notify(ludusaviStore, "refresh_status", "SDH-Ludusavi", "Ludusavi game status refreshed", <IoMdRefresh />);
       }
     } catch (error) {
       log("error", `Manual refresh failed: ${error}`);
@@ -1196,7 +1116,7 @@ function Content() {
       showModal(<LudusaviLogModal logs={logs} />);
     } catch (error) {
       log("error", `Failed to fetch Ludusavi logs: ${error}`);
-      notify("failures_errors", "SDH-Ludusavi", "Failed to fetch Ludusavi logs", <FaExclamationTriangle />);
+      notify(ludusaviStore, "failures_errors", "SDH-Ludusavi", "Failed to fetch Ludusavi logs", <FaExclamationTriangle />);
     }
   };
 
@@ -1208,7 +1128,7 @@ function Content() {
       showModal(<LogModal logs={currentLogs} />);
     } catch (error) {
       log("error", `Failed to fetch plugin logs: ${error}`);
-      notify("failures_errors", "SDH-Ludusavi", "Failed to fetch plugin logs", <FaExclamationTriangle />);
+      notify(ludusaviStore, "failures_errors", "SDH-Ludusavi", "Failed to fetch plugin logs", <FaExclamationTriangle />);
     }
   };
 
@@ -1218,8 +1138,7 @@ function Content() {
     setBusyLabel("Updating settings");
     
     // Optimistic update
-    setSettings((s: Settings) => ({ ...s, auto_sync_enabled: enabled }));
-    autoSyncNotificationsEnabled = enabled;
+    ludusaviStore.setAutoSyncEnabled(enabled);
 
     try {
       const result = await setAutoSyncEnabled(enabled);
@@ -1230,9 +1149,8 @@ function Content() {
     } catch (error) {
       log("error", `Failed to toggle auto-sync: ${error}`);
       // Rollback
-      setSettings((s: Settings) => ({ ...s, auto_sync_enabled: previous }));
-      autoSyncNotificationsEnabled = previous;
-      notify("failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+      ludusaviStore.setAutoSyncEnabled(previous);
+      notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
       setBusyLabel(null);
     }
@@ -1243,8 +1161,7 @@ function Content() {
     const previous = settings.notifications;
     const nextNotifications = { ...previous, [key]: enabled };
     setBusyLabel("Updating settings");
-    setSettings((s: Settings) => ({ ...s, notifications: nextNotifications }));
-    notificationSettingsMirror = nextNotifications;
+    ludusaviStore.setNotificationSettings(nextNotifications);
 
     try {
       const result = await setNotificationSettings(nextNotifications);
@@ -1254,9 +1171,8 @@ function Content() {
       applySettings(result);
     } catch (error) {
       log("error", `Failed to update notification settings: ${error}`);
-      setSettings((s: Settings) => ({ ...s, notifications: previous }));
-      notificationSettingsMirror = previous;
-      notify("failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+      ludusaviStore.setNotificationSettings(previous);
+      notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
       setBusyLabel(null);
     }
@@ -1269,7 +1185,7 @@ function Content() {
     setBusyLabel("Updating settings");
     
     // Optimistic update
-    setSelectedGame(value);
+    ludusaviStore.setSelectedGame(value);
 
     try {
       const result = await setSelectedGameCall(value);
@@ -1277,12 +1193,12 @@ function Content() {
         throw new Error(result.message || result.status);
       }
       applySettings(result);
-      setSelectedGame(result.selected_game);
+      ludusaviStore.setSelectedGame(result.selected_game);
     } catch (error) {
       log("error", `Failed to persist selected game: ${error}`);
       // Rollback
-      setSelectedGame(previous);
-      notify("failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+      ludusaviStore.setSelectedGame(previous);
+      notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
       setBusyLabel(null);
     }
@@ -1298,20 +1214,20 @@ function Content() {
     log("info", `Triggering force ${label} for ${selectedGame}`, label, selectedGame);
     setBusyLabel(`${label} running`);
     const icon = label === "Backup" ? <FaSave /> : <FaDownload />;
-    notify("manual_operations", `SDH-Ludusavi ${label}`, `${label} started for ${selectedGame}`, icon);
+    notify(ludusaviStore, "manual_operations", `SDH-Ludusavi ${label}`, `${label} started for ${selectedGame}`, icon);
     try {
       const result = await operationCall(selectedGame);
       log("info", `Force ${label} completed: ${JSON.stringify(result)}`, label, selectedGame);
       const resultIcon = result.status === "failed" ? <FaExclamationTriangle /> : icon;
       const category = result.status === "failed" ? "failures_errors" : "manual_operations";
-      notify(category, `SDH-Ludusavi ${label}`, summarizeOperationResult(result, label), resultIcon);
+      notify(ludusaviStore, category, `SDH-Ludusavi ${label}`, summarizeOperationResult(result, label), resultIcon);
       const refreshed = await refreshGamesCall(false);
       applyRefreshResult(refreshed);
       setOperation(await getOperationStatus());
       setLogs(await getRecentLogs());
     } catch (error) {
       log("error", `Force ${label} failed: ${error}`, label, selectedGame);
-      notify("failures_errors", `SDH-Ludusavi ${label} failed`, error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+      notify(ludusaviStore, "failures_errors", `SDH-Ludusavi ${label} failed`, error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
       setBusyLabel(null);
     }
@@ -1642,6 +1558,7 @@ function LudusaviPanel({
 export default definePlugin(() => {
   console.log("SDH-Ludusavi plugin initializing");
 
+  const ludusaviStore = createLudusaviStateStore();
   const activeSessions = new Map<number, RunningSession>();
   let fallbackIntervalID: number | null = null;
   let fallbackPreviousAppID: string | null = null;
@@ -1649,19 +1566,20 @@ export default definePlugin(() => {
   let lifecycleRegistration: unknown = null;
 
   const isTracked = (name: string, appID: string) => {
-    if (trackedAppIDs.has(appID)) {
+    const snapshot = ludusaviStore.getSnapshot();
+    if (snapshot.trackedAppIDs.has(appID)) {
       log("debug", `Match found via AppID: ${appID}`);
       return true;
     }
     
     const normalizedInput = normalize(name);
-    if (trackedNames.has(normalizedInput)) {
+    if (snapshot.trackedNames.has(normalizedInput)) {
       log("debug", `Match found via exact name: ${normalizedInput}`);
       return true;
     }
 
     // Substring matching (mirroring backend fuzzy logic)
-    for (const trackedName of Array.from(trackedNames)) {
+    for (const trackedName of Array.from(snapshot.trackedNames)) {
       if (
         (normalizedInput.length > 4 && trackedName.includes(normalizedInput)) ||
         (trackedName.length > 4 && normalizedInput.includes(trackedName))
@@ -1675,9 +1593,8 @@ export default definePlugin(() => {
     return false;
   };
 
-  function shouldPublishAutoSyncStatusBeforeRpc(tracked: boolean) {
-    const trackingCacheEmpty = trackedAppIDs.size === 0 && trackedNames.size === 0;
-    return (globalSettings === null || autoSyncNotificationsEnabled) && (tracked || trackingCacheEmpty);
+  function shouldPublishAutoSyncStatusBeforeRpc(store: LudusaviStateStore, tracked: boolean) {
+    return store.shouldPublishAutoSyncStatusBeforeRpc(tracked);
   }
 
   const handleAppStart = async (name: string, appID: string, instanceID?: number) => {
@@ -1685,7 +1602,7 @@ export default definePlugin(() => {
     log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
     let paused = false;
     
-    if (shouldPublishAutoSyncStatusBeforeRpc(tracked)) {
+    if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
       publishAutoSyncStatus("checking", {
         source: "lifecycle_start",
         gameName: name,
@@ -1728,7 +1645,7 @@ export default definePlugin(() => {
             message: "Launch gate unavailable; restore skipped while game is loading."
           };
           completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-          notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
           return;
         }
         publishAutoSyncStatus("restoring", {
@@ -1742,7 +1659,7 @@ export default definePlugin(() => {
         log("info", `restore_game_on_start result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
         completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
-          notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
         }
         return;
       }
@@ -1756,7 +1673,7 @@ export default definePlugin(() => {
           resultStatus: checkResult.status
         });
         if (!paused) {
-          notify("failures_errors", "SDH-Ludusavi Auto-sync", "Launch gate unavailable; conflict resolution skipped while game is loading.", <FaExclamationTriangle />);
+          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", "Launch gate unavailable; conflict resolution skipped while game is loading.", <FaExclamationTriangle />);
           return;
         }
         const resolution = await showConflictResolutionModal(checkResult);
@@ -1767,14 +1684,14 @@ export default definePlugin(() => {
         const result = await resolveGameStartConflictCall(checkResult.game ?? name, appID, resolution);
         completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
-          notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
         }
         return;
       }
 
       completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
       if (checkResult.status === "failed") {
-        notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
+        notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
       }
     } catch (err) {
       log("error", `App start handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
@@ -1793,7 +1710,7 @@ export default definePlugin(() => {
           log("error", `Failed to resume game process ${instanceID}: ${err}`, "lifecycle", name);
         }
       }
-      await syncGlobalHistory();
+      await syncGlobalHistory(ludusaviStore);
     }
   };
 
@@ -1801,7 +1718,7 @@ export default definePlugin(() => {
     const tracked = isTracked(name, appID);
     log("info", `App exited: ${name} (${appID}) tracked=${tracked}`);
     
-    if (shouldPublishAutoSyncStatusBeforeRpc(tracked)) {
+    if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
       publishAutoSyncStatus("checking", {
         source: "lifecycle_exit",
         gameName: name,
@@ -1838,14 +1755,14 @@ export default definePlugin(() => {
         log("info", `backup_game_on_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
         completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
-          notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
+          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
         }
         return;
       }
 
       completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
       if (checkResult.status === "failed") {
-        notify("failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
+        notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
       }
     } catch (err) {
       log("error", `App exit handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
@@ -1857,7 +1774,7 @@ export default definePlugin(() => {
         resultStatus: "failed"
       });
     } finally {
-      await syncGlobalHistory();
+      await syncGlobalHistory(ludusaviStore);
     }
   };
 
@@ -2041,7 +1958,11 @@ export default definePlugin(() => {
   return {
     name: "SDH-Ludusavi",
     titleView: <div className="sdh-ludusavi-title">SDH-Ludusavi</div>,
-    content: <Content />,
+    content: (
+      <LudusaviStateProvider store={ludusaviStore}>
+        <Content />
+      </LudusaviStateProvider>
+    ),
     icon: <PluginIcon />,
     alwaysRender: true,
     onDismount() {
