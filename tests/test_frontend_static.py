@@ -1431,5 +1431,11 @@ def test_frontend_decomposed_load_initial_helpers_exist() -> None:
 
 def test_frontend_state_store_optimization_no_array_from_in_loop() -> None:
     store_source = Path("src/state/ludusaviState.tsx").read_text(encoding="utf-8")
+    index_source = Path("src/index.tsx").read_text(encoding="utf-8")
+
+    # Assert Array.from is not called on trackedNames in either file
     assert "Array.from(this.snapshot.trackedNames)" not in store_source
+    assert "Array.from(snapshot.trackedNames)" not in index_source
+
+    # Assert the optimized Set iteration is in the state store
     assert "for (const trackedName of this.snapshot.trackedNames)" in store_source

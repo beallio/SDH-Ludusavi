@@ -57,7 +57,6 @@ import {
   useLudusaviStateStore
 } from "./state/ludusaviState";
 import {
-  normalize,
   getInstalledAppIdsString,
   sessionFromAppOverview,
   getMainRunningSession,
@@ -1586,31 +1585,22 @@ export default definePlugin(() => {
   let lifecycleRegistration: unknown = null;
 
   const isTracked = (name: string, appID: string) => {
-    const snapshot = ludusaviStore.getSnapshot();
-    if (snapshot.trackedAppIDs.has(appID)) {
-      log("debug", `Match found via AppID: ${appID}`);
-      return true;
-    }
-    
-    const normalizedInput = normalize(name);
-    if (snapshot.trackedNames.has(normalizedInput)) {
-      log("debug", `Match found via exact name: ${normalizedInput}`);
-      return true;
-    }
-
-    // Substring matching (mirroring backend fuzzy logic)
-    for (const trackedName of Array.from(snapshot.trackedNames)) {
-      if (
-        (normalizedInput.length > 4 && trackedName.includes(normalizedInput)) ||
-        (trackedName.length > 4 && normalizedInput.includes(trackedName))
-      ) {
-        log("debug", `Match found via substring: ${normalizedInput} <-> ${trackedName}`);
-        return true;
+    return ludusaviStore.isTracked(
+      name,
+      appID,
+      (reason, detail) => {
+        if (reason === "appId") {
+          log("debug", `Match found via AppID: ${detail}`);
+        } else if (reason === "exact") {
+          log("debug", `Match found via exact name: ${detail}`);
+        } else if (reason === "substring") {
+          log("debug", `Match found via substring: ${detail}`);
+        }
+      },
+      (normalizedInput) => {
+        log("debug", `No match for ${name} (${appID}) [normalized: ${normalizedInput}]`);
       }
-    }
-
-    log("debug", `No match for ${name} (${appID}) [normalized: ${normalizedInput}]`);
-    return false;
+    );
   };
 
   function shouldPublishAutoSyncStatusBeforeRpc(store: LudusaviStateStore, tracked: boolean) {

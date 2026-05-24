@@ -193,13 +193,20 @@ export class LudusaviStateStore {
     return this.snapshot.notificationSettings.enabled && this.snapshot.notificationSettings[category];
   }
 
-  isTracked(name: string, appID: string): boolean {
+  isTracked(
+    name: string,
+    appID: string,
+    onMatch?: (reason: "appId" | "exact" | "substring", detail: string) => void,
+    onMiss?: (normalizedInput: string) => void
+  ): boolean {
     if (this.snapshot.trackedAppIDs.has(appID)) {
+      onMatch?.("appId", appID);
       return true;
     }
 
     const normalizedInput = normalize(name);
     if (this.snapshot.trackedNames.has(normalizedInput)) {
+      onMatch?.("exact", normalizedInput);
       return true;
     }
 
@@ -208,10 +215,12 @@ export class LudusaviStateStore {
         (normalizedInput.length > 4 && trackedName.includes(normalizedInput)) ||
         (trackedName.length > 4 && normalizedInput.includes(trackedName))
       ) {
+        onMatch?.("substring", `${normalizedInput} <-> ${trackedName}`);
         return true;
       }
     }
 
+    onMiss?.(normalizedInput);
     return false;
   }
 
