@@ -50,6 +50,9 @@ modules already available on Python 3.12: `asyncio`, `contextvars`, `os`, and
 - Add/keep dynamic coverage for success, callback exception propagation,
   cancellation, cancellation logging, closed-loop late worker completion, and
   late worker exceptions after cancellation.
+- Add setup-failure coverage for `loop.add_reader` and `thread.start` so pipe
+  file descriptors are closed when initialization fails before the worker owns
+  the write descriptor.
 - Verify the red state with targeted tests before implementation.
 - Run the required full validation suite before commit:
   - `./run.sh uv run ruff check . --fix`

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import threading
 import time
@@ -14,7 +15,23 @@ mock_decky = types.SimpleNamespace()
 mock_decky.logger = MagicMock()
 sys.modules["decky"] = mock_decky
 
+import main as main_module  # noqa: E402
 from main import _run_blocking  # noqa: E402
+
+
+def _is_fd_closed(fd: int) -> bool:
+    try:
+        os.fstat(fd)
+    except OSError:
+        return True
+    return False
+
+
+def _close_if_open(fd: int) -> None:
+    try:
+        os.close(fd)
+    except OSError:
+        return
 
 
 @pytest.mark.asyncio
@@ -90,6 +107,58 @@ async def test_run_blocking_worker_exception_after_cancellation_is_not_loop_erro
         loop.set_exception_handler(previous_handler)
 
     assert loop_errors == []
+
+
+def test_run_blocking_closes_pipe_fds_when_add_reader_fails(monkeypatch: pytest.MonkeyPatch):
+    loop = asyncio.new_event_loop()
+    read_fd, write_fd = os.pipe()
+
+    def fail_add_reader(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("add_reader failed")
+
+    def fake_pipe() -> tuple[int, int]:
+        return read_fd, write_fd
+
+    async def scenario() -> None:
+        monkeypatch.setattr(main_module.os, "pipe", fake_pipe)
+        monkeypatch.setattr(loop, "add_reader", fail_add_reader)
+        with pytest.raises(RuntimeError, match="add_reader failed"):
+            await _run_blocking(lambda: "done")
+
+    try:
+        loop.run_until_complete(scenario())
+        assert _is_fd_closed(read_fd)
+        assert _is_fd_closed(write_fd)
+    finally:
+        _close_if_open(read_fd)
+        _close_if_open(write_fd)
+        loop.close()
+
+
+def test_run_blocking_closes_pipe_fds_when_thread_start_fails(monkeypatch: pytest.MonkeyPatch):
+    loop = asyncio.new_event_loop()
+    read_fd, write_fd = os.pipe()
+
+    def fail_thread_start(_self: threading.Thread) -> None:
+        raise RuntimeError("thread start failed")
+
+    def fake_pipe() -> tuple[int, int]:
+        return read_fd, write_fd
+
+    async def scenario() -> None:
+        monkeypatch.setattr(main_module.os, "pipe", fake_pipe)
+        monkeypatch.setattr(threading.Thread, "start", fail_thread_start)
+        with pytest.raises(RuntimeError, match="thread start failed"):
+            await _run_blocking(lambda: "done")
+
+    try:
+        loop.run_until_complete(scenario())
+        assert _is_fd_closed(read_fd)
+        assert _is_fd_closed(write_fd)
+    finally:
+        _close_if_open(read_fd)
+        _close_if_open(write_fd)
+        loop.close()
 
 
 def test_run_blocking_worker_completion_after_loop_close_has_no_thread_exception():

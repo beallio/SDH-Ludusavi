@@ -305,6 +305,8 @@ async def _run_blocking(callback: Any) -> Any:
     read_fd, write_fd = os.pipe()
     completion: tuple[str, Any] | None = None
     completion_lock = threading.Lock()
+    reader_registered = False
+    thread_started = False
 
     def close_fd(fd: int) -> None:
         try:
@@ -312,11 +314,16 @@ async def _run_blocking(callback: Any) -> Any:
         except OSError:
             return
 
-    def read_completion_signal() -> None:
+    def remove_reader_if_active() -> None:
+        if loop.is_closed() or not loop.is_running():
+            return
         try:
             loop.remove_reader(read_fd)
         except (OSError, RuntimeError):
             return
+
+    def read_completion_signal() -> None:
+        remove_reader_if_active()
         try:
             os.read(read_fd, 1)
         except OSError:
@@ -349,9 +356,20 @@ async def _run_blocking(callback: Any) -> Any:
         finally:
             close_fd(write_fd)
 
-    loop.add_reader(read_fd, read_completion_signal)
-    thread = threading.Thread(target=worker, name="sdh-ludusavi-worker", daemon=True)
-    thread.start()
+    try:
+        loop.add_reader(read_fd, read_completion_signal)
+        reader_registered = True
+        thread = threading.Thread(target=worker, name="sdh-ludusavi-worker", daemon=True)
+        thread.start()
+        thread_started = True
+    except BaseException:
+        if reader_registered:
+            remove_reader_if_active()
+        close_fd(read_fd)
+        if not thread_started:
+            close_fd(write_fd)
+        future.cancel()
+        raise
 
     try:
         return await asyncio.shield(future)
@@ -359,10 +377,7 @@ async def _run_blocking(callback: Any) -> Any:
         decky.logger.warning(
             "SDH-ludusavi operation was cancelled while worker may still be running"
         )
-        try:
-            loop.remove_reader(read_fd)
-        except (OSError, RuntimeError):
-            pass
+        remove_reader_if_active()
         close_fd(read_fd)
         future.cancel()
         raise
