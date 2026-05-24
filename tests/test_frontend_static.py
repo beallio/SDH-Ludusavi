@@ -1427,3 +1427,9 @@ def test_frontend_decomposed_load_initial_helpers_exist() -> None:
     assert "const fetchMetadata = () => {" in source
     assert "const fetchInitialState = async (): Promise<RpcResult<Settings>> => {" in source
     assert "const synchronizeGameList = async (" in source
+
+
+def test_frontend_state_store_optimization_no_array_from_in_loop() -> None:
+    store_source = Path("src/state/ludusaviState.tsx").read_text(encoding="utf-8")
+    assert "Array.from(this.snapshot.trackedNames)" not in store_source
+    assert "for (const trackedName of this.snapshot.trackedNames)" in store_source

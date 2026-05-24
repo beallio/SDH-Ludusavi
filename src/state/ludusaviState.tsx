@@ -203,7 +203,7 @@ export class LudusaviStateStore {
       return true;
     }
 
-    for (const trackedName of Array.from(this.snapshot.trackedNames)) {
+    for (const trackedName of this.snapshot.trackedNames) {
       if (
         (normalizedInput.length > 4 && trackedName.includes(normalizedInput)) ||
         (trackedName.length > 4 && normalizedInput.includes(trackedName))
