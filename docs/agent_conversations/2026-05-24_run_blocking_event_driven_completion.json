@@ -1,0 +1,35 @@
+{
+  "date": "2026-05-24",
+  "task_objective": "Replace _run_blocking queue polling with event-driven completion while preserving daemon-worker cancellation safety.",
+  "files_modified": [
+    "docs/plans/fix_run_blocking_event_driven_completion.md",
+    "main.py",
+    "tests/test_issue_7_cancellation.py",
+    "tests/test_main.py"
+  ],
+  "tests_added": [
+    "tests/test_main.py::test_run_blocking_uses_event_driven_daemon_future_without_polling",
+    "tests/test_issue_7_cancellation.py::test_run_blocking_cancellation_logs_warning",
+    "tests/test_issue_7_cancellation.py::test_run_blocking_worker_exception_propagates",
+    "tests/test_issue_7_cancellation.py::test_run_blocking_worker_exception_after_cancellation_is_not_loop_error"
+  ],
+  "design_decisions": [
+    "Kept _run_blocking public behavior unchanged.",
+    "Kept a dedicated daemon worker so cancellation does not hold the plugin process open.",
+    "Replaced queue polling and asyncio.sleep with an event-loop self-pipe reader.",
+    "Preserved context propagation with contextvars.copy_context().",
+    "Used best-effort late completion behavior so cancellation and loop shutdown do not surface background thread exceptions.",
+    "Avoided call_soon_threadsafe and run_in_executor after local validation showed delayed worker completions did not wake the loop reliably in this environment."
+  ],
+  "results": {
+    "red_test": "./run.sh uv run pytest tests/test_main.py::test_run_blocking_uses_event_driven_daemon_future_without_polling tests/test_issue_7_cancellation.py failed before implementation on queue polling",
+    "targeted_tests": "8 passed in 0.64s",
+    "ruff_check": "passed",
+    "ruff_format": "49 files left unchanged",
+    "ty_check": "passed",
+    "pytest": "258 passed in 7.87s",
+    "pnpm_typecheck": "passed",
+    "pnpm_build": "passed",
+    "latency_probe": "20 iterations of a 1 ms callback: mean 1.490 ms, median 1.507 ms, max 1.678 ms"
+  }
+}

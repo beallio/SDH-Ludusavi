@@ -108,7 +108,7 @@ def import_main(
     return module
 
 
-def test_run_blocking_uses_daemon_worker_and_polling_queue() -> None:
+def test_run_blocking_uses_event_driven_daemon_future_without_polling() -> None:
     tree = ast.parse(Path("main.py").read_text(encoding="utf-8"))
     run_blocking = next(
         node
@@ -118,18 +118,21 @@ def test_run_blocking_uses_daemon_worker_and_polling_queue() -> None:
     names = {node.id for node in ast.walk(run_blocking) if isinstance(node, ast.Name)}
     attributes = {node.attr for node in ast.walk(run_blocking) if isinstance(node, ast.Attribute)}
 
-    assert "queue" in names
-    assert "sleep" in attributes
-    assert "pipe" not in attributes
-    assert "add_reader" not in attributes
-    assert "remove_reader" not in attributes
+    assert "queue" not in names
+    assert "Empty" not in attributes
+    assert "sleep" not in attributes
+    assert "pipe" in attributes
+    assert "add_reader" in attributes
+    assert "remove_reader" in attributes
     assert "wait_for" not in attributes
     assert "TimeoutError" not in names
     assert "call_soon_threadsafe" not in attributes
-    assert "create_future" not in attributes
+    assert "create_future" in attributes
+    assert "copy_context" in attributes
     assert "Thread" in attributes
     assert "to_thread" not in attributes
-    assert "shield" not in attributes
+    assert "run_in_executor" not in attributes
+    assert "shield" in attributes
     assert "wrap_future" not in attributes
     assert "set_running_or_notify_cancel" not in attributes
 
