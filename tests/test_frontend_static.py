@@ -1419,3 +1419,11 @@ def test_frontend_toggles_wrapped_in_panel_section_row_without_highlight_on_focu
         toggle_block = source[start:end]
         assert "highlightOnFocus" not in toggle_block
         idx = end
+
+
+def test_frontend_decomposed_load_initial_helpers_exist() -> None:
+    source = FRONTEND.read_text()
+
+    assert "const fetchMetadata = () => {" in source
+    assert "const fetchInitialState = async (): Promise<RpcResult<Settings>> => {" in source
+    assert "const synchronizeGameList = async (" in source

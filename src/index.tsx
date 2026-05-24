@@ -940,6 +940,30 @@ function Content() {
     }
     setBackgroundRefreshBusy(isWarmed);
 
+    fetchMetadata();
+
+    try {
+      log("debug", `Starting initial load (warmed=${isWarmed})`);
+      const loadedSettings = await fetchInitialState();
+      if (!isMounted.current) return;
+
+      await synchronizeGameList(isWarmed, loadedSettings);
+      if (!isMounted.current) return;
+
+      const loadedOperation = await getOperationStatus();
+      if (!isMounted.current) return;
+      setOperation(loadedOperation);
+    } catch (error) {
+      log("error", `Initial load failed: ${error}`);
+    } finally {
+      if (isMounted.current) {
+        setBackgroundRefreshBusy(false);
+        setBusyLabel(null);
+      }
+    }
+  };
+
+  const fetchMetadata = () => {
     // Load versions and commands in the background asynchronously.
     void (async () => {
       const [versionsResult, commandResult] = await Promise.allSettled([
@@ -975,58 +999,54 @@ function Content() {
         log("error", `Background load of command failed: ${commandResult.reason}`);
       }
     })();
+  };
 
-    try {
-      log("debug", `Starting initial load (warmed=${isWarmed})`);
-      const [loadedSettings, loadedHistory] = await Promise.all([
+  const fetchInitialState = async (): Promise<RpcResult<Settings>> => {
+    const [loadedSettings, loadedHistory] = await Promise.all([
         getSettings(),
         getGameHistoryCall()
       ]);
 
-      if (!isMounted.current) return;
+    if (!isMounted.current) return loadedSettings;
 
-      log("debug", `Loaded settings: ${JSON.stringify(loadedSettings)}`);
-      if (isRpcStatus(loadedSettings)) {
-        logRpcStatus(loadedSettings, "settings");
-      } else {
-        const normalizedSettings = applySettings(loadedSettings);
-        if (normalizedSettings.selected_game) {
-          ludusaviStore.setSelectedGame(normalizedSettings.selected_game);
-        }
+    log("debug", `Loaded settings: ${JSON.stringify(loadedSettings)}`);
+    if (isRpcStatus(loadedSettings)) {
+      logRpcStatus(loadedSettings, "settings");
+    } else {
+      const normalizedSettings = applySettings(loadedSettings);
+      if (normalizedSettings.selected_game) {
+        ludusaviStore.setSelectedGame(normalizedSettings.selected_game);
       }
+    }
 
-      if (isRpcStatus(loadedHistory)) {
-        logRpcStatus(loadedHistory, "history");
-      } else {
-        ludusaviStore.setGameHistory(loadedHistory);
-      }
+    if (isRpcStatus(loadedHistory)) {
+      logRpcStatus(loadedHistory, "history");
+    } else {
+      ludusaviStore.setGameHistory(loadedHistory);
+    }
 
-      log("debug", "Initializing game list (cached)");
-      const installedAppIds = await getInstalledAppIdsString();
-      const installedAppIdsChanged = ludusaviState.installedAppIds !== installedAppIds;
-      if (!isMounted.current) return;
-      const cacheCurrentResult = isWarmed && !installedAppIdsChanged ? await isGameCacheCurrentCall(installedAppIds) : false;
-      if (!isMounted.current) return;
-      const cacheCurrent = !isRpcStatus(cacheCurrentResult) && cacheCurrentResult === true;
-      if (cacheCurrent && ludusaviState.games) {
-        applyCachedRefreshResult(isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game);
-      } else {
-        const refreshed = await refreshGamesCall(false, installedAppIds);
-        if (!isMounted.current) return;
-        if (applyRefreshResult(refreshed, isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game)) {
-          ludusaviStore.setInstalledAppIds(installedAppIds);
-        }
-      }
+    return loadedSettings;
+  };
 
-      const loadedOperation = await getOperationStatus();
+  const synchronizeGameList = async (isWarmed: boolean, loadedSettings: RpcResult<Settings>) => {
+    log("debug", "Initializing game list (cached)");
+    const installedAppIds = await getInstalledAppIdsString();
+    const installedAppIdsChanged = ludusaviState.installedAppIds !== installedAppIds;
+    if (!isMounted.current) return;
+
+    const cacheCurrentResult = isWarmed && !installedAppIdsChanged ? await isGameCacheCurrentCall(installedAppIds) : false;
+    if (!isMounted.current) return;
+
+    const cacheCurrent = !isRpcStatus(cacheCurrentResult) && cacheCurrentResult === true;
+    const preferredGame = isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game;
+
+    if (cacheCurrent && ludusaviState.games) {
+      applyCachedRefreshResult(preferredGame);
+    } else {
+      const refreshed = await refreshGamesCall(false, installedAppIds);
       if (!isMounted.current) return;
-      setOperation(loadedOperation);
-    } catch (error) {
-      log("error", `Initial load failed: ${error}`);
-    } finally {
-      if (isMounted.current) {
-        setBackgroundRefreshBusy(false);
-        setBusyLabel(null);
+      if (applyRefreshResult(refreshed, preferredGame)) {
+        ludusaviStore.setInstalledAppIds(installedAppIds);
       }
     }
   };
