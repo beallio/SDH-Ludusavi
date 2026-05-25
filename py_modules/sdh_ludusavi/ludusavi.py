@@ -96,7 +96,7 @@ class PyludusaviAdapter:
                 alias = game.get("alias")
                 if name and alias:
                     aliases[name] = alias
-        except LudusaviError as exc:
+        except (LudusaviError, KeyError, TypeError, ValueError, AttributeError) as exc:
             LOGGER.debug("Failed to retrieve custom game aliases: %s", exc)
         return aliases
 
@@ -252,7 +252,7 @@ class PyludusaviAdapter:
     def get_config_mtime_ns(self) -> int | None:
         try:
             return Path(self._config_path()).stat().st_mtime_ns
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError, LudusaviError):
             LOGGER.debug(
                 "Unable to stat Ludusavi config path: %s", self._cached_config_path, exc_info=True
             )

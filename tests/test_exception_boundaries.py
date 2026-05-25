@@ -307,3 +307,38 @@ def test_post_backup_refresh_failure_logs_warning_and_returns_backup_result(tmp_
     result = service.force_backup("Hades")
     assert result["status"] == "backed_up"
     assert result["result"] == {"ok": True}
+
+    # Assert that the post-backup warning log was generated and recorded
+    logs = service.get_recent_logs()
+    warning_logs = [
+        entry
+        for entry in logs
+        if entry["level"] == "warning" and "Post-backup status refresh failed" in entry["message"]
+    ]
+    assert len(warning_logs) == 1
+    assert "refresh failed" in warning_logs[0]["message"]
+
+
+def test_get_aliases_catches_config_shape_errors():
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    mock_client = MagicMock()
+    # mock config_show to return invalid shape (e.g. data is None, triggering AttributeError)
+    mock_response = MagicMock()
+    mock_response.data = None
+    mock_client.config_show.return_value = mock_response
+    adapter._client = mock_client
+
+    # Should catch AttributeError and return {}
+    assert adapter.get_aliases() == {}
+
+
+def test_get_config_mtime_ns_catches_and_raises_ludusavi_error():
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    adapter._cached_config_path = None
+    mock_client = MagicMock()
+    mock_client.config_path.side_effect = LudusaviError("mock ludusavi error")
+    adapter._client = mock_client
+
+    # Should catch LudusaviError, log at debug, and re-raise it
+    with pytest.raises(LudusaviError, match="mock ludusavi error"):
+        adapter.get_config_mtime_ns()
