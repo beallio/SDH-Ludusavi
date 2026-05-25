@@ -497,34 +497,40 @@ def test_process_tree_falls_back_on_listdir_failure(
     assert result == [42]
 
 
-def test_read_ppid_parses_status_file(tmp_path: Path) -> None:
-    """_read_ppid correctly extracts PPid from a /proc status file."""
+def test_read_ppid_parses_stat_file(tmp_path: Path) -> None:
+    """_read_ppid extracts PPID from compact /proc stat content."""
     from sdh_ludusavi.service import _read_ppid
 
-    status_file = tmp_path / "status"
-    status_file.write_text(
-        "Name:\tbash\n"
-        "Umask:\t0022\n"
-        "State:\tS (sleeping)\n"
-        "Tgid:\t12345\n"
-        "Pid:\t12345\n"
-        "PPid:\t100\n"
-        "TracerPid:\t0\n",
-        encoding="utf-8",
-    )
-
-    # _read_ppid reads /proc/{pid_str}/status, so we construct a fake /proc tree
     proc_dir = tmp_path / "proc" / "12345"
     proc_dir.mkdir(parents=True)
-    (proc_dir / "status").write_text(
-        status_file.read_text(encoding="utf-8"),
+    (proc_dir / "stat").write_text("12345 (bash) S 100 12345 12345 0 -1\n", encoding="utf-8")
+
+    assert _read_ppid("12345", proc_root=str(tmp_path / "proc")) == 100
+
+
+def test_read_ppid_parses_stat_comm_with_spaces_and_parentheses(tmp_path: Path) -> None:
+    """The /proc stat parser must not split the parenthesized comm field naively."""
+    from sdh_ludusavi.service import _read_ppid
+
+    proc_dir = tmp_path / "proc" / "12345"
+    proc_dir.mkdir(parents=True)
+    (proc_dir / "stat").write_text(
+        "12345 (game process) name) S 100 12345 12345 0 -1\n",
         encoding="utf-8",
     )
 
-    # We test _read_ppid by monkeypatching the path prefix — but since _read_ppid
-    # uses a hardcoded "/proc/" prefix, we test it indirectly through _process_tree
-    # or directly if it accepts a path. For now, test the parsing logic:
     assert _read_ppid("12345", proc_root=str(tmp_path / "proc")) == 100
+
+
+def test_read_ppid_returns_none_on_malformed_stat(tmp_path: Path) -> None:
+    """Malformed /proc stat content is treated like a vanished process."""
+    from sdh_ludusavi.service import _read_ppid
+
+    proc_dir = tmp_path / "proc" / "12345"
+    proc_dir.mkdir(parents=True)
+    (proc_dir / "stat").write_text("12345 (bash) S not-a-ppid\n", encoding="utf-8")
+
+    assert _read_ppid("12345", proc_root=str(tmp_path / "proc")) is None
 
 
 def test_read_ppid_returns_none_on_missing_file() -> None:
@@ -547,6 +553,15 @@ def test_process_tree_has_no_subprocess_usage() -> None:
             assert "subprocess" not in names, f"{node.name} must not reference subprocess"
             assert "Popen" not in attrs, f"{node.name} must not reference Popen"
             assert "communicate" not in attrs, f"{node.name} must not reference communicate"
+
+
+def test_read_ppid_uses_proc_stat_not_status() -> None:
+    """Static regression: parent PID reads should use compact /proc stat files."""
+    source = Path("py_modules/sdh_ludusavi/service.py").read_text(encoding="utf-8")
+    read_ppid_source = source[source.index("def _read_ppid") : source.index("def _process_tree")]
+
+    assert "/stat" in read_ppid_source
+    assert "/status" not in read_ppid_source
 
 
 def test_resume_all_paused_processes_resumes_remaining_pids(

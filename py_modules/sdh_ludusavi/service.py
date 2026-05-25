@@ -1613,18 +1613,22 @@ def _normalize_installed_app_ids(raw: str | None) -> str | None:
 
 
 def _read_ppid(pid_str: str, *, proc_root: str = "/proc") -> int | None:
-    """Read the parent PID from /proc/<pid>/status.
+    """Read the parent PID from /proc/<pid>/stat.
 
     Returns None if the process has vanished or the file is unreadable.
     """
     try:
-        with open(f"{proc_root}/{pid_str}/status", encoding="utf-8") as fh:
-            for line in fh:
-                if line.startswith("PPid:"):
-                    return int(line.split(":")[1])
-    except (OSError, ValueError):
+        with open(f"{proc_root}/{pid_str}/stat", encoding="utf-8") as fh:
+            stat = fh.readline()
+        comm_end = stat.rfind(")")
+        if comm_end == -1:
+            return None
+        fields = stat[comm_end + 2 :].split()
+        if len(fields) < 2:
+            return None
+        return int(fields[1])
+    except (OSError, ValueError, IndexError):
         return None
-    return None
 
 
 def _process_tree(pid: int) -> list[int]:
