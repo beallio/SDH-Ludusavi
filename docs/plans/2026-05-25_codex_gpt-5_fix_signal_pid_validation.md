@@ -54,6 +54,8 @@ Behavior:
   - floats, including `123.0`, to avoid truncation/coercion ambiguity.
   - strings that are empty or not parseable by `int(cleaned)`.
   - any parsed integer `<= 1`.
+  - any parsed integer above `2_147_483_647`, so oversized Python integers do
+    not reach `os.kill` and trigger C `pid_t` conversion overflow.
 - Raise `ValueError` with a concise user/log-safe message when invalid.
 - Return the parsed `int` when valid.
 
@@ -163,12 +165,17 @@ Add red tests before production edits:
 
 - `test_coerce_signal_pid_rejects_non_integral_values`
   - Cover representative malformed inputs: `True`, `False`, `2.5`, `"2.5"`,
-    `""`, `"   "`, `"abc"`, `"-5"`, and `"+1"`.
+    `""`, `"   "`, `"abc"`, `"-5"`, `"+1"`, and `2_147_483_648`.
   - Assert `ValueError`.
 
 - `test_coerce_signal_pid_accepts_valid_integer_strings`
-  - Cover representative valid inputs: `2`, `"2"`, `" 2 "`, and `"+2"`.
+  - Cover representative valid inputs: `2`, `"2"`, `" 2 "`, `"+2"`, and
+    `2_147_483_647`.
   - Assert the helper returns the parsed integer.
+
+- `test_signal_process_methods_reject_pid_above_os_signal_range`
+  - Call both pause and resume with `"2147483648"`.
+  - Assert both return failure status and do not call `_send_signal_tree`.
 
 Existing tests must still prove valid behavior:
 
@@ -196,6 +203,7 @@ broad formatting rather than rewriting user-owned files.
 
 - PIDs `0`, `-1`, and `1` return failure status from both pause and resume
   methods.
+- PIDs greater than `2_147_483_647` return failure status before signaling.
 - Invalid PIDs never call `_send_signal_tree()` or `os.kill()`.
 - Valid PID behavior remains unchanged.
 - No public RPC/type/API shape changes.

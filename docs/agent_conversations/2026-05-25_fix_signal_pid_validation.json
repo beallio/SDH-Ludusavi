@@ -16,6 +16,7 @@
   "design_decisions": [
     "Added a backend-only _coerce_signal_pid helper near the process signaling helpers.",
     "Rejected bool, float, malformed string, blank string, and PID values less than or equal to 1 before any signal dispatch.",
+    "Rejected PID values above 2147483647 before dispatch so oversized Python integers cannot reach os.kill pid_t conversion.",
     "Parsed string PIDs with int(cleaned), not isdigit or isdecimal, so signed strings are handled consistently.",
     "Handled ValueError locally in pause_game_process and resume_game_process to return structured failure results and warning logs without Plugin._call exception traces.",
     "Kept public RPC names, TypeScript types, process-tree traversal, frontend lifecycle flow, and dependencies unchanged."
@@ -25,6 +26,7 @@
     "red_tests": "Targeted new tests failed before implementation because unsafe PIDs still signaled and _coerce_signal_pid did not exist.",
     "targeted_validation": [
       "./run.sh uv run pytest tests/test_service.py::test_pause_game_process_rejects_invalid_signal_pids tests/test_service.py::test_resume_game_process_rejects_invalid_signal_pids tests/test_service.py::test_coerce_signal_pid_rejects_invalid_values tests/test_service.py::test_coerce_signal_pid_accepts_valid_integer_strings -> 19 passed",
+      "./run.sh uv run pytest tests/test_service.py::test_signal_process_methods_reject_pid_above_os_signal_range tests/test_service.py::test_coerce_signal_pid_rejects_invalid_values tests/test_service.py::test_coerce_signal_pid_accepts_valid_integer_strings -> 16 passed",
       "./run.sh uv run pytest tests/test_service.py -> 84 passed"
     ],
     "full_validation": [

@@ -397,7 +397,32 @@ def test_resume_game_process_rejects_invalid_signal_pids(
     assert service._paused_pids == {99: 123.0}
 
 
-@pytest.mark.parametrize("invalid_input", [True, False, 2.5, "2.5", "", "   ", "abc", "-5", "+1"])
+def test_signal_process_methods_reject_pid_above_os_signal_range(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = service_with_state(tmp_path)
+    calls: list[tuple[int, signal.Signals]] = []
+
+    def capture_signal_tree(target_pid: int, sig: signal.Signals) -> bool:
+        calls.append((target_pid, sig))
+        return True
+
+    monkeypatch.setattr("sdh_ludusavi.service._send_signal_tree", capture_signal_tree)
+
+    pause_result = service.pause_game_process("2147483648")
+    resume_result = service.resume_game_process("2147483648")
+
+    assert pause_result["status"] == "failed"
+    assert resume_result["status"] == "failed"
+    assert calls == []
+    assert service._paused_pids == {}
+
+
+@pytest.mark.parametrize(
+    "invalid_input",
+    [True, False, 2.5, "2.5", "", "   ", "abc", "-5", "+1", 2_147_483_648],
+)
 def test_coerce_signal_pid_rejects_invalid_values(invalid_input: object) -> None:
     import sdh_ludusavi.service as svc_mod
 
@@ -405,7 +430,10 @@ def test_coerce_signal_pid_rejects_invalid_values(invalid_input: object) -> None
         svc_mod._coerce_signal_pid(invalid_input)
 
 
-@pytest.mark.parametrize(("value", "expected"), [(2, 2), ("2", 2), (" 2 ", 2), ("+2", 2)])
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(2, 2), ("2", 2), (" 2 ", 2), ("+2", 2), (2_147_483_647, 2_147_483_647)],
+)
 def test_coerce_signal_pid_accepts_valid_integer_strings(value: object, expected: int) -> None:
     import sdh_ludusavi.service as svc_mod
 

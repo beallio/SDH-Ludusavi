@@ -18,6 +18,7 @@ from ._version import resolve_version
 
 LOGGER = logging.getLogger(__name__)
 MAX_INSTALLED_APP_IDS_BYTES = 16_384
+MAX_SIGNAL_PID = 2_147_483_647
 _CONFIG_MARKER_READ_FAILED = object()
 _CACHE_MARKER_UNCHANGED = object()
 DEFAULT_NOTIFICATION_SETTINGS: dict[str, bool] = {
@@ -1623,6 +1624,8 @@ def _coerce_signal_pid(value: object) -> int:
 
     if pid <= 1:
         raise ValueError(f"Refusing to signal unsafe PID value: {pid}")
+    if pid > MAX_SIGNAL_PID:
+        raise ValueError("PID value exceeds maximum 32-bit integer limit")
     return pid
 
 
