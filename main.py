@@ -213,17 +213,27 @@ class Plugin:
 
     async def _unload(self) -> None:
         backend = self._backend
-        if backend is not None:
-            result = await self._call("unload_stop", backend.stop)
-            if isinstance(result, dict) and result.get("status") == "failed":
-                decky.logger.warning(
-                    "Offloaded unload stop failed; falling back to synchronous stop"
-                )
+        try:
+            if backend is not None:
+                result = await self._call("unload_stop", backend.stop)
+                if isinstance(result, dict) and result.get("status") == "failed":
+                    decky.logger.warning(
+                        "Offloaded unload stop failed; falling back to synchronous stop"
+                    )
+                    try:
+                        backend.stop()
+                    except Exception:
+                        decky.logger.exception("Synchronous unload stop fallback failed")
+        except asyncio.CancelledError:
+            if backend is not None:
+                decky.logger.warning("Unload stop was cancelled; falling back to synchronous stop")
                 try:
                     backend.stop()
                 except Exception:
                     decky.logger.exception("Synchronous unload stop fallback failed")
-        decky.logger.info("SDH-ludusavi backend unloaded")
+            raise
+        finally:
+            decky.logger.info("SDH-ludusavi backend unloaded")
 
     async def _uninstall(self) -> None:
         decky.logger.info("SDH-ludusavi backend uninstalled")

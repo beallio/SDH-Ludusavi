@@ -518,9 +518,9 @@ function destroyAutoSyncStatusBrowserView() {
       browserViewOwner.Destroy();
       needsSteamClientDestroy = false;
     }
-    if (needsSteamClientDestroy) {
+    if (needsSteamClientDestroy && browserViewOwner) {
       const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
-      steamClient?.BrowserView?.Destroy?.(browserViewOwner ?? browserView);
+      steamClient?.BrowserView?.Destroy?.(browserViewOwner);
     }
   } catch (err) {
     log("warning", `Could not destroy status strip BrowserView: ${err}`, "autosync_status");

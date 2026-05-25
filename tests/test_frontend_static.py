@@ -375,11 +375,16 @@ def test_frontend_status_strip_destroy_disposes_owner_and_nested_view() -> None:
         "browserView.Destroy();",
         'typeof browserViewOwner?.Destroy === "function"',
         "browserViewOwner.Destroy();",
-        "steamClient?.BrowserView?.Destroy?.(browserViewOwner ?? browserView);",
+        "needsSteamClientDestroy && browserViewOwner",
+        "steamClient?.BrowserView?.Destroy?.(browserViewOwner);",
         "autoSyncStatusBrowserView = null;",
         "autoSyncStatusBrowserViewOwner = null;",
     ]:
         assert required_text in destroy_source
+    assert (
+        "steamClient?.BrowserView?.Destroy?.(browserViewOwner ?? browserView);"
+        not in destroy_source
+    )
 
     assert "else if" not in destroy_source
 

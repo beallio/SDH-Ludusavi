@@ -407,6 +407,34 @@ def test_unload_falls_back_to_synchronous_stop_when_offload_fails(
     assert logger.infos[-1] == "SDH-ludusavi backend unloaded"
 
 
+def test_unload_cancellation_runs_synchronous_stop_before_reraising(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decky, logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+    calls: list[str] = []
+
+    class Backend:
+        def stop(self) -> None:
+            calls.append("stop")
+
+    async def fake_call(operation: str, callback: Any) -> object:
+        calls.append(operation)
+        raise asyncio.CancelledError
+
+    plugin._backend = Backend()
+    monkeypatch.setattr(plugin, "_call", fake_call)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(plugin._unload())
+
+    assert calls == ["unload_stop", "stop"]
+    assert logger.warnings == ["Unload stop was cancelled; falling back to synchronous stop"]
+    assert logger.infos[-1] == "SDH-ludusavi backend unloaded"
+
+
 def test_unload_logs_synchronous_stop_fallback_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
