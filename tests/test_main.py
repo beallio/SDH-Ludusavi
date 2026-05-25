@@ -328,6 +328,110 @@ def test_plugin_exposes_process_pause_resume_rpcs(
     assert calls == [("pause", 1234), ("resume", 1234)]
 
 
+def test_unload_stops_backend_through_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decky, logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+    calls: list[str] = []
+
+    class Backend:
+        def stop(self) -> None:
+            calls.append("stop")
+
+    async def fake_call(operation: str, callback: Any) -> object:
+        calls.append(operation)
+        return callback()
+
+    plugin._backend = Backend()
+    monkeypatch.setattr(plugin, "_call", fake_call)
+
+    asyncio.run(plugin._unload())
+
+    assert calls == ["unload_stop", "stop"]
+    assert logger.infos[-1] == "SDH-ludusavi backend unloaded"
+
+
+def test_unload_does_not_block_event_loop_while_stop_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decky, _logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+
+    class SlowBackend:
+        def stop(self) -> None:
+            time.sleep(0.15)
+
+    plugin._backend = SlowBackend()
+
+    async def scenario() -> None:
+        started = time.perf_counter()
+        task = asyncio.create_task(plugin._unload())
+        await asyncio.sleep(0.01)
+
+        assert time.perf_counter() - started < 0.08
+        assert not task.done()
+        await task
+
+    asyncio.run(scenario())
+
+
+def test_unload_falls_back_to_synchronous_stop_when_offload_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decky, logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+    calls: list[str] = []
+
+    class Backend:
+        def stop(self) -> None:
+            calls.append("stop")
+
+    async def fake_call(operation: str, callback: Any) -> dict[str, str]:
+        calls.append(operation)
+        return {"status": "failed", "message": "loop closed"}
+
+    plugin._backend = Backend()
+    monkeypatch.setattr(plugin, "_call", fake_call)
+
+    asyncio.run(plugin._unload())
+
+    assert calls == ["unload_stop", "stop"]
+    assert logger.warnings == ["Offloaded unload stop failed; falling back to synchronous stop"]
+    assert logger.infos[-1] == "SDH-ludusavi backend unloaded"
+
+
+def test_unload_logs_synchronous_stop_fallback_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decky, logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+
+    class Backend:
+        def stop(self) -> None:
+            raise RuntimeError("still failed")
+
+    async def fake_call(operation: str, callback: Any) -> dict[str, str]:
+        return {"status": "failed", "message": "loop closed"}
+
+    plugin._backend = Backend()
+    monkeypatch.setattr(plugin, "_call", fake_call)
+
+    asyncio.run(plugin._unload())
+
+    assert logger.warnings == ["Offloaded unload stop failed; falling back to synchronous stop"]
+    assert logger.exceptions == ["Synchronous unload stop fallback failed"]
+    assert logger.infos[-1] == "SDH-ludusavi backend unloaded"
+
+
 def test_service_uses_decky_plugin_settings_and_runtime_dirs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -1643,13 +1643,15 @@ def _process_tree(pid: int) -> list[int]:
         children_by_parent.setdefault(ppid, []).append(int(entry))
 
     ordered: list[int] = []
-
-    def visit(target_pid: int) -> None:
+    visited: set[int] = set()
+    stack = [pid]
+    while stack:
+        target_pid = stack.pop()
+        if target_pid in visited:
+            continue
+        visited.add(target_pid)
         ordered.append(target_pid)
-        for child_pid in sorted(children_by_parent.get(target_pid, [])):
-            visit(child_pid)
-
-    visit(pid)
+        stack.extend(sorted(children_by_parent.get(target_pid, []), reverse=True))
     return ordered
 
 

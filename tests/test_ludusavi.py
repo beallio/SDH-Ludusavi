@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 import pytest
 
@@ -95,10 +96,14 @@ class FakeResponse:
 
 class FakeLudusaviClient:
     def __init__(
-        self, backup_data: dict[str, object], restore_data: dict[str, object] | None = None
+        self,
+        backup_data: dict[str, object],
+        restore_data: dict[str, object] | None = None,
+        backup_preview_data: dict[str, object] | None = None,
     ) -> None:
         self.backup_data = backup_data
         self.restore_data = restore_data or {}
+        self.backup_preview_data = backup_preview_data or {}
         self.requested_games: list[str] | None = None
         self.preview_requested: bool = False
 
@@ -113,13 +118,21 @@ class FakeLudusaviClient:
         self.preview_requested = preview
         return FakeResponse(self.restore_data)
 
+    def backup(
+        self, games: list[str] | None = None, preview: bool = False, **kwargs: object
+    ) -> FakeResponse:
+        self.requested_games = games
+        self.preview_requested = preview
+        return FakeResponse(self.backup_preview_data)
+
 
 def adapter_with_backups(
     backup_data: dict[str, object],
     restore_data: dict[str, object] | None = None,
+    backup_preview_data: dict[str, object] | None = None,
 ) -> tuple[PyludusaviAdapter, FakeLudusaviClient]:
     adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
-    client = FakeLudusaviClient(backup_data, restore_data)
+    client = FakeLudusaviClient(backup_data, restore_data, backup_preview_data)
     adapter._client = client
     return adapter, client
 
@@ -161,3 +174,35 @@ def test_compare_recency_remains_ambiguous_on_preview_error() -> None:
     client.restore = fail_preview
 
     assert adapter.compare_recency("Hades") == "ambiguous"
+
+
+def test_conflict_metadata_local_modified_at_is_timezone_aware_utc(tmp_path):
+    save_file = tmp_path / "save.dat"
+    save_file.write_text("save", encoding="utf-8")
+    os.utime(save_file, (1_800_000_000, 1_800_000_000))
+    adapter, _client = adapter_with_backups(
+        backup_data={
+            "games": {
+                "Hades": {
+                    "backups": [{"when": "2026-05-10T00:00:00Z"}],
+                    "backupPath": "/backup/Hades",
+                }
+            }
+        },
+        backup_preview_data={
+            "games": {
+                "Hades": {
+                    "files": {
+                        "save": {"originalPath": str(save_file)},
+                    }
+                }
+            }
+        },
+    )
+
+    metadata = adapter.get_conflict_metadata("Hades")
+
+    assert metadata["backupModifiedAt"] == "2026-05-10T00:00:00Z"
+    assert metadata["backupPath"] == "/backup/Hades"
+    assert str(metadata["localModifiedAt"]).endswith("+00:00")
+    assert datetime.fromisoformat(str(metadata["localModifiedAt"])).tzinfo is not None

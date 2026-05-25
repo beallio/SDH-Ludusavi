@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 import os
 from pathlib import Path
@@ -160,7 +160,10 @@ class PyludusaviAdapter:
                     except OSError:
                         continue
             if mtimes:
-                metadata["localModifiedAt"] = datetime.fromtimestamp(max(mtimes)).isoformat()
+                metadata["localModifiedAt"] = datetime.fromtimestamp(
+                    max(mtimes),
+                    tz=timezone.utc,
+                ).isoformat()
         except Exception:
             pass
         return metadata

@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 import types
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
@@ -191,6 +192,61 @@ def test_run_blocking_worker_completion_after_loop_close_has_no_thread_exception
             loop.close()
 
     assert thread_errors == []
+
+
+def test_run_blocking_late_reader_after_cancel_does_not_touch_reused_fd(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    loop = asyncio.new_event_loop()
+    read_fd, write_fd = os.pipe()
+    source_read_fd: int | None = None
+    source_write_fd: int | None = None
+    replacement_fd: int | None = None
+    captured_readers: list[Callable[[], None]] = []
+    real_pipe = os.pipe
+    release_worker = threading.Event()
+
+    def fake_pipe() -> tuple[int, int]:
+        return read_fd, write_fd
+
+    def capture_reader(_fd: int, callback: Callable[[], None]) -> None:
+        captured_readers.append(callback)
+
+    async def scenario() -> int:
+        nonlocal replacement_fd, source_read_fd, source_write_fd
+        monkeypatch.setattr(main_module.os, "pipe", fake_pipe)
+        monkeypatch.setattr(loop, "add_reader", capture_reader)
+
+        task = asyncio.create_task(_run_blocking(lambda: release_worker.wait(timeout=1)))
+        await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert captured_readers
+        assert _is_fd_closed(read_fd)
+
+        source_read_fd, source_write_fd = real_pipe()
+        os.write(source_write_fd, b"z")
+        replacement_fd = os.dup2(source_read_fd, read_fd)
+        assert replacement_fd == read_fd
+
+        captured_readers[0]()
+        release_worker.set()
+        await asyncio.sleep(0.05)
+        return replacement_fd
+
+    try:
+        replacement_fd = loop.run_until_complete(scenario())
+        os.fstat(replacement_fd)
+        assert os.read(replacement_fd, 1) == b"z"
+    finally:
+        release_worker.set()
+        time.sleep(0.05)
+        for fd in (replacement_fd, source_read_fd, source_write_fd, read_fd, write_fd):
+            if fd is not None:
+                _close_if_open(fd)
+        loop.close()
 
 
 @pytest.mark.asyncio

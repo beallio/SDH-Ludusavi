@@ -462,6 +462,25 @@ def test_process_tree_skips_vanished_processes(
     assert result == [100, 101]
 
 
+def test_process_tree_ignores_cycles(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sdh_ludusavi.service as svc_mod
+
+    proc_status: dict[str, str] = {
+        "100": "Name:\tbash\nPid:\t100\nPPid:\t201\n",
+        "101": "Name:\tgame\nPid:\t101\nPPid:\t100\n",
+        "102": "Name:\twine\nPid:\t102\nPPid:\t100\n",
+        "201": "Name:\tchild\nPid:\t201\nPPid:\t101\n",
+    }
+
+    monkeypatch.setattr(
+        "sdh_ludusavi.service.os.listdir",
+        lambda path: ["100", "101", "102", "201"],
+    )
+    monkeypatch.setattr(svc_mod, "_read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str))
+
+    assert svc_mod._process_tree(100) == [100, 101, 201, 102]
+
+
 def test_process_tree_falls_back_on_listdir_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

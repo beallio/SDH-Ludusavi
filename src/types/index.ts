@@ -126,6 +126,7 @@ export type AutoSyncStatusBrowserView = {
   SetFocus?: (value: boolean) => void;
   SetName?: (name: string) => void;
   SetVisible?: (value: boolean) => void;
+  SetTopmost?: (value: boolean) => void;
   SetWindowStackingOrder?: (value: number) => void;
   Destroy?: () => void;
 };

@@ -255,17 +255,47 @@ function getPrototypeKeys(value: unknown): string {
   return Object.getOwnPropertyNames(prototype).join(",");
 }
 
-function patchBrowserViewMethodAliases(view: AutoSyncStatusBrowserViewOwner) {
-  const raw = view as any;
-  if (!raw.LoadURL && raw.loadURL) raw.LoadURL = raw.loadURL;
-  if (!raw.SetBounds && raw.setBounds) raw.SetBounds = raw.setBounds;
-  if (!raw.SetVisible && raw.setVisible) raw.SetVisible = raw.setVisible;
-  if (!raw.SetFocus && raw.setFocus) raw.SetFocus = raw.setFocus;
-  if (!raw.SetName && raw.setName) raw.SetName = raw.setName;
-  if (!raw.SetWindowStackingOrder && raw.setWindowStackingOrder) {
-    raw.SetWindowStackingOrder = raw.setWindowStackingOrder;
+function browserViewMethod<T extends (...args: any[]) => void>(
+  raw: any,
+  upperName: string,
+  lowerName: string,
+): T | null {
+  const method = raw[upperName] ?? raw[lowerName];
+  return typeof method === "function" ? method.bind(raw) : null;
+}
+
+function buildBrowserViewAdapter(
+  raw: any,
+  owner: AutoSyncStatusBrowserViewOwner,
+): AutoSyncStatusBrowserView | null {
+  const loadURL = browserViewMethod<(url: string) => void>(raw, "LoadURL", "loadURL");
+  const setBounds = browserViewMethod<
+    (x: number, y: number, width: number, height: number) => void
+  >(raw, "SetBounds", "setBounds");
+  const setVisible = browserViewMethod<(visible: boolean) => void>(
+    raw,
+    "SetVisible",
+    "setVisible",
+  );
+
+  if (!loadURL || !setBounds || !setVisible) {
+    return null;
   }
-  if (!raw.Destroy && raw.destroy) raw.Destroy = raw.destroy;
+
+  return {
+    LoadURL: loadURL,
+    SetBounds: setBounds,
+    SetVisible: setVisible,
+    SetFocus: browserViewMethod(raw, "SetFocus", "setFocus") ?? undefined,
+    SetName: browserViewMethod(raw, "SetName", "setName") ?? undefined,
+    SetTopmost: browserViewMethod(raw, "SetTopmost", "setTopmost") ?? undefined,
+    SetWindowStackingOrder:
+      browserViewMethod(raw, "SetWindowStackingOrder", "setWindowStackingOrder") ?? undefined,
+    Destroy:
+      raw === owner
+        ? undefined
+        : browserViewMethod(raw, "Destroy", "destroy") ?? undefined,
+  };
 }
 
 function normalizeAutoSyncStatusBrowserView(
@@ -279,14 +309,18 @@ function normalizeAutoSyncStatusBrowserView(
     ["m_browserView.m_browserView", candidate?.m_browserView?.m_browserView],
   ];
 
+  if (!candidate) {
+    return null;
+  }
+
   for (const [source, view] of candidates) {
     if (!view) {
       continue;
     }
-    patchBrowserViewMethodAliases(view);
-    if (view.LoadURL && view.SetBounds && view.SetVisible) {
+    const adapter = buildBrowserViewAdapter(view, candidate);
+    if (adapter) {
       log("info", `BrowserView normalized from ${source}`, "autosync_status");
-      return view;
+      return adapter;
     }
     log(
       "debug",
@@ -341,9 +375,7 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
     normalized.SetFocus?.(false);
     normalized.SetVisible?.(false);
 
-    if (typeof (normalized as any).SetTopmost === "function") {
-      (normalized as any).SetTopmost(true);
-    }
+    normalized.SetTopmost?.(true);
 
     autoSyncStatusBrowserView = normalized;
     return autoSyncStatusBrowserView;
@@ -704,7 +736,14 @@ type ConflictResolutionModalProps = {
 };
 
 function formatConflictTime(value?: string | null) {
-  return value || "Unknown time";
+  if (!value) {
+    return "Unknown time";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString();
 }
 
 function ConflictResolutionModal({ conflict, onChoose, onDismiss, closeModal }: ConflictResolutionModalProps) {

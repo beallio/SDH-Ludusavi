@@ -296,6 +296,8 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         "candidate?.BrowserView",
         "candidate?.m_browserView?.m_browserView",
         "BrowserView normalized from",
+        "function browserViewMethod",
+        "function buildBrowserViewAdapter",
         "rootWindow?.CreateBrowserView",
         "rootWindow.CreateBrowserView(",
         '"sdh-ludusavi-autosync-status-strip"',
@@ -319,7 +321,7 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         'log("info",',
         "`BrowserView created: type=${typeof autoSyncStatusBrowserViewOwner}",
         "normalized.SetWindowStackingOrder?.(50);",
-        "SetTopmost(true)",
+        "normalized.SetTopmost?.(true);",
         "browserView.LoadURL(url);",
         "setTimeout(() => {",
         "pixelRatio",
@@ -346,6 +348,10 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
         )
     ]
     assert "clearAutoSyncStatusShowTimeout();" in destroy_source
+    assert "raw.LoadURL = raw.loadURL" not in source
+    assert "patchBrowserViewMethodAliases" not in source
+    assert "raw === owner" in source
+    assert "SetTopmost" in source
 
     dismount_source = source[source.index("onDismount()") :]
     assert "clearAutoSyncStatusShowTimeout();" in dismount_source
@@ -376,6 +382,16 @@ def test_frontend_status_strip_destroy_disposes_owner_and_nested_view() -> None:
         assert required_text in destroy_source
 
     assert "else if" not in destroy_source
+
+
+def test_frontend_conflict_time_formats_valid_dates_locally() -> None:
+    source = FRONTEND.read_text()
+
+    assert "function formatConflictTime" in source
+    assert "new Date(value)" in source
+    assert "Number.isNaN(date.getTime())" in source
+    assert "return date.toLocaleString();" in source
+    assert 'return "Unknown time";' in source
 
 
 def test_frontend_recreates_status_strip_before_lifecycle_verification() -> None:

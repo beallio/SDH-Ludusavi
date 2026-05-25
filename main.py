@@ -212,8 +212,17 @@ class Plugin:
         self._service()
 
     async def _unload(self) -> None:
-        if self._backend is not None:
-            self._backend.stop()
+        backend = self._backend
+        if backend is not None:
+            result = await self._call("unload_stop", backend.stop)
+            if isinstance(result, dict) and result.get("status") == "failed":
+                decky.logger.warning(
+                    "Offloaded unload stop failed; falling back to synchronous stop"
+                )
+                try:
+                    backend.stop()
+                except Exception:
+                    decky.logger.exception("Synchronous unload stop fallback failed")
         decky.logger.info("SDH-ludusavi backend unloaded")
 
     async def _uninstall(self) -> None:
@@ -307,12 +316,20 @@ async def _run_blocking(callback: Any) -> Any:
     completion_lock = threading.Lock()
     reader_registered = False
     thread_started = False
+    read_fd_closed = False
 
     def close_fd(fd: int) -> None:
         try:
             os.close(fd)
         except OSError:
             return
+
+    def close_read_fd() -> None:
+        nonlocal read_fd_closed
+        if read_fd_closed:
+            return
+        read_fd_closed = True
+        close_fd(read_fd)
 
     def remove_reader_if_active() -> None:
         if loop.is_closed() or not loop.is_running():
@@ -324,11 +341,12 @@ async def _run_blocking(callback: Any) -> Any:
 
     def read_completion_signal() -> None:
         remove_reader_if_active()
-        try:
-            os.read(read_fd, 1)
-        except OSError:
-            pass
-        close_fd(read_fd)
+        if not read_fd_closed:
+            try:
+                os.read(read_fd, 1)
+            except OSError:
+                pass
+            close_read_fd()
         with completion_lock:
             completed = completion
         if future.done() or completed is None:
@@ -365,7 +383,7 @@ async def _run_blocking(callback: Any) -> Any:
     except BaseException:
         if reader_registered:
             remove_reader_if_active()
-        close_fd(read_fd)
+        close_read_fd()
         if not thread_started:
             close_fd(write_fd)
         future.cancel()
@@ -378,6 +396,6 @@ async def _run_blocking(callback: Any) -> Any:
             "SDH-ludusavi operation was cancelled while worker may still be running"
         )
         remove_reader_if_active()
-        close_fd(read_fd)
+        close_read_fd()
         future.cancel()
         raise
