@@ -284,26 +284,38 @@ class SDHLudusaviService:
 
     def pause_game_process(self, pid: int) -> dict[str, object]:
         """Suspend a launched game process tree while start sync runs."""
-        pid = int(pid)
-        if not _send_signal_tree(pid, signal.SIGSTOP):
+        try:
+            valid_pid = _coerce_signal_pid(pid)
+        except ValueError as exc:
+            self.log("warning", f"Invalid PID passed to pause_game_process: {exc}", "launch_gate")
+            return {"status": "failed", "message": str(exc)}
+
+        if not _send_signal_tree(valid_pid, signal.SIGSTOP):
             self.log(
-                "warning", f"Unable to pause game process tree rooted at PID {pid}", "launch_gate"
+                "warning",
+                f"Unable to pause game process tree rooted at PID {valid_pid}",
+                "launch_gate",
             )
-            return {"status": "failed", "pid": pid, "message": "Unable to pause game process"}
+            return {"status": "failed", "pid": valid_pid, "message": "Unable to pause game process"}
         with self._paused_pids_lock:
-            self._paused_pids[pid] = time.time()
+            self._paused_pids[valid_pid] = time.time()
             self._ensure_watchdog_running()
-        self.log("info", f"Paused game process tree rooted at PID {pid}", "launch_gate")
-        return {"status": "paused", "pid": pid}
+        self.log("info", f"Paused game process tree rooted at PID {valid_pid}", "launch_gate")
+        return {"status": "paused", "pid": valid_pid}
 
     def resume_game_process(self, pid: int) -> dict[str, object]:
         """Resume a previously suspended game process tree."""
-        pid = int(pid)
-        _send_signal_tree(pid, signal.SIGCONT)
+        try:
+            valid_pid = _coerce_signal_pid(pid)
+        except ValueError as exc:
+            self.log("warning", f"Invalid PID passed to resume_game_process: {exc}", "launch_gate")
+            return {"status": "failed", "message": str(exc)}
+
+        _send_signal_tree(valid_pid, signal.SIGCONT)
         with self._paused_pids_lock:
-            self._paused_pids.pop(pid, None)
-        self.log("info", f"Resumed game process tree rooted at PID {pid}", "launch_gate")
-        return {"status": "resumed", "pid": pid}
+            self._paused_pids.pop(valid_pid, None)
+        self.log("info", f"Resumed game process tree rooted at PID {valid_pid}", "launch_gate")
+        return {"status": "resumed", "pid": valid_pid}
 
     def resume_all_paused_processes(self) -> None:
         """Best-effort cleanup for plugin unload or launch-gate failures."""
@@ -1591,6 +1603,27 @@ def _normalize(game_name: str) -> str:
 
 def _child_pids(pid: int) -> list[int]:
     return _process_tree(pid)[1:]
+
+
+def _coerce_signal_pid(value: object) -> int:
+    if isinstance(value, bool):
+        raise ValueError("PID must be an integer, not a boolean")
+    if isinstance(value, int):
+        pid = value
+    elif isinstance(value, str):
+        cleaned = value.strip()
+        try:
+            pid = int(cleaned)
+        except ValueError as exc:
+            raise ValueError("PID must be a valid integer string") from exc
+    elif isinstance(value, float):
+        raise ValueError("PID must be an integer, not a float")
+    else:
+        raise ValueError("PID must be an integer or integer string")
+
+    if pid <= 1:
+        raise ValueError(f"Refusing to signal unsafe PID value: {pid}")
+    return pid
 
 
 def _send_signal_tree(pid: int, sig: signal.Signals) -> bool:

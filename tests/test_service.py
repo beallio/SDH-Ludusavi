@@ -348,6 +348,70 @@ def test_pause_and_resume_game_process_signal_process_tree(
     ]
 
 
+@pytest.mark.parametrize("pid", [0, -1, 1])
+def test_pause_game_process_rejects_invalid_signal_pids(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pid: int,
+) -> None:
+    service = service_with_state(tmp_path)
+    calls: list[tuple[int, signal.Signals]] = []
+
+    def capture_signal_tree(target_pid: int, sig: signal.Signals) -> bool:
+        calls.append((target_pid, sig))
+        return True
+
+    monkeypatch.setattr("sdh_ludusavi.service._send_signal_tree", capture_signal_tree)
+
+    result = service.pause_game_process(pid)
+
+    assert result["status"] == "failed"
+    assert "message" in result
+    assert "pid" not in result
+    assert calls == []
+    assert service._paused_pids == {}
+
+
+@pytest.mark.parametrize("pid", [0, -1, 1])
+def test_resume_game_process_rejects_invalid_signal_pids(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pid: int,
+) -> None:
+    service = service_with_state(tmp_path)
+    service._paused_pids[99] = 123.0
+    calls: list[tuple[int, signal.Signals]] = []
+
+    def capture_signal_tree(target_pid: int, sig: signal.Signals) -> bool:
+        calls.append((target_pid, sig))
+        return True
+
+    monkeypatch.setattr("sdh_ludusavi.service._send_signal_tree", capture_signal_tree)
+
+    result = service.resume_game_process(pid)
+
+    assert result["status"] == "failed"
+    assert "message" in result
+    assert "pid" not in result
+    assert calls == []
+    assert service._paused_pids == {99: 123.0}
+
+
+@pytest.mark.parametrize("invalid_input", [True, False, 2.5, "2.5", "", "   ", "abc", "-5", "+1"])
+def test_coerce_signal_pid_rejects_invalid_values(invalid_input: object) -> None:
+    import sdh_ludusavi.service as svc_mod
+
+    with pytest.raises(ValueError):
+        svc_mod._coerce_signal_pid(invalid_input)
+
+
+@pytest.mark.parametrize(("value", "expected"), [(2, 2), ("2", 2), (" 2 ", 2), ("+2", 2)])
+def test_coerce_signal_pid_accepts_valid_integer_strings(value: object, expected: int) -> None:
+    import sdh_ludusavi.service as svc_mod
+
+    assert svc_mod._coerce_signal_pid(value) == expected
+
+
 def test_signal_process_tree_snapshots_process_table_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
