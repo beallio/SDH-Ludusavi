@@ -169,7 +169,7 @@ def test_compare_recency_remains_ambiguous_on_preview_error() -> None:
     )
 
     def fail_preview(*args: object, **kwargs: object) -> FakeResponse:
-        raise RuntimeError("preview failed")
+        raise pyludusavi.LudusaviError("preview failed")
 
     client.restore = fail_preview
 

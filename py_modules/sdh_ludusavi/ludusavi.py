@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from typing import Any, cast
 
+from pyludusavi import LudusaviError
+
 
 FLATPAK_ID = "com.github.mtkennerly.ludusavi"
 LOGGER = logging.getLogger(__name__)
@@ -94,8 +96,8 @@ class PyludusaviAdapter:
                 alias = game.get("alias")
                 if name and alias:
                     aliases[name] = alias
-        except Exception:
-            pass
+        except LudusaviError as exc:
+            LOGGER.debug("Failed to retrieve custom game aliases: %s", exc)
         return aliases
 
     def compare_recency(self, game_name: str) -> str:
@@ -123,8 +125,12 @@ class PyludusaviAdapter:
                 # In a restore context, New/Different implies the backup has
                 # data that should be applied to local.
                 return "backup_newer"
-        except Exception:
-            pass
+        except (LudusaviError, KeyError, TypeError, ValueError) as exc:
+            LOGGER.debug(
+                "Restore preview failed or returned unexpected shape during recency check for %s: %s",
+                game_name,
+                exc,
+            )
 
         return "ambiguous"
 
@@ -141,8 +147,8 @@ class PyludusaviAdapter:
             backup_path = game_backups.get("backupPath")
             if backup_path:
                 metadata["backupPath"] = backup_path
-        except Exception:
-            pass
+        except (LudusaviError, KeyError, TypeError, ValueError) as exc:
+            LOGGER.debug("Failed to retrieve backup list for conflict metadata: %s", exc)
 
         try:
             preview = self._client.backup(games=[game_name], preview=True, force=True).data
@@ -164,8 +170,8 @@ class PyludusaviAdapter:
                     max(mtimes),
                     tz=timezone.utc,
                 ).isoformat()
-        except Exception:
-            pass
+        except (LudusaviError, KeyError, TypeError, ValueError) as exc:
+            LOGGER.debug("Failed to run backup preview for conflict metadata: %s", exc)
         return metadata
 
     def backup(self, game_name: str, preview: bool = False) -> dict[str, object]:
@@ -227,7 +233,7 @@ class PyludusaviAdapter:
             backup_config = self._client.config_show().data.get("backup", {})
             if isinstance(backup_config, dict):
                 backup_path = str(backup_config.get("path") or "unknown")
-        except Exception:
+        except (LudusaviError, KeyError, TypeError, ValueError):
             pass
 
         diagnostics = {
@@ -246,11 +252,11 @@ class PyludusaviAdapter:
     def get_config_mtime_ns(self) -> int | None:
         try:
             return Path(self._config_path()).stat().st_mtime_ns
-        except Exception as exc:
+        except (OSError, RuntimeError):
             LOGGER.debug(
                 "Unable to stat Ludusavi config path: %s", self._cached_config_path, exc_info=True
             )
-            raise exc
+            raise
 
 
 def _games_from_output(output: Mapping[str, Any]) -> dict[str, dict[str, Any]]:

@@ -109,6 +109,8 @@ class DeckyLogHandler(logging.Handler):
 
             # Also push to decky.logger if available
             _decky_log(level, msg)
+        # Intentionally broad: follows logging.Handler behavior by routing normal
+        # handler failures to handleError().
         except Exception:
             self.handleError(record)
 
@@ -310,6 +312,7 @@ class SDHLudusaviService:
         for pid in paused_pids:
             try:
                 self.resume_game_process(pid)
+            # Intentionally broad: best-effort cleanup so one failed PID does not block other resume attempts.
             except Exception as exc:
                 self.log("warning", f"Unable to resume paused PID {pid}: {exc}", "launch_gate")
 
@@ -354,6 +357,7 @@ class SDHLudusaviService:
                 )
                 try:
                     self.resume_game_process(pid)
+                # Intentionally broad: best-effort cleanup so one failed PID does not block other resume attempts.
                 except Exception as exc:
                     self.log(
                         "error",
@@ -683,6 +687,7 @@ class SDHLudusaviService:
                 "history": self._game_history,
                 "dependency_error": None,
             }
+        # Intentionally broad: fallback that reports dependency errors back to the caller instead of crashing the UI or service initialization.
         except (
             Exception
         ) as exc:  # pragma: no cover - concrete exception types come from pyludusavi.
@@ -785,6 +790,7 @@ class SDHLudusaviService:
                     "backup", game.name, lambda: self._ludusavi().backup(game.name)
                 )
                 self._record_history(game.name, "backup", "auto_start", "backed_up")
+            # Intentionally broad: records operation failure state/history and immediately re-raises.
             except Exception as exc:
                 self._record_history(game.name, "backup", "auto_start", "failed", message=str(exc))
                 raise
@@ -798,6 +804,7 @@ class SDHLudusaviService:
                 "restore", game.name, lambda: self._ludusavi().restore(game.name)
             )
             self._record_history(game.name, "restore", "auto_start", "restored")
+        # Intentionally broad: records operation failure state/history and immediately re-raises.
         except Exception as exc:
             self._record_history(game.name, "restore", "auto_start", "failed", message=str(exc))
             raise
@@ -807,6 +814,7 @@ class SDHLudusaviService:
     def _conflict_metadata(self, game_name: str) -> dict[str, object]:
         try:
             metadata = self._ludusavi().get_conflict_metadata(game_name)
+        # Intentionally broad: metadata/diagnostic preview fallback that must not block user-facing conflict prompts.
         except Exception as exc:
             self.log(
                 "debug",
@@ -860,6 +868,7 @@ class SDHLudusaviService:
                 game.name,
                 lambda: self._ludusavi().restore(game.name),
             )
+        # Intentionally broad: records operation failure state/history and immediately re-raises.
         except Exception as exc:
             self._record_history(game.name, "restore", "auto_start", "failed", message=str(exc))
             raise
@@ -963,6 +972,7 @@ class SDHLudusaviService:
 
             if change == "Same":
                 return self._skip("exit", game.name, "local_current")
+        # Intentionally broad: metadata/diagnostic preview fallback that must not block exit flow.
         except Exception as exc:
             self.log("debug", f"Backup preview failed for {game.name}: {exc}", "exit", game.name)
             # If preview fails, we skip to avoid potentially invalid or redundant backup attempts.
@@ -1006,10 +1016,12 @@ class SDHLudusaviService:
             )
             # Record success immediately before the potentially failing refresh.
             self._record_history(game.name, "backup", "auto_exit", "backed_up")
+        # Intentionally broad: records operation failure state/history and immediately re-raises.
         except Exception as exc:
             self._record_history(game.name, "backup", "auto_exit", "failed", message=str(exc))
             raise
 
+        # Intentionally broad: best-effort after a successful backup so refresh failure does not convert backup success into failure.
         try:
             self._refresh_statuses_unlocked()
         except Exception as exc:
@@ -1041,10 +1053,12 @@ class SDHLudusaviService:
             )
             # Record success immediately before the potentially failing refresh.
             self._record_history(game.name, "backup", "manual_backup", "backed_up")
+        # Intentionally broad: records operation failure state/history and immediately re-raises.
         except Exception as exc:
             self._record_history(game.name, "backup", "manual_backup", "failed", message=str(exc))
             raise
 
+        # Intentionally broad: best-effort after a successful backup so refresh failure does not convert backup success into failure.
         try:
             self._refresh_statuses_unlocked()
         except Exception as exc:
@@ -1068,6 +1082,7 @@ class SDHLudusaviService:
             result = self._run_locked(
                 "restore", game.name, lambda: self._ludusavi().restore(game.name)
             )
+        # Intentionally broad: records operation failure state/history and immediately re-raises.
         except Exception as exc:
             self._record_history(game.name, "restore", "manual_restore", "failed", message=str(exc))
             raise
@@ -1144,7 +1159,7 @@ class SDHLudusaviService:
                 try:
                     game = self._coerce_game_status(cast(dict[str, object], g))
                     self._games[game.name] = game
-                except Exception:
+                except (KeyError, TypeError, ValueError):
                     continue
 
         # Load cached aliases and IDs
@@ -1334,7 +1349,7 @@ class SDHLudusaviService:
                     )
                 game = self._coerce_game_status(dict(raw_game))
                 games.append(game)
-            except Exception as exc:
+            except (KeyError, TypeError, ValueError) as exc:
                 raw_name = raw_game.get("name") if isinstance(raw_game, Mapping) else "<unknown>"
                 self.log(
                     "error",
@@ -1449,6 +1464,7 @@ class SDHLudusaviService:
         self._operation.last_error = None
         try:
             result = callback()
+        # Intentionally broad: records operation failure state/history and immediately re-raises.
         except Exception as exc:
             self._operation.last_error = str(exc)
             self._operation.last_result = "failed"
@@ -1537,6 +1553,7 @@ class SDHLudusaviService:
         def run() -> None:
             try:
                 diagnostics = adapter.get_diagnostics()
+            # Intentionally broad: diagnostic fallback that must not block initialization logs.
             except Exception as exc:
                 self.log("debug", f"Ludusavi diagnostics unavailable: {exc}", "init")
                 return
@@ -1556,6 +1573,7 @@ class SDHLudusaviService:
     def _current_ludusavi_config_mtime_ns(self) -> int | None | object:
         try:
             return self._ludusavi().get_config_mtime_ns()
+        # Intentionally broad: config/metadata fallback that must not block refresh status/initialization.
         except Exception as exc:
             self.log(
                 "debug",
