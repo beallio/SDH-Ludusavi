@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import logging
 import os
 from pathlib import Path
+import threading
 from typing import Any, cast
 
 from pyludusavi import LudusaviError
@@ -52,6 +53,9 @@ class PyludusaviAdapter:
         self._cached_config_path: str | None = None
         self._cached_versions: dict[str, str] | None = None
         self._cached_diagnostics: dict[str, object] | None = None
+        self._cached_aliases: dict[str, str] | None = None
+        self._cached_aliases_mtime_ns: int | None = None
+        self._aliases_lock = threading.Lock()
 
     def refresh_statuses(self) -> list[dict[str, object]]:
         preview = self._client.backup(preview=True).data
@@ -88,6 +92,29 @@ class PyludusaviAdapter:
         """
         Build a map of custom game names to their canonical titles.
         """
+        aliases_lock = getattr(self, "_aliases_lock", None)
+        if aliases_lock is None:
+            aliases_lock = threading.Lock()
+            self._aliases_lock = aliases_lock
+
+        current_mtime_ns: int | None = None
+        try:
+            current_mtime_ns = self.get_config_mtime_ns()
+        # Intentionally broad: alias refresh should still try config_show when the
+        # optional mtime optimization is unavailable.
+        except Exception as exc:
+            LOGGER.debug("Failed to read config mtime for custom game aliases: %s", exc)
+
+        with aliases_lock:
+            cached_aliases = getattr(self, "_cached_aliases", None)
+            cached_mtime_ns = getattr(self, "_cached_aliases_mtime_ns", None)
+            if (
+                current_mtime_ns is not None
+                and cached_aliases is not None
+                and cached_mtime_ns == current_mtime_ns
+            ):
+                return dict(cached_aliases)
+
         aliases: dict[str, str] = {}
         try:
             config = self._client.config_show().data
@@ -96,8 +123,21 @@ class PyludusaviAdapter:
                 alias = game.get("alias")
                 if name and alias:
                     aliases[name] = alias
+            if current_mtime_ns is not None:
+                with aliases_lock:
+                    self._cached_aliases = dict(aliases)
+                    self._cached_aliases_mtime_ns = current_mtime_ns
         except (LudusaviError, KeyError, TypeError, ValueError, AttributeError) as exc:
             LOGGER.debug("Failed to retrieve custom game aliases: %s", exc)
+            with aliases_lock:
+                cached_aliases = getattr(self, "_cached_aliases", None)
+                cached_mtime_ns = getattr(self, "_cached_aliases_mtime_ns", None)
+                if (
+                    current_mtime_ns is not None
+                    and cached_aliases is not None
+                    and cached_mtime_ns == current_mtime_ns
+                ):
+                    return dict(cached_aliases)
         return aliases
 
     def compare_recency(self, game_name: str) -> str:

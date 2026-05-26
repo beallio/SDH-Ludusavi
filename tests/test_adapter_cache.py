@@ -1,5 +1,6 @@
 from pathlib import Path
 from unittest.mock import MagicMock
+
 from sdh_ludusavi.ludusavi import PyludusaviAdapter
 
 
@@ -71,3 +72,53 @@ def test_pyludusavi_adapter_reuses_diagnostic_first_load_probes(tmp_path: Path) 
     assert config_mtime == config_file.stat().st_mtime_ns
     assert mock_client.version.call_count == 1
     assert mock_client.config_path.call_count == 1
+
+
+def test_pyludusavi_adapter_caches_aliases_by_config_mtime() -> None:
+    mock_client = MagicMock()
+    mock_client.config_show.return_value.data = {
+        "customGames": [{"name": "Shortcut Name", "alias": "The Witcher 3: Wild Hunt"}]
+    }
+
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    adapter._client = mock_client
+    adapter.get_config_mtime_ns = MagicMock(return_value=100)
+
+    first_aliases = adapter.get_aliases()
+    first_aliases["Shortcut Name"] = "mutated"
+    second_aliases = adapter.get_aliases()
+
+    assert second_aliases == {"Shortcut Name": "The Witcher 3: Wild Hunt"}
+    assert mock_client.config_show.call_count == 1
+
+
+def test_pyludusavi_adapter_reloads_aliases_when_config_mtime_changes() -> None:
+    mock_client = MagicMock()
+    first_response = MagicMock()
+    first_response.data = {"customGames": [{"name": "Shortcut Name", "alias": "Old Title"}]}
+    second_response = MagicMock()
+    second_response.data = {"customGames": [{"name": "Shortcut Name", "alias": "New Title"}]}
+    mock_client.config_show.side_effect = [first_response, second_response]
+
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    adapter._client = mock_client
+    adapter.get_config_mtime_ns = MagicMock(side_effect=[100, 101])
+
+    assert adapter.get_aliases() == {"Shortcut Name": "Old Title"}
+    assert adapter.get_aliases() == {"Shortcut Name": "New Title"}
+    assert mock_client.config_show.call_count == 2
+
+
+def test_pyludusavi_adapter_does_not_reuse_alias_cache_when_mtime_unavailable() -> None:
+    mock_client = MagicMock()
+    mock_client.config_show.return_value.data = {
+        "customGames": [{"name": "Shortcut Name", "alias": "The Witcher 3: Wild Hunt"}]
+    }
+
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    adapter._client = mock_client
+    adapter.get_config_mtime_ns = MagicMock(side_effect=RuntimeError("mtime unavailable"))
+
+    assert adapter.get_aliases() == {"Shortcut Name": "The Witcher 3: Wild Hunt"}
+    assert adapter.get_aliases() == {"Shortcut Name": "The Witcher 3: Wild Hunt"}
+    assert mock_client.config_show.call_count == 2
