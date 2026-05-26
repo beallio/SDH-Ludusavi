@@ -581,6 +581,9 @@ def test_frontend_launch_gate_pauses_before_start_check_and_resumes_in_finally()
         'const pauseGameProcessCall = callable<[pid: number], RpcResult<ProcessSignalResult>>("pause_game_process");',
         'const resumeGameProcessCall = callable<[pid: number], RpcResult<ProcessSignalResult>>("resume_game_process");',
         "const handleAppStart = async (name: string, appID: string, instanceID?: number) => {",
+        "const autoSyncEnabled = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;",
+        "const shouldPauseLaunch =",
+        "if (shouldPauseLaunch) {",
         "const pauseResult = await pauseGameProcessCall(instanceID);",
         "const checkResult = await checkGameStartCall(name, appID);",
         "} finally {",
@@ -588,6 +591,25 @@ def test_frontend_launch_gate_pauses_before_start_check_and_resumes_in_finally()
         "void handleAppStart(session.name, session.appID, notification.nInstanceID);",
     ]:
         assert required_text in source
+
+    assert start_source.index("const shouldPauseLaunch =") < start_source.index(
+        "const pauseResult = await pauseGameProcessCall(instanceID);"
+    )
+    assert start_source.index("if (shouldPauseLaunch) {") < start_source.index(
+        "const pauseResult = await pauseGameProcessCall(instanceID);"
+    )
+    should_pause_source = start_source[
+        start_source.index("const shouldPauseLaunch =") : start_source.index(
+            "if (shouldPauseLaunch) {"
+        )
+    ]
+    for required_gate in [
+        "autoSyncEnabled",
+        "tracked",
+        'typeof instanceID === "number"',
+        "instanceID > 1",
+    ]:
+        assert required_gate in should_pause_source
 
     assert start_source.index(
         "const pauseResult = await pauseGameProcessCall(instanceID);"

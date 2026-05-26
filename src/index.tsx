@@ -1661,7 +1661,14 @@ export default definePlugin(() => {
     }
 
     try {
-      if (typeof instanceID === "number" && instanceID > 0) {
+      const autoSyncEnabled = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
+      const shouldPauseLaunch =
+        autoSyncEnabled &&
+        tracked &&
+        typeof instanceID === "number" &&
+        instanceID > 1;
+
+      if (shouldPauseLaunch) {
         const pauseResult = await pauseGameProcessCall(instanceID);
         if (!isRpcStatus(pauseResult) && pauseResult.status === "paused") {
           paused = true;
