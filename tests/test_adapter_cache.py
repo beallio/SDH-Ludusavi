@@ -1,6 +1,10 @@
 from pathlib import Path
+import inspect
 from unittest.mock import MagicMock
 
+import pyludusavi
+
+from sdh_ludusavi import ludusavi
 from sdh_ludusavi.ludusavi import PyludusaviAdapter
 
 
@@ -122,3 +126,25 @@ def test_pyludusavi_adapter_does_not_reuse_alias_cache_when_mtime_unavailable() 
     assert adapter.get_aliases() == {"Shortcut Name": "The Witcher 3: Wild Hunt"}
     assert adapter.get_aliases() == {"Shortcut Name": "The Witcher 3: Wild Hunt"}
     assert mock_client.config_show.call_count == 2
+
+
+def test_pyludusavi_adapter_lazy_alias_lock_initialization_is_guarded() -> None:
+    source = Path(ludusavi.__file__).read_text(encoding="utf-8")
+    get_aliases_source = inspect.getsource(PyludusaviAdapter.get_aliases)
+
+    assert "_ALIASES_INIT_LOCK = threading.Lock()" in source
+    assert "with _ALIASES_INIT_LOCK:" in get_aliases_source
+
+
+def test_pyludusavi_adapter_does_not_return_stale_aliases_after_known_config_change() -> None:
+    mock_client = MagicMock()
+    first_response = MagicMock()
+    first_response.data = {"customGames": [{"name": "Shortcut Name", "alias": "Old Title"}]}
+    mock_client.config_show.side_effect = [first_response, pyludusavi.LudusaviError("failed")]
+
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    adapter._client = mock_client
+    adapter.get_config_mtime_ns = MagicMock(side_effect=[100, 101])
+
+    assert adapter.get_aliases() == {"Shortcut Name": "Old Title"}
+    assert adapter.get_aliases() == {}

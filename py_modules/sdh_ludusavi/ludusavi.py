@@ -13,6 +13,7 @@ from pyludusavi import LudusaviError
 
 FLATPAK_ID = "com.github.mtkennerly.ludusavi"
 LOGGER = logging.getLogger(__name__)
+_ALIASES_INIT_LOCK = threading.Lock()
 
 
 def _ludusavi_env() -> dict[str, str]:
@@ -94,8 +95,11 @@ class PyludusaviAdapter:
         """
         aliases_lock = getattr(self, "_aliases_lock", None)
         if aliases_lock is None:
-            aliases_lock = threading.Lock()
-            self._aliases_lock = aliases_lock
+            with _ALIASES_INIT_LOCK:
+                aliases_lock = getattr(self, "_aliases_lock", None)
+                if aliases_lock is None:
+                    aliases_lock = threading.Lock()
+                    self._aliases_lock = aliases_lock
 
         current_mtime_ns: int | None = None
         try:
@@ -129,15 +133,6 @@ class PyludusaviAdapter:
                     self._cached_aliases_mtime_ns = current_mtime_ns
         except (LudusaviError, KeyError, TypeError, ValueError, AttributeError) as exc:
             LOGGER.debug("Failed to retrieve custom game aliases: %s", exc)
-            with aliases_lock:
-                cached_aliases = getattr(self, "_cached_aliases", None)
-                cached_mtime_ns = getattr(self, "_cached_aliases_mtime_ns", None)
-                if (
-                    current_mtime_ns is not None
-                    and cached_aliases is not None
-                    and cached_mtime_ns == current_mtime_ns
-                ):
-                    return dict(cached_aliases)
         return aliases
 
     def compare_recency(self, game_name: str) -> str:
