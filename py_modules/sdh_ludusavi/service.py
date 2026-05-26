@@ -1384,8 +1384,15 @@ class SDHLudusaviService:
                 )
 
         with self._state_lock:
+            aliases = self._aliases
+            if not (
+                isinstance(ludusavi_config_mtime_ns, int)
+                and self._ludusavi_config_mtime_ns == ludusavi_config_mtime_ns
+            ):
+                aliases = getattr(self._ludusavi(), "get_aliases", lambda: {})()
+
             self._games = {game.name: game for game in games}
-            self._aliases = getattr(self._ludusavi(), "get_aliases", lambda: {})()
+            self._aliases = aliases
             self._ids = {game.steam_id: game.name for game in games if game.steam_id}
 
             if installed_app_ids is not _CACHE_MARKER_UNCHANGED:

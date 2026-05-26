@@ -50,6 +50,8 @@ class FakeAdapter:
         self.refresh_error: Exception | None = None
         self.config_mtime_ns: int | None = 100
         self.refresh_count = 0
+        self.aliases: dict[str, str] = {}
+        self.alias_call_count = 0
 
     def refresh_statuses(self) -> list[dict[str, object]]:
         self.refresh_count += 1
@@ -94,6 +96,10 @@ class FakeAdapter:
 
     def get_config_mtime_ns(self) -> int | None:
         return self.config_mtime_ns
+
+    def get_aliases(self) -> dict[str, str]:
+        self.alias_call_count += 1
+        return dict(self.aliases)
 
 
 class RaisingConfigMarkerAdapter(FakeAdapter):
@@ -1617,6 +1623,39 @@ def test_config_marker_read_failure_forces_refresh_instead_of_cache_hit(
     assert [game["name"] for game in result["games"]] == ["Hades", "Celeste"]
     assert service._installed_app_ids == "1,2,3"
     assert service._ludusavi_config_mtime_ns is None
+
+
+def test_refresh_games_reuses_aliases_when_config_marker_is_unchanged(
+    tmp_path: Path,
+) -> None:
+    adapter = FakeAdapter()
+    adapter.aliases = {"Shortcut Name": "The Witcher 3: Wild Hunt"}
+    service = service_with_state(tmp_path, adapter)
+
+    first = service.refresh_games(installed_app_ids="1,2,3")
+    adapter.aliases = {"Shortcut Name": "Changed Title"}
+    second = service.refresh_games(force=True, installed_app_ids="1,2,3")
+
+    assert first["aliases"] == {"Shortcut Name": "The Witcher 3: Wild Hunt"}
+    assert second["aliases"] == {"Shortcut Name": "The Witcher 3: Wild Hunt"}
+    assert adapter.alias_call_count == 1
+
+
+def test_refresh_games_reloads_aliases_when_config_marker_changes(
+    tmp_path: Path,
+) -> None:
+    adapter = FakeAdapter()
+    adapter.aliases = {"Shortcut Name": "Old Title"}
+    service = service_with_state(tmp_path, adapter)
+
+    first = service.refresh_games(installed_app_ids="1,2,3")
+    adapter.config_mtime_ns = 101
+    adapter.aliases = {"Shortcut Name": "New Title"}
+    second = service.refresh_games(installed_app_ids="1,2,3")
+
+    assert first["aliases"] == {"Shortcut Name": "Old Title"}
+    assert second["aliases"] == {"Shortcut Name": "New Title"}
+    assert adapter.alias_call_count == 2
 
 
 def test_match_game_serializes_lazy_refresh_for_concurrent_callers(tmp_path: Path) -> None:
