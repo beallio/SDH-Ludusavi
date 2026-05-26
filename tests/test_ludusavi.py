@@ -1,4 +1,5 @@
 import os
+import threading
 from datetime import datetime
 
 import pytest
@@ -87,6 +88,48 @@ def test_game_error_reports_failed_files_or_registry() -> None:
     assert _game_error({"files": {"save": {"failed": True, "error": {"message": "denied"}}}})
     assert _game_error({"registry": {"key": {"failed": True}}})
     assert _game_error({"files": {"save": {"failed": False}}}) is None
+
+
+def test_refresh_statuses_runs_preview_and_backups_probes_concurrently() -> None:
+    backup_started = threading.Event()
+    release_preview = threading.Event()
+
+    class ConcurrentProbeClient:
+        def backup(self, preview: bool = False, **kwargs: object) -> FakeResponse:
+            assert preview is True
+            if not backup_started.wait(timeout=1):
+                raise AssertionError("backups_list did not start while preview was running")
+            release_preview.wait(timeout=1)
+            return FakeResponse(
+                {
+                    "games": {
+                        "Hades": {
+                            "files": {"save": {}},
+                            "registry": {},
+                            "steamId": 1145360,
+                        }
+                    }
+                }
+            )
+
+        def backups_list(self) -> FakeResponse:
+            backup_started.set()
+            release_preview.set()
+            return FakeResponse({"games": {"Hades": {"backups": [{"name": "full"}]}}})
+
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    adapter._client = ConcurrentProbeClient()
+
+    assert adapter.refresh_statuses() == [
+        {
+            "name": "Hades",
+            "configured": True,
+            "has_backup": True,
+            "needs_first_backup": False,
+            "steam_id": "1145360",
+            "error": None,
+        }
+    ]
 
 
 class FakeResponse:

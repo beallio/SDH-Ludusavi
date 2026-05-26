@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import logging
 import os
@@ -59,8 +60,12 @@ class PyludusaviAdapter:
         self._aliases_lock = threading.Lock()
 
     def refresh_statuses(self) -> list[dict[str, object]]:
-        preview = self._client.backup(preview=True).data
-        backups = self._client.backups_list().data
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            preview_future = executor.submit(self._client.backup, preview=True)
+            backups_future = executor.submit(self._client.backups_list)
+            preview = preview_future.result().data
+            backups = backups_future.result().data
+
         preview_games = _games_from_output(preview)
         backup_games = _games_from_output(backups)
 
