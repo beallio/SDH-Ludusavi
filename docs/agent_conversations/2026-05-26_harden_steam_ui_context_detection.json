@@ -1,0 +1,29 @@
+{
+  "date": "2026-05-26",
+  "task_objective": "Harden SteamUI QAM current-game context detection so React private prop/fiber scraping remains a bounded fallback while route and explicit DOM app context are preferred when available.",
+  "files_modified": [
+    "docs/plans/2026-05-26_harden_steam_ui_context_detection.md",
+    "src/utils/steam.ts",
+    "tests/test_frontend_static.py",
+    "docs/agent_conversations/2026-05-26_harden_steam_ui_context_detection.json"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py::test_frontend_hardens_steam_ui_focused_context_discovery"
+  ],
+  "design_decisions": [
+    "Kept React private property discovery as a best-effort fallback because no stable local Decky API exposes Home/Library focused tile context.",
+    "Moved the shared Library app route regex into a named constant and made route context the first captured SteamUI context source.",
+    "Added explicit focused DOM app-id discovery using ancestor and descendant lookup, while filtering BODY and HTML to avoid root-level scans.",
+    "Deferred appID-only DOM sessions until after React candidates so steam_id matching remains possible without blocking richer name-bearing React context.",
+    "Added named candidate, hover, and fiber-depth caps plus a visited-fiber guard for malformed React fiber chains."
+  ],
+  "results": [
+    "Red static regression tests failed before implementation for missing hardening helpers and route-first capture.",
+    "Focused frontend static tests passed after implementation.",
+    "Full frontend static suite passed with 71 tests.",
+    "Full Python suite passed with 319 tests.",
+    "TypeScript typecheck passed.",
+    "Frontend build passed.",
+    "pnpm verify passed after rerunning with network access for npm audit."
+  ]
+}

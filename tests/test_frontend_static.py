@@ -1262,13 +1262,56 @@ def test_frontend_captures_home_library_focused_game_context() -> None:
         assert required_text in source
 
 
+def test_frontend_hardens_steam_ui_focused_context_discovery() -> None:
+    source = FRONTEND.read_text()
+
+    for required_text in [
+        "const STEAM_UI_REACT_FIBER_MAX_DEPTH = 12;",
+        "const STEAM_UI_REACT_CANDIDATE_MAX_COUNT = 64;",
+        "const STEAM_UI_HOVERED_ELEMENT_MAX_COUNT = 4;",
+        'const STEAM_UI_REACT_PROPS_PREFIX = "__reactProps$";',
+        "const STEAM_UI_REACT_FIBER_PREFIXES = [",
+        "function getSteamUiFocusedElements(doc: Document): Element[]",
+        'element.tagName !== "BODY"',
+        'element.tagName !== "HTML"',
+        "function sessionFromElementAppContext(",
+        'const selector = "[data-appid], [data-app-id], [href]";',
+        "element?.closest(selector) ?? element?.querySelector(selector)",
+        "function pushSteamUiCandidate(",
+        "STEAM_UI_REACT_CANDIDATE_MAX_COUNT",
+        "STEAM_UI_REACT_FIBER_MAX_DEPTH",
+        "const visitedFibers = new Set<any>();",
+        "!visitedFibers.has(fiber)",
+        "visitedFibers.add(fiber);",
+    ]:
+        assert required_text in source
+
+    focused = source[
+        source.index("function getFocusedSteamGameSession") : source.index(
+            "function captureSteamUiGameContext"
+        )
+    ]
+    assert "const domSession = sessionFromElementAppContext(element);" in focused
+    assert "const appIDOnlyFallback = domSession?.name ? null : domSession;" in focused
+    assert "if (domSession?.name)" in focused
+    assert "for (const candidate of getSteamUiReactPropCandidates(element))" in focused
+    assert "if (appIDOnlyFallback)" in focused
+    assert focused.index("if (domSession?.name)") < focused.index(
+        "for (const candidate of getSteamUiReactPropCandidates(element))"
+    )
+    assert focused.index(
+        "for (const candidate of getSteamUiReactPropCandidates(element))"
+    ) < focused.index("if (appIDOnlyFallback)")
+
+
 def test_frontend_resolves_selected_library_route_app_context() -> None:
     source = FRONTEND.read_text()
 
     for required_text in [
         "function getRouteSteamGameSession(): RunningSession | null",
         "function sessionFromRoutePath(path: string): RunningSession | null",
-        "match(/(?:\\/routes)?\\/library\\/app\\/(\\d+)/)",
+        "const STEAM_UI_APP_ROUTE_PATTERN = /(?:\\/routes)?\\/library\\/app\\/(\\d+)/;",
+        "path.match(STEAM_UI_APP_ROUTE_PATTERN)",
         "function getSteamAppNameFromStores(appID: string): string | null",
         "appStore?.GetAppOverviewByAppID",
         "collectionStore?.allGamesCollection?.allApps",
@@ -1286,6 +1329,14 @@ def test_frontend_prefers_focused_or_selected_game_before_running_game() -> None
             "function findGameForRunningSession"
         )
     ]
+    capture = source[
+        source.index("function captureSteamUiGameContext") : source.index(
+            "function getRecentSteamUiGameContext"
+        )
+    ]
+    assert capture.index("getRouteSteamGameSession()") < capture.index(
+        "getFocusedSteamGameSession()"
+    )
     assert "captureSteamUiGameContext()" in preferred
     assert "getRecentSteamUiGameContext()" in preferred
     assert "getMainRunningSession()" in preferred

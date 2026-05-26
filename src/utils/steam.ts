@@ -5,6 +5,15 @@ import { log } from "./logging";
 let lastSteamUiGameContext: RunningSession | null = null;
 let lastSteamUiGameContextCapturedAt = 0;
 const STEAM_UI_GAME_CONTEXT_TTL_MS = 10_000;
+const STEAM_UI_REACT_FIBER_MAX_DEPTH = 12;
+const STEAM_UI_REACT_CANDIDATE_MAX_COUNT = 64;
+const STEAM_UI_HOVERED_ELEMENT_MAX_COUNT = 4;
+const STEAM_UI_APP_ROUTE_PATTERN = /(?:\/routes)?\/library\/app\/(\d+)/;
+const STEAM_UI_REACT_PROPS_PREFIX = "__reactProps$";
+const STEAM_UI_REACT_FIBER_PREFIXES = [
+  "__reactFiber$",
+  "__reactInternalInstance$",
+];
 const QUICK_ACCESS_TOP_EPSILON_PX = 1;
 
 const STATUS_STRIP_HEIGHT_RATIO = 0.0475;
@@ -94,7 +103,7 @@ export function getSteamAppNameFromStores(appID: string): string | null {
 }
 
 export function sessionFromRoutePath(path: string): RunningSession | null {
-  const match = path.match(/(?:\/routes)?\/library\/app\/(\d+)/);
+  const match = path.match(STEAM_UI_APP_ROUTE_PATTERN);
   const appID = match?.[1];
   if (!appID) {
     return null;
@@ -151,6 +160,31 @@ export function sessionFromSteamUiCandidate(candidate: any): RunningSession | nu
   return null;
 }
 
+export function sessionFromElementAppContext(element: Element | null): RunningSession | null {
+  const selector = "[data-appid], [data-app-id], [href]";
+  const appElement = element?.closest(selector) ?? element?.querySelector(selector) ?? null;
+  const href = appElement?.getAttribute("href") ?? "";
+  const appID =
+    appElement?.getAttribute("data-appid") ??
+    appElement?.getAttribute("data-app-id") ??
+    href.match(STEAM_UI_APP_ROUTE_PATTERN)?.[1] ??
+    null;
+
+  if (!appID) {
+    return null;
+  }
+
+  const name = getSteamAppNameFromStores(appID) ?? "";
+  return { appID, name, source: "focused" };
+}
+
+function pushSteamUiCandidate(candidates: any[], value: any): boolean {
+  if (value) {
+    candidates.push(value);
+  }
+  return candidates.length < STEAM_UI_REACT_CANDIDATE_MAX_COUNT;
+}
+
 export function getSteamUiReactPropCandidates(element: Element | null): any[] {
   if (!element) {
     return [];
@@ -158,35 +192,81 @@ export function getSteamUiReactPropCandidates(element: Element | null): any[] {
 
   const candidates: any[] = [];
   for (const key of Object.keys(element as any)) {
-    if (key.startsWith("__reactProps$")) {
-      candidates.push((element as any)[key]);
+    if (candidates.length >= STEAM_UI_REACT_CANDIDATE_MAX_COUNT) {
+      break;
     }
-    if (key.startsWith("__reactFiber$") || key.startsWith("__reactInternalInstance$")) {
-      let fiber = (element as any)[key];
-      for (let depth = 0; fiber && depth < 12; depth += 1) {
-        candidates.push(fiber.pendingProps, fiber.memoizedProps, fiber.stateNode?.props);
-        fiber = fiber.return;
+
+    if (key.startsWith(STEAM_UI_REACT_PROPS_PREFIX)) {
+      if (!pushSteamUiCandidate(candidates, (element as any)[key])) {
+        break;
       }
+      continue;
+    }
+
+    if (!STEAM_UI_REACT_FIBER_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+      continue;
+    }
+
+    let fiber = (element as any)[key];
+    const visitedFibers = new Set<any>();
+    for (
+      let depth = 0;
+      fiber && depth < STEAM_UI_REACT_FIBER_MAX_DEPTH && !visitedFibers.has(fiber);
+      depth += 1
+    ) {
+      visitedFibers.add(fiber);
+      if (!pushSteamUiCandidate(candidates, fiber.pendingProps)) break;
+      if (!pushSteamUiCandidate(candidates, fiber.memoizedProps)) break;
+      if (!pushSteamUiCandidate(candidates, fiber.stateNode?.props)) break;
+      fiber = fiber.return;
     }
   }
   return candidates.filter(Boolean);
 }
 
+function getSteamUiFocusedElements(doc: Document): Element[] {
+  const elements = [
+    doc.activeElement,
+    doc.querySelector(".gpfocus, .gpfocuswithin, :focus"),
+    ...Array.from(doc.querySelectorAll(":hover"))
+      .reverse()
+      .slice(0, STEAM_UI_HOVERED_ELEMENT_MAX_COUNT),
+  ];
+
+  const unique: Element[] = [];
+  for (const element of elements) {
+    if (
+      element &&
+      element.tagName !== "BODY" &&
+      element.tagName !== "HTML" &&
+      !unique.includes(element)
+    ) {
+      unique.push(element);
+    }
+  }
+  return unique;
+}
+
 export function getFocusedSteamGameSession(): RunningSession | null {
   const mainWindow = getMainSteamWindow();
   const doc = mainWindow?.document ?? document;
-  const focusedElements = [
-    doc.activeElement,
-    doc.querySelector(".gpfocus, .gpfocuswithin, :focus"),
-    ...Array.from(doc.querySelectorAll(":hover")).reverse()
-  ];
 
-  for (const element of focusedElements) {
+  for (const element of getSteamUiFocusedElements(doc)) {
+    const domSession = sessionFromElementAppContext(element);
+    const appIDOnlyFallback = domSession?.name ? null : domSession;
+    if (domSession?.name) {
+      return domSession;
+    }
+
     for (const candidate of getSteamUiReactPropCandidates(element)) {
       const session = sessionFromSteamUiCandidate(candidate);
       if (session) {
         return { ...session, source: "focused" };
       }
+    }
+
+    if (appIDOnlyFallback) {
+      return appIDOnlyFallback;
     }
   }
 
@@ -194,7 +274,7 @@ export function getFocusedSteamGameSession(): RunningSession | null {
 }
 
 export function captureSteamUiGameContext(): RunningSession | null {
-  const session = getFocusedSteamGameSession() ?? getRouteSteamGameSession();
+  const session = getRouteSteamGameSession() ?? getFocusedSteamGameSession();
   if (session) {
     if (
       lastSteamUiGameContext?.appID !== session.appID ||
