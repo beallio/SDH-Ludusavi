@@ -759,7 +759,7 @@ function ConflictResolutionModal({ conflict, onChoose, onDismiss, closeModal }: 
     <ConfirmModal
       bAlertDialog={true}
       strTitle="Conflict Detected"
-      onOK={() => choose("restore_backup")}
+      onOK={dismiss}
       onCancel={dismiss}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "14px" }}>

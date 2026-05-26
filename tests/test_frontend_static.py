@@ -677,6 +677,18 @@ def test_frontend_conflict_modal_uses_backup_save_copy_not_cloud_save() -> None:
     assert "Cloud Save" not in source
 
 
+def test_frontend_conflict_modal_default_action_dismisses_safely() -> None:
+    source = FRONTEND.read_text()
+    modal_source = source[source.index("function ConflictResolutionModal") :]
+    modal_source = modal_source[: modal_source.index("function showConflictResolutionModal")]
+
+    assert "onOK={dismiss}" in modal_source
+    assert 'onOK={() => choose("restore_backup")}' not in modal_source
+    assert "onCancel={dismiss}" in modal_source
+    assert 'onClick={() => choose("keep_local")}' in modal_source
+    assert 'onClick={() => choose("restore_backup")}' in modal_source
+
+
 def test_frontend_has_no_status_strip_diagnostic_ui_or_modes() -> None:
     source = FRONTEND.read_text()
 
