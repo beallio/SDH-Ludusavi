@@ -108,6 +108,36 @@ def import_main(
     return module
 
 
+def test_migration_does_not_call_decky_template_migration_helpers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decky, logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    calls: list[str] = []
+
+    def record_call(name: str) -> Any:
+        def recorder(*_args: object) -> None:
+            calls.append(name)
+
+        return recorder
+
+    decky.migrate_logs = record_call("migrate_logs")
+    decky.migrate_settings = record_call("migrate_settings")
+    decky.migrate_runtime = record_call("migrate_runtime")
+    module = import_main(monkeypatch, decky)
+
+    asyncio.run(module.Plugin()._migration())
+
+    assert calls == []
+    assert logger.infos == ["SDH-ludusavi migration skipped; no legacy paths to migrate"]
+
+
+def test_migration_has_no_template_scaffolding_paths() -> None:
+    content = Path("main.py").read_text(encoding="utf-8")
+
+    assert "template" not in content.casefold()
+
+
 def test_run_blocking_uses_event_driven_daemon_future_without_polling() -> None:
     tree = ast.parse(Path("main.py").read_text(encoding="utf-8"))
     run_blocking = next(

@@ -239,21 +239,7 @@ class Plugin:
         decky.logger.info("SDH-ludusavi backend uninstalled")
 
     async def _migration(self) -> None:
-        decky.logger.info("Migrating SDH-ludusavi legacy paths")
-        decky.migrate_logs(
-            os.path.join(decky.DECKY_USER_HOME, ".config", "decky-template", "template.log"),
-            os.path.join(decky.DECKY_USER_HOME, ".config", "sdh-ludusavi", "plugin.log"),
-        )
-        decky.migrate_settings(
-            os.path.join(decky.DECKY_HOME, "settings", "template.json"),
-            os.path.join(decky.DECKY_USER_HOME, ".config", "decky-template"),
-            os.path.join(decky.DECKY_USER_HOME, ".config", "sdh-ludusavi"),
-        )
-        decky.migrate_runtime(
-            os.path.join(decky.DECKY_HOME, "template"),
-            os.path.join(decky.DECKY_USER_HOME, ".local", "share", "decky-template"),
-            os.path.join(decky.DECKY_USER_HOME, ".local", "share", "sdh-ludusavi"),
-        )
+        decky.logger.info("SDH-ludusavi migration skipped; no legacy paths to migrate")
 
     async def _call(self, operation: str, callback: Any) -> Any:
         """
