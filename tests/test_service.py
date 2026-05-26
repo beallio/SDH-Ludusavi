@@ -891,6 +891,75 @@ def test_check_game_start_reports_restore_needed_without_restoring(tmp_path: Pat
     assert adapter.restores == []
 
 
+def test_check_game_start_runs_recency_under_operation_lock(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    observed_status: dict[str, object] = {}
+
+    def compare_recency(game_name: str) -> str:
+        observed_status.update(service.get_operation_status())
+        return adapter.recency.get(game_name, "ambiguous")
+
+    adapter.compare_recency = compare_recency
+
+    result = service.check_game_start("Hades")
+
+    assert result == {"status": "skipped", "game": "Hades", "reason": "local_current"}
+    assert observed_status["is_running"] is True
+    assert observed_status["name"] == "start_check"
+    assert observed_status["game_name"] == "Hades"
+
+
+def test_check_game_start_skips_if_operation_starts_after_initial_guard(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = service_with_state(tmp_path)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    entered = threading.Event()
+    release = threading.Event()
+    first_errors: list[BaseException] = []
+
+    def slow_callback() -> dict[str, object]:
+        entered.set()
+        release.wait(timeout=1)
+        return {"ok": True}
+
+    def run_first_operation() -> None:
+        try:
+            service._run_locked("refresh", None, slow_callback)
+        except BaseException as exc:  # pragma: no cover - failure details are asserted below.
+            first_errors.append(exc)
+
+    original_match_game = service._match_game
+    first_thread: threading.Thread | None = None
+
+    def match_game_and_start_operation(*args: object, **kwargs: object) -> object:
+        nonlocal first_thread
+        game = original_match_game(*args, **kwargs)
+        first_thread = threading.Thread(target=run_first_operation)
+        first_thread.start()
+        assert entered.wait(timeout=1)
+        return game
+
+    monkeypatch.setattr(service, "_match_game", match_game_and_start_operation)
+
+    try:
+        result = service.check_game_start("Hades")
+    finally:
+        release.set()
+        if first_thread is not None:
+            first_thread.join(timeout=1)
+
+    assert result == {"status": "skipped", "game": "Hades", "reason": "operation_running"}
+    assert first_thread is not None
+    assert not first_thread.is_alive()
+    assert first_errors == []
+
+
 def test_restore_game_on_start_performs_restore_and_records_history(tmp_path: Path) -> None:
     adapter = FakeAdapter()
     service = service_with_state(tmp_path, adapter)
@@ -1003,6 +1072,87 @@ def test_check_game_exit_reports_backup_needed_without_backing_up(tmp_path: Path
 
     assert result == {"status": "needed", "operation": "backup", "game": "Hades"}
     assert adapter.backups == []
+
+
+def test_check_game_exit_runs_preview_under_operation_lock(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    observed_status: dict[str, object] = {}
+
+    def backup(game_name: str, preview: bool = False) -> dict[str, object]:
+        if preview:
+            observed_status.update(service.get_operation_status())
+            return {
+                "games": {
+                    game_name: {
+                        "change": "Different",
+                        "files": {"save.dat": {}},
+                        "registry": {},
+                    }
+                }
+            }
+        adapter.backups.append(game_name)
+        return {"ok": True, "game": game_name}
+
+    adapter.backup = backup
+
+    result = service.check_game_exit("Hades")
+
+    assert result == {"status": "needed", "operation": "backup", "game": "Hades"}
+    assert adapter.backups == []
+    assert observed_status["is_running"] is True
+    assert observed_status["name"] == "exit_check"
+    assert observed_status["game_name"] == "Hades"
+
+
+def test_check_game_exit_skips_if_operation_starts_after_initial_guard(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = service_with_state(tmp_path)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    entered = threading.Event()
+    release = threading.Event()
+    first_errors: list[BaseException] = []
+
+    def slow_callback() -> dict[str, object]:
+        entered.set()
+        release.wait(timeout=1)
+        return {"ok": True}
+
+    def run_first_operation() -> None:
+        try:
+            service._run_locked("refresh", None, slow_callback)
+        except BaseException as exc:  # pragma: no cover - failure details are asserted below.
+            first_errors.append(exc)
+
+    original_match_game = service._match_game
+    first_thread: threading.Thread | None = None
+
+    def match_game_and_start_operation(*args: object, **kwargs: object) -> object:
+        nonlocal first_thread
+        game = original_match_game(*args, **kwargs)
+        first_thread = threading.Thread(target=run_first_operation)
+        first_thread.start()
+        assert entered.wait(timeout=1)
+        return game
+
+    monkeypatch.setattr(service, "_match_game", match_game_and_start_operation)
+
+    try:
+        result = service.check_game_exit("Hades")
+    finally:
+        release.set()
+        if first_thread is not None:
+            first_thread.join(timeout=1)
+
+    assert result == {"status": "skipped", "game": "Hades", "reason": "operation_running"}
+    assert first_thread is not None
+    assert not first_thread.is_alive()
+    assert first_errors == []
 
 
 def test_backup_game_on_exit_performs_backup_and_refreshes_history(tmp_path: Path) -> None:

@@ -1,0 +1,33 @@
+{
+  "date": "2026-05-26",
+  "task_objective": "Address code review feedback by running game start and exit preview checks under the service operation lock.",
+  "files_modified": [
+    "docs/agent_conversations/2026-05-26_refactor_operation_lock_checks.json",
+    "docs/plans/2026-05-26_refactor_operation_lock_checks.md",
+    "py_modules/sdh_ludusavi/service.py",
+    "tests/test_service.py"
+  ],
+  "tests_added": [
+    "test_check_game_start_runs_recency_under_operation_lock",
+    "test_check_game_start_skips_if_operation_starts_after_initial_guard",
+    "test_check_game_exit_runs_preview_under_operation_lock",
+    "test_check_game_exit_skips_if_operation_starts_after_initial_guard"
+  ],
+  "design_decisions": [
+    "Wrapped check_game_start recency comparison in _run_locked with the internal operation label start_check.",
+    "Wrapped check_game_exit backup preview in _run_locked with the internal operation label exit_check.",
+    "Converted OperationLockedError from those preview checks into the existing skipped operation_running payload shape.",
+    "Left _conflict_metadata outside this patch because it is best-effort metadata, catches failures, and falls back without blocking the conflict prompt.",
+    "Kept public Python and TypeScript-facing result contracts unchanged.",
+    "Noted that a future hardening pass should evaluate serializing every Ludusavi CLI subprocess call, including conflict metadata, diagnostics, version checks, and config probes."
+  ],
+  "results": {
+    "red_test": "./run.sh uv run pytest tests/test_service.py -k \"operation_lock or initial_guard or recency_under_operation_lock or preview_under_operation_lock\" failed before implementation with 4 expected failures.",
+    "targeted_test": "./run.sh uv run pytest tests/test_service.py -k \"operation_lock or initial_guard or recency_under_operation_lock or preview_under_operation_lock\" passed after implementation.",
+    "service_tests": "./run.sh uv run pytest tests/test_service.py passed with 91 tests.",
+    "ruff_check": "./run.sh uv run ruff check . --fix passed.",
+    "ruff_format": "./run.sh uv run ruff format . completed with 50 files left unchanged.",
+    "type_check": "./run.sh uv run ty check py_modules/sdh_ludusavi/ passed.",
+    "full_tests": "./run.sh uv run pytest passed with 315 tests."
+  }
+}

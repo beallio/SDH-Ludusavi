@@ -759,7 +759,14 @@ class SDHLudusaviService:
             return self._skip("start", game.name, "game_error")
 
         self.log("debug", f"Checking recency for {game.name}", "start", game.name)
-        recency = self._ludusavi().compare_recency(game.name)
+        try:
+            recency = self._run_locked(
+                "start_check",
+                game.name,
+                lambda: self._ludusavi().compare_recency(game.name),
+            )
+        except OperationLockedError:
+            return self._skip("start", game.name, "operation_running")
         self.log("info", f"Recency check result for {game.name}: {recency}", "start", game.name)
 
         if recency == "backup_newer":
@@ -942,7 +949,11 @@ class SDHLudusaviService:
 
         self.log("debug", f"Checking if backup is needed for {game.name}", "exit", game.name)
         try:
-            preview = self._ludusavi().backup(game.name, preview=True)
+            preview = self._run_locked(
+                "exit_check",
+                game.name,
+                lambda: self._ludusavi().backup(game.name, preview=True),
+            )
             games_output = cast(dict[str, Any], preview.get("games", {}))
 
             if game.name not in games_output:
@@ -985,6 +996,8 @@ class SDHLudusaviService:
 
             if change == "Same":
                 return self._skip("exit", game.name, "local_current")
+        except OperationLockedError:
+            return self._skip("exit", game.name, "operation_running")
         # Intentionally broad: metadata/diagnostic preview fallback that must not block exit flow.
         except Exception as exc:
             self.log("debug", f"Backup preview failed for {game.name}: {exc}", "exit", game.name)
