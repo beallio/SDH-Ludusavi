@@ -19,7 +19,11 @@ def test_no_imports_from_service() -> None:
         tree = ast.parse(content, filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
-                if node.module in ("service", "sdh_ludusavi.service"):
+                imports_service_module = node.module in ("service", "sdh_ludusavi.service")
+                imports_service_from_package = node.module in (None, "sdh_ludusavi", "") and any(
+                    alias.name == "service" for alias in node.names
+                )
+                if imports_service_module or imports_service_from_package:
                     raise AssertionError(f"Forbidden import from service in {path.name}")
             elif isinstance(node, ast.Import):
                 for name in node.names:
