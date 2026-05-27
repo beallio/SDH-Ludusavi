@@ -72,3 +72,18 @@ def test_service_facade_class_size() -> None:
             break
     else:
         raise AssertionError("SDHLudusaviService class definition not found")
+
+
+def test_no_registry_match_game_rebinding() -> None:
+    """service.py must not contain _registry_match_game or assign to self._registry.match_game."""
+    service_path = Path(__file__).parent.parent / "py_modules" / "sdh_ludusavi" / "service.py"
+    content = service_path.read_text(encoding="utf-8")
+    assert "_registry_match_game" not in content
+    assert "self._registry.match_game =" not in content
+
+
+def test_no_direct_service_log_in_gateway() -> None:
+    """gateway.py must not contain self._service.log."""
+    gateway_path = Path(__file__).parent.parent / "py_modules" / "sdh_ludusavi" / "gateway.py"
+    content = gateway_path.read_text(encoding="utf-8")
+    assert "self._service.log" not in content

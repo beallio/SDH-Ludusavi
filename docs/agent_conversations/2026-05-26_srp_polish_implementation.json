@@ -1,0 +1,22 @@
+{
+  "date": "2026-05-26",
+  "task_objective": "Implement /tmp/sdh_ludusavi_srp_polish_implementation_plan.md to clean facade match_game rebinding, update first-party contention tests, update gateway logging to be callback-based, and verify architecture tests.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/service.py",
+    "py_modules/sdh_ludusavi/gateway.py",
+    "py_modules/sdh_ludusavi/log_buffer.py",
+    "tests/test_architecture.py",
+    "tests/test_service.py",
+    "tests/test_gateway.py"
+  ],
+  "tests_added": [
+    "tests/test_gateway.py (test_gateway_current_config_mtime_ns_read_failure)"
+  ],
+  "design_decisions": [
+    "Removed lambda-based monkeypatching override from the service constructor since it was surprising and unnecessary.",
+    "Updated contention tests to patch the registry method registry.match_game directly, keeping boundaries clean.",
+    "Changed current_config_mtime_ns inside gateway.py to invoke the _log callback instead of facade.log directly.",
+    "Cleaned dynamic module lookup comments from log_buffer.py."
+  ],
+  "results": "All 361 tests passed successfully. Ruff lint/format check passed, ty type check passed, and git diff has no whitespace errors."
+}

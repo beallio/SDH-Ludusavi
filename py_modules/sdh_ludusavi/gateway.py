@@ -146,7 +146,7 @@ class LudusaviGateway:
         try:
             return self.get_adapter().get_config_mtime_ns()
         except Exception as exc:
-            self._service.log(
+            self._log(
                 "debug",
                 f"Unable to read Ludusavi config marker; forcing refresh: {exc}",
                 "refresh",

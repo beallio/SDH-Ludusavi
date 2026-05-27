@@ -955,7 +955,7 @@ def test_check_game_start_skips_if_operation_starts_after_initial_guard(
         except BaseException as exc:  # pragma: no cover - failure details are asserted below.
             first_errors.append(exc)
 
-    original_match_game = service._match_game
+    original_match_game = service._registry.match_game
     first_thread: threading.Thread | None = None
 
     def match_game_and_start_operation(*args: object, **kwargs: object) -> object:
@@ -966,7 +966,7 @@ def test_check_game_start_skips_if_operation_starts_after_initial_guard(
         assert entered.wait(timeout=1)
         return game
 
-    monkeypatch.setattr(service, "_match_game", match_game_and_start_operation)
+    monkeypatch.setattr(service._registry, "match_game", match_game_and_start_operation)
 
     try:
         result = service.check_game_start("Hades")
@@ -1150,7 +1150,7 @@ def test_check_game_exit_skips_if_operation_starts_after_initial_guard(
         except BaseException as exc:  # pragma: no cover - failure details are asserted below.
             first_errors.append(exc)
 
-    original_match_game = service._match_game
+    original_match_game = service._registry.match_game
     first_thread: threading.Thread | None = None
 
     def match_game_and_start_operation(*args: object, **kwargs: object) -> object:
@@ -1161,7 +1161,7 @@ def test_check_game_exit_skips_if_operation_starts_after_initial_guard(
         assert entered.wait(timeout=1)
         return game
 
-    monkeypatch.setattr(service, "_match_game", match_game_and_start_operation)
+    monkeypatch.setattr(service._registry, "match_game", match_game_and_start_operation)
 
     try:
         result = service.check_game_exit("Hades")

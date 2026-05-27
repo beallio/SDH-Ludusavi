@@ -53,3 +53,25 @@ def test_ludusavi_gateway_discovery() -> None:
         cmd = gateway.get_ludusavi_command()
         assert cmd["commandPath"] == "/usr/bin/ludusavi"
         assert cmd["args"] == ["-f"]
+
+
+def test_gateway_current_config_mtime_ns_read_failure() -> None:
+    from unittest.mock import MagicMock
+    from sdh_ludusavi.constants import CONFIG_MARKER_READ_FAILED
+    from sdh_ludusavi.types import LudusaviAdapter
+
+    mock_adapter = MagicMock(spec=LudusaviAdapter)
+    mock_adapter.get_config_mtime_ns.side_effect = RuntimeError("Read error")
+
+    log_calls = []
+
+    def log_callback(level, message, operation=None, game_name=None):
+        log_calls.append((level, message, operation, game_name))
+
+    gateway = LudusaviGateway(service=None, adapter=mock_adapter, log_callback=log_callback)
+
+    mtime = gateway.current_config_mtime_ns()
+    assert mtime is CONFIG_MARKER_READ_FAILED
+    assert len(log_calls) >= 1
+    assert log_calls[-1][0] == "debug"
+    assert "Unable to read Ludusavi config marker" in log_calls[-1][1]

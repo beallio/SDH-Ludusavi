@@ -110,10 +110,6 @@ class SDHLudusaviService:
             save_callback=self._save_state,
             get_history_callback=self.get_game_history,
         )
-        self._registry_match_game = self._registry.match_game
-        self._registry.match_game = lambda game_name, app_id=None: self._match_game(  # type: ignore
-            game_name, app_id
-        )
 
         # 3. Persistence Layer
         self._persistence = PersistenceManager(
@@ -393,7 +389,7 @@ class SDHLudusaviService:
             self._persistence.save_cache(cache_payload)
 
     def _match_game(self, game_name: str, app_id: str | None = None) -> GameStatus | None:
-        return self._registry_match_game(game_name, app_id)
+        return self._registry.match_game(game_name, app_id)
 
     def _conflict_metadata(self, game_name: str) -> dict[str, object]:
         try:

@@ -9,10 +9,6 @@ from typing import Any
 
 LOGGER = logging.getLogger("sdh_ludusavi.service.log_buffer")
 
-# To satisfy the AST check in service.py, we import _DECKY_LOGGER and _decky_log
-# dynamically or check if defined. To keep things clean, we will reference them
-# via sdh_ludusavi.service module dynamically.
-
 
 @dataclass
 class LogEntry:
