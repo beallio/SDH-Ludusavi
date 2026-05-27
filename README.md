@@ -74,4 +74,4 @@ Using Syncthing allows for near-instant local backups that sync in the backgroun
 
 ## License
 
-MIT - See [LICENSE](LICENSE) for details. For technical details, see [DEVELOPMENT.md](DEVELOPMENT.md).
+GPL-3.0-only - See [LICENSE](LICENSE) for details. For technical details, see [DEVELOPMENT.md](DEVELOPMENT.md).
