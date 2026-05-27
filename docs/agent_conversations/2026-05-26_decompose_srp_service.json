@@ -1,0 +1,43 @@
+{
+  "date": "2026-05-26",
+  "task_objective": "Decompose the monolithic SDHLudusaviService class to respect the Single Responsibility Principle (SRP).",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/service.py",
+    "tests/test_history.py"
+  ],
+  "files_added": [
+    "py_modules/sdh_ludusavi/persistence.py",
+    "py_modules/sdh_ludusavi/watchdog.py",
+    "py_modules/sdh_ludusavi/history.py",
+    "py_modules/sdh_ludusavi/matcher.py",
+    "py_modules/sdh_ludusavi/coordinator.py",
+    "py_modules/sdh_ludusavi/gateway.py",
+    "py_modules/sdh_ludusavi/log_buffer.py",
+    "tests/test_persistence.py",
+    "tests/test_watchdog.py",
+    "tests/test_history.py",
+    "tests/test_matcher.py",
+    "tests/test_coordinator.py",
+    "tests/test_gateway.py",
+    "tests/test_log_buffer.py",
+    "tests/test_compatibility.py"
+  ],
+  "tests_added": [
+    "tests/test_persistence.py",
+    "tests/test_watchdog.py",
+    "tests/test_history.py (refactored to target HistoryManager directly)",
+    "tests/test_matcher.py",
+    "tests/test_coordinator.py",
+    "tests/test_gateway.py",
+    "tests/test_log_buffer.py",
+    "tests/test_compatibility.py"
+  ],
+  "design_decisions": [
+    "Decomposed the monolithic SDHLudusaviService class (~1,400 lines) into smaller, single-responsibility manager classes: PersistenceManager, ProcessWatchdog, HistoryManager, GameRegistryMatcher, OperationCoordinator, LudusaviGateway, and DiagnosticLogBuffer.",
+    "Mapped properties on the manager classes to delegate back to the service instance dynamically to support direct mutations and backward compatibility with the existing test suite's extensive mock tests.",
+    "Removed circular property structures in SDHLudusaviService by using simple instance attributes that sub-managers access directly, resolving circular recursion and initialization ordering issues.",
+    "Preserved hierarchical logging layout under 'sdh_ludusavi.service' (e.g. 'sdh_ludusavi.service.persistence') to ensure standard logging captures and tests continue to work correctly.",
+    "Mutated collections (like games, aliases, and ids) in-place during refresh cycles so that matchers holding references automatically see the refreshed state rather than referencing stale empty structures."
+  ],
+  "results": "All 333 tests passed successfully. Ruff check and format pass completely. Ty checks pass with zero diagnostics."
+}
