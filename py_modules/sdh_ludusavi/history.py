@@ -15,6 +15,7 @@ class HistoryManager:
     ) -> None:
         self._service = service
         self._save_callback = save_callback
+        self._game_history: dict[str, dict[str, Any]] = {}
 
         # Initialize and validate input history
         if isinstance(initial_history, dict):
@@ -28,14 +29,6 @@ class HistoryManager:
 
                 self._update_last_operation(validated_history)
                 self._game_history[str(game_name)] = validated_history
-
-    @property
-    def _game_history(self) -> dict[str, dict[str, Any]]:
-        return self._service._game_history
-
-    @_game_history.setter
-    def _game_history(self, val: dict[str, dict[str, Any]]) -> None:
-        self._service._game_history = val
 
     def get_history(self) -> dict[str, dict[str, Any]]:
         """Return the complete validated game operation history."""

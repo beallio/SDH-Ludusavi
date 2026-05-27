@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ._version import resolve_version
-from .service import LudusaviAdapter
+from .types import LudusaviAdapter
 
 LOGGER = logging.getLogger("sdh_ludusavi.service.gateway")
 
@@ -18,30 +18,22 @@ class LudusaviGateway:
     discovering the launcher command, and reading log outputs.
     """
 
-    def __init__(self, service: Any) -> None:
+    def __init__(
+        self,
+        service: Any,
+        adapter: LudusaviAdapter | None = None,
+        adapter_factory: Callable[[], LudusaviAdapter] | None = None,
+    ) -> None:
         self._service = service
+        self._adapter = adapter or getattr(service, "_adapter", None)
+        self._adapter_lock = getattr(service, "_adapter_lock", None) or threading.Lock()
+        self._adapter_factory = (
+            adapter_factory
+            or getattr(service, "_adapter_factory", None)
+            or _default_adapter_factory
+        )
         self._versions: dict[str, str] | None = None
         self._ludusavi_command: dict[str, object] | None = None
-
-    @property
-    def _adapter(self) -> LudusaviAdapter | None:
-        return self._service._adapter
-
-    @_adapter.setter
-    def _adapter(self, val: LudusaviAdapter | None) -> None:
-        self._service._adapter = val
-
-    @property
-    def _adapter_lock(self) -> threading.Lock:
-        return self._service._adapter_lock
-
-    @property
-    def _adapter_factory(self) -> Callable[[], LudusaviAdapter]:
-        return self._service._adapter_factory
-
-    @_adapter_factory.setter
-    def _adapter_factory(self, val: Callable[[], LudusaviAdapter]) -> None:
-        self._service._adapter_factory = val
 
     def get_adapter(self) -> LudusaviAdapter:
         """Lazily initialize and return the Ludusavi adapter."""
@@ -54,7 +46,8 @@ class LudusaviGateway:
             with self._adapter_lock:
                 if not self._service._diagnostics_logged:
                     self._service._log_ludusavi_diagnostics(self._adapter)
-        assert self._adapter is not None
+        if self._adapter is None:
+            raise RuntimeError("Ludusavi adapter factory returned None")
         return self._adapter
 
     def get_versions(self) -> dict[str, str]:
@@ -130,9 +123,9 @@ class LudusaviGateway:
                 f"Unable to read Ludusavi config marker; forcing refresh: {exc}",
                 "refresh",
             )
-            from .service import _CONFIG_MARKER_READ_FAILED
+            from .constants import CONFIG_MARKER_READ_FAILED
 
-            return _CONFIG_MARKER_READ_FAILED
+            return CONFIG_MARKER_READ_FAILED
 
 
 def _decky_version() -> str:
@@ -144,3 +137,9 @@ def _decky_version() -> str:
     except ImportError:
         return "unknown"
     return str(getattr(decky, "__version__", "unknown"))
+
+
+def _default_adapter_factory() -> LudusaviAdapter:
+    from .ludusavi import PyludusaviAdapter
+
+    return PyludusaviAdapter()

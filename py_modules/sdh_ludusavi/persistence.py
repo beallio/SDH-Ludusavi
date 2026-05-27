@@ -153,13 +153,13 @@ class PersistenceManager:
     def _load_combined_settings(self) -> dict[str, Any]:
         data = self.load_all()
         # Filter settings keys from combined loaded dict
-        from .service import SETTINGS_KEYS
+        from .constants import SETTINGS_KEYS
 
         return {k: v for k, v in data["settings"].items() if k in SETTINGS_KEYS}
 
     def _load_combined_cache(self) -> dict[str, Any]:
         data = self.load_all()
-        from .service import SETTINGS_KEYS
+        from .constants import SETTINGS_KEYS
 
         return {k: v for k, v in data["cache"].items() if k not in SETTINGS_KEYS}
 

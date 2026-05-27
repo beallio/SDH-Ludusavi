@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Callable
-from .service import GameStatus
+from .types import GameStatus
 
 
 class GameRegistryMatcher:

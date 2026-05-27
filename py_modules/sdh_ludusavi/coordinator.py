@@ -34,14 +34,8 @@ class OperationCoordinator:
 
     def __init__(self, service: Any) -> None:
         self._service = service
-
-    @property
-    def _operation(self) -> OperationState:
-        return self._service._operation
-
-    @property
-    def _operation_lock(self) -> threading.Lock:
-        return self._service._operation_lock
+        self._operation = OperationState()
+        self._operation_lock = threading.Lock()
 
     def run_locked(
         self,

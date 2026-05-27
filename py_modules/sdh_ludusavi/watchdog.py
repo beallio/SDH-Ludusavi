@@ -27,38 +27,11 @@ class ProcessWatchdog:
         self._service = service
         self._log = log_callback
         self._is_operation_running = is_operation_running
-
-    @property
-    def _paused_pids(self) -> dict[int, float]:
-        return self._service._paused_pids
-
-    @_paused_pids.setter
-    def _paused_pids(self, val: dict[int, float]) -> None:
-        self._service._paused_pids = val
-
-    @property
-    def _paused_pids_lock(self) -> threading.Lock:
-        return self._service._paused_pids_lock
-
-    @property
-    def _watchdog_active(self) -> bool:
-        return self._service._watchdog_active
-
-    @_watchdog_active.setter
-    def _watchdog_active(self, val: bool) -> None:
-        self._service._watchdog_active = val
-
-    @property
-    def _watchdog_thread(self) -> threading.Thread | None:
-        return self._service._watchdog_thread
-
-    @_watchdog_thread.setter
-    def _watchdog_thread(self, val: threading.Thread | None) -> None:
-        self._service._watchdog_thread = val
-
-    @property
-    def _watchdog_stop(self) -> threading.Event:
-        return self._service._watchdog_stop
+        self._paused_pids: dict[int, float] = {}
+        self._paused_pids_lock = threading.Lock()
+        self._watchdog_active = False
+        self._watchdog_thread: threading.Thread | None = None
+        self._watchdog_stop = threading.Event()
 
     def pause(self, pid: int) -> dict[str, object]:
         """Suspend a launched game process tree while start sync runs."""

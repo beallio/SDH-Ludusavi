@@ -5,9 +5,8 @@ import os
 import threading
 from collections.abc import Callable
 from collections import deque
-from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 # For test backward compatibility, import helper objects into module scope
 from ._version import resolve_version  # noqa: F401
@@ -23,58 +22,19 @@ from .watchdog import (  # noqa: F401
 )
 from .log_buffer import LogEntry, DeckyLogHandler  # noqa: F401
 
+from .constants import (
+    DEFAULT_NOTIFICATION_SETTINGS,
+    MAX_INSTALLED_APP_IDS_BYTES,
+    CONFIG_MARKER_READ_FAILED,
+    CACHE_MARKER_UNCHANGED,
+)
+from .types import LudusaviAdapter, GameStatus
+
 LOGGER = logging.getLogger(__name__)
-MAX_INSTALLED_APP_IDS_BYTES = 16_384
-_CONFIG_MARKER_READ_FAILED = object()
-_CACHE_MARKER_UNCHANGED = object()
-DEFAULT_NOTIFICATION_SETTINGS: dict[str, bool] = {
-    "enabled": True,
-    "auto_sync_progress": True,
-    "auto_sync_results": True,
-    "manual_operations": True,
-    "refresh_status": True,
-    "failures_errors": True,
-}
-SETTINGS_KEYS = ("auto_sync_enabled", "selected_game", "notifications")
 
-
-class LudusaviAdapter(Protocol):
-    def refresh_statuses(self) -> list[dict[str, object]]: ...
-    def compare_recency(self, game_name: str) -> str: ...
-    def get_conflict_metadata(self, game_name: str) -> dict[str, object]: ...
-    def backup(self, game_name: str, preview: bool = False) -> dict[str, object]: ...
-    def restore(self, game_name: str, preview: bool = False) -> dict[str, object]: ...
-    def get_versions(self) -> dict[str, str]: ...
-    def get_log_contents(self) -> str: ...
-    def get_config_mtime_ns(self) -> int | None: ...
-    def get_diagnostics(self) -> dict[str, object]: ...
-
-
-@dataclass
-class GameStatus:
-    """Represents the parsed Ludusavi status for a single game."""
-
-    name: str
-    configured: bool
-    has_backup: bool
-    needs_first_backup: bool
-    steam_id: str | None = None
-    error: str | None = None
-
-    @property
-    def status(self) -> str:
-        if self.error:
-            return "error"
-        if self.has_backup:
-            return "has_backup"
-        if self.needs_first_backup:
-            return "needs_first_backup"
-        return "configured" if self.configured else "error"
-
-    def to_dict(self) -> dict[str, object]:
-        data = asdict(self)
-        data["status"] = self.status
-        return data
+# For backward compatibility
+_CONFIG_MARKER_READ_FAILED = CONFIG_MARKER_READ_FAILED
+_CACHE_MARKER_UNCHANGED = CACHE_MARKER_UNCHANGED
 
 
 # For test compatibility, keep references to LogEntry and DeckyLogHandler
@@ -133,29 +93,19 @@ class SDHLudusaviService:
         self._ids: dict[str, str] = {}
         self._installed_app_ids: str | None = None
         self._ludusavi_config_mtime_ns: int | None = None
-        self._game_history: dict[str, dict[str, Any]] = {}
-        self._logs: deque[LogEntry] = deque(maxlen=log_limit)
-
-        self._paused_pids: dict[int, float] = {}
-        self._paused_pids_lock = threading.Lock()
-        self._watchdog_active = False
-        self._watchdog_thread: threading.Thread | None = None
-        self._watchdog_stop = threading.Event()
-
-        self._operation = OperationState()
-        self._operation_lock = threading.Lock()
-
-        self._adapter = adapter
-        self._adapter_lock = threading.Lock()
-        self._adapter_factory = adapter_factory or _default_adapter_factory
         self._diagnostics_logged = False
-
         self._state_lock = threading.RLock()
 
-        # 2. Early logger buffer setup (must be first before any logs are generated!)
+        # 2. Early sub-managers setup (so property proxies don't fail)
         from .log_buffer import DiagnosticLogBuffer
 
-        self._log_buffer = DiagnosticLogBuffer(self)
+        self._log_buffer = DiagnosticLogBuffer(self, log_limit=log_limit)
+
+        from .gateway import LudusaviGateway
+
+        self._gateway = LudusaviGateway(self, adapter=adapter, adapter_factory=adapter_factory)
+
+        self._coordinator = OperationCoordinator(self)
 
         # 3. Persistence Layer
         self._persistence = PersistenceManager(
@@ -164,18 +114,10 @@ class SDHLudusaviService:
             cache_path=cache_path,
         )
 
-        # 4. Ludusavi Gateway
-        from .gateway import LudusaviGateway
-
-        self._gateway = LudusaviGateway(self)
-
-        # 5. Operation Coordinator
-        self._coordinator = OperationCoordinator(self)
-
-        # 6. Load State payloads
+        # 4. Load State payloads
         self._load_state()
 
-        # 7. Process Watchdog
+        # 5. Process Watchdog
         from .watchdog import ProcessWatchdog
 
         self._watchdog = ProcessWatchdog(
@@ -184,7 +126,7 @@ class SDHLudusaviService:
             is_operation_running=lambda: self._coordinator.is_running,
         )
 
-        # 8. History Manager
+        # 6. History Manager
         from .history import HistoryManager
 
         self._history = HistoryManager(
@@ -193,10 +135,15 @@ class SDHLudusaviService:
             save_callback=self._save_state,
         )
 
-        # 9. Game Registry Matcher
+        # 7. Game Registry Matcher
         from .matcher import GameRegistryMatcher
 
         self._matcher = GameRegistryMatcher()
+
+        # 8. Game Lifecycle Manager
+        from .lifecycle import GameLifecycleManager
+
+        self._lifecycle = GameLifecycleManager(self)
 
         # Configure unified logging
         self._log_buffer.setup_logging()
@@ -220,6 +167,86 @@ class SDHLudusaviService:
             if key in _allowed_env_keys
         }
         self.log("debug", f"Environment summary: {_filtered_env}", "init")
+
+    @property
+    def _operation(self) -> OperationState:
+        return self._coordinator._operation
+
+    @_operation.setter
+    def _operation(self, val: OperationState) -> None:
+        self._coordinator._operation = val
+
+    @property
+    def _operation_lock(self) -> threading.Lock:
+        return self._coordinator._operation_lock
+
+    @property
+    def _adapter(self) -> LudusaviAdapter | None:
+        return self._gateway._adapter
+
+    @_adapter.setter
+    def _adapter(self, val: LudusaviAdapter | None) -> None:
+        self._gateway._adapter = val
+
+    @property
+    def _adapter_lock(self) -> threading.Lock:
+        return self._gateway._adapter_lock
+
+    @property
+    def _adapter_factory(self) -> Callable[[], LudusaviAdapter]:
+        return self._gateway._adapter_factory
+
+    @_adapter_factory.setter
+    def _adapter_factory(self, val: Callable[[], LudusaviAdapter]) -> None:
+        self._gateway._adapter_factory = val
+
+    @property
+    def _game_history(self) -> dict[str, dict[str, Any]]:
+        return self._history._game_history
+
+    @_game_history.setter
+    def _game_history(self, val: dict[str, dict[str, Any]]) -> None:
+        self._history._game_history = val
+
+    @property
+    def _logs(self) -> deque[LogEntry]:
+        return self._log_buffer._logs
+
+    @_logs.setter
+    def _logs(self, val: deque[LogEntry]) -> None:
+        self._log_buffer._logs = val
+
+    @property
+    def _paused_pids(self) -> dict[int, float]:
+        return self._watchdog._paused_pids
+
+    @_paused_pids.setter
+    def _paused_pids(self, val: dict[int, float]) -> None:
+        self._watchdog._paused_pids = val
+
+    @property
+    def _paused_pids_lock(self) -> threading.Lock:
+        return self._watchdog._paused_pids_lock
+
+    @property
+    def _watchdog_active(self) -> bool:
+        return self._watchdog._watchdog_active
+
+    @_watchdog_active.setter
+    def _watchdog_active(self, val: bool) -> None:
+        self._watchdog._watchdog_active = val
+
+    @property
+    def _watchdog_thread(self) -> threading.Thread | None:
+        return self._watchdog._watchdog_thread
+
+    @_watchdog_thread.setter
+    def _watchdog_thread(self, val: threading.Thread | None) -> None:
+        self._watchdog._watchdog_thread = val
+
+    @property
+    def _watchdog_stop(self) -> threading.Event:
+        return self._watchdog._watchdog_stop
 
     def _ludusavi(self) -> LudusaviAdapter:
         return self._gateway.get_adapter()
@@ -390,293 +417,41 @@ class SDHLudusaviService:
 
     def check_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Check whether a game launch needs a restore without changing local saves."""
-        game_name = self._sanitize_name(game_name)
-        self.log(
-            "info",
-            f"check_game_start triggered for game='{game_name}', app_id='{app_id}'",
-            "start",
-            game_name,
-        )
-        if not self._auto_sync_enabled:
-            return self._skip("start", game_name, "auto_sync_disabled")
-        if self._coordinator.is_running:
-            return self._skip("start", game_name, "operation_running")
-
-        game = self._match_game(game_name, app_id=app_id)
-        if game is None:
-            return self._skip("start", game_name, "unmatched_game")
-        if not game.has_backup:
-            return self._skip("start", game.name, "no_backup")
-        if game.error:
-            return self._skip("start", game.name, "game_error")
-
-        try:
-            recency = self._run_locked(
-                "start_check",
-                game.name,
-                lambda: self._gateway.get_adapter().compare_recency(game.name),
-            )
-        except OperationLockedError:
-            return self._skip("start", game.name, "operation_running")
-
-        if recency == "backup_newer":
-            return {"status": "needed", "operation": "restore", "game": game.name}
-        if recency == "local_current":
-            return self._skip("start", game.name, "local_current")
-
-        metadata = self._conflict_metadata(game.name)
-        self._history.record_history(
-            game.name, "start", "auto_start", "skipped", reason="ambiguous_recency"
-        )
-        return {
-            "status": "conflict",
-            "operation": "restore",
-            "game": game.name,
-            "reason": "ambiguous_recency",
-            "localLabel": "Keep Local Save",
-            "backupLabel": "Restore Backup Save",
-            **metadata,
-        }
+        return self._lifecycle.check_game_start(game_name, app_id)
 
     def resolve_game_start_conflict(
         self, game_name: str, app_id: str | None, resolution: str
     ) -> dict[str, object]:
         """Apply the user's choice for an ambiguous launch recency conflict."""
-        if resolution not in ("keep_local", "restore_backup"):
-            return self._skip("start", self._sanitize_name(game_name), "invalid_resolution")
-        if not self._auto_sync_enabled:
-            return self._skip("start", game_name, "auto_sync_disabled")
-
-        game_name = self._sanitize_name(game_name)
-        game = self._match_game(game_name, app_id=app_id)
-        if game is None:
-            return self._skip("start", game_name, "unmatched_game")
-        if game.error:
-            return self._skip("start", game.name, "game_error")
-
-        if resolution == "keep_local":
-            try:
-                result = self._run_locked(
-                    "backup", game.name, lambda: self._gateway.get_adapter().backup(game.name)
-                )
-                self._history.record_history(game.name, "backup", "auto_start", "backed_up")
-            # Intentionally broad: records operation failure state/history and immediately re-raises.
-            except Exception as exc:
-                self._history.record_history(
-                    game.name, "backup", "auto_start", "failed", message=str(exc)
-                )
-                raise
-            self.log("info", f"Kept local save for {game.name}", "backup", game.name)
-            return {"status": "backed_up", "game": game.name, "result": result}
-
-        if not game.has_backup:
-            return self._skip("start", game.name, "no_backup")
-        try:
-            result = self._run_locked(
-                "restore", game.name, lambda: self._gateway.get_adapter().restore(game.name)
-            )
-            self._history.record_history(game.name, "restore", "auto_start", "restored")
-        # Intentionally broad: records operation failure state/history and immediately re-raises.
-        except Exception as exc:
-            self._history.record_history(
-                game.name, "restore", "auto_start", "failed", message=str(exc)
-            )
-            raise
-        self.log("info", f"Restored backup save for {game.name}", "restore", game.name)
-        return {"status": "restored", "game": game.name, "result": result}
+        return self._lifecycle.resolve_game_start_conflict(game_name, app_id, resolution)
 
     def restore_game_on_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Restore a game's backup during launch after a check reports it is needed."""
-        game_name = self._sanitize_name(game_name)
-        self.log(
-            "info",
-            f"restore_game_on_start triggered for game='{game_name}', app_id='{app_id}'",
-            "restore",
-            game_name,
-        )
-        if not self._auto_sync_enabled:
-            return self._skip("start", game_name, "auto_sync_disabled")
-
-        game = self._match_game(game_name, app_id=app_id)
-        if game is None:
-            return self._skip("start", game_name, "unmatched_game")
-        if not game.has_backup:
-            return self._skip("start", game.name, "no_backup")
-        if game.error:
-            return self._skip("start", game.name, "game_error")
-
-        try:
-            result = self._run_locked(
-                "restore",
-                game.name,
-                lambda: self._gateway.get_adapter().restore(game.name),
-            )
-        # Intentionally broad: records operation failure state/history and immediately re-raises.
-        except Exception as exc:
-            self._history.record_history(
-                game.name, "restore", "auto_start", "failed", message=str(exc)
-            )
-            raise
-        self.log("info", f"Restored {game.name} before launch", "restore", game.name)
-        self._history.record_history(game.name, "restore", "auto_start", "restored")
-        return {"status": "restored", "game": game.name, "result": result}
+        return self._lifecycle.restore_game_on_start(game_name, app_id)
 
     def handle_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Compatibility wrapper for the original one-call launch autosync flow."""
-        result = self.check_game_start(game_name, app_id)
-        if result.get("status") == "needed" and result.get("operation") == "restore":
-            return self.restore_game_on_start(str(result["game"]), app_id)
-        return result
+        return self._lifecycle.handle_game_start(game_name, app_id)
 
     def check_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Check whether a game exit needs a backup without writing backup data."""
-        game_name = self._sanitize_name(game_name)
-        self.log(
-            "info",
-            f"check_game_exit triggered for game='{game_name}', app_id='{app_id}'",
-            "exit",
-            game_name,
-        )
-        if not self._auto_sync_enabled:
-            return self._skip("exit", game_name, "auto_sync_disabled")
-        if self._coordinator.is_running:
-            return self._skip("exit", game_name, "operation_running")
-
-        game = self._match_game(game_name, app_id=app_id)
-        if game is None:
-            return self._skip("exit", game_name, "unmatched_game")
-        if game.error:
-            return self._skip("exit", game.name, "game_error")
-
-        try:
-            preview = self._run_locked(
-                "exit_check",
-                game.name,
-                lambda: self._gateway.get_adapter().backup(game.name, preview=True),
-            )
-            games_output = cast(dict[str, Any], preview.get("games", {}))
-
-            if game.name not in games_output:
-                return self._skip("exit", game.name, "not_in_preview")
-
-            game_output = cast(dict[str, Any], games_output.get(game.name, {}))
-            decision = game_output.get("decision")
-            if decision in ("Ignored", "Cancelled"):
-                return self._skip("exit", game.name, "not_processed")
-
-            files = game_output.get("files", {})
-            registry = game_output.get("registry", {})
-            if not files and not registry:
-                return self._skip("exit", game.name, "no_files_found")
-
-            change = game_output.get("change")
-            if change == "Same":
-                return self._skip("exit", game.name, "local_current")
-        except OperationLockedError:
-            return self._skip("exit", game.name, "operation_running")
-        # Intentionally broad: metadata/diagnostic preview fallback that must not block exit flow.
-        except Exception as exc:
-            self.log("debug", f"Backup preview failed for {game.name}: {exc}", "exit", game.name)
-            return self._skip("exit", game.name, "preview_failed")
-
-        return {"status": "needed", "operation": "backup", "game": game.name}
+        return self._lifecycle.check_game_exit(game_name, app_id)
 
     def backup_game_on_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Back up a game during exit after a check reports it is needed."""
-        game_name = self._sanitize_name(game_name)
-        self.log(
-            "info",
-            f"backup_game_on_exit triggered for game='{game_name}', app_id='{app_id}'",
-            "backup",
-            game_name,
-        )
-        if not self._auto_sync_enabled:
-            return self._skip("exit", game_name, "auto_sync_disabled")
-
-        game = self._match_game(game_name, app_id=app_id)
-        if game is None:
-            return self._skip("exit", game_name, "unmatched_game")
-        if game.error:
-            return self._skip("exit", game.name, "game_error")
-
-        try:
-            result = self._run_locked(
-                "backup", game.name, lambda: self._gateway.get_adapter().backup(game.name)
-            )
-            self._history.record_history(game.name, "backup", "auto_exit", "backed_up")
-        # Intentionally broad: records operation failure state/history and immediately re-raises.
-        except Exception as exc:
-            self._history.record_history(
-                game.name, "backup", "auto_exit", "failed", message=str(exc)
-            )
-            raise
-
-        # Intentionally broad: best-effort after a successful backup so refresh failure does not convert backup success into failure.
-        try:
-            self._refresh_statuses_unlocked()
-        except Exception as exc:
-            self.log("warning", f"Post-backup status refresh failed: {exc}", "backup", game.name)
-
-        self.log("info", f"Backed up {game.name} after exit", "backup", game.name)
-        return {"status": "backed_up", "game": game.name, "result": result}
+        return self._lifecycle.backup_game_on_exit(game_name, app_id)
 
     def handle_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Compatibility wrapper for the original one-call exit autosync flow."""
-        result = self.check_game_exit(game_name, app_id)
-        if result.get("status") == "needed" and result.get("operation") == "backup":
-            return self.backup_game_on_exit(str(result["game"]), app_id)
-        return result
+        return self._lifecycle.handle_game_exit(game_name, app_id)
 
     def force_backup(self, game_name: str) -> dict[str, object]:
         """Trigger a manual backup for the specified game."""
-        game_name = self._sanitize_name(game_name)
-        game = self._match_game(game_name)
-        if game is None:
-            return self._skip("backup", game_name, "unmatched_game")
-
-        try:
-            result = self._run_locked(
-                "backup", game.name, lambda: self._gateway.get_adapter().backup(game.name)
-            )
-            self._history.record_history(game.name, "backup", "manual_backup", "backed_up")
-        # Intentionally broad: records operation failure state/history and immediately re-raises.
-        except Exception as exc:
-            self._history.record_history(
-                game.name, "backup", "manual_backup", "failed", message=str(exc)
-            )
-            raise
-
-        # Intentionally broad: best-effort after a successful backup so refresh failure does not convert backup success into failure.
-        try:
-            self._refresh_statuses_unlocked()
-        except Exception as exc:
-            self.log("warning", f"Post-backup status refresh failed: {exc}", "backup", game.name)
-
-        self.log("info", f"Backed up {game.name}", "backup", game.name)
-        return {"status": "backed_up", "game": game.name, "result": result}
+        return self._lifecycle.force_backup(game_name)
 
     def force_restore(self, game_name: str) -> dict[str, object]:
         """Trigger a manual restore for the specified game."""
-        game_name = self._sanitize_name(game_name)
-        game = self._match_game(game_name)
-        if game is None:
-            return self._skip("restore", game_name, "unmatched_game")
-        if not game.has_backup:
-            return self._skip("restore", game.name, "no_backup")
-
-        try:
-            result = self._run_locked(
-                "restore", game.name, lambda: self._gateway.get_adapter().restore(game.name)
-            )
-        # Intentionally broad: records operation failure state/history and immediately re-raises.
-        except Exception as exc:
-            self._history.record_history(
-                game.name, "restore", "manual_restore", "failed", message=str(exc)
-            )
-            raise
-        self.log("info", f"Restored {game.name}", "restore", game.name)
-        self._history.record_history(game.name, "restore", "manual_restore", "restored")
-        return {"status": "restored", "game": game.name, "result": result}
+        return self._lifecycle.force_restore(game_name)
 
     def get_versions(self) -> dict[str, str]:
         """Fetch version information for Ludusavi and the plugin."""

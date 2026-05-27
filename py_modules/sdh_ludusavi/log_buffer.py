@@ -92,16 +92,9 @@ class DiagnosticLogBuffer:
     and configuring the custom standard Python logging handler.
     """
 
-    def __init__(self, service: Any) -> None:
+    def __init__(self, service: Any, log_limit: int = 100) -> None:
         self._service = service
-
-    @property
-    def _logs(self) -> deque[LogEntry]:
-        return self._service._logs
-
-    @_logs.setter
-    def _logs(self, val: deque[LogEntry]) -> None:
-        self._service._logs = val
+        self._logs: deque[LogEntry] = deque(maxlen=log_limit)
 
     def log(
         self,
