@@ -242,8 +242,8 @@ def test_load_state_skips_malformed_cached_game_entries(tmp_path):
     )
 
     # Hades should be loaded, the malformed entry should be skipped because of coercion failure
-    assert "Hades" in service._games
-    assert len(service._games) == 1
+    assert "Hades" in service._registry._games
+    assert len(service._registry._games) == 1
 
 
 def test_refresh_games_logs_and_drops_malformed_entries(tmp_path):

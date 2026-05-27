@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from collections import deque
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -62,26 +61,20 @@ class DeckyLogHandler(logging.Handler):
 
 
 def _decky_log_fallback(level: str, message: str) -> None:
-    svc = sys.modules.get("sdh_ludusavi.service")
-    func = getattr(svc, "_decky_log", None)
-    if func:
-        func(level, message)
-        return
-
-    # Fallback to local import if service module isn't active
     try:
         import decky
 
         logger = getattr(decky, "logger", None)
         if logger:
             logger_level_map = {
-                "warning": logger.warning,
-                "error": logger.error,
-                "debug": lambda msg: logger.info(f"[DEBUG] {msg}"),
-                "info": logger.info,
+                "warning": getattr(logger, "warning", logger.info),
+                "error": getattr(logger, "error", getattr(logger, "exception", logger.info)),
+                "debug": getattr(logger, "info", None),
+                "info": getattr(logger, "info", None),
             }
-            logger_level = logger_level_map.get(level, logger.info)
-            logger_level(message)
+            logger_level = logger_level_map.get(level, getattr(logger, "info", None))
+            if logger_level:
+                logger_level(f"[DEBUG] {message}" if level == "debug" else message)
     except ImportError:
         pass
 

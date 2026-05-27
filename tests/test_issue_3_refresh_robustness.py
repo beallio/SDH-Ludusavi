@@ -48,6 +48,6 @@ def test_refresh_robustness_with_non_mapping(tmp_path):
     # This should not crash despite the 'None' in the games list
     service.refresh_games(force=True)
 
-    assert "Hades" in service._games
-    assert "Celeste" in service._games
-    assert len(service._games) == 2
+    assert "Hades" in service._registry._games
+    assert "Celeste" in service._registry._games
+    assert len(service._registry._games) == 2

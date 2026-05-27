@@ -21,14 +21,14 @@ def test_diagnostics_logging_is_thread_safe_and_runs_once(tmp_path):
     def mock_diagnostics_logger(adapter):
         nonlocal called_count
         called_count += 1
-        service._diagnostics_logged = True
+        service._gateway._diagnostics_logged = True
 
     service = SDHLudusaviService(
         adapter=MagicMock(),
         settings_store=JsonSettingsStore(tmp_path / "mock_settings.json"),
         cache_path=tmp_path / "mock_cache.json",
     )
-    service._log_ludusavi_diagnostics = mock_diagnostics_logger
+    service._gateway._log_ludusavi_diagnostics = mock_diagnostics_logger
 
     # Simulate concurrent calls to _ludusavi()
     threads = []

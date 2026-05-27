@@ -28,7 +28,7 @@ def test_fuzzy_matching_length_check(tmp_path):
     service._refreshed_once = True
 
     # Manually populate _games for testing _match_game
-    service._games = {
+    service._registry._games = {
         "A Game": GameStatus(
             name="A Game", configured=True, has_backup=True, needs_first_backup=False, error=None
         ),

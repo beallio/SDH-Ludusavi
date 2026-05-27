@@ -110,9 +110,9 @@ class GameRegistryMatcher:
         if target_installed_app_ids is not None and installed_app_ids != target_installed_app_ids:
             return False
 
-        from .service import _CONFIG_MARKER_READ_FAILED
+        from .constants import CONFIG_MARKER_READ_FAILED
 
-        if target_config_mtime_ns is _CONFIG_MARKER_READ_FAILED:
+        if target_config_mtime_ns is CONFIG_MARKER_READ_FAILED:
             return False
 
         return config_mtime_ns == target_config_mtime_ns

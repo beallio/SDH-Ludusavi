@@ -23,6 +23,7 @@ class LudusaviGateway:
         service: Any,
         adapter: LudusaviAdapter | None = None,
         adapter_factory: Callable[[], LudusaviAdapter] | None = None,
+        log_callback: Callable[..., None] | None = None,
     ) -> None:
         self._service = service
         self._adapter = adapter or getattr(service, "_adapter", None)
@@ -32,6 +33,8 @@ class LudusaviGateway:
             or getattr(service, "_adapter_factory", None)
             or _default_adapter_factory
         )
+        self._log = log_callback or getattr(service, "log", None) or (lambda *a, **kw: None)
+        self._diagnostics_logged = False
         self._versions: dict[str, str] | None = None
         self._ludusavi_command: dict[str, object] | None = None
 
@@ -41,14 +44,39 @@ class LudusaviGateway:
             with self._adapter_lock:
                 if self._adapter is None:
                     self._adapter = self._adapter_factory()
-                    self._service._log_ludusavi_diagnostics(self._adapter)
-        if not self._service._diagnostics_logged:
+                    self._log_ludusavi_diagnostics(self._adapter)
+        if not self._diagnostics_logged:
             with self._adapter_lock:
-                if not self._service._diagnostics_logged:
-                    self._service._log_ludusavi_diagnostics(self._adapter)
+                if not self._diagnostics_logged:
+                    self._log_ludusavi_diagnostics(self._adapter)
         if self._adapter is None:
             raise RuntimeError("Ludusavi adapter factory returned None")
         return self._adapter
+
+    def _log_ludusavi_diagnostics(self, adapter: LudusaviAdapter) -> None:
+        if self._diagnostics_logged:
+            return
+        self._diagnostics_logged = True
+
+        def run() -> None:
+            try:
+                diagnostics = adapter.get_diagnostics()
+            # Intentionally broad: catch any diagnostics retrieval error safely
+            except Exception as exc:
+                self._log("debug", f"Ludusavi diagnostics unavailable: {exc}", "init")
+                return
+
+            version = diagnostics.get("version", "unknown")
+            ludusavi_type = diagnostics.get("type", "unknown")
+            path = diagnostics.get("path", "unknown")
+            config_path = diagnostics.get("configPath", "unknown")
+            backup_path = diagnostics.get("backupPath", "unknown")
+            self._log("info", f"Ludusavi version: {version}", "init")
+            self._log("info", f"Ludusavi type/path: {ludusavi_type} {path}", "init")
+            self._log("info", f"Ludusavi config path: {config_path}", "init")
+            self._log("info", f"Ludusavi backup path: {backup_path}", "init")
+
+        threading.Thread(target=run, daemon=True).start()
 
     def get_versions(self) -> dict[str, str]:
         """Fetch and cache version information for Ludusavi and the plugin."""

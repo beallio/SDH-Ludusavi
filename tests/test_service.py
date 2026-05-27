@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from sdh_ludusavi.service import JsonSettingsStore, OperationLockedError, SDHLudusaviService
+from sdh_ludusavi.types import GameStatus
 
 
 class FakeAdapter:
@@ -280,9 +281,9 @@ def test_game_cache_current_returns_false_on_config_stat_failure(tmp_path: Path)
     service = service_with_state(tmp_path, adapter)
 
     # Populate cache first
-    service._games = {"Hades": {"name": "Hades", "configured": True}}
-    service._installed_app_ids = "111,222"
-    service._ludusavi_config_mtime_ns = 100
+    service._registry._games = {"Hades": GameStatus("Hades", True, True, False)}
+    service._registry._installed_app_ids = "111,222"
+    service._registry._ludusavi_config_mtime_ns = 100
 
     # Since the adapter raises an exception on config mtime check, it should return False
     assert service.is_game_cache_current("111,222") is False
@@ -1324,7 +1325,7 @@ def test_ludusavi_diagnostics_are_logged_after_adapter_initialization(tmp_path: 
     # Wait for the background diagnostics logging to finish
     for _ in range(50):
         messages = [entry["message"] for entry in service.get_recent_logs()]
-        if any("Ludusavi version: 0.31.0" in message for message in messages):
+        if any("Ludusavi backup path:" in message for message in messages):
             break
         time.sleep(0.01)
 
@@ -1415,7 +1416,7 @@ def test_refresh_games_cache_invalidation_via_app_ids(tmp_path: Path) -> None:
     service = service_with_state(tmp_path, adapter)
 
     # Ensure cache is loaded
-    assert "Ghost Game" in service._games
+    assert "Ghost Game" in service._registry._games
 
     # Call with the same installed_app_ids should use the cache
     adapter.refresh_error = RuntimeError("should not be called")
@@ -1426,7 +1427,7 @@ def test_refresh_games_cache_invalidation_via_app_ids(tmp_path: Path) -> None:
     adapter.refresh_error = None  # allow it to succeed
     result = service.refresh_games(force=False, installed_app_ids="1,2,3,4")
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
-    assert service._installed_app_ids == "1,2,3,4"
+    assert service._registry._installed_app_ids == "1,2,3,4"
 
     # Call with NO installed_app_ids should also trigger scan if cache was empty, but since it's populated it will just use cache
     adapter.refresh_error = RuntimeError("should not be called")
@@ -1443,7 +1444,7 @@ def test_refresh_games_normalizes_installed_app_ids_before_persisting(
     result = service.refresh_games(force=False, installed_app_ids="3,1,3,2")
 
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
-    assert service._installed_app_ids == "1,2,3"
+    assert service._registry._installed_app_ids == "1,2,3"
     saved_state = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
     assert saved_state["installed_app_ids"] == "1,2,3"
 
@@ -1475,7 +1476,7 @@ def test_refresh_games_preserves_empty_installed_app_ids_marker(
     result = service.refresh_games(force=False, installed_app_ids="")
 
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
-    assert service._installed_app_ids == ""
+    assert service._registry._installed_app_ids == ""
     saved_state = json.loads(cache_path.read_text(encoding="utf-8"))
     assert saved_state["installed_app_ids"] == ""
 
@@ -1487,7 +1488,7 @@ def test_refresh_games_rejects_malformed_installed_app_ids(tmp_path: Path) -> No
     result = service.refresh_games(force=False, installed_app_ids="1,not-a-number,2")
 
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
-    assert service._installed_app_ids is None
+    assert service._registry._installed_app_ids is None
     saved_state = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
     assert saved_state["installed_app_ids"] is None
 
@@ -1500,7 +1501,7 @@ def test_refresh_games_rejects_oversized_installed_app_ids(tmp_path: Path) -> No
     result = service.refresh_games(force=False, installed_app_ids=oversized)
 
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
-    assert service._installed_app_ids is None
+    assert service._registry._installed_app_ids is None
     saved_state = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
     assert saved_state["installed_app_ids"] is None
 
