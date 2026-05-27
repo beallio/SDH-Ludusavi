@@ -20,7 +20,7 @@ def test_no_imports_from_service() -> None:
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
                 imports_service_module = node.module in ("service", "sdh_ludusavi.service")
-                imports_service_from_package = node.module in (None, "sdh_ludusavi", "") and any(
+                imports_service_from_package = node.module in (None, "sdh_ludusavi") and any(
                     alias.name == "service" for alias in node.names
                 )
                 if imports_service_module or imports_service_from_package:
