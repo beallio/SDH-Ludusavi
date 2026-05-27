@@ -4,7 +4,6 @@ import logging
 import os
 import threading
 from collections.abc import Callable
-from typing import Any
 
 from ._version import resolve_version
 from .types import LudusaviAdapter
@@ -20,20 +19,15 @@ class LudusaviGateway:
 
     def __init__(
         self,
-        service: Any,
+        *,
         adapter: LudusaviAdapter | None = None,
         adapter_factory: Callable[[], LudusaviAdapter] | None = None,
         log_callback: Callable[..., None] | None = None,
     ) -> None:
-        self._service = service
-        self._adapter = adapter or getattr(service, "_adapter", None)
-        self._adapter_lock = getattr(service, "_adapter_lock", None) or threading.Lock()
-        self._adapter_factory = (
-            adapter_factory
-            or getattr(service, "_adapter_factory", None)
-            or _default_adapter_factory
-        )
-        self._log = log_callback or getattr(service, "log", None) or (lambda *a, **kw: None)
+        self._adapter = adapter
+        self._adapter_lock = threading.Lock()
+        self._adapter_factory = adapter_factory or _default_adapter_factory
+        self._log = log_callback or (lambda *a, **kw: None)
         self._diagnostics_logged = False
         self._versions: dict[str, str] | None = None
         self._ludusavi_command: dict[str, object] | None = None
@@ -43,7 +37,10 @@ class LudusaviGateway:
         if self._adapter is None:
             with self._adapter_lock:
                 if self._adapter is None:
-                    self._adapter = self._adapter_factory()
+                    adapter = self._adapter_factory()
+                    if adapter is None:
+                        raise RuntimeError("Ludusavi adapter factory returned None")
+                    self._adapter = adapter
                     self._log_ludusavi_diagnostics(self._adapter)
         if not self._diagnostics_logged:
             with self._adapter_lock:
@@ -145,6 +142,7 @@ class LudusaviGateway:
         """Return the current modification time of Ludusavi config or marker."""
         try:
             return self.get_adapter().get_config_mtime_ns()
+        # Intentionally broad: catch any config marker reading error safely
         except Exception as exc:
             self._log(
                 "debug",

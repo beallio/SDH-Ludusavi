@@ -66,7 +66,19 @@ class ProcessWatchdog:
             self._log("warning", f"Invalid PID passed to resume: {exc}", "launch_gate", None)
             return {"status": "failed", "message": str(exc)}
 
-        _send_signal_tree(valid_pid, signal.SIGCONT)
+        if not _send_signal_tree(valid_pid, signal.SIGCONT):
+            self._log(
+                "warning",
+                f"Failed to send SIGCONT to process tree rooted at PID {valid_pid}",
+                "launch_gate",
+                None,
+            )
+            return {
+                "status": "failed",
+                "pid": valid_pid,
+                "message": "Unable to resume game process",
+            }
+
         with self._paused_pids_lock:
             self._paused_pids.pop(valid_pid, None)
         self._log(
@@ -81,6 +93,7 @@ class ProcessWatchdog:
         for pid in paused_pids:
             try:
                 self.resume(pid)
+            # Intentionally broad: catch resume exceptions during cleanup/unload
             except Exception as exc:
                 self._log(
                     "warning", f"Unable to resume paused PID {pid}: {exc}", "launch_gate", None
@@ -143,6 +156,7 @@ class ProcessWatchdog:
             )
             try:
                 self.resume(pid)
+            # Intentionally broad: catch automatic resume errors in background watchdog thread
             except Exception as exc:
                 self._log(
                     "error",

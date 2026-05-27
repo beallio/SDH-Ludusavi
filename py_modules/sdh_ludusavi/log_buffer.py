@@ -52,6 +52,7 @@ class DeckyLogHandler(logging.Handler):
 
             # Also push to decky.logger if available
             _decky_log_fallback(level, msg)
+        # Intentionally broad: prevent logging handler failures from crashing the program
         except Exception:
             self.handleError(record)
 
@@ -123,14 +124,8 @@ class DiagnosticLogBuffer:
         for name in ("sdh_ludusavi", "pyludusavi"):
             logger = logging.getLogger(name)
             logger.setLevel(logging.DEBUG)
-            has_our_handler = False
             for h in logger.handlers[:]:
-                if isinstance(h, DeckyLogHandler):
-                    has_our_handler = True
-                    continue
                 logger.removeHandler(h)
 
-            if not has_our_handler:
-                logger.addHandler(handler)
-
+            logger.addHandler(handler)
             logger.propagate = not bool(os.environ.get("DECKY_VERSION"))

@@ -97,3 +97,12 @@ def test_no_direct_service_log_in_gateway() -> None:
     gateway_path = Path(__file__).parent.parent / "py_modules" / "sdh_ludusavi" / "gateway.py"
     content = gateway_path.read_text(encoding="utf-8")
     assert "self._service.log" not in content
+
+
+def test_no_service_references_in_gateway() -> None:
+    """gateway.py must not contain getattr(service, or service: Any."""
+    gateway_path = Path(__file__).parent.parent / "py_modules" / "sdh_ludusavi" / "gateway.py"
+    content = gateway_path.read_text(encoding="utf-8")
+    assert "getattr(service," not in content
+    assert "service: Any" not in content
+    assert "self._service" not in content

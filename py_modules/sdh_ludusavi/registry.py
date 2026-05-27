@@ -154,6 +154,7 @@ class GameRegistry:
                 "history": self._get_history(),
                 "dependency_error": None,
             }
+        # Intentionally broad: fallback to cached statuses if refresh fails
         except Exception as exc:
             return {
                 "games": self._cached_games(),
@@ -182,6 +183,7 @@ class GameRegistry:
         """Best-effort status refresh after a successful backup or restore."""
         try:
             self._refresh_statuses_unlocked()
+        # Intentionally broad: catch any post-operation status refresh failure safely
         except Exception as exc:
             self.log("warning", f"Post-backup status refresh failed: {exc}", "refresh")
 

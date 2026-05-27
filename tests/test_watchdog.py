@@ -59,3 +59,26 @@ def test_process_watchdog_auto_resume_stuck_pids() -> None:
         mock_kill.assert_called_with(9999, 18)
         assert 9999 not in wd._paused_pids
         wd.stop()
+
+
+def test_process_watchdog_failed_resume() -> None:
+    log_mock = MagicMock()
+    is_op_running = MagicMock(return_value=False)
+    with (
+        patch("sdh_ludusavi.watchdog._send_signal_tree", return_value=False),
+    ):
+        svc = DummyService()
+        wd = ProcessWatchdog(svc, log_callback=log_mock, is_operation_running=is_op_running)
+
+        with wd._paused_pids_lock:
+            wd._paused_pids[7777] = time.time()
+
+        res = wd.resume(7777)
+        assert res["status"] == "failed"
+        assert res["pid"] == 7777
+        assert "Unable to resume" in res["message"]
+
+        with wd._paused_pids_lock:
+            assert 7777 in wd._paused_pids
+
+        wd.stop()

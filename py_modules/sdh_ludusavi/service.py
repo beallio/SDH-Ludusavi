@@ -96,7 +96,7 @@ class SDHLudusaviService:
         from .gateway import LudusaviGateway
 
         self._gateway = LudusaviGateway(
-            self, adapter=adapter, adapter_factory=adapter_factory, log_callback=self.log
+            adapter=adapter, adapter_factory=adapter_factory, log_callback=self.log
         )
 
         self._coordinator = OperationCoordinator(self)

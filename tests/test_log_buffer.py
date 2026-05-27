@@ -41,3 +41,34 @@ def test_decky_log_handler_emit() -> None:
     recent = buf.get_recent()
     assert len(recent) == 1
     assert "Hello SRP Log Handler" in recent[0]["message"]
+
+
+def test_setup_logging_removes_old_handlers(tmp_path) -> None:
+    from unittest.mock import MagicMock
+    from sdh_ludusavi.service import SDHLudusaviService
+
+    mock_adapter = MagicMock()
+    mock_adapter.get_versions.return_value = {"ludusavi": "0.31.0"}
+    mock_adapter.get_diagnostics.return_value = {"version": "0.31.0"}
+
+    # Create first service
+    svc1 = SDHLudusaviService(adapter=mock_adapter, state_path=tmp_path / "state1.json")
+    # Create second service
+    svc2 = SDHLudusaviService(adapter=mock_adapter, state_path=tmp_path / "state2.json")
+
+    # Now get active handlers for "sdh_ludusavi" logger
+    logger = logging.getLogger("sdh_ludusavi")
+    handlers = [h for h in logger.handlers if isinstance(h, DeckyLogHandler)]
+    # There should only be 1 handler, belonging to the newest service (svc2)
+    assert len(handlers) == 1
+
+    # Verify records logged to "sdh_ludusavi" go to svc2's log buffer
+    logger.info("Test routing")
+
+    recent1 = svc1.get_recent_logs()
+    recent2 = svc2.get_recent_logs()
+
+    # Check that it did NOT go to svc1
+    assert not any("Test routing" in entry["message"] for entry in recent1)
+    # Check that it DID go to svc2
+    assert any("Test routing" in entry["message"] for entry in recent2)

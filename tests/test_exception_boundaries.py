@@ -16,10 +16,8 @@ def test_no_bare_except_and_broad_except_comment_check():
     2. Every `except Exception` block has a comment containing "Intentionally broad"
        within the 1-3 lines preceding the 'except' keyword.
     """
-    files_to_check = [
-        Path("py_modules/sdh_ludusavi/service.py"),
-        Path("py_modules/sdh_ludusavi/ludusavi.py"),
-    ]
+    dir_path = Path("py_modules/sdh_ludusavi")
+    files_to_check = sorted([p for p in dir_path.glob("*.py") if p.name != "_version.py"])
 
     for filepath in files_to_check:
         assert filepath.exists(), f"{filepath} does not exist"

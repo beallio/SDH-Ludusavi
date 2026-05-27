@@ -112,6 +112,7 @@ class GameLifecycleManager:
                 self.dependencies.history.record_history(
                     game.name, "backup", "auto_start", "backed_up"
                 )
+            # Intentionally broad: record history and re-raise on backup failure
             except Exception as exc:
                 self.dependencies.history.record_history(
                     game.name, "backup", "auto_start", "failed", message=str(exc)
@@ -129,6 +130,7 @@ class GameLifecycleManager:
                 lambda: self.dependencies.gateway.get_adapter().restore(game.name),
             )
             self.dependencies.history.record_history(game.name, "restore", "auto_start", "restored")
+        # Intentionally broad: record history and re-raise on restore failure
         except Exception as exc:
             self.dependencies.history.record_history(
                 game.name, "restore", "auto_start", "failed", message=str(exc)
@@ -163,6 +165,7 @@ class GameLifecycleManager:
                 game.name,
                 lambda: self.dependencies.gateway.get_adapter().restore(game.name),
             )
+        # Intentionally broad: record history and re-raise on launch restore failure
         except Exception as exc:
             self.dependencies.history.record_history(
                 game.name, "restore", "auto_start", "failed", message=str(exc)
@@ -225,6 +228,7 @@ class GameLifecycleManager:
                 return self.dependencies.skip("exit", game.name, "local_current")
         except OperationLockedError:
             return self.dependencies.skip("exit", game.name, "operation_running")
+        # Intentionally broad: handle backup preview exceptions gracefully
         except Exception as exc:
             self.dependencies.log(
                 "debug", f"Backup preview failed for {game.name}: {exc}", "exit", game.name
@@ -258,6 +262,7 @@ class GameLifecycleManager:
                 lambda: self.dependencies.gateway.get_adapter().backup(game.name),
             )
             self.dependencies.history.record_history(game.name, "backup", "auto_exit", "backed_up")
+        # Intentionally broad: record history and re-raise on exit backup failure
         except Exception as exc:
             self.dependencies.history.record_history(
                 game.name, "backup", "auto_exit", "failed", message=str(exc)
@@ -291,6 +296,7 @@ class GameLifecycleManager:
             self.dependencies.history.record_history(
                 game.name, "backup", "manual_backup", "backed_up"
             )
+        # Intentionally broad: record history and re-raise on manual backup failure
         except Exception as exc:
             self.dependencies.history.record_history(
                 game.name, "backup", "manual_backup", "failed", message=str(exc)
@@ -316,6 +322,7 @@ class GameLifecycleManager:
                 game.name,
                 lambda: self.dependencies.gateway.get_adapter().restore(game.name),
             )
+        # Intentionally broad: record history and re-raise on manual restore failure
         except Exception as exc:
             self.dependencies.history.record_history(
                 game.name, "restore", "manual_restore", "failed", message=str(exc)

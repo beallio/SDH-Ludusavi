@@ -64,6 +64,7 @@ class OperationCoordinator:
         self._operation.last_error = None
         try:
             result = callback()
+        # Intentionally broad: catch all exceptions to update operation status
         except Exception as exc:
             self._operation.last_error = str(exc)
             self._operation.last_result = "failed"

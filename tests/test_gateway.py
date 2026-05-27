@@ -32,8 +32,7 @@ class DummyService:
 
 
 def test_ludusavi_gateway_methods() -> None:
-    svc = DummyService(MockAdapter())
-    gateway = LudusaviGateway(svc)
+    gateway = LudusaviGateway(adapter=MockAdapter())
 
     with patch("sdh_ludusavi.gateway._decky_version", return_value="1.2.3"):
         v1 = gateway.get_versions()
@@ -46,8 +45,7 @@ def test_ludusavi_gateway_methods() -> None:
 
 
 def test_ludusavi_gateway_discovery() -> None:
-    svc = DummyService(MockAdapter())
-    gateway = LudusaviGateway(svc)
+    gateway = LudusaviGateway(adapter=MockAdapter())
 
     with patch("pyludusavi.discovery.find_ludusavi", return_value=["/usr/bin/ludusavi", "-f"]):
         cmd = gateway.get_ludusavi_command()
@@ -68,10 +66,28 @@ def test_gateway_current_config_mtime_ns_read_failure() -> None:
     def log_callback(level, message, operation=None, game_name=None):
         log_calls.append((level, message, operation, game_name))
 
-    gateway = LudusaviGateway(service=None, adapter=mock_adapter, log_callback=log_callback)
+    gateway = LudusaviGateway(adapter=mock_adapter, log_callback=log_callback)
 
     mtime = gateway.current_config_mtime_ns()
     assert mtime is CONFIG_MARKER_READ_FAILED
     assert len(log_calls) >= 1
     assert log_calls[-1][0] == "debug"
     assert "Unable to read Ludusavi config marker" in log_calls[-1][1]
+
+
+def test_ludusavi_gateway_factory_returns_none() -> None:
+    import pytest
+    from unittest.mock import MagicMock
+
+    log_mock = MagicMock()
+    gateway = LudusaviGateway(
+        adapter_factory=lambda: None,
+        log_callback=log_mock,
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        gateway.get_adapter()
+
+    assert "Ludusavi adapter factory returned None" in str(exc_info.value)
+    assert not gateway._diagnostics_logged
+    log_mock.assert_not_called()

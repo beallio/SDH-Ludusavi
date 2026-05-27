@@ -22,7 +22,7 @@ This high level of coupling makes the service difficult to test (requiring compl
 ---
 
 ## Architecture Overview
-To achieve SRP, we will decompose `SDHLudusaviService` into separate, single-responsibility components and delegate responsibilities through composition. 
+To achieve SRP, we will decompose `SDHLudusaviService` into separate, single-responsibility components and delegate responsibilities through composition.
 
 ```mermaid
 classDiagram
