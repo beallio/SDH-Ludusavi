@@ -17,7 +17,7 @@ def test_no_bare_except_and_broad_except_comment_check():
        within the 1-3 lines preceding the 'except' keyword.
     """
     dir_path = Path("py_modules/sdh_ludusavi")
-    files_to_check = sorted([p for p in dir_path.glob("*.py") if p.name != "_version.py"])
+    files_to_check = sorted(list(dir_path.glob("*.py")))
 
     for filepath in files_to_check:
         assert filepath.exists(), f"{filepath} does not exist"

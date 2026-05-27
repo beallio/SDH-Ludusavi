@@ -7,7 +7,7 @@ Address six specific review findings concerning manager wiring, watchdog correct
 1. **Ruff/Type checks and Test Validation**:
    - Handle repeated logger setups in `log_buffer.py` by removing prior stale `DeckyLogHandler` instances.
    - Return `failed` status in `ProcessWatchdog.resume()` and keep tracking the PID if `SIGCONT` signaling fails.
-   - Extend `test_exception_boundaries` to scan all first-party python files in `py_modules/sdh_ludusavi/`.
+   - Extend `test_exception_boundaries` to scan all first-party python files in `py_modules/sdh_ludusavi/` (including `_version.py`).
    - Validate that `LudusaviGateway.get_adapter()` checks for `None` from factory before attempting diagnostics.
    - Refactor `LudusaviGateway` constructor to accept explicit keyword dependencies rather than introspecting a service facade instance.
    - Clean up plan markdown trailing whitespace.

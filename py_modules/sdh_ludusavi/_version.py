@@ -44,6 +44,7 @@ def _project_root() -> Path:
             if (current / "plugin.json").is_file():
                 return current
             current = current.parent
+    # Intentionally broad: ignore any errors finding project root and fallback
     except Exception:
         pass
 
