@@ -20,9 +20,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/beallio/SDH-ludusavi"
-Repository = "https://github.com/beallio/SDH-ludusavi"
-Issues = "https://github.com/beallio/SDH-ludusavi/issues"
+Homepage = "https://github.com/beallio/SDH-Ludusavi"
+Repository = "https://github.com/beallio/SDH-Ludusavi"
+Issues = "https://github.com/beallio/SDH-Ludusavi/issues"
 
 [tool.hatch.version]
 source = "vcs"

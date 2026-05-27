@@ -15,7 +15,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/beallio/SDH-ludusavi.git"
+    "url": "git+https://github.com/beallio/SDH-Ludusavi.git"
   },
   "keywords": [
     "decky",
@@ -28,9 +28,9 @@
   "author": "David Beall <6121439+beallio@users.noreply.github.com>",
   "license": "GPL-3.0-only",
   "bugs": {
-    "url": "https://github.com/beallio/SDH-ludusavi/issues"
+    "url": "https://github.com/beallio/SDH-Ludusavi/issues"
   },
-  "homepage": "https://github.com/beallio/SDH-ludusavi#readme",
+  "homepage": "https://github.com/beallio/SDH-Ludusavi#readme",
   "dependencies": {
     "@decky/api": "1.1.3",
     "react-icons": "5.3.0",
