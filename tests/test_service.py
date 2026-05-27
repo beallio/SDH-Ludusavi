@@ -336,8 +336,10 @@ def test_pause_and_resume_game_process_signal_process_tree(
     service = service_with_state(tmp_path)
     signals: list[tuple[int, signal.Signals]] = []
 
-    monkeypatch.setattr("sdh_ludusavi.service._process_tree", lambda pid: [100, 101, 201, 102])
-    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr("sdh_ludusavi.watchdog._process_tree", lambda pid: [100, 101, 201, 102])
+    monkeypatch.setattr(
+        "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
+    )
 
     assert service.pause_game_process(100) == {"status": "paused", "pid": 100}
     assert service.resume_game_process(100) == {"status": "resumed", "pid": 100}
@@ -466,11 +468,13 @@ def test_signal_process_tree_snapshots_process_table_once(
         listdir_calls.append(path)
         return ["1", "100", "101", "102", "201", "self", "sys"]
 
-    import sdh_ludusavi.service as svc_mod
-
-    monkeypatch.setattr(svc_mod, "_read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str))
-    monkeypatch.setattr("sdh_ludusavi.service.os.listdir", fake_listdir)
-    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr(
+        "sdh_ludusavi.watchdog._read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str)
+    )
+    monkeypatch.setattr("sdh_ludusavi.watchdog.os.listdir", fake_listdir)
+    monkeypatch.setattr(
+        "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
+    )
 
     assert service.pause_game_process(100) == {"status": "paused", "pid": 100}
 
@@ -493,8 +497,10 @@ def test_signal_process_tree_falls_back_to_root_when_snapshot_fails(
     def fail_listdir(path: str) -> list[str]:
         raise OSError("/proc unavailable")
 
-    monkeypatch.setattr("sdh_ludusavi.service.os.listdir", fail_listdir)
-    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr("sdh_ludusavi.watchdog.os.listdir", fail_listdir)
+    monkeypatch.setattr(
+        "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
+    )
 
     assert service.pause_game_process(100) == {"status": "paused", "pid": 100}
 
@@ -527,10 +533,12 @@ def test_process_tree_reads_proc_filesystem(
     }
 
     monkeypatch.setattr(
-        "sdh_ludusavi.service.os.listdir",
+        "sdh_ludusavi.watchdog.os.listdir",
         lambda path: ["1", "100", "101", "102", "201", "self", "sys"],
     )
-    monkeypatch.setattr(svc_mod, "_read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str))
+    monkeypatch.setattr(
+        "sdh_ludusavi.watchdog._read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str)
+    )
 
     result = svc_mod._process_tree(100)
 
@@ -550,10 +558,12 @@ def test_process_tree_skips_vanished_processes(
     }
 
     monkeypatch.setattr(
-        "sdh_ludusavi.service.os.listdir",
+        "sdh_ludusavi.watchdog.os.listdir",
         lambda path: ["100", "101", "102"],
     )
-    monkeypatch.setattr(svc_mod, "_read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str))
+    monkeypatch.setattr(
+        "sdh_ludusavi.watchdog._read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str)
+    )
 
     result = svc_mod._process_tree(100)
 
@@ -571,10 +581,12 @@ def test_process_tree_ignores_cycles(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
     monkeypatch.setattr(
-        "sdh_ludusavi.service.os.listdir",
+        "sdh_ludusavi.watchdog.os.listdir",
         lambda path: ["100", "101", "102", "201"],
     )
-    monkeypatch.setattr(svc_mod, "_read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str))
+    monkeypatch.setattr(
+        "sdh_ludusavi.watchdog._read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str)
+    )
 
     assert svc_mod._process_tree(100) == [100, 101, 201, 102]
 
@@ -586,7 +598,7 @@ def test_process_tree_falls_back_on_listdir_failure(
     import sdh_ludusavi.service as svc_mod
 
     monkeypatch.setattr(
-        "sdh_ludusavi.service.os.listdir",
+        "sdh_ludusavi.watchdog.os.listdir",
         lambda path: (_ for _ in ()).throw(OSError("/proc unavailable")),
     )
 
@@ -640,7 +652,7 @@ def test_read_ppid_returns_none_on_missing_file() -> None:
 
 def test_process_tree_has_no_subprocess_usage() -> None:
     """Static regression: _process_tree and _read_ppid must not use subprocess."""
-    source = Path("py_modules/sdh_ludusavi/service.py").read_text(encoding="utf-8")
+    source = Path("py_modules/sdh_ludusavi/watchdog.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
 
     target_funcs = {"_process_tree", "_read_ppid"}
@@ -655,7 +667,7 @@ def test_process_tree_has_no_subprocess_usage() -> None:
 
 def test_read_ppid_uses_proc_stat_not_status() -> None:
     """Static regression: parent PID reads should use compact /proc stat files."""
-    source = Path("py_modules/sdh_ludusavi/service.py").read_text(encoding="utf-8")
+    source = Path("py_modules/sdh_ludusavi/watchdog.py").read_text(encoding="utf-8")
     read_ppid_source = source[source.index("def _read_ppid") : source.index("def _process_tree")]
 
     assert "/stat" in read_ppid_source
@@ -669,8 +681,10 @@ def test_resume_all_paused_processes_resumes_remaining_pids(
     service = service_with_state(tmp_path)
     signals: list[tuple[int, signal.Signals]] = []
 
-    monkeypatch.setattr("sdh_ludusavi.service._process_tree", lambda pid: [pid])
-    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr("sdh_ludusavi.watchdog._process_tree", lambda pid: [pid])
+    monkeypatch.setattr(
+        "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
+    )
 
     service.pause_game_process(100)
     service.pause_game_process(200)
@@ -1282,7 +1296,7 @@ def test_version_lookup_and_missing_dependency_states_are_logged(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("sdh_ludusavi.service.resolve_version", lambda: "0.1.dev104+gabcdef")
+    monkeypatch.setattr("sdh_ludusavi.gateway.resolve_version", lambda: "0.1.dev104+gabcdef")
     monkeypatch.setenv("DECKY_VERSION", "3.1.4")
     adapter = FakeAdapter()
     service = service_with_state(tmp_path, adapter)
@@ -1779,8 +1793,8 @@ def test_watchdog_lazy_initialization_and_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     service = service_with_state(tmp_path)
-    monkeypatch.setattr("sdh_ludusavi.service._process_tree", lambda pid: [pid])
-    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: None)
+    monkeypatch.setattr("sdh_ludusavi.watchdog._process_tree", lambda pid: [pid])
+    monkeypatch.setattr("sdh_ludusavi.watchdog.os.kill", lambda pid, sig: None)
 
     assert not service._watchdog_active
     assert service._watchdog_thread is None
@@ -1806,8 +1820,10 @@ def test_watchdog_auto_resumption_on_timeout(
     service = service_with_state(tmp_path)
     signals: list[tuple[int, signal.Signals]] = []
 
-    monkeypatch.setattr("sdh_ludusavi.service._process_tree", lambda pid: [pid])
-    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr("sdh_ludusavi.watchdog._process_tree", lambda pid: [pid])
+    monkeypatch.setattr(
+        "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
+    )
 
     # Start by pausing a PID
     service.pause_game_process(123)
@@ -1837,8 +1853,10 @@ def test_watchdog_does_not_resume_during_active_operation(
     service = service_with_state(tmp_path)
     signals: list[tuple[int, signal.Signals]] = []
 
-    monkeypatch.setattr("sdh_ludusavi.service._process_tree", lambda pid: [pid])
-    monkeypatch.setattr("sdh_ludusavi.service.os.kill", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr("sdh_ludusavi.watchdog._process_tree", lambda pid: [pid])
+    monkeypatch.setattr(
+        "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
+    )
 
     # Pause a PID
     service.pause_game_process(123)

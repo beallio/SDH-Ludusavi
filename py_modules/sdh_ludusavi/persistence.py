@@ -82,8 +82,8 @@ class PersistenceManager:
                     else:
                         data = json.loads(raw_state)
                         if isinstance(data, dict):
-                            settings = cast(dict[str, Any], data)
-                            cache = cast(dict[str, Any], data)
+                            settings = cast(dict[str, Any], dict(data))
+                            cache = cast(dict[str, Any], dict(data))
                         else:
                             self._warn_load("state file must contain a JSON object")
                 except OSError as exc:
@@ -164,7 +164,8 @@ class PersistenceManager:
         return {k: v for k, v in data["cache"].items() if k not in SETTINGS_KEYS}
 
     def _save_combined(self, settings_data: dict[str, Any], cache_data: dict[str, Any]) -> None:
-        assert self._combined_state_path is not None
+        if self._combined_state_path is None:
+            raise RuntimeError("_save_combined called without a combined state path")
         data = {**settings_data, **cache_data}
         self._combined_state_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         temp_path = self._combined_state_path.with_name(f".{self._combined_state_path.name}.tmp")

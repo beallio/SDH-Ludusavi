@@ -18,6 +18,8 @@ from .watchdog import (  # noqa: F401
     _send_signal_tree,  # noqa: F401
     _child_pids,  # noqa: F401
     MAX_SIGNAL_PID,  # noqa: F401
+    _read_ppid,  # noqa: F401
+    _process_tree,  # noqa: F401
 )
 from .log_buffer import LogEntry, DeckyLogHandler  # noqa: F401
 
@@ -153,7 +155,7 @@ class SDHLudusaviService:
         # 2. Early logger buffer setup (must be first before any logs are generated!)
         from .log_buffer import DiagnosticLogBuffer
 
-        self._log_buffer = DiagnosticLogBuffer(self, limit=log_limit)
+        self._log_buffer = DiagnosticLogBuffer(self)
 
         # 3. Persistence Layer
         self._persistence = PersistenceManager(
@@ -223,7 +225,29 @@ class SDHLudusaviService:
         return self._gateway.get_adapter()
 
     def _log_ludusavi_diagnostics(self, adapter: LudusaviAdapter) -> None:
-        self._gateway._log_ludusavi_diagnostics(adapter)
+        if self._diagnostics_logged:
+            return
+        self._diagnostics_logged = True
+
+        def run() -> None:
+            try:
+                diagnostics = adapter.get_diagnostics()
+            # Intentionally broad: catch any diagnostics retrieval error safely
+            except Exception as exc:
+                self.log("debug", f"Ludusavi diagnostics unavailable: {exc}", "init")
+                return
+
+            version = diagnostics.get("version", "unknown")
+            ludusavi_type = diagnostics.get("type", "unknown")
+            path = diagnostics.get("path", "unknown")
+            config_path = diagnostics.get("configPath", "unknown")
+            backup_path = diagnostics.get("backupPath", "unknown")
+            self.log("info", f"Ludusavi version: {version}", "init")
+            self.log("info", f"Ludusavi type/path: {ludusavi_type} {path}", "init")
+            self.log("info", f"Ludusavi config path: {config_path}", "init")
+            self.log("info", f"Ludusavi backup path: {backup_path}", "init")
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _run_locked(self, operation: str, game_name: str | None, callback: Any) -> Any:
         return self._coordinator.run_locked(operation, game_name, callback, self.log)
@@ -894,56 +918,6 @@ class SDHLudusaviService:
             if isinstance(value, bool):
                 coerced[key] = value
         return coerced
-
-
-# The following functions are physically defined in service.py for AST checks in tests
-
-
-def _read_ppid(pid_str: str, *, proc_root: str = "/proc") -> int | None:
-    """Read the parent PID from /proc/<pid>/stat.
-
-    Returns None if the process has vanished or the file is unreadable.
-    """
-    try:
-        with open(f"{proc_root}/{pid_str}/stat", encoding="utf-8") as fh:
-            stat = fh.readline()
-        comm_end = stat.rfind(")")
-        if comm_end == -1:
-            return None
-        fields = stat[comm_end + 2 :].split()
-        if len(fields) < 2:
-            return None
-        return int(fields[1])
-    except (OSError, ValueError, IndexError):
-        return None
-
-
-def _process_tree(pid: int) -> list[int]:
-    try:
-        entries = os.listdir("/proc")
-    except OSError:
-        return [pid]
-
-    children_by_parent: dict[int, list[int]] = {}
-    for entry in entries:
-        if not entry.isdigit():
-            continue
-        ppid = _read_ppid(entry)
-        if ppid is None:
-            continue
-        children_by_parent.setdefault(ppid, []).append(int(entry))
-
-    ordered: list[int] = []
-    visited: set[int] = set()
-    stack = [pid]
-    while stack:
-        target_pid = stack.pop()
-        if target_pid in visited:
-            continue
-        visited.add(target_pid)
-        ordered.append(target_pid)
-        stack.extend(sorted(children_by_parent.get(target_pid, []), reverse=True))
-    return ordered
 
 
 # Keep fuzzy matching module-level functions mapped to GameRegistryMatcher

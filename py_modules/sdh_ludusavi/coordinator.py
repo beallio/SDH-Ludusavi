@@ -56,7 +56,11 @@ class OperationCoordinator:
             if log_callback:
                 log_callback(level, msg, operation, game_name)
 
-        if self._operation.is_running or not self._operation_lock.acquire(blocking=False):
+        if not self._operation_lock.acquire(blocking=False):
+            raise OperationLockedError(f"{self._operation.name or 'operation'} is already running")
+
+        if self._operation.is_running:
+            self._operation_lock.release()
             raise OperationLockedError(f"{self._operation.name or 'operation'} is already running")
 
         log("info", f"Starting {operation}")

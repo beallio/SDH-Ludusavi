@@ -77,7 +77,7 @@ def _decky_log_fallback(level: str, message: str) -> None:
             logger_level_map = {
                 "warning": logger.warning,
                 "error": logger.error,
-                "debug": logger.info,
+                "debug": lambda msg: logger.info(f"[DEBUG] {msg}"),
                 "info": logger.info,
             }
             logger_level = logger_level_map.get(level, logger.info)
@@ -92,7 +92,7 @@ class DiagnosticLogBuffer:
     and configuring the custom standard Python logging handler.
     """
 
-    def __init__(self, service: Any, limit: int = 100) -> None:
+    def __init__(self, service: Any) -> None:
         self._service = service
 
     @property

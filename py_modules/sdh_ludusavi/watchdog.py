@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 import signal
-import sys
 import threading
 import time
 from collections.abc import Callable
@@ -11,13 +10,6 @@ from typing import Any
 
 LOGGER = logging.getLogger("sdh_ludusavi.service.watchdog")
 MAX_SIGNAL_PID = 2_147_483_647
-
-
-def _get_service_os() -> Any:
-    svc = sys.modules.get("sdh_ludusavi.service")
-    if svc and hasattr(svc, "os"):
-        return svc.os
-    return os
 
 
 class ProcessWatchdog:
@@ -188,11 +180,6 @@ class ProcessWatchdog:
 
 
 def _coerce_signal_pid(value: object) -> int:
-    svc = sys.modules.get("sdh_ludusavi.service")
-    func = getattr(svc, "_coerce_signal_pid", None) if svc else None
-    if func and func.__code__ is not _coerce_signal_pid.__code__:
-        return func(value)
-
     if isinstance(value, bool):
         raise ValueError("PID must be an integer, not a boolean")
     if isinstance(value, int):
@@ -216,15 +203,10 @@ def _coerce_signal_pid(value: object) -> int:
 
 
 def _send_signal_tree(pid: int, sig: signal.Signals) -> bool:
-    svc = sys.modules.get("sdh_ludusavi.service")
-    func = getattr(svc, "_send_signal_tree", None) if svc else None
-    if func and func.__code__ is not _send_signal_tree.__code__:
-        return func(pid, sig)
-
     sent = False
     for target_pid in _process_tree(pid):
         try:
-            _get_service_os().kill(target_pid, sig)
+            os.kill(target_pid, sig)
             sent = True
         except OSError:
             if target_pid == pid:
@@ -233,11 +215,6 @@ def _send_signal_tree(pid: int, sig: signal.Signals) -> bool:
 
 
 def _read_ppid(pid_str: str, *, proc_root: str = "/proc") -> int | None:
-    svc = sys.modules.get("sdh_ludusavi.service")
-    func = getattr(svc, "_read_ppid", None) if svc else None
-    if func and func.__code__ is not _read_ppid.__code__:
-        return func(pid_str, proc_root=proc_root)
-
     try:
         with open(f"{proc_root}/{pid_str}/stat", encoding="utf-8") as fh:
             stat = fh.readline()
@@ -253,13 +230,8 @@ def _read_ppid(pid_str: str, *, proc_root: str = "/proc") -> int | None:
 
 
 def _process_tree(pid: int) -> list[int]:
-    svc = sys.modules.get("sdh_ludusavi.service")
-    func = getattr(svc, "_process_tree", None) if svc else None
-    if func and func.__code__ is not _process_tree.__code__:
-        return func(pid)
-
     try:
-        entries = _get_service_os().listdir("/proc")
+        entries = os.listdir("/proc")
     except OSError:
         return [pid]
 

@@ -43,14 +43,6 @@ class LudusaviGateway:
     def _adapter_factory(self, val: Callable[[], LudusaviAdapter]) -> None:
         self._service._adapter_factory = val
 
-    @property
-    def _diagnostics_logged(self) -> bool:
-        return self._service._diagnostics_logged
-
-    @_diagnostics_logged.setter
-    def _diagnostics_logged(self, val: bool) -> None:
-        self._service._diagnostics_logged = val
-
     def get_adapter(self) -> LudusaviAdapter:
         """Lazily initialize and return the Ludusavi adapter."""
         if self._adapter is None:
@@ -58,9 +50,9 @@ class LudusaviGateway:
                 if self._adapter is None:
                     self._adapter = self._adapter_factory()
                     self._service._log_ludusavi_diagnostics(self._adapter)
-        if not self._diagnostics_logged:
+        if not self._service._diagnostics_logged:
             with self._adapter_lock:
-                if not self._diagnostics_logged:
+                if not self._service._diagnostics_logged:
                     self._service._log_ludusavi_diagnostics(self._adapter)
         assert self._adapter is not None
         return self._adapter
@@ -72,11 +64,7 @@ class LudusaviGateway:
 
         adapter = self.get_adapter()
         versions = dict(adapter.get_versions())
-        import sys
-
-        svc = sys.modules.get("sdh_ludusavi.service")
-        resolve_fn = getattr(svc, "resolve_version", resolve_version)
-        versions["sdh_ludusavi"] = resolve_fn()
+        versions["sdh_ludusavi"] = resolve_version()
         versions["decky"] = _decky_version()
 
         if "pyludusavi" not in versions:
@@ -145,30 +133,6 @@ class LudusaviGateway:
             from .service import _CONFIG_MARKER_READ_FAILED
 
             return _CONFIG_MARKER_READ_FAILED
-
-    def _log_ludusavi_diagnostics(self, adapter: LudusaviAdapter) -> None:
-        if self._diagnostics_logged:
-            return
-        self._diagnostics_logged = True
-
-        def run() -> None:
-            try:
-                diagnostics = adapter.get_diagnostics()
-            except Exception as exc:
-                self._service.log("debug", f"Ludusavi diagnostics unavailable: {exc}", "init")
-                return
-
-            version = diagnostics.get("version", "unknown")
-            ludusavi_type = diagnostics.get("type", "unknown")
-            path = diagnostics.get("path", "unknown")
-            config_path = diagnostics.get("configPath", "unknown")
-            backup_path = diagnostics.get("backupPath", "unknown")
-            self._service.log("info", f"Ludusavi version: {version}", "init")
-            self._service.log("info", f"Ludusavi type/path: {ludusavi_type} {path}", "init")
-            self._service.log("info", f"Ludusavi config path: {config_path}", "init")
-            self._service.log("info", f"Ludusavi backup path: {backup_path}", "init")
-
-        threading.Thread(target=run, daemon=True).start()
 
 
 def _decky_version() -> str:
