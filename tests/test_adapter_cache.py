@@ -160,30 +160,6 @@ def test_pyludusavi_adapter_does_not_return_stale_aliases_after_known_config_cha
     assert adapter.get_aliases() == {}
 
 
-def test_parse_backup_path() -> None:
-    from sdh_ludusavi.ludusavi import _parse_backup_path
-
-    # Unquoted
-    yaml1 = "backup:\n  path: /home/deck/ludusavi-backups\n"
-    assert _parse_backup_path(yaml1) == "/home/deck/ludusavi-backups"
-
-    # Double quoted
-    yaml2 = 'backup:\n  path: "/home/deck/ludusavi-backups"\n'
-    assert _parse_backup_path(yaml2) == "/home/deck/ludusavi-backups"
-
-    # Single quoted
-    yaml3 = "backup:\n  path: '/home/deck/ludusavi-backups'\n"
-    assert _parse_backup_path(yaml3) == "/home/deck/ludusavi-backups"
-
-    # Spacing and comments
-    yaml4 = "---\n# some comment\nbackup:\n  # inline comment\n  path:   /home/deck/ludusavi-backups   \n"
-    assert _parse_backup_path(yaml4) == "/home/deck/ludusavi-backups"
-
-    # Missing backup section
-    yaml5 = "restore:\n  path: /home/deck/ludusavi-backups\n"
-    assert _parse_backup_path(yaml5) is None
-
-
 def test_composite_mtime_config_cache_manifest(tmp_path: Path) -> None:
     config_file = tmp_path / "config.yaml"
     config_file.write_text("backup:\n  path: /non/existent/path\n", encoding="utf-8")
@@ -210,46 +186,3 @@ def test_composite_mtime_config_cache_manifest(tmp_path: Path) -> None:
     hash3 = adapter.get_config_mtime_ns()
     assert hash3 != hash2
     assert hash3 != hash1
-
-
-def test_composite_mtime_backup_directory(tmp_path: Path) -> None:
-    import os
-    import time
-
-    backup_dir = tmp_path / "my-backups"
-    backup_dir.mkdir()
-
-    config_file = tmp_path / "config.yaml"
-    config_file.write_text(f"backup:\n  path: {backup_dir}\n", encoding="utf-8")
-
-    mock_client = MagicMock()
-    mock_client.config_path.return_value = str(config_file)
-
-    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
-    adapter._client = mock_client
-    adapter._cached_config_path = None
-
-    # Base mtime (empty backups directory)
-    hash1 = adapter.get_config_mtime_ns()
-
-    # 1. Create a game folder inside backups
-    game_dir = backup_dir / "Super Game"
-    game_dir.mkdir()
-    hash2 = adapter.get_config_mtime_ns()
-    assert hash2 != hash1
-
-    # 2. Create mapping.yaml inside that game folder
-    mapping_file = game_dir / "mapping.yaml"
-    mapping_file.write_text("mapping data")
-    hash3 = adapter.get_config_mtime_ns()
-    assert hash3 != hash2
-    assert hash3 != hash1
-
-    # 3. Modify mapping.yaml and set custom mtime via utime
-    mapping_file.write_text("updated mapping data")
-    now = time.time()
-    os.utime(mapping_file, (now + 100, now + 100))
-    hash4 = adapter.get_config_mtime_ns()
-    assert hash4 != hash3
-    assert hash4 != hash2
-    assert hash4 != hash1

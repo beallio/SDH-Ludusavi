@@ -311,39 +311,6 @@ class PyludusaviAdapter:
             except OSError:
                 pass
 
-        # Try to parse backup.path from config.yaml to get backups directory mtime
-        try:
-            config_content = config_path.read_text(encoding="utf-8", errors="replace")
-            backup_path_str = _parse_backup_path(config_content)
-            if backup_path_str:
-                backup_dir = Path(os.path.expanduser(backup_path_str))
-                if backup_dir.is_dir():
-                    mtimes.append(backup_dir.stat().st_mtime_ns)
-                    # Scan direct subdirectories (games)
-                    # Limit to a high number like 2000 to avoid performance issues
-                    subdirs = []
-                    try:
-                        for entry in os.scandir(backup_dir):
-                            if entry.is_dir():
-                                subdirs.append(entry)
-                                if len(subdirs) >= 2000:
-                                    break
-                    except OSError:
-                        pass
-
-                    for entry in subdirs:
-                        try:
-                            # Stat the subdirectory itself
-                            mtimes.append(entry.stat().st_mtime_ns)
-                            # Stat mapping.yaml if it exists inside the game subfolder
-                            mapping_file = Path(entry.path) / "mapping.yaml"
-                            if mapping_file.is_file():
-                                mtimes.append(mapping_file.stat().st_mtime_ns)
-                        except OSError:
-                            pass
-        except OSError:
-            pass
-
         # Combine all mtimes using a stable 64-bit integer SHA-256 hash
         mtimes.sort()
         mtimes_str = ",".join(str(m) for m in mtimes)
@@ -352,39 +319,6 @@ class PyludusaviAdapter:
         digest = hashlib.sha256(mtimes_str.encode("utf-8")).digest()
         # Return a signed 64-bit integer
         return int.from_bytes(digest[:8], byteorder="big", signed=True)
-
-
-def _parse_backup_path(config_content: str) -> str | None:
-    """
-    Extract the 'backup.path' string from Ludusavi's config.yaml content.
-
-    Handles basic YAML formatting:
-    backup:
-      path: /some/path
-    """
-    in_backup = False
-    for line in config_content.splitlines():
-        line_stripped = line.strip()
-        if not line_stripped or line_stripped.startswith("#") or line_stripped.startswith("---"):
-            continue
-        # Check if we are starting the backup: block
-        if line_stripped.startswith("backup:"):
-            in_backup = True
-            continue
-        # If we see another top-level key (starts with no indentation) while in_backup is True,
-        # we exit the backup block.
-        if in_backup and not (line.startswith(" ") or line.startswith("\t")):
-            in_backup = False
-        if in_backup:
-            if line_stripped.startswith("path:"):
-                path_val = line_stripped[len("path:") :].strip()
-                # Strip single or double quotes
-                if (path_val.startswith('"') and path_val.endswith('"')) or (
-                    path_val.startswith("'") and path_val.endswith("'")
-                ):
-                    path_val = path_val[1:-1]
-                return path_val
-    return None
 
 
 def _games_from_output(output: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
