@@ -1401,19 +1401,25 @@ function Content() {
                         selectedHistory.message
                       )}
                     </div>
-                    {selectedHistory.timestamp &&
-                    selectedHistory.timestamp.split(/[T ]/)[1]?.split(".")[0] ? (
-                      <div
-                        style={{
-                          fontSize: "12px",
-                          opacity: 0.65,
-                          marginTop: "2px",
-                          fontVariantNumeric: "tabular-nums"
-                        }}
-                      >
-                        ({formatDateMDY(selectedHistory.timestamp)} {formatTime12h(selectedHistory.timestamp.split(/[T ]/)[1].split(".")[0])})
-                      </div>
-                    ) : null}
+                    {(() => {
+                      if (!selectedHistory.timestamp) return null;
+                      const parts = selectedHistory.timestamp.split(/[T ]/);
+                      const timePart = parts[1]?.split(".")[0];
+                      if (!timePart) return null;
+
+                      return (
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            opacity: 0.65,
+                            marginTop: "2px",
+                            fontVariantNumeric: "tabular-nums"
+                          }}
+                        >
+                          ({formatDateMDY(selectedHistory.timestamp)} {formatTime12h(timePart)})
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               )}
