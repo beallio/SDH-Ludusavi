@@ -132,6 +132,14 @@ function formatTime12h(timeStr: string): string {
   return `${hours}:${minutes} ${ampm}`;
 }
 
+function formatDateMDY(timestampStr: string): string {
+  const datePart = timestampStr.split(/[T ]/)[0];
+  if (!datePart) return "";
+  const parts = datePart.split("-");
+  if (parts.length < 3) return datePart;
+  return `${parts[1]}/${parts[2]}/${parts[0]}`;
+}
+
 async function syncGlobalHistory(store: LudusaviStateStore) {
   try {
     const historyRes = await getGameHistoryCall();
@@ -1403,7 +1411,7 @@ function Content() {
                           fontVariantNumeric: "tabular-nums"
                         }}
                       >
-                        ({formatTime12h(selectedHistory.timestamp.split(/[T ]/)[1].split(".")[0])})
+                        ({formatDateMDY(selectedHistory.timestamp)} {formatTime12h(selectedHistory.timestamp.split(/[T ]/)[1].split(".")[0])})
                       </div>
                     ) : null}
                   </div>
