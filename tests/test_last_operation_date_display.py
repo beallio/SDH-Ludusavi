@@ -11,6 +11,9 @@ def test_frontend_format_date_mdy_exists_and_is_used() -> None:
 
     # Assert IIFE pattern is used for safe property/timestamp splitting
     assert (
-        re.search(r"\(\s*\)\s*=>\s*\{\s*if\s*\(\s*!\s*selectedHistory\.timestamp\s*\)", source)
+        re.search(
+            r"\(\s*\)\s*=>\s*\{\s*if\s*\(\s*!\s*selectedHistory(?:\.|\?\.)timestamp\s*\)",
+            source,
+        )
         is not None
     )

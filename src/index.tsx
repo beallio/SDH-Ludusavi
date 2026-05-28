@@ -135,8 +135,9 @@ function formatTime12h(timeStr: string): string {
 function formatDateMDY(timestampStr: string): string {
   const datePart = timestampStr.split(/[T ]/)[0];
   if (!datePart) return "";
+  const isIsoDate = /^\d{4}-\d{2}-\d{2}$/.test(datePart);
+  if (!isIsoDate) return datePart;
   const parts = datePart.split("-");
-  if (parts.length < 3) return datePart;
   return `${parts[1]}/${parts[2]}/${parts[0]}`;
 }
 
