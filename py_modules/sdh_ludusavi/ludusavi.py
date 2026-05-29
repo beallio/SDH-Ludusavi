@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ from pyludusavi import LudusaviError
 FLATPAK_ID = "com.github.mtkennerly.ludusavi"
 LOGGER = logging.getLogger(__name__)
 _ALIASES_INIT_LOCK = threading.Lock()
+_MONITORED_CONFIG_FILES = ("cache.yaml", "manifest.yaml")
 
 
 def _ludusavi_env() -> dict[str, str]:
@@ -290,20 +292,34 @@ class PyludusaviAdapter:
         return self._client.log_show()
 
     def get_config_mtime_ns(self) -> int | None:
+        """
+        Return a composite 64-bit signed integer hash of monitored config file mtimes.
+
+        Monitors config.yaml, cache.yaml, and manifest.yaml to detect settings changes,
+        GUI/CLI backups, and manifest updates.
+
+        Note/Limitation:
+        As an O(1) constant-time check, this does not scan the backups directory directly.
+        Therefore, external file/folder additions/deletions within the backups directory
+        (e.g., via manual sync, Syncthing, Dropbox) will not trigger cache invalidation
+        until Ludusavi GUI or CLI updates its configuration or database files.
+        """
         try:
             config_path_str = self._config_path()
             config_path = Path(config_path_str)
             config_stat = config_path.stat()
             mtimes = [config_stat.st_mtime_ns]
         except (OSError, RuntimeError, LudusaviError):
-            LOGGER.debug(
-                "Unable to stat Ludusavi config path: %s", self._cached_config_path, exc_info=True
-            )
+            path_to_log = getattr(self, "_cached_config_path", None)
+            if path_to_log is None:
+                LOGGER.debug("Unable to discover Ludusavi config path", exc_info=True)
+            else:
+                LOGGER.debug("Unable to stat Ludusavi config path: %s", path_to_log, exc_info=True)
             raise
 
-        # Check optional sibling files: cache.yaml and manifest.yaml
+        # Check optional sibling files defined in _MONITORED_CONFIG_FILES
         config_dir = config_path.parent
-        for filename in ("cache.yaml", "manifest.yaml"):
+        for filename in _MONITORED_CONFIG_FILES:
             sibling = config_dir / filename
             try:
                 if sibling.is_file():
@@ -314,8 +330,6 @@ class PyludusaviAdapter:
         # Combine all mtimes using a stable 64-bit integer SHA-256 hash
         mtimes.sort()
         mtimes_str = ",".join(str(m) for m in mtimes)
-        import hashlib
-
         digest = hashlib.sha256(mtimes_str.encode("utf-8")).digest()
         # Return a signed 64-bit integer
         return int.from_bytes(digest[:8], byteorder="big", signed=True)
