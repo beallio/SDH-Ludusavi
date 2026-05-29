@@ -1,0 +1,15 @@
+{
+  "date": "2026-05-29",
+  "task_objective": "Fix selected game dropdown synchronization and settings queue exceptions",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "test_frontend_selected_game_sync_effect",
+    "test_frontend_notify_queue_listeners_catches_exceptions",
+    "test_frontend_settings_failure_notifications_guarded_by_sequence"
+  ],
+  "design_decisions": "Synchronized `lastQueuedSelectedGame` reactively with `selectedGame` from the store using a `useEffect`. Wrapped setting queue notifications in `try-catch` blocks to protect settings serialization queue execution. Guarded settings failure notifications behind sequence check filters to prevent out-of-order/stale failure toasts from being displayed.",
+  "results": "All tests passed successfully, typescript typechecks passed, and package zipped cleanly."
+}
