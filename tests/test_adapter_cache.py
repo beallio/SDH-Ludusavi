@@ -269,3 +269,33 @@ def test_get_config_mtime_ns_resolves_symlinks(tmp_path: Path) -> None:
         signed=True,
     )
     assert config_mtime == expected_hash
+
+
+def test_get_config_mtime_ns_caches_resolved_path(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("settings")
+
+    mock_client = MagicMock()
+    mock_client.config_path.return_value = str(config_file)
+
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    adapter._client = mock_client
+    adapter._cached_config_path = None
+
+    original_resolve = Path.resolve
+    resolve_calls = []
+
+    def mock_resolve(self, *args, **kwargs):
+        resolve_calls.append(self)
+        return original_resolve(self, *args, **kwargs)
+
+    with patch.object(Path, "resolve", mock_resolve):
+        # First call resolves
+        adapter.get_config_mtime_ns()
+        assert len(resolve_calls) == 1
+
+        # Second call uses cached resolved path
+        adapter.get_config_mtime_ns()
+        assert len(resolve_calls) == 1

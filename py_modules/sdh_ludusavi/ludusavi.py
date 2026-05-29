@@ -306,8 +306,9 @@ class PyludusaviAdapter:
         until Ludusavi GUI or CLI updates its configuration or database files.
         """
         try:
-            config_path_str = self._config_path()
-            config_path = Path(config_path_str).resolve()
+            if getattr(self, "_cached_resolved_config_path", None) is None:
+                self._cached_resolved_config_path = Path(self._config_path()).resolve()
+            config_path = self._cached_resolved_config_path
             config_stat = config_path.stat()
             mtimes = [config_stat.st_mtime_ns]
         except (OSError, RuntimeError, LudusaviError):
