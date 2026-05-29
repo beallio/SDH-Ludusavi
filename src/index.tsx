@@ -872,6 +872,7 @@ const queueListeners = new Set<(busy: boolean) => void>();
 
 function subscribeQueue(listener: (busy: boolean) => void) {
   queueListeners.add(listener);
+  listener(settingsProcessing || settingsQueue.length > 0);
   return () => {
     queueListeners.delete(listener);
   };
@@ -886,19 +887,22 @@ async function processSettingsQueue() {
   if (settingsProcessing) return;
   settingsProcessing = true;
   notifyQueueListeners();
-  while (settingsQueue.length > 0) {
-    const task = settingsQueue.shift();
-    if (task) {
-      try {
-        await task();
-      } catch (err) {
-        log("error", `Settings update failed in queue: ${err}`);
+  try {
+    while (settingsQueue.length > 0) {
+      const task = settingsQueue.shift();
+      if (task) {
+        try {
+          await task();
+        } catch (err) {
+          log("error", `Settings update failed in queue: ${err}`);
+        }
       }
+      notifyQueueListeners();
     }
+  } finally {
+    settingsProcessing = false;
     notifyQueueListeners();
   }
-  settingsProcessing = false;
-  notifyQueueListeners();
 }
 
 function enqueueSettingsUpdate(task: () => Promise<void>) {
@@ -2197,6 +2201,19 @@ export default definePlugin(() => {
       clearAutoSyncStatusSyncTimeout();
       clearAutoSyncStatusShowTimeout();
       destroyAutoSyncStatusBrowserView();
+
+      // Reset settings queue and tracking variables
+      settingsQueue.length = 0;
+      settingsProcessing = false;
+      queueListeners.clear();
+      autoSyncSeq = 0;
+      notificationSeq = 0;
+      selectedGameSeq = 0;
+      lastPersistedAutoSync = null;
+      lastPersistedNotifications = null;
+      lastPersistedSelectedGame = null;
+      lastQueuedSelectedGame = null;
+
       console.log("SDH-Ludusavi unloading");
     },
   };

@@ -1690,3 +1690,62 @@ def test_frontend_settings_intermediate_success_updates_last_persisted() -> None
         )
         is not None
     )
+
+
+def test_frontend_settings_queue_recovers_on_listener_error() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that processSettingsQueue uses try...finally to ensure settingsProcessing is reset
+    assert (
+        re.search(
+            r"async\s+function\s+processSettingsQueue\s*\(\s*\)[\s\S]*?"
+            r"try\s*\{\s*while\s*\(\s*settingsQueue\.length\s*>\s*0\s*\)\s*\{[\s\S]*\}"
+            r"\s*\}\s*finally\s*\{\s*settingsProcessing\s*=\s*false\s*;",
+            source,
+        )
+        is not None
+    )
+
+
+def test_frontend_settings_variables_reset_on_dismount() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that onDismount resets queue and sequence variables
+    assert (
+        re.search(
+            r"onDismount\s*\(\s*\)\s*\{[\s\S]*?"
+            r"settingsQueue\.length\s*=\s*0\s*;[\s\S]*?"
+            r"settingsProcessing\s*=\s*false\s*;[\s\S]*?"
+            r"queueListeners\.clear\(\s*\)\s*;[\s\S]*?"
+            r"autoSyncSeq\s*=\s*0\s*;[\s\S]*?"
+            r"notificationSeq\s*=\s*0\s*;[\s\S]*?"
+            r"selectedGameSeq\s*=\s*0\s*;[\s\S]*?"
+            r"lastPersistedAutoSync\s*=\s*null\s*;[\s\S]*?"
+            r"lastPersistedNotifications\s*=\s*null\s*;[\s\S]*?"
+            r"lastPersistedSelectedGame\s*=\s*null\s*;[\s\S]*?"
+            r"lastQueuedSelectedGame\s*=\s*null\s*;",
+            source,
+        )
+        is not None
+    )
+
+
+def test_frontend_settings_subscribe_queue_invokes_immediately() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that subscribeQueue immediately invokes the listener callback
+    assert (
+        re.search(
+            r"function\s+subscribeQueue\s*\(\s*listener[\s\S]*?\)\s*\{[\s\S]*?"
+            r"queueListeners\.add\(\s*listener\s*\)\s*;[\s\S]*?"
+            r"listener\(\s*settingsProcessing\s*\|\|\s*settingsQueue\.length\s*>\s*0\s*\)\s*;",
+            source,
+        )
+        is not None
+    )
