@@ -53,6 +53,7 @@ import {
   LudusaviStateProvider,
   LudusaviStateStore,
   createLudusaviStateStore,
+  defaultNotificationSettings,
   defaultSettings,
   useLudusaviState,
   useLudusaviStateStore
@@ -1216,9 +1217,9 @@ function Content() {
     }
   };
 
-  const toggleAutoSync = async (enabled: boolean) => {
+  const toggleAutoSync = useCallback(async (enabled: boolean) => {
     log("info", `Toggling auto-sync to ${enabled}`);
-    const previous = settings.auto_sync_enabled;
+    const previous = ludusaviStore.getSnapshot().settings?.auto_sync_enabled ?? false;
     setBusyLabel("Updating settings");
     
     // Optimistic update
@@ -1242,12 +1243,12 @@ function Content() {
         setBusyLabel(null);
       }
     }
-  };
+  }, [ludusaviStore, applySettings]);
 
-  const toggleNotificationSetting = async (key: keyof NotificationSettings, enabled: boolean) => {
+  const toggleNotificationSetting = useCallback(async (key: keyof NotificationSettings, enabled: boolean) => {
     log("info", `Toggling notification setting ${String(key)} to ${enabled}`);
-    const previous = settings.notifications;
-    const nextNotifications = { ...previous, [key]: enabled };
+    const previousNotifications = ludusaviStore.getSnapshot().settings?.notifications ?? defaultNotificationSettings;
+    const nextNotifications = { ...previousNotifications, [key]: enabled };
     setBusyLabel("Updating settings");
     ludusaviStore.setNotificationSettings(nextNotifications);
 
@@ -1262,7 +1263,8 @@ function Content() {
       // Rollback only if the store state still matches the optimistic value we set
       const currentNotifications = ludusaviStore.getSnapshot().settings?.notifications;
       if (currentNotifications && currentNotifications[key] === enabled) {
-        ludusaviStore.setNotificationSettings(previous);
+        const rollbackNotifications = { ...currentNotifications, [key]: previousNotifications[key] };
+        ludusaviStore.setNotificationSettings(rollbackNotifications);
       }
       notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
@@ -1270,7 +1272,7 @@ function Content() {
         setBusyLabel(null);
       }
     }
-  };
+  }, [ludusaviStore, applySettings]);
 
   const onGameChange = useCallback(async (data: SingleDropdownOption | string | null | undefined) => {
     const value = (typeof data === 'object' && data !== null) ? data.data : data;
@@ -1278,11 +1280,12 @@ function Content() {
       log("warning", `onGameChange received invalid game selection value: ${String(value)}`);
       return;
     }
-    if (value === selectedGame) {
+    const currentSelectedGame = ludusaviStore.getSnapshot().selectedGame;
+    if (value === currentSelectedGame) {
       return;
     }
     log("info", `Selected game changed to ${value}`);
-    const previous = selectedGame;
+    const previous = currentSelectedGame;
     setBusyLabel("Updating settings");
     
     // Optimistic update
@@ -1310,7 +1313,7 @@ function Content() {
         setBusyLabel(null);
       }
     }
-  }, [selectedGame, ludusaviStore, applySettings]);
+  }, [ludusaviStore, applySettings]);
 
   const runForceOperation = async (
     label: "Backup" | "Restore",

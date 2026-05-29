@@ -837,10 +837,10 @@ def test_frontend_dropdown_has_below_layout() -> None:
     game_section = match.group(0)
 
     assert "<DropdownItem" in game_section, "DropdownItem not found in GAME section"
-    assert re.search(r"menuLabel=(['\"])Select Game\1", game_section) is not None, (
+    assert re.search(r"menuLabel\s*=\s*(['\"])Select Game\1", game_section) is not None, (
         "DropdownItem with menuLabel='Select Game' not found in GAME section"
     )
-    assert re.search(r"layout=(['\"])below\1", game_section) is not None, (
+    assert re.search(r"layout\s*=\s*(['\"])below\1", game_section) is not None, (
         "Games dropdown does not have layout='below' in GAME section"
     )
 
