@@ -1788,3 +1788,42 @@ def test_frontend_notify_queue_listeners_catches_exceptions() -> None:
         )
         is not None
     )
+
+
+def test_frontend_settings_failure_notifications_guarded_by_sequence() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that auto-sync catch block notify call is within sequence check
+    assert (
+        re.search(
+            r"catch\s*\(\s*error\s*\)\s*\{[\s\S]*?"
+            r"if\s*\(\s*updateSeq\s*===\s*autoSyncSeq\s*\)\s*\{[\s\S]*?"
+            r"notify\(\s*ludusaviStore\s*,\s*\"failures_errors\"",
+            source,
+        )
+        is not None
+    )
+
+    # Assert that notifications catch block notify call is within sequence check
+    assert (
+        re.search(
+            r"catch\s*\(\s*error\s*\)\s*\{[\s\S]*?"
+            r"if\s*\(\s*updateSeq\s*===\s*notificationSeq\s*\)\s*\{[\s\S]*?"
+            r"notify\(\s*ludusaviStore\s*,\s*\"failures_errors\"",
+            source,
+        )
+        is not None
+    )
+
+    # Assert that selected game catch block notify call is within sequence check
+    assert (
+        re.search(
+            r"catch\s*\(\s*error\s*\)\s*\{[\s\S]*?"
+            r"if\s*\(\s*updateSeq\s*===\s*selectedGameSeq\s*\)\s*\{[\s\S]*?"
+            r"notify\(\s*ludusaviStore\s*,\s*\"failures_errors\"",
+            source,
+        )
+        is not None
+    )
