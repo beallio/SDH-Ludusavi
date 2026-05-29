@@ -1570,3 +1570,20 @@ def test_frontend_state_store_optimization_no_array_from_in_loop() -> None:
 
     # Assert the optimized Set iteration is in the state store
     assert "for (const trackedName of this.snapshot.trackedNames)" in store_source
+
+
+def test_frontend_settings_transaction_tracking_rollback() -> None:
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Verify that the transaction tracking refs are defined
+    assert "const settingsSeq = useRef(0);" in source
+    assert "const lastPersistedSettings = useRef<Settings | null>(null);" in source
+
+    # Verify that setting update handlers increment the sequence counter
+    assert "const reqSeq = ++settingsSeq.current;" in source
+
+    # Verify sequence check on success / failure rollback
+    assert "if (reqSeq === settingsSeq.current) {" in source
+
+    # Verify rollback check uses lastPersistedSettings
+    assert "const rollbackVal = lastPersistedSettings.current" in source
