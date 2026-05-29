@@ -866,32 +866,28 @@ function logRpcStatus(result: RpcStatus, operation: string) {
   log(level, message, operation);
 }
 
-function useSettingsQueue() {
-  const settingsQueue = useRef<(() => Promise<void>)[]>([]);
-  const settingsProcessing = useRef(false);
+const settingsQueue: (() => Promise<void>)[] = [];
+let settingsProcessing = false;
 
-  const processSettingsQueue = useCallback(async () => {
-    if (settingsProcessing.current) return;
-    settingsProcessing.current = true;
-    while (settingsQueue.current.length > 0) {
-      const task = settingsQueue.current.shift();
-      if (task) {
-        try {
-          await task();
-        } catch (err) {
-          log("error", `Settings update failed in queue: ${err}`);
-        }
+async function processSettingsQueue() {
+  if (settingsProcessing) return;
+  settingsProcessing = true;
+  while (settingsQueue.length > 0) {
+    const task = settingsQueue.shift();
+    if (task) {
+      try {
+        await task();
+      } catch (err) {
+        log("error", `Settings update failed in queue: ${err}`);
       }
     }
-    settingsProcessing.current = false;
-  }, []);
+  }
+  settingsProcessing = false;
+}
 
-  const enqueueSettingsUpdate = useCallback((task: () => Promise<void>) => {
-    settingsQueue.current.push(task);
-    void processSettingsQueue();
-  }, [processSettingsQueue]);
-
-  return { enqueueSettingsUpdate };
+function enqueueSettingsUpdate(task: () => Promise<void>) {
+  settingsQueue.push(task);
+  void processSettingsQueue();
 }
 
 function Content() {
@@ -910,7 +906,6 @@ function Content() {
   const lastPersistedNotifications = useRef<NotificationSettings | null>(null);
   const lastPersistedSelectedGame = useRef<string | null>(null);
 
-  const { enqueueSettingsUpdate } = useSettingsQueue();
   const settings = ludusaviState.settings ?? defaultSettings();
   const games = ludusaviState.games ?? EMPTY_GAMES;
   const gamesDropdownOptions = useMemo(() => {
@@ -1276,6 +1271,9 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
+        if (result.auto_sync_enabled !== undefined) {
+          lastPersistedAutoSync.current = result.auto_sync_enabled;
+        }
         if (updateSeq === autoSyncSeq.current) {
           applySettings(result);
         }
@@ -1292,7 +1290,7 @@ function Content() {
         }
       }
     });
-  }, [ludusaviStore, applySettings, enqueueSettingsUpdate]);
+  }, [ludusaviStore, applySettings]);
 
   const toggleNotificationSetting = useCallback((key: keyof NotificationSettings, enabled: boolean) => {
     const updateSeq = ++notificationSeq.current;
@@ -1314,6 +1312,9 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
+        if (result.notifications) {
+          lastPersistedNotifications.current = result.notifications;
+        }
         if (updateSeq === notificationSeq.current) {
           applySettings(result);
         }
@@ -1330,7 +1331,7 @@ function Content() {
         }
       }
     });
-  }, [ludusaviStore, applySettings, enqueueSettingsUpdate]);
+  }, [ludusaviStore, applySettings]);
 
   const onGameChange = useCallback((data: SingleDropdownOption | string | null | undefined) => {
     const value = (typeof data === 'object' && data !== null) ? data.data : data;
@@ -1361,6 +1362,9 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
+        if (result.selected_game !== undefined) {
+          lastPersistedSelectedGame.current = result.selected_game;
+        }
         if (updateSeq === selectedGameSeq.current) {
           applySettings(result);
           ludusaviStore.setSelectedGame(result.selected_game);
@@ -1379,7 +1383,7 @@ function Content() {
         }
       }
     });
-  }, [ludusaviStore, applySettings, enqueueSettingsUpdate]);
+  }, [ludusaviStore, applySettings]);
 
   const runForceOperation = async (
     label: "Backup" | "Restore",

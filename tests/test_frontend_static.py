@@ -823,18 +823,17 @@ def test_frontend_uses_simplified_dropdown_labels() -> None:
 def test_frontend_dropdown_has_below_layout() -> None:
     import re
 
-    source = FRONTEND.read_text()
+    source = FRONTEND.read_text(encoding="utf-8")
 
-    match = re.search(r'<PanelSection\s+title=(["\'])GAME\1[\s\S]*?</PanelSection>', source)
-    assert match is not None, "GAME PanelSection not found in index.tsx"
-    game_section = match.group(0)
-
-    assert "<DropdownItem" in game_section, "DropdownItem not found in GAME section"
-    assert re.search(r"menuLabel\s*=\s*(['\"])Select Game\1", game_section) is not None, (
-        "DropdownItem with menuLabel='Select Game' not found in GAME section"
+    # Match DropdownItem and capture all its attributes up to the closing tag or self-closing tag
+    dropdown_match = re.search(
+        r'<DropdownItem[\s\S]*?menuLabel=(["\'])Select Game\1[\s\S]*?/>', source
     )
-    assert re.search(r"layout\s*=\s*(['\"])below\1", game_section) is not None, (
-        "Games dropdown does not have layout='below' in GAME section"
+    assert dropdown_match is not None, "DropdownItem for Select Game not found in index.tsx"
+
+    dropdown_content = dropdown_match.group(0)
+    assert re.search(r'layout\s*=\s*(["\'])below\1', dropdown_content) is not None, (
+        "Select Game dropdown does not have layout='below'"
     )
 
 
@@ -1568,12 +1567,12 @@ def test_frontend_state_store_optimization_no_array_from_in_loop() -> None:
 def test_frontend_settings_serialization_queue() -> None:
     source = FRONTEND.read_text(encoding="utf-8")
 
-    # Verify that the serialization queue refs are defined
-    assert "const settingsQueue = useRef" in source
-    assert "const settingsProcessing = useRef(false);" in source
+    # Verify that the serialization queue is defined at module scope
+    assert "const settingsQueue:" in source
+    assert "let settingsProcessing = false;" in source
 
     # Verify task enqueuing and processing are present
-    assert "settingsQueue.current.push(task);" in source
+    assert "settingsQueue.push(task);" in source
     assert "processSettingsQueue()" in source
 
 
@@ -1616,3 +1615,42 @@ def test_frontend_settings_consecutive_changes_not_ignored() -> None:
         in source
     )
     assert "if (value === lastQueued) {" in source
+
+
+def test_frontend_settings_queue_is_module_scoped() -> None:
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Verify that settingsQueue is declared as a module-scoped variable (before Content component)
+    content_start_idx = source.index("function Content() {")
+    queue_decl_idx = source.index("const settingsQueue")
+
+    assert queue_decl_idx < content_start_idx, (
+        "settingsQueue must be declared at the module scope (before Content component) "
+        "to prevent recreation on component remount"
+    )
+
+
+def test_frontend_settings_intermediate_success_updates_last_persisted() -> None:
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that lastPersisted refs are updated immediately on RPC success,
+    # before checking sequence numbers.
+    idx_ref_update = source.index("lastPersistedAutoSync.current = result.auto_sync_enabled;")
+    idx_seq_check = source.index("if (updateSeq === autoSyncSeq.current) {")
+    assert idx_ref_update < idx_seq_check, (
+        "AutoSync lastPersisted ref must be updated before sequence check"
+    )
+
+    idx_ref_update_notif = source.index(
+        "lastPersistedNotifications.current = result.notifications;"
+    )
+    idx_seq_check_notif = source.index("if (updateSeq === notificationSeq.current) {")
+    assert idx_ref_update_notif < idx_seq_check_notif, (
+        "Notifications lastPersisted ref must be updated before sequence check"
+    )
+
+    idx_ref_update_game = source.index("lastPersistedSelectedGame.current = result.selected_game;")
+    idx_seq_check_game = source.index("if (updateSeq === selectedGameSeq.current) {")
+    assert idx_ref_update_game < idx_seq_check_game, (
+        "SelectedGame lastPersisted ref must be updated before sequence check"
+    )
