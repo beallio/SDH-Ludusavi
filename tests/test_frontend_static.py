@@ -1739,12 +1739,14 @@ def test_frontend_settings_subscribe_queue_invokes_immediately() -> None:
 
     source = FRONTEND.read_text(encoding="utf-8")
 
-    # Assert that subscribeQueue immediately invokes the listener callback
+    # Assert that subscribeQueue immediately invokes the listener callback, protected by try-catch
     assert (
         re.search(
             r"function\s+subscribeQueue\s*\(\s*listener[\s\S]*?\)\s*\{[\s\S]*?"
             r"queueListeners\.add\(\s*listener\s*\)\s*;[\s\S]*?"
-            r"listener\(\s*settingsProcessing\s*\|\|\s*settingsQueue\.length\s*>\s*0\s*\)\s*;",
+            r"try\s*\{[\s\S]*?"
+            r"listener\(\s*settingsProcessing\s*\|\|\s*settingsQueue\.length\s*>\s*0\s*\)\s*;[\s\S]*?"
+            r"\}\s*catch\s*\(\s*err\s*\)\s*\{",
             source,
         )
         is not None

@@ -872,7 +872,11 @@ const queueListeners = new Set<(busy: boolean) => void>();
 
 function subscribeQueue(listener: (busy: boolean) => void) {
   queueListeners.add(listener);
-  listener(settingsProcessing || settingsQueue.length > 0);
+  try {
+    listener(settingsProcessing || settingsQueue.length > 0);
+  } catch (err) {
+    log("error", `Initial queue listener call failed: ${err}`);
+  }
   return () => {
     queueListeners.delete(listener);
   };
