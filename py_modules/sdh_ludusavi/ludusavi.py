@@ -307,7 +307,7 @@ class PyludusaviAdapter:
         """
         try:
             config_path_str = self._config_path()
-            config_path = Path(config_path_str)
+            config_path = Path(config_path_str).resolve()
             config_stat = config_path.stat()
             mtimes = [config_stat.st_mtime_ns]
         except (OSError, RuntimeError, LudusaviError):

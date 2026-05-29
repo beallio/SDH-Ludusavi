@@ -218,10 +218,54 @@ def test_get_config_mtime_ns_stat_syscall_count(tmp_path: Path) -> None:
     with patch.object(Path, "stat", mock_stat):
         adapter.get_config_mtime_ns()
 
-    # The stat call count should be exactly 3 (1 for config.yaml, 1 for cache.yaml, 1 for manifest.yaml)
-    assert len(stat_calls) == 3
-    # Check that each file was stat'ed exactly once
+    # Check that each sibling file was stat'ed exactly once (Path.resolve may also stat config_file)
     paths_stated = [str(p) for p in stat_calls]
-    assert paths_stated.count(str(config_file)) == 1
     assert paths_stated.count(str(cache_file)) == 1
     assert paths_stated.count(str(manifest_file)) == 1
+
+
+def test_get_config_mtime_ns_resolves_symlinks(tmp_path: Path) -> None:
+    # Target directory where the real config and sibling files reside
+    real_dir = tmp_path / "real-config"
+    real_dir.mkdir()
+    config_file = real_dir / "config.yaml"
+    config_file.write_text("settings")
+    cache_file = real_dir / "cache.yaml"
+    cache_file.write_text("cache")
+    manifest_file = real_dir / "manifest.yaml"
+    manifest_file.write_text("manifest")
+
+    # Another directory containing a symlink to the real config file
+    symlink_dir = tmp_path / "symlink-dir"
+    symlink_dir.mkdir()
+    symlink_file = symlink_dir / "config.yaml"
+
+    # Create the symlink
+    symlink_file.symlink_to(config_file)
+
+    mock_client = MagicMock()
+    mock_client.config_path.return_value = str(symlink_file)
+
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    adapter._client = mock_client
+    adapter._cached_config_path = None
+
+    # Retrieve mtime hash
+    config_mtime = adapter.get_config_mtime_ns()
+
+    # The expected hash is computed using real files because the symlink is resolved
+    import hashlib
+
+    mtimes = [
+        config_file.stat().st_mtime_ns,
+        cache_file.stat().st_mtime_ns,
+        manifest_file.stat().st_mtime_ns,
+    ]
+    mtimes.sort()
+    expected_hash_str = ",".join(str(m) for m in mtimes)
+    expected_hash = int.from_bytes(
+        hashlib.sha256(expected_hash_str.encode("utf-8")).digest()[:8],
+        byteorder="big",
+        signed=True,
+    )
+    assert config_mtime == expected_hash
