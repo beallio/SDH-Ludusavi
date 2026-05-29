@@ -1171,16 +1171,22 @@ function Content() {
     try {
       const installedAppIds = await getInstalledAppIdsString();
       const result = await refreshGamesCall(true, installedAppIds);
-      if (applyRefreshResult(result)) {
-        ludusaviStore.setInstalledAppIds(installedAppIds);
-        setOperation(await getOperationStatus());
-        setLogs(await getRecentLogs());
-        notify(ludusaviStore, "refresh_status", "SDH-Ludusavi", "Ludusavi game status refreshed", <IoMdRefresh />);
+      const operationStatus = await getOperationStatus();
+      const recentLogs = await getRecentLogs();
+      if (isMounted.current) {
+        if (applyRefreshResult(result)) {
+          ludusaviStore.setInstalledAppIds(installedAppIds);
+          setOperation(operationStatus);
+          setLogs(recentLogs);
+          notify(ludusaviStore, "refresh_status", "SDH-Ludusavi", "Ludusavi game status refreshed", <IoMdRefresh />);
+        }
       }
     } catch (error) {
       log("error", `Manual refresh failed: ${error}`);
     } finally {
-      setBusyLabel(null);
+      if (isMounted.current) {
+        setBusyLabel(null);
+      }
     }
   };
 
@@ -1200,7 +1206,9 @@ function Content() {
     try {
       log("debug", `Fetching plugin logs (cached=${logs.length})`, "logs");
       const currentLogs = await getRecentLogs();
-      setLogs(currentLogs);
+      if (isMounted.current) {
+        setLogs(currentLogs);
+      }
       showModal(<LogModal logs={currentLogs} />);
     } catch (error) {
       log("error", `Failed to fetch plugin logs: ${error}`);
@@ -1224,11 +1232,15 @@ function Content() {
       applySettings(result);
     } catch (error) {
       log("error", `Failed to toggle auto-sync: ${error}`);
-      // Rollback
-      ludusaviStore.setAutoSyncEnabled(previous);
+      // Rollback only if the store state still matches the optimistic value set at the start
+      if (ludusaviStore.getSnapshot().settings?.auto_sync_enabled === enabled) {
+        ludusaviStore.setAutoSyncEnabled(previous);
+      }
       notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
-      setBusyLabel(null);
+      if (isMounted.current) {
+        setBusyLabel(null);
+      }
     }
   };
 
@@ -1247,7 +1259,11 @@ function Content() {
       applySettings(result);
     } catch (error) {
       log("error", `Failed to update notification settings: ${error}`);
-      ludusaviStore.setNotificationSettings(previous);
+      // Rollback only if the store state still matches the optimistic value we set
+      const currentNotifications = ludusaviStore.getSnapshot().settings?.notifications;
+      if (currentNotifications && currentNotifications[key] === enabled) {
+        ludusaviStore.setNotificationSettings(previous);
+      }
       notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
       if (isMounted.current) {
@@ -1277,8 +1293,11 @@ function Content() {
       if (isRpcStatus(result)) {
         throw new Error(result.message || result.status);
       }
-      applySettings(result);
-      ludusaviStore.setSelectedGame(result.selected_game);
+      // Guard against out-of-order resolution: only apply settings and set selected game if the store's current selected game still matches the value of the active invocation
+      if (ludusaviStore.getSnapshot().selectedGame === value) {
+        applySettings(result);
+        ludusaviStore.setSelectedGame(result.selected_game);
+      }
     } catch (error) {
       log("error", `Failed to persist selected game: ${error}`);
       // Rollback only if the selected game in the store is still the optimistic value we set
@@ -1311,9 +1330,13 @@ function Content() {
       const category = result.status === "failed" ? "failures_errors" : "manual_operations";
       notify(ludusaviStore, category, `SDH-Ludusavi ${label}`, summarizeOperationResult(result, label), resultIcon);
       const refreshed = await refreshGamesCall(false);
-      applyRefreshResult(refreshed);
-      setOperation(await getOperationStatus());
-      setLogs(await getRecentLogs());
+      const operationStatus = await getOperationStatus();
+      const recentLogs = await getRecentLogs();
+      if (isMounted.current) {
+        applyRefreshResult(refreshed);
+        setOperation(operationStatus);
+        setLogs(recentLogs);
+      }
     } catch (error) {
       log("error", `Force ${label} failed: ${error}`, label, selectedGame);
       notify(ludusaviStore, "failures_errors", `SDH-Ludusavi ${label} failed`, error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
