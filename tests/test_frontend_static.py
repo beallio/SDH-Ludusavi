@@ -1749,3 +1749,40 @@ def test_frontend_settings_subscribe_queue_invokes_immediately() -> None:
         )
         is not None
     )
+
+
+def test_frontend_selected_game_sync_effect() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that there is a useEffect syncing lastQueuedSelectedGame with selectedGame
+    assert (
+        re.search(
+            r"useEffect\(\s*\(\s*\)\s*=>\s*\{\s*"
+            r"lastQueuedSelectedGame\s*=\s*selectedGame\s*;\s*"
+            r"\}\s*,\s*\[\s*selectedGame\s*\]\s*\)\s*;",
+            source,
+        )
+        is not None
+    )
+
+
+def test_frontend_notify_queue_listeners_catches_exceptions() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that notifyQueueListeners wraps the listener callback in a try-catch block
+    assert (
+        re.search(
+            r"function\s+notifyQueueListeners\(\s*\)\s*\{[\s\S]*?"
+            r"queueListeners\.forEach\(\s*\(\s*listener\s*\)\s*=>\s*\{[\s\S]*?"
+            r"try\s*\{[\s\S]*?"
+            r"listener\(\s*busy\s*\)\s*;[\s\S]*?"
+            r"\}\s*catch\s*\(\s*err\s*\)\s*\{[\s\S]*?"
+            r"log\([\s\S]*?Queue listener notification failed",
+            source,
+        )
+        is not None
+    )

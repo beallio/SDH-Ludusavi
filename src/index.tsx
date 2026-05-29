@@ -880,7 +880,13 @@ function subscribeQueue(listener: (busy: boolean) => void) {
 
 function notifyQueueListeners() {
   const busy = settingsProcessing || settingsQueue.length > 0;
-  queueListeners.forEach((listener) => listener(busy));
+  queueListeners.forEach((listener) => {
+    try {
+      listener(busy);
+    } catch (err) {
+      log("error", `Queue listener notification failed: ${err}`);
+    }
+  });
 }
 
 async function processSettingsQueue() {
@@ -1031,6 +1037,10 @@ function Content() {
       isMounted.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    lastQueuedSelectedGame = selectedGame;
+  }, [selectedGame]);
 
   useEffect(() => {
     if (isQuickAccessVisible && !wasQuickAccessVisible.current) {
