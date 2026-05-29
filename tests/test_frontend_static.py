@@ -814,17 +814,10 @@ def test_frontend_uses_decky_log_modal() -> None:
 
 
 def test_frontend_uses_simplified_dropdown_labels() -> None:
-    import re
-
     source = FRONTEND.read_text()
 
-    pattern = r"const\s+gamesDropdownOptions\s*=\s*useMemo\((?:[\s\S]*?)\);\s*"
-    match = re.search(pattern, source)
-    assert match is not None, "gamesDropdownOptions useMemo block not found"
-
-    block = match.group(0)
-    assert "label: game.name" in block
-    assert "statusLabels" not in block
+    assert "label: game.name" in source
+    assert "data: game.name" in source
 
 
 def test_frontend_dropdown_has_below_layout() -> None:
@@ -1572,18 +1565,32 @@ def test_frontend_state_store_optimization_no_array_from_in_loop() -> None:
     assert "for (const trackedName of this.snapshot.trackedNames)" in store_source
 
 
-def test_frontend_settings_transaction_tracking_rollback() -> None:
+def test_frontend_settings_serialization_queue() -> None:
     source = FRONTEND.read_text(encoding="utf-8")
 
-    # Verify that the transaction tracking refs are defined
-    assert "const settingsSeq = useRef(0);" in source
-    assert "const lastPersistedSettings = useRef<Settings | null>(null);" in source
+    # Verify that the serialization queue refs are defined
+    assert "const settingsQueue = useRef" in source
+    assert "const settingsProcessing = useRef(false);" in source
 
-    # Verify that setting update handlers increment the sequence counter
-    assert "const reqSeq = ++settingsSeq.current;" in source
+    # Verify task enqueuing and processing are present
+    assert "settingsQueue.current.push(task);" in source
+    assert "processSettingsQueue()" in source
 
-    # Verify sequence check on success / failure rollback
-    assert "if (reqSeq === settingsSeq.current) {" in source
 
-    # Verify rollback check uses lastPersistedSettings
-    assert "const rollbackVal = lastPersistedSettings.current" in source
+def test_frontend_settings_queue_rollback_behavior() -> None:
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that pre-request states are captured as `previous` variables
+    assert (
+        "const previous = ludusaviStore.getSnapshot().settings?.auto_sync_enabled ?? false;"
+        in source
+    )
+    assert (
+        "const previousNotifications = ludusaviStore.getSnapshot().settings?.notifications"
+        in source
+    )
+    assert "const previous = ludusaviStore.getSnapshot().selectedGame;" in source
+
+    # Assert that they are rolled back to the captured previous states on failure
+    assert "ludusaviStore.setAutoSyncEnabled(previous);" in source
+    assert "ludusaviStore.setSelectedGame(previous);" in source

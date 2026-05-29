@@ -874,9 +874,8 @@ function Content() {
   const wasQuickAccessVisible = useRef(false);
   const pendingCurrentGameSelection = useRef(false);
   const isMounted = useRef(true);
-  const settingsSeq = useRef(0);
-  const lastPersistedSeq = useRef(0);
-  const lastPersistedSettings = useRef<Settings | null>(null);
+  const settingsQueue = useRef<(() => Promise<void>)[]>([]);
+  const settingsProcessing = useRef(false);
   const settings = ludusaviState.settings ?? defaultSettings();
   const games = ludusaviState.games ?? EMPTY_GAMES;
   const gamesDropdownOptions = useMemo(() => {
@@ -907,22 +906,25 @@ function Content() {
   const [backgroundRefreshBusy, setBackgroundRefreshBusy] = useState(false);
   const ludusaviCommand = ludusaviState.ludusaviCommand;
 
-  const updatePersistedSettings = useCallback((nextSettings: Settings, reqSeq?: number) => {
-    if (reqSeq !== undefined) {
-      if (reqSeq > lastPersistedSeq.current) {
-        lastPersistedSeq.current = reqSeq;
-        lastPersistedSettings.current = nextSettings;
+  const processSettingsQueue = useCallback(async () => {
+    if (settingsProcessing.current) return;
+    settingsProcessing.current = true;
+    while (settingsQueue.current.length > 0) {
+      const task = settingsQueue.current.shift();
+      if (task) {
+        try {
+          await task();
+        } catch (err) {
+          log("error", `Settings update failed in queue: ${err}`);
+        }
       }
-    } else {
-      lastPersistedSettings.current = nextSettings;
-      lastPersistedSeq.current = settingsSeq.current;
     }
+    settingsProcessing.current = false;
   }, []);
 
   const applySettings = useCallback((nextSettings: Settings) => {
-    updatePersistedSettings(nextSettings);
     return ludusaviStore.applySettings(nextSettings);
-  }, [ludusaviStore, updatePersistedSettings]);
+  }, [ludusaviStore]);
 
   const syncSelectedGameCache = (nextSelectedGame: string) => {
     ludusaviStore.syncSelectedGameCache(nextSelectedGame);
@@ -1227,78 +1229,70 @@ function Content() {
     }
   };
 
-  const toggleAutoSync = useCallback(async (enabled: boolean) => {
-    log("info", `Toggling auto-sync to ${enabled}`);
-    const reqSeq = ++settingsSeq.current;
-    const previous = ludusaviStore.getSnapshot().settings?.auto_sync_enabled ?? false;
-    setBusyLabel("Updating settings");
-    
-    // Optimistic update
-    ludusaviStore.setAutoSyncEnabled(enabled);
+  const toggleAutoSync = useCallback((enabled: boolean) => {
+    const task = async () => {
+      log("info", `Executing toggle auto-sync to ${enabled}`);
+      const previous = ludusaviStore.getSnapshot().settings?.auto_sync_enabled ?? false;
+      setBusyLabel("Updating settings");
+      
+      // Optimistic update
+      ludusaviStore.setAutoSyncEnabled(enabled);
 
-    try {
-      const result = await setAutoSyncEnabled(enabled);
-      if (isRpcStatus(result)) {
-        throw new Error(result.message || result.status);
-      }
-      updatePersistedSettings(result, reqSeq);
-      if (reqSeq === settingsSeq.current) {
-        ludusaviStore.applySettings(result);
-      }
-    } catch (error) {
-      log("error", `Failed to toggle auto-sync: ${error}`);
-      if (reqSeq === settingsSeq.current) {
-        const rollbackVal = lastPersistedSettings.current
-          ? lastPersistedSettings.current.auto_sync_enabled
-          : previous;
-        ludusaviStore.setAutoSyncEnabled(rollbackVal);
-      }
-      notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
-    } finally {
-      if (isMounted.current) {
-        setBusyLabel(null);
-      }
-    }
-  }, [ludusaviStore, updatePersistedSettings]);
-
-  const toggleNotificationSetting = useCallback(async (key: keyof NotificationSettings, enabled: boolean) => {
-    log("info", `Toggling notification setting ${String(key)} to ${enabled}`);
-    const reqSeq = ++settingsSeq.current;
-    const previousNotifications = ludusaviStore.getSnapshot().settings?.notifications ?? defaultNotificationSettings;
-    const nextNotifications = { ...previousNotifications, [key]: enabled };
-    setBusyLabel("Updating settings");
-    ludusaviStore.setNotificationSettings(nextNotifications);
-
-    try {
-      const result = await setNotificationSettings(nextNotifications);
-      if (isRpcStatus(result)) {
-        throw new Error(result.message || result.status);
-      }
-      updatePersistedSettings(result, reqSeq);
-      if (reqSeq === settingsSeq.current) {
-        ludusaviStore.applySettings(result);
-      }
-    } catch (error) {
-      log("error", `Failed to update notification settings: ${error}`);
-      if (reqSeq === settingsSeq.current) {
-        const currentNotifications = ludusaviStore.getSnapshot().settings?.notifications;
-        if (currentNotifications) {
-          const rollbackVal = lastPersistedSettings.current
-            ? lastPersistedSettings.current.notifications[key]
-            : previousNotifications[key];
-          const rollbackNotifications = { ...currentNotifications, [key]: rollbackVal };
-          ludusaviStore.setNotificationSettings(rollbackNotifications);
+      try {
+        const result = await setAutoSyncEnabled(enabled);
+        if (isRpcStatus(result)) {
+          throw new Error(result.message || result.status);
+        }
+        applySettings(result);
+      } catch (error) {
+        log("error", `Failed to toggle auto-sync: ${error}`);
+        ludusaviStore.setAutoSyncEnabled(previous);
+        notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+      } finally {
+        if (isMounted.current) {
+          setBusyLabel(null);
         }
       }
-      notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
-    } finally {
-      if (isMounted.current) {
-        setBusyLabel(null);
-      }
-    }
-  }, [ludusaviStore, updatePersistedSettings]);
+    };
+    
+    settingsQueue.current.push(task);
+    void processSettingsQueue();
+  }, [ludusaviStore, applySettings, processSettingsQueue]);
 
-  const onGameChange = useCallback(async (data: SingleDropdownOption | string | null | undefined) => {
+  const toggleNotificationSetting = useCallback((key: keyof NotificationSettings, enabled: boolean) => {
+    const task = async () => {
+      log("info", `Executing toggle notification setting ${String(key)} to ${enabled}`);
+      const previousNotifications = ludusaviStore.getSnapshot().settings?.notifications ?? defaultNotificationSettings;
+      const nextNotifications = { ...previousNotifications, [key]: enabled };
+      setBusyLabel("Updating settings");
+      ludusaviStore.setNotificationSettings(nextNotifications);
+
+      try {
+        const result = await setNotificationSettings(nextNotifications);
+        if (isRpcStatus(result)) {
+          throw new Error(result.message || result.status);
+        }
+        applySettings(result);
+      } catch (error) {
+        log("error", `Failed to update notification settings: ${error}`);
+        const currentNotifications = ludusaviStore.getSnapshot().settings?.notifications;
+        if (currentNotifications) {
+          const rollbackNotifications = { ...currentNotifications, [key]: previousNotifications[key] };
+          ludusaviStore.setNotificationSettings(rollbackNotifications);
+        }
+        notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+      } finally {
+        if (isMounted.current) {
+          setBusyLabel(null);
+        }
+      }
+    };
+    
+    settingsQueue.current.push(task);
+    void processSettingsQueue();
+  }, [ludusaviStore, applySettings, processSettingsQueue]);
+
+  const onGameChange = useCallback((data: SingleDropdownOption | string | null | undefined) => {
     const value = (typeof data === 'object' && data !== null) ? data.data : data;
     if (typeof value !== "string" || value.trim() === "") {
       log("warning", `onGameChange received invalid game selection value: ${String(value)}`);
@@ -1309,38 +1303,36 @@ function Content() {
       return;
     }
     log("info", `Selected game changed to ${value}`);
-    const reqSeq = ++settingsSeq.current;
-    const previous = currentSelectedGame;
-    setBusyLabel("Updating settings");
     
-    // Optimistic update
-    ludusaviStore.setSelectedGame(value);
+    const task = async () => {
+      log("info", `Executing selected game change to ${value}`);
+      const previous = ludusaviStore.getSnapshot().selectedGame;
+      setBusyLabel("Updating settings");
+      
+      // Optimistic update
+      ludusaviStore.setSelectedGame(value);
 
-    try {
-      const result = await setSelectedGameCall(value);
-      if (isRpcStatus(result)) {
-        throw new Error(result.message || result.status);
-      }
-      updatePersistedSettings(result, reqSeq);
-      if (reqSeq === settingsSeq.current) {
-        ludusaviStore.applySettings(result);
+      try {
+        const result = await setSelectedGameCall(value);
+        if (isRpcStatus(result)) {
+          throw new Error(result.message || result.status);
+        }
+        applySettings(result);
         ludusaviStore.setSelectedGame(result.selected_game);
+      } catch (error) {
+        log("error", `Failed to persist selected game: ${error}`);
+        ludusaviStore.setSelectedGame(previous);
+        notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+      } finally {
+        if (isMounted.current) {
+          setBusyLabel(null);
+        }
       }
-    } catch (error) {
-      log("error", `Failed to persist selected game: ${error}`);
-      if (reqSeq === settingsSeq.current) {
-        const rollbackVal = lastPersistedSettings.current
-          ? lastPersistedSettings.current.selected_game
-          : previous;
-        ludusaviStore.setSelectedGame(rollbackVal);
-      }
-      notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
-    } finally {
-      if (isMounted.current) {
-        setBusyLabel(null);
-      }
-    }
-  }, [ludusaviStore, updatePersistedSettings]);
+    };
+
+    settingsQueue.current.push(task);
+    void processSettingsQueue();
+  }, [ludusaviStore, applySettings, processSettingsQueue]);
 
   const runForceOperation = async (
     label: "Backup" | "Restore",
