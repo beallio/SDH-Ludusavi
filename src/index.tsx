@@ -948,7 +948,6 @@ dropdownStyleEl.textContent = `
     display: block !important;
   }
 `;
-document.head.appendChild(dropdownStyleEl);
 
 function Content() {
   const ludusaviState = useLudusaviState();
@@ -1057,9 +1056,15 @@ function Content() {
     isMounted.current = true;
     lastQueuedSelectedGame = null;
     log("info", "Plugin mounted, starting initial load");
+    if (!dropdownStyleEl.parentNode) {
+      document.head.appendChild(dropdownStyleEl);
+    }
     void loadInitial();
     return () => {
       isMounted.current = false;
+      if (dropdownStyleEl.parentNode) {
+        dropdownStyleEl.parentNode.removeChild(dropdownStyleEl);
+      }
     };
   }, []);
 
@@ -1338,10 +1343,10 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
-        if (result.auto_sync_enabled !== undefined) {
-          lastPersistedAutoSync = result.auto_sync_enabled;
-        }
         if (updateSeq === autoSyncSeq) {
+          if (result.auto_sync_enabled !== undefined) {
+            lastPersistedAutoSync = result.auto_sync_enabled;
+          }
           applySettings(result);
         }
       } catch (error) {
@@ -1379,10 +1384,10 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
-        if (result.notifications) {
-          lastPersistedNotifications = result.notifications;
-        }
         if (updateSeq === notificationSeq) {
+          if (result.notifications) {
+            lastPersistedNotifications = result.notifications;
+          }
           applySettings(result);
         }
       } catch (error) {
@@ -1429,10 +1434,10 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
-        if (result.selected_game !== undefined) {
-          lastPersistedSelectedGame = result.selected_game;
-        }
         if (updateSeq === selectedGameSeq) {
+          if (result.selected_game !== undefined) {
+            lastPersistedSelectedGame = result.selected_game;
+          }
           applySettings(result);
           ludusaviStore.setSelectedGame(result.selected_game);
         }
@@ -2239,10 +2244,6 @@ export default definePlugin(() => {
       clearAutoSyncStatusSyncTimeout();
       clearAutoSyncStatusShowTimeout();
       destroyAutoSyncStatusBrowserView();
-
-      if (dropdownStyleEl.parentNode) {
-        dropdownStyleEl.parentNode.removeChild(dropdownStyleEl);
-      }
 
       // Reset settings queue and tracking variables
       settingsQueue.length = 0;
