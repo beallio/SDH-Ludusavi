@@ -1250,7 +1250,9 @@ function Content() {
       ludusaviStore.setNotificationSettings(previous);
       notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
-      setBusyLabel(null);
+      if (isMounted.current) {
+        setBusyLabel(null);
+      }
     }
   };
 
@@ -1258,6 +1260,9 @@ function Content() {
     const value = (typeof data === 'object' && data !== null) ? data.data : data;
     if (typeof value !== "string" || value.trim() === "") {
       log("warning", `onGameChange received invalid game selection value: ${String(value)}`);
+      return;
+    }
+    if (value === selectedGame) {
       return;
     }
     log("info", `Selected game changed to ${value}`);
@@ -1276,11 +1281,15 @@ function Content() {
       ludusaviStore.setSelectedGame(result.selected_game);
     } catch (error) {
       log("error", `Failed to persist selected game: ${error}`);
-      // Rollback
-      ludusaviStore.setSelectedGame(previous);
+      // Rollback only if the selected game in the store is still the optimistic value we set
+      if (ludusaviStore.getSnapshot().selectedGame === value) {
+        ludusaviStore.setSelectedGame(previous);
+      }
       notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
-      setBusyLabel(null);
+      if (isMounted.current) {
+        setBusyLabel(null);
+      }
     }
   }, [selectedGame, ludusaviStore, applySettings]);
 
@@ -1309,7 +1318,9 @@ function Content() {
       log("error", `Force ${label} failed: ${error}`, label, selectedGame);
       notify(ludusaviStore, "failures_errors", `SDH-Ludusavi ${label} failed`, error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
     } finally {
-      setBusyLabel(null);
+      if (isMounted.current) {
+        setBusyLabel(null);
+      }
     }
   };
 
