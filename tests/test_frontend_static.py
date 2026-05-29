@@ -1659,11 +1659,13 @@ def test_frontend_settings_intermediate_success_updates_last_persisted() -> None
 
     source = FRONTEND.read_text(encoding="utf-8")
 
-    # Assert that lastPersisted refs are updated only when sequence numbers match.
+    # Assert that lastPersisted refs are updated immediately on RPC success,
+    # before checking sequence numbers.
     assert (
         re.search(
-            r"if\s*\(\s*updateSeq\s*===\s*autoSyncSeq\s*\)\s*\{[\s\S]*?"
-            r"lastPersistedAutoSync\s*=\s*result\.auto_sync_enabled",
+            r"try\s*\{\s*const\s+result\s*=\s*await\s+setAutoSyncEnabled\([\s\S]*?"
+            r"lastPersistedAutoSync\s*=\s*result\.auto_sync_enabled[\s\S]*?"
+            r"if\s*\(\s*updateSeq\s*===\s*autoSyncSeq\s*\)",
             source,
         )
         is not None
@@ -1671,8 +1673,9 @@ def test_frontend_settings_intermediate_success_updates_last_persisted() -> None
 
     assert (
         re.search(
-            r"if\s*\(\s*updateSeq\s*===\s*notificationSeq\s*\)\s*\{[\s\S]*?"
-            r"lastPersistedNotifications\s*=\s*result\.notifications",
+            r"try\s*\{\s*const\s+result\s*=\s*await\s+setNotificationSettings\([\s\S]*?"
+            r"lastPersistedNotifications\s*=\s*result\.notifications[\s\S]*?"
+            r"if\s*\(\s*updateSeq\s*===\s*notificationSeq\s*\)",
             source,
         )
         is not None
@@ -1680,8 +1683,9 @@ def test_frontend_settings_intermediate_success_updates_last_persisted() -> None
 
     assert (
         re.search(
-            r"if\s*\(\s*updateSeq\s*===\s*selectedGameSeq\s*\)\s*\{[\s\S]*?"
-            r"lastPersistedSelectedGame\s*=\s*result\.selected_game",
+            r"try\s*\{\s*const\s+result\s*=\s*await\s+setSelectedGameCall\([\s\S]*?"
+            r"lastPersistedSelectedGame\s*=\s*result\.selected_game[\s\S]*?"
+            r"if\s*\(\s*updateSeq\s*===\s*selectedGameSeq\s*\)",
             source,
         )
         is not None

@@ -1343,10 +1343,10 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
+        if (isMounted.current && result.auto_sync_enabled !== undefined) {
+          lastPersistedAutoSync = result.auto_sync_enabled;
+        }
         if (updateSeq === autoSyncSeq) {
-          if (result.auto_sync_enabled !== undefined) {
-            lastPersistedAutoSync = result.auto_sync_enabled;
-          }
           applySettings(result);
         }
       } catch (error) {
@@ -1384,10 +1384,10 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
+        if (isMounted.current && result.notifications) {
+          lastPersistedNotifications = result.notifications;
+        }
         if (updateSeq === notificationSeq) {
-          if (result.notifications) {
-            lastPersistedNotifications = result.notifications;
-          }
           applySettings(result);
         }
       } catch (error) {
@@ -1434,10 +1434,10 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
+        if (isMounted.current && result.selected_game !== undefined) {
+          lastPersistedSelectedGame = result.selected_game;
+        }
         if (updateSeq === selectedGameSeq) {
-          if (result.selected_game !== undefined) {
-            lastPersistedSelectedGame = result.selected_game;
-          }
           applySettings(result);
           ludusaviStore.setSelectedGame(result.selected_game);
         }
