@@ -1827,3 +1827,34 @@ def test_frontend_settings_failure_notifications_guarded_by_sequence() -> None:
         )
         is not None
     )
+
+
+def test_frontend_dropdown_truncation_styling() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that DropdownItem is wrapped inside a div with className sdh-ludusavi-game-dropdown
+    assert (
+        re.search(
+            r'className="sdh-ludusavi-game-dropdown"[\s\S]*?<DropdownItem',
+            source,
+        )
+        is not None
+    )
+
+    # Assert that style tag containing sdh-ludusavi-game-dropdown override rules is defined
+    assert (
+        re.search(
+            r"\.sdh-ludusavi-game-dropdown\s+button\b[\s\S]*?max-width:\s*100%\s*!important\s*;[\s\S]*?width:\s*100%\s*!important\s*;",
+            source,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r"text-overflow:\s*ellipsis\s*!important\s*;[\s\S]*?white-space:\s*nowrap\s*!important\s*;",
+            source,
+        )
+        is not None
+    )

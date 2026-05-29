@@ -1468,7 +1468,25 @@ function Content() {
   };
 
   return (
-    <div ref={qamContentRef}>
+    <div ref={qamContentRef} className="sdh-ludusavi-qam-container">
+      <style>{`
+        .sdh-ludusavi-game-dropdown button,
+        .sdh-ludusavi-game-dropdown [class*="DropdownButton"],
+        .sdh-ludusavi-game-dropdown [class*="dropdown_"] {
+          max-width: 100% !important;
+          width: 100% !important;
+        }
+        .sdh-ludusavi-game-dropdown button > div,
+        .sdh-ludusavi-game-dropdown button span,
+        .sdh-ludusavi-game-dropdown [class*="DropdownButton"] > div,
+        .sdh-ludusavi-game-dropdown [class*="DropdownButton"] span {
+          overflow: hidden !important;
+          text-overflow: ellipsis !important;
+          white-space: nowrap !important;
+          max-width: 100% !important;
+          display: block !important;
+        }
+      `}</style>
 
       <PanelSection title="GLOBAL">
         <PanelSectionRow>
@@ -1497,17 +1515,19 @@ function Content() {
 
       <PanelSection title="GAME">
         <PanelSectionRow>
-          <DropdownItem
-            layout="below"
-            menuLabel="Select Game"
-            highlightOnFocus={true}
-            focusable={true}
-            bottomSeparator="none"
-            disabled={isBusy}
-            rgOptions={gamesDropdownOptions}
-            selectedOption={selectedGame}
-            onChange={onGameChange}
-          />
+          <div className="sdh-ludusavi-game-dropdown" style={{ width: "100%" }}>
+            <DropdownItem
+              layout="below"
+              menuLabel="Select Game"
+              highlightOnFocus={true}
+              focusable={true}
+              bottomSeparator="none"
+              disabled={isBusy}
+              rgOptions={gamesDropdownOptions}
+              selectedOption={selectedGame}
+              onChange={onGameChange}
+            />
+          </div>
         </PanelSectionRow>
 
         <PanelSectionRow>
