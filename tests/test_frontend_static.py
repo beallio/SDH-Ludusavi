@@ -817,15 +817,18 @@ def test_frontend_uses_simplified_dropdown_labels() -> None:
     source = FRONTEND.read_text()
 
     assert "label: game.name" in source
-    assert "statusLabels" not in source.split("rgOptions")[1].split("})")[0]
+    assert "gamesDropdownOptions = useMemo" in source
+    options_block = source.split("gamesDropdownOptions = useMemo")[1].split("}, [games]")[0]
+    assert "statusLabels" not in options_block
 
 
 def test_frontend_dropdown_has_below_layout() -> None:
+    import re
+
     source = FRONTEND.read_text()
 
-    assert "<DropdownItem" in source
-    dropdown_item_block = source.split("<DropdownItem")[1].split("/>")[0]
-    assert 'layout="below"' in dropdown_item_block
+    pattern = r"<DropdownItem[^>]*\blayout=(['\"])below\1"
+    assert re.search(pattern, source) is not None
 
 
 def test_frontend_includes_verbose_logging() -> None:

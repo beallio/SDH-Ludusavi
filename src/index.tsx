@@ -872,6 +872,12 @@ function Content() {
   const isMounted = useRef(true);
   const settings = ludusaviState.settings ?? defaultSettings();
   const games = ludusaviState.games ?? [];
+  const gamesDropdownOptions = useMemo(() => {
+    return games.map((game) => ({
+      label: game.name,
+      data: game.name
+    }));
+  }, [games]);
   const gameAliases = ludusaviState.gameAliases;
   const gameHistory = ludusaviState.gameHistory;
   const selectedGame = ludusaviState.selectedGame;
@@ -1337,10 +1343,7 @@ function Content() {
             focusable={true}
             bottomSeparator="none"
             disabled={isBusy}
-            rgOptions={games.map((game) => ({
-              label: game.name,
-              data: game.name
-            }))}
+            rgOptions={gamesDropdownOptions}
             selectedOption={selectedGame}
             onChange={(data: any) => void onGameChange(data)}
           />
