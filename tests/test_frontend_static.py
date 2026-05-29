@@ -1580,20 +1580,28 @@ def test_frontend_settings_serialization_queue() -> None:
 def test_frontend_settings_queue_rollback_behavior() -> None:
     source = FRONTEND.read_text(encoding="utf-8")
 
-    # Assert that pre-request states are captured as `previous` variables
-    assert (
-        "const previous = ludusaviStore.getSnapshot().settings?.auto_sync_enabled ?? false;"
-        in source
-    )
-    assert (
-        "const previousNotifications = ludusaviStore.getSnapshot().settings?.notifications"
-        in source
-    )
-    assert "const previous = ludusaviStore.getSnapshot().selectedGame;" in source
+    # Assert that sequence variables exist
+    assert "const autoSyncSeq = useRef(0);" in source
+    assert "const notificationSeq = useRef(0);" in source
+    assert "const selectedGameSeq = useRef(0);" in source
 
-    # Assert that they are rolled back to the captured previous states on failure
-    assert "ludusaviStore.setAutoSyncEnabled(previous);" in source
-    assert "ludusaviStore.setSelectedGame(previous);" in source
+    # Assert that lastPersisted refs exist
+    assert "const lastPersistedAutoSync = useRef<boolean | null>(null);" in source
+    assert "const lastPersistedNotifications = useRef<NotificationSettings | null>(null);" in source
+    assert "const lastPersistedSelectedGame = useRef<string | null>(null);" in source
+
+    # Assert sequence checks inside catch blocks
+    assert "if (updateSeq === autoSyncSeq.current) {" in source
+    assert "if (updateSeq === notificationSeq.current) {" in source
+    assert "if (updateSeq === selectedGameSeq.current) {" in source
+
+    # Assert rollback to fallbacks
+    assert "const fallback = lastPersistedAutoSync.current ?? false;" in source
+    assert (
+        "const fallback = lastPersistedNotifications.current ?? defaultNotificationSettings;"
+        in source
+    )
+    assert 'const fallback = lastPersistedSelectedGame.current ?? "";' in source
 
 
 def test_frontend_settings_consecutive_changes_not_ignored() -> None:
