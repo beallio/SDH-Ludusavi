@@ -875,6 +875,7 @@ function Content() {
   const pendingCurrentGameSelection = useRef(false);
   const isMounted = useRef(true);
   const settingsSeq = useRef(0);
+  const lastPersistedSeq = useRef(0);
   const lastPersistedSettings = useRef<Settings | null>(null);
   const settings = ludusaviState.settings ?? defaultSettings();
   const games = ludusaviState.games ?? EMPTY_GAMES;
@@ -906,14 +907,22 @@ function Content() {
   const [backgroundRefreshBusy, setBackgroundRefreshBusy] = useState(false);
   const ludusaviCommand = ludusaviState.ludusaviCommand;
 
-  const updatePersistedSettings = (nextSettings: Settings) => {
-    lastPersistedSettings.current = nextSettings;
-  };
+  const updatePersistedSettings = useCallback((nextSettings: Settings, reqSeq?: number) => {
+    if (reqSeq !== undefined) {
+      if (reqSeq > lastPersistedSeq.current) {
+        lastPersistedSeq.current = reqSeq;
+        lastPersistedSettings.current = nextSettings;
+      }
+    } else {
+      lastPersistedSettings.current = nextSettings;
+      lastPersistedSeq.current = settingsSeq.current;
+    }
+  }, []);
 
   const applySettings = useCallback((nextSettings: Settings) => {
     updatePersistedSettings(nextSettings);
     return ludusaviStore.applySettings(nextSettings);
-  }, [ludusaviStore]);
+  }, [ludusaviStore, updatePersistedSettings]);
 
   const syncSelectedGameCache = (nextSelectedGame: string) => {
     ludusaviStore.syncSelectedGameCache(nextSelectedGame);
@@ -1232,7 +1241,7 @@ function Content() {
       if (isRpcStatus(result)) {
         throw new Error(result.message || result.status);
       }
-      updatePersistedSettings(result);
+      updatePersistedSettings(result, reqSeq);
       if (reqSeq === settingsSeq.current) {
         ludusaviStore.applySettings(result);
       }
@@ -1250,7 +1259,7 @@ function Content() {
         setBusyLabel(null);
       }
     }
-  }, [ludusaviStore, applySettings]);
+  }, [ludusaviStore, updatePersistedSettings]);
 
   const toggleNotificationSetting = useCallback(async (key: keyof NotificationSettings, enabled: boolean) => {
     log("info", `Toggling notification setting ${String(key)} to ${enabled}`);
@@ -1265,7 +1274,7 @@ function Content() {
       if (isRpcStatus(result)) {
         throw new Error(result.message || result.status);
       }
-      updatePersistedSettings(result);
+      updatePersistedSettings(result, reqSeq);
       if (reqSeq === settingsSeq.current) {
         ludusaviStore.applySettings(result);
       }
@@ -1287,7 +1296,7 @@ function Content() {
         setBusyLabel(null);
       }
     }
-  }, [ludusaviStore, applySettings]);
+  }, [ludusaviStore, updatePersistedSettings]);
 
   const onGameChange = useCallback(async (data: SingleDropdownOption | string | null | undefined) => {
     const value = (typeof data === 'object' && data !== null) ? data.data : data;
@@ -1312,7 +1321,7 @@ function Content() {
       if (isRpcStatus(result)) {
         throw new Error(result.message || result.status);
       }
-      updatePersistedSettings(result);
+      updatePersistedSettings(result, reqSeq);
       if (reqSeq === settingsSeq.current) {
         ludusaviStore.applySettings(result);
         ludusaviStore.setSelectedGame(result.selected_game);
@@ -1331,7 +1340,7 @@ function Content() {
         setBusyLabel(null);
       }
     }
-  }, [ludusaviStore, applySettings]);
+  }, [ludusaviStore, updatePersistedSettings]);
 
   const runForceOperation = async (
     label: "Backup" | "Restore",
