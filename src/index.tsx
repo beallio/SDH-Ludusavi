@@ -17,7 +17,7 @@ import {
   toaster,
   useQuickAccessVisible
 } from "@decky/api";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FaSave, FaDownload, FaExclamationTriangle } from "react-icons/fa";
 import { IoMdRefresh } from "react-icons/io";
 
@@ -903,9 +903,9 @@ function Content() {
   const [backgroundRefreshBusy, setBackgroundRefreshBusy] = useState(false);
   const ludusaviCommand = ludusaviState.ludusaviCommand;
 
-  const applySettings = (nextSettings: Settings) => {
+  const applySettings = useCallback((nextSettings: Settings) => {
     return ludusaviStore.applySettings(nextSettings);
-  };
+  }, [ludusaviStore]);
 
   const syncSelectedGameCache = (nextSelectedGame: string) => {
     ludusaviStore.syncSelectedGameCache(nextSelectedGame);
@@ -922,7 +922,7 @@ function Content() {
   const isBusy = operation.is_running || busyLabel !== null || backgroundRefreshBusy;
 
   function selectCurrentSteamGameIfAvailable(
-    currentGames: GameStatus[],
+    currentGames: readonly GameStatus[],
     currentAliases: Record<string, string>
   ): boolean {
     const runningSession = getPreferredSteamGameSession();
@@ -974,7 +974,7 @@ function Content() {
       return;
     }
 
-    selectCurrentSteamGameIfAvailable(games as GameStatus[], gameAliases);
+    selectCurrentSteamGameIfAvailable(games, gameAliases);
     pendingCurrentGameSelection.current = false;
   }, [gameAliases, games, isQuickAccessVisible]);
 
@@ -1254,8 +1254,12 @@ function Content() {
     }
   };
 
-  const onGameChange = async (data: SingleDropdownOption | string) => {
-    const value = typeof data === 'object' ? data?.data : data;
+  const onGameChange = useCallback(async (data: SingleDropdownOption | string | null | undefined) => {
+    const value = (typeof data === 'object' && data !== null) ? data.data : data;
+    if (typeof value !== "string" || value.trim() === "") {
+      log("warning", `onGameChange received invalid game selection value: ${String(value)}`);
+      return;
+    }
     log("info", `Selected game changed to ${value}`);
     const previous = selectedGame;
     setBusyLabel("Updating settings");
@@ -1278,7 +1282,7 @@ function Content() {
     } finally {
       setBusyLabel(null);
     }
-  };
+  }, [selectedGame, ludusaviStore, applySettings]);
 
   const runForceOperation = async (
     label: "Backup" | "Restore",
@@ -1348,7 +1352,7 @@ function Content() {
             disabled={isBusy}
             rgOptions={gamesDropdownOptions}
             selectedOption={selectedGame}
-            onChange={(data: SingleDropdownOption) => void onGameChange(data)}
+            onChange={onGameChange}
           />
         </PanelSectionRow>
 

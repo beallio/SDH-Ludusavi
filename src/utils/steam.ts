@@ -334,7 +334,7 @@ export function findAliasTargetForSession(
 }
 
 export function findGameForRunningSession(
-  currentGames: GameStatus[],
+  currentGames: readonly GameStatus[],
   session: RunningSession,
   currentAliases: Record<string, string>
 ): { game: GameStatus; reason: "steam_id" | "name" | "alias" } | null {
@@ -376,7 +376,7 @@ export function logCurrentGameSelection(
   session: RunningSession,
   runningGame: GameStatus,
   reason: string,
-  currentGames: GameStatus[],
+  currentGames: readonly GameStatus[],
   currentAliases: Record<string, string>
 ) {
   log(
@@ -389,7 +389,7 @@ export function logCurrentGameSelection(
 
 export function logCurrentGameNoMatch(
   session: RunningSession | null,
-  currentGames: GameStatus[],
+  currentGames: readonly GameStatus[],
   currentAliases: Record<string, string>
 ) {
   log(

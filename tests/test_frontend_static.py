@@ -832,18 +832,16 @@ def test_frontend_dropdown_has_below_layout() -> None:
 
     source = FRONTEND.read_text()
 
-    matches = re.findall(r"<DropdownItem[^>]*>", source)
-    assert matches, "No DropdownItem components found in index.tsx"
+    match = re.search(r'<PanelSection\s+title=(["\'])GAME\1[\s\S]*?</PanelSection>', source)
+    assert match is not None, "GAME PanelSection not found in index.tsx"
+    game_section = match.group(0)
 
-    games_dropdown = None
-    for m in matches:
-        if re.search(r"menuLabel=(['\"])Select Game\1", m):
-            games_dropdown = m
-            break
-
-    assert games_dropdown is not None, "DropdownItem with menuLabel='Select Game' not found"
-    assert re.search(r"\blayout=(['\"])below\1", games_dropdown) is not None, (
-        "Games dropdown does not have layout='below'"
+    assert "<DropdownItem" in game_section, "DropdownItem not found in GAME section"
+    assert re.search(r"menuLabel=(['\"])Select Game\1", game_section) is not None, (
+        "DropdownItem with menuLabel='Select Game' not found in GAME section"
+    )
+    assert re.search(r"layout=(['\"])below\1", game_section) is not None, (
+        "Games dropdown does not have layout='below' in GAME section"
     )
 
 
@@ -1225,7 +1223,7 @@ def test_frontend_applies_current_game_before_saved_selected_game() -> None:
     assert "const pendingCurrentGameSelection = useRef(false);" in source
     assert "pendingCurrentGameSelection.current = true;" in source
     assert "pendingCurrentGameSelection.current = false;" in source
-    assert "void onGameChange(data)" in source
+    assert "onChange={onGameChange}" in source
     assert "const result = await setSelectedGameCall(value);" in source
 
 
