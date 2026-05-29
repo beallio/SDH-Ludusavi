@@ -866,6 +866,34 @@ function logRpcStatus(result: RpcStatus, operation: string) {
   log(level, message, operation);
 }
 
+function useSettingsQueue() {
+  const settingsQueue = useRef<(() => Promise<void>)[]>([]);
+  const settingsProcessing = useRef(false);
+
+  const processSettingsQueue = useCallback(async () => {
+    if (settingsProcessing.current) return;
+    settingsProcessing.current = true;
+    while (settingsQueue.current.length > 0) {
+      const task = settingsQueue.current.shift();
+      if (task) {
+        try {
+          await task();
+        } catch (err) {
+          log("error", `Settings update failed in queue: ${err}`);
+        }
+      }
+    }
+    settingsProcessing.current = false;
+  }, []);
+
+  const enqueueSettingsUpdate = useCallback((task: () => Promise<void>) => {
+    settingsQueue.current.push(task);
+    void processSettingsQueue();
+  }, [processSettingsQueue]);
+
+  return { enqueueSettingsUpdate };
+}
+
 function Content() {
   const ludusaviState = useLudusaviState();
   const ludusaviStore = useLudusaviStateStore();
@@ -874,8 +902,8 @@ function Content() {
   const wasQuickAccessVisible = useRef(false);
   const pendingCurrentGameSelection = useRef(false);
   const isMounted = useRef(true);
-  const settingsQueue = useRef<(() => Promise<void>)[]>([]);
-  const settingsProcessing = useRef(false);
+  const lastQueuedSelectedGame = useRef<string | null>(null);
+  const { enqueueSettingsUpdate } = useSettingsQueue();
   const settings = ludusaviState.settings ?? defaultSettings();
   const games = ludusaviState.games ?? EMPTY_GAMES;
   const gamesDropdownOptions = useMemo(() => {
@@ -905,22 +933,6 @@ function Content() {
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [backgroundRefreshBusy, setBackgroundRefreshBusy] = useState(false);
   const ludusaviCommand = ludusaviState.ludusaviCommand;
-
-  const processSettingsQueue = useCallback(async () => {
-    if (settingsProcessing.current) return;
-    settingsProcessing.current = true;
-    while (settingsQueue.current.length > 0) {
-      const task = settingsQueue.current.shift();
-      if (task) {
-        try {
-          await task();
-        } catch (err) {
-          log("error", `Settings update failed in queue: ${err}`);
-        }
-      }
-    }
-    settingsProcessing.current = false;
-  }, []);
 
   const applySettings = useCallback((nextSettings: Settings) => {
     return ludusaviStore.applySettings(nextSettings);
@@ -1230,13 +1242,17 @@ function Content() {
   };
 
   const toggleAutoSync = useCallback((enabled: boolean) => {
-    const task = async () => {
-      log("info", `Executing toggle auto-sync to ${enabled}`);
-      const previous = ludusaviStore.getSnapshot().settings?.auto_sync_enabled ?? false;
+    const previous = ludusaviStore.getSnapshot().settings?.auto_sync_enabled ?? false;
+    ludusaviStore.setAutoSyncEnabled(enabled);
+    if (isMounted.current) {
       setBusyLabel("Updating settings");
-      
-      // Optimistic update
-      ludusaviStore.setAutoSyncEnabled(enabled);
+    }
+
+    enqueueSettingsUpdate(async () => {
+      log("info", `Executing toggle auto-sync to ${enabled}`);
+      if (isMounted.current) {
+        setBusyLabel("Updating settings");
+      }
 
       try {
         const result = await setAutoSyncEnabled(enabled);
@@ -1253,19 +1269,22 @@ function Content() {
           setBusyLabel(null);
         }
       }
-    };
-    
-    settingsQueue.current.push(task);
-    void processSettingsQueue();
-  }, [ludusaviStore, applySettings, processSettingsQueue]);
+    });
+  }, [ludusaviStore, applySettings, enqueueSettingsUpdate]);
 
   const toggleNotificationSetting = useCallback((key: keyof NotificationSettings, enabled: boolean) => {
-    const task = async () => {
-      log("info", `Executing toggle notification setting ${String(key)} to ${enabled}`);
-      const previousNotifications = ludusaviStore.getSnapshot().settings?.notifications ?? defaultNotificationSettings;
-      const nextNotifications = { ...previousNotifications, [key]: enabled };
+    const previousNotifications = ludusaviStore.getSnapshot().settings?.notifications ?? defaultNotificationSettings;
+    const nextNotifications = { ...previousNotifications, [key]: enabled };
+    ludusaviStore.setNotificationSettings(nextNotifications);
+    if (isMounted.current) {
       setBusyLabel("Updating settings");
-      ludusaviStore.setNotificationSettings(nextNotifications);
+    }
+
+    enqueueSettingsUpdate(async () => {
+      log("info", `Executing toggle notification setting ${String(key)} to ${enabled}`);
+      if (isMounted.current) {
+        setBusyLabel("Updating settings");
+      }
 
       try {
         const result = await setNotificationSettings(nextNotifications);
@@ -1286,11 +1305,8 @@ function Content() {
           setBusyLabel(null);
         }
       }
-    };
-    
-    settingsQueue.current.push(task);
-    void processSettingsQueue();
-  }, [ludusaviStore, applySettings, processSettingsQueue]);
+    });
+  }, [ludusaviStore, applySettings, enqueueSettingsUpdate]);
 
   const onGameChange = useCallback((data: SingleDropdownOption | string | null | undefined) => {
     const value = (typeof data === 'object' && data !== null) ? data.data : data;
@@ -1298,19 +1314,23 @@ function Content() {
       log("warning", `onGameChange received invalid game selection value: ${String(value)}`);
       return;
     }
-    const currentSelectedGame = ludusaviStore.getSnapshot().selectedGame;
-    if (value === currentSelectedGame) {
+    const lastQueued = lastQueuedSelectedGame.current ?? ludusaviStore.getSnapshot().selectedGame;
+    if (value === lastQueued) {
       return;
     }
     log("info", `Selected game changed to ${value}`);
-    
-    const task = async () => {
-      log("info", `Executing selected game change to ${value}`);
-      const previous = ludusaviStore.getSnapshot().selectedGame;
+    const previous = ludusaviStore.getSnapshot().selectedGame;
+    lastQueuedSelectedGame.current = value;
+    ludusaviStore.setSelectedGame(value);
+    if (isMounted.current) {
       setBusyLabel("Updating settings");
-      
-      // Optimistic update
-      ludusaviStore.setSelectedGame(value);
+    }
+
+    enqueueSettingsUpdate(async () => {
+      log("info", `Executing selected game change to ${value}`);
+      if (isMounted.current) {
+        setBusyLabel("Updating settings");
+      }
 
       try {
         const result = await setSelectedGameCall(value);
@@ -1322,17 +1342,15 @@ function Content() {
       } catch (error) {
         log("error", `Failed to persist selected game: ${error}`);
         ludusaviStore.setSelectedGame(previous);
+        lastQueuedSelectedGame.current = previous;
         notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
       } finally {
         if (isMounted.current) {
           setBusyLabel(null);
         }
       }
-    };
-
-    settingsQueue.current.push(task);
-    void processSettingsQueue();
-  }, [ludusaviStore, applySettings, processSettingsQueue]);
+    });
+  }, [ludusaviStore, applySettings, enqueueSettingsUpdate]);
 
   const runForceOperation = async (
     label: "Backup" | "Restore",

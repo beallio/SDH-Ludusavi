@@ -1594,3 +1594,17 @@ def test_frontend_settings_queue_rollback_behavior() -> None:
     # Assert that they are rolled back to the captured previous states on failure
     assert "ludusaviStore.setAutoSyncEnabled(previous);" in source
     assert "ludusaviStore.setSelectedGame(previous);" in source
+
+
+def test_frontend_settings_consecutive_changes_not_ignored() -> None:
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that lastQueuedSelectedGame ref exists
+    assert "const lastQueuedSelectedGame = useRef<string | null>(null);" in source
+
+    # Assert that it is checked in onGameChange to prevent early return desync
+    assert (
+        "const lastQueued = lastQueuedSelectedGame.current ?? ludusaviStore.getSnapshot().selectedGame;"
+        in source
+    )
+    assert "if (value === lastQueued) {" in source
