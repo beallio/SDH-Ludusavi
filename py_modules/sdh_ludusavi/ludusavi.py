@@ -7,6 +7,7 @@ import hashlib
 import logging
 import os
 from pathlib import Path
+import stat
 import threading
 from typing import Any, cast
 
@@ -322,8 +323,9 @@ class PyludusaviAdapter:
         for filename in _MONITORED_CONFIG_FILES:
             sibling = config_dir / filename
             try:
-                if sibling.is_file():
-                    mtimes.append(sibling.stat().st_mtime_ns)
+                st = sibling.stat()
+                if stat.S_ISREG(st.st_mode):
+                    mtimes.append(st.st_mtime_ns)
             except OSError:
                 pass
 

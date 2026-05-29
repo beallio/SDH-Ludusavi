@@ -186,3 +186,42 @@ def test_composite_mtime_config_cache_manifest(tmp_path: Path) -> None:
     hash3 = adapter.get_config_mtime_ns()
     assert hash3 != hash2
     assert hash3 != hash1
+
+
+def test_get_config_mtime_ns_stat_syscall_count(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("backup:\n  path: /non/existent/path\n", encoding="utf-8")
+
+    # Create cache.yaml and manifest.yaml so they exist and are checked
+    cache_file = tmp_path / "cache.yaml"
+    cache_file.write_text("cache")
+    manifest_file = tmp_path / "manifest.yaml"
+    manifest_file.write_text("manifest")
+
+    mock_client = MagicMock()
+    mock_client.config_path.return_value = str(config_file)
+
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    adapter._client = mock_client
+    adapter._cached_config_path = None
+
+    # Patch Path.stat to count calls
+    original_stat = Path.stat
+    stat_calls = []
+
+    def mock_stat(self, *args, **kwargs):
+        stat_calls.append(self)
+        return original_stat(self, *args, **kwargs)
+
+    with patch.object(Path, "stat", mock_stat):
+        adapter.get_config_mtime_ns()
+
+    # The stat call count should be exactly 3 (1 for config.yaml, 1 for cache.yaml, 1 for manifest.yaml)
+    assert len(stat_calls) == 3
+    # Check that each file was stat'ed exactly once
+    paths_stated = [str(p) for p in stat_calls]
+    assert paths_stated.count(str(config_file)) == 1
+    assert paths_stated.count(str(cache_file)) == 1
+    assert paths_stated.count(str(manifest_file)) == 1
