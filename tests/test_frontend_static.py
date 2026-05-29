@@ -820,6 +820,14 @@ def test_frontend_uses_simplified_dropdown_labels() -> None:
     assert "statusLabels" not in source.split("rgOptions")[1].split("})")[0]
 
 
+def test_frontend_dropdown_has_below_layout() -> None:
+    source = FRONTEND.read_text()
+
+    assert "<DropdownItem" in source
+    dropdown_item_block = source.split("<DropdownItem")[1].split("/>")[0]
+    assert 'layout="below"' in dropdown_item_block
+
+
 def test_frontend_includes_verbose_logging() -> None:
     source = FRONTEND.read_text()
 

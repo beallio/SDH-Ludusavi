@@ -1331,6 +1331,7 @@ function Content() {
       <PanelSection title="GAME">
         <PanelSectionRow>
           <DropdownItem
+            layout="below"
             menuLabel="Select Game"
             highlightOnFocus={true}
             focusable={true}
