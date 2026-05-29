@@ -816,10 +816,12 @@ def test_frontend_uses_decky_log_modal() -> None:
 def test_frontend_uses_simplified_dropdown_labels() -> None:
     source = FRONTEND.read_text()
 
-    assert "label: game.name" in source
-    assert "gamesDropdownOptions = useMemo" in source
-    options_block = source.split("gamesDropdownOptions = useMemo")[1].split("}, [games]")[0]
-    assert "statusLabels" not in options_block
+    start_idx = source.find("gamesDropdownOptions")
+    assert start_idx != -1, "gamesDropdownOptions is not defined in the source"
+
+    block = source[start_idx : start_idx + 300]
+    assert "label: game.name" in block
+    assert "statusLabels" not in block
 
 
 def test_frontend_dropdown_has_below_layout() -> None:
@@ -827,8 +829,19 @@ def test_frontend_dropdown_has_below_layout() -> None:
 
     source = FRONTEND.read_text()
 
-    pattern = r"<DropdownItem[^>]*\blayout=(['\"])below\1"
-    assert re.search(pattern, source) is not None
+    matches = re.findall(r"<DropdownItem[^>]*>", source)
+    assert matches, "No DropdownItem components found in index.tsx"
+
+    games_dropdown = None
+    for m in matches:
+        if re.search(r"menuLabel=(['\"])Select Game\1", m):
+            games_dropdown = m
+            break
+
+    assert games_dropdown is not None, "DropdownItem with menuLabel='Select Game' not found"
+    assert re.search(r"\blayout=(['\"])below\1", games_dropdown) is not None, (
+        "Games dropdown does not have layout='below'"
+    )
 
 
 def test_frontend_includes_verbose_logging() -> None:

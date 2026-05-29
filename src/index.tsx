@@ -180,6 +180,8 @@ const backupGameOnExitCall = callable<[gameName: string, app_id?: string], RpcRe
 
 
 
+const EMPTY_GAMES: GameStatus[] = [];
+
 const statusLabels: Record<GameStatus["status"], string> = {
   configured: "Configured",
   has_backup: "Backup ready",
@@ -871,7 +873,7 @@ function Content() {
   const pendingCurrentGameSelection = useRef(false);
   const isMounted = useRef(true);
   const settings = ludusaviState.settings ?? defaultSettings();
-  const games = ludusaviState.games ?? [];
+  const games = ludusaviState.games ?? EMPTY_GAMES;
   const gamesDropdownOptions = useMemo(() => {
     return games.map((game) => ({
       label: game.name,
