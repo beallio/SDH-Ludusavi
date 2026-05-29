@@ -8,7 +8,8 @@ import {
   showModal,
   ToggleField,
   Spinner,
-  Router
+  Router,
+  SingleDropdownOption
 } from "@decky/ui";
 import {
   callable,
@@ -180,7 +181,7 @@ const backupGameOnExitCall = callable<[gameName: string, app_id?: string], RpcRe
 
 
 
-const EMPTY_GAMES: GameStatus[] = [];
+const EMPTY_GAMES: readonly GameStatus[] = Object.freeze([]);
 
 const statusLabels: Record<GameStatus["status"], string> = {
   configured: "Configured",
@@ -973,7 +974,7 @@ function Content() {
       return;
     }
 
-    selectCurrentSteamGameIfAvailable(games, gameAliases);
+    selectCurrentSteamGameIfAvailable(games as GameStatus[], gameAliases);
     pendingCurrentGameSelection.current = false;
   }, [gameAliases, games, isQuickAccessVisible]);
 
@@ -1253,7 +1254,7 @@ function Content() {
     }
   };
 
-  const onGameChange = async (data: any) => {
+  const onGameChange = async (data: SingleDropdownOption | string) => {
     const value = typeof data === 'object' ? data?.data : data;
     log("info", `Selected game changed to ${value}`);
     const previous = selectedGame;
@@ -1347,7 +1348,7 @@ function Content() {
             disabled={isBusy}
             rgOptions={gamesDropdownOptions}
             selectedOption={selectedGame}
-            onChange={(data: any) => void onGameChange(data)}
+            onChange={(data: SingleDropdownOption) => void onGameChange(data)}
           />
         </PanelSectionRow>
 

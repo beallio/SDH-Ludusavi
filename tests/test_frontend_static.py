@@ -814,12 +814,15 @@ def test_frontend_uses_decky_log_modal() -> None:
 
 
 def test_frontend_uses_simplified_dropdown_labels() -> None:
+    import re
+
     source = FRONTEND.read_text()
 
-    start_idx = source.find("gamesDropdownOptions")
-    assert start_idx != -1, "gamesDropdownOptions is not defined in the source"
+    pattern = r"const\s+gamesDropdownOptions\s*=\s*useMemo\((?:[\s\S]*?)\);\s*"
+    match = re.search(pattern, source)
+    assert match is not None, "gamesDropdownOptions useMemo block not found"
 
-    block = source[start_idx : start_idx + 300]
+    block = match.group(0)
     assert "label: game.name" in block
     assert "statusLabels" not in block
 
