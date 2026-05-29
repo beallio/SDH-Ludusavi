@@ -1303,23 +1303,19 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
-        if (isMounted.current) {
-          if (result.auto_sync_enabled !== undefined) {
-            lastPersistedAutoSync = result.auto_sync_enabled;
-          }
-          if (updateSeq === autoSyncSeq) {
-            applySettings(result);
-          }
+        if (result.auto_sync_enabled !== undefined) {
+          lastPersistedAutoSync = result.auto_sync_enabled;
+        }
+        if (updateSeq === autoSyncSeq) {
+          applySettings(result);
         }
       } catch (error) {
         log("error", `Failed to toggle auto-sync: ${error}`);
-        if (isMounted.current) {
-          if (updateSeq === autoSyncSeq) {
-            const fallback = lastPersistedAutoSync ?? false;
-            ludusaviStore.setAutoSyncEnabled(fallback);
-          }
-          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+        if (updateSeq === autoSyncSeq) {
+          const fallback = lastPersistedAutoSync ?? false;
+          ludusaviStore.setAutoSyncEnabled(fallback);
         }
+        notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
       } finally {
         if (isMounted.current) {
           setBusyLabel(null);
@@ -1348,23 +1344,19 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
-        if (isMounted.current) {
-          if (result.notifications) {
-            lastPersistedNotifications = result.notifications;
-          }
-          if (updateSeq === notificationSeq) {
-            applySettings(result);
-          }
+        if (result.notifications) {
+          lastPersistedNotifications = result.notifications;
+        }
+        if (updateSeq === notificationSeq) {
+          applySettings(result);
         }
       } catch (error) {
         log("error", `Failed to update notification settings: ${error}`);
-        if (isMounted.current) {
-          if (updateSeq === notificationSeq) {
-            const fallback = lastPersistedNotifications ?? defaultNotificationSettings;
-            ludusaviStore.setNotificationSettings(fallback);
-          }
-          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+        if (updateSeq === notificationSeq) {
+          const fallback = lastPersistedNotifications ?? defaultNotificationSettings;
+          ludusaviStore.setNotificationSettings(fallback);
         }
+        notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
       } finally {
         if (isMounted.current) {
           setBusyLabel(null);
@@ -1402,25 +1394,21 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
-        if (isMounted.current) {
-          if (result.selected_game !== undefined) {
-            lastPersistedSelectedGame = result.selected_game;
-          }
-          if (updateSeq === selectedGameSeq) {
-            applySettings(result);
-            ludusaviStore.setSelectedGame(result.selected_game);
-          }
+        if (result.selected_game !== undefined) {
+          lastPersistedSelectedGame = result.selected_game;
+        }
+        if (updateSeq === selectedGameSeq) {
+          applySettings(result);
+          ludusaviStore.setSelectedGame(result.selected_game);
         }
       } catch (error) {
         log("error", `Failed to persist selected game: ${error}`);
-        if (isMounted.current) {
-          if (updateSeq === selectedGameSeq) {
-            const fallback = lastPersistedSelectedGame ?? "";
-            ludusaviStore.setSelectedGame(fallback);
-            lastQueuedSelectedGame = fallback;
-          }
-          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+        if (updateSeq === selectedGameSeq) {
+          const fallback = lastPersistedSelectedGame ?? "";
+          ludusaviStore.setSelectedGame(fallback);
+          lastQueuedSelectedGame = fallback;
         }
+        notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
       } finally {
         if (isMounted.current) {
           setBusyLabel(null);
