@@ -868,10 +868,24 @@ function logRpcStatus(result: RpcStatus, operation: string) {
 
 const settingsQueue: (() => Promise<void>)[] = [];
 let settingsProcessing = false;
+const queueListeners = new Set<(busy: boolean) => void>();
+
+function subscribeQueue(listener: (busy: boolean) => void) {
+  queueListeners.add(listener);
+  return () => {
+    queueListeners.delete(listener);
+  };
+}
+
+function notifyQueueListeners() {
+  const busy = settingsProcessing || settingsQueue.length > 0;
+  queueListeners.forEach((listener) => listener(busy));
+}
 
 async function processSettingsQueue() {
   if (settingsProcessing) return;
   settingsProcessing = true;
+  notifyQueueListeners();
   while (settingsQueue.length > 0) {
     const task = settingsQueue.shift();
     if (task) {
@@ -881,14 +895,25 @@ async function processSettingsQueue() {
         log("error", `Settings update failed in queue: ${err}`);
       }
     }
+    notifyQueueListeners();
   }
   settingsProcessing = false;
+  notifyQueueListeners();
 }
 
 function enqueueSettingsUpdate(task: () => Promise<void>) {
   settingsQueue.push(task);
+  notifyQueueListeners();
   void processSettingsQueue();
 }
+
+let autoSyncSeq = 0;
+let notificationSeq = 0;
+let selectedGameSeq = 0;
+let lastPersistedAutoSync: boolean | null = null;
+let lastPersistedNotifications: NotificationSettings | null = null;
+let lastPersistedSelectedGame: string | null = null;
+let lastQueuedSelectedGame: string | null = null;
 
 function Content() {
   const ludusaviState = useLudusaviState();
@@ -898,13 +923,6 @@ function Content() {
   const wasQuickAccessVisible = useRef(false);
   const pendingCurrentGameSelection = useRef(false);
   const isMounted = useRef(true);
-  const lastQueuedSelectedGame = useRef<string | null>(null);
-  const autoSyncSeq = useRef(0);
-  const notificationSeq = useRef(0);
-  const selectedGameSeq = useRef(0);
-  const lastPersistedAutoSync = useRef<boolean | null>(null);
-  const lastPersistedNotifications = useRef<NotificationSettings | null>(null);
-  const lastPersistedSelectedGame = useRef<string | null>(null);
 
   const settings = ludusaviState.settings ?? defaultSettings();
   const games = ludusaviState.games ?? EMPTY_GAMES;
@@ -934,18 +952,27 @@ function Content() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [backgroundRefreshBusy, setBackgroundRefreshBusy] = useState(false);
+  const [queueBusy, setQueueBusy] = useState(settingsProcessing || settingsQueue.length > 0);
   const ludusaviCommand = ludusaviState.ludusaviCommand;
+
+  useEffect(() => {
+    return subscribeQueue((busy) => {
+      if (isMounted.current) {
+        setQueueBusy(busy);
+      }
+    });
+  }, []);
 
   const applySettings = useCallback((nextSettings: Settings) => {
     const normalized = ludusaviStore.applySettings(nextSettings);
     if (normalized.auto_sync_enabled !== undefined) {
-      lastPersistedAutoSync.current = normalized.auto_sync_enabled;
+      lastPersistedAutoSync = normalized.auto_sync_enabled;
     }
     if (normalized.notifications) {
-      lastPersistedNotifications.current = normalized.notifications;
+      lastPersistedNotifications = normalized.notifications;
     }
     if (normalized.selected_game !== undefined) {
-      lastPersistedSelectedGame.current = normalized.selected_game;
+      lastPersistedSelectedGame = normalized.selected_game;
     }
     return normalized;
   }, [ludusaviStore]);
@@ -962,7 +989,7 @@ function Content() {
     const history = gameHistory[selectedGame];
     return history?.last_operation ?? null;
   }, [gameHistory, selectedGame]);
-  const isBusy = operation.is_running || busyLabel !== null || backgroundRefreshBusy;
+  const isBusy = operation.is_running || busyLabel !== null || backgroundRefreshBusy || queueBusy;
 
   function selectCurrentSteamGameIfAvailable(
     currentGames: readonly GameStatus[],
@@ -1254,7 +1281,7 @@ function Content() {
   };
 
   const toggleAutoSync = useCallback((enabled: boolean) => {
-    const updateSeq = ++autoSyncSeq.current;
+    const updateSeq = ++autoSyncSeq;
     ludusaviStore.setAutoSyncEnabled(enabled);
     if (isMounted.current) {
       setBusyLabel("Updating settings");
@@ -1272,15 +1299,15 @@ function Content() {
           throw new Error(result.message || result.status);
         }
         if (result.auto_sync_enabled !== undefined) {
-          lastPersistedAutoSync.current = result.auto_sync_enabled;
+          lastPersistedAutoSync = result.auto_sync_enabled;
         }
-        if (updateSeq === autoSyncSeq.current) {
+        if (updateSeq === autoSyncSeq) {
           applySettings(result);
         }
       } catch (error) {
         log("error", `Failed to toggle auto-sync: ${error}`);
-        if (updateSeq === autoSyncSeq.current) {
-          const fallback = lastPersistedAutoSync.current ?? false;
+        if (updateSeq === autoSyncSeq) {
+          const fallback = lastPersistedAutoSync ?? false;
           ludusaviStore.setAutoSyncEnabled(fallback);
         }
         notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
@@ -1293,7 +1320,7 @@ function Content() {
   }, [ludusaviStore, applySettings]);
 
   const toggleNotificationSetting = useCallback((key: keyof NotificationSettings, enabled: boolean) => {
-    const updateSeq = ++notificationSeq.current;
+    const updateSeq = ++notificationSeq;
     const previousNotifications = ludusaviStore.getSnapshot().settings?.notifications ?? defaultNotificationSettings;
     const nextNotifications = { ...previousNotifications, [key]: enabled };
     ludusaviStore.setNotificationSettings(nextNotifications);
@@ -1313,15 +1340,15 @@ function Content() {
           throw new Error(result.message || result.status);
         }
         if (result.notifications) {
-          lastPersistedNotifications.current = result.notifications;
+          lastPersistedNotifications = result.notifications;
         }
-        if (updateSeq === notificationSeq.current) {
+        if (updateSeq === notificationSeq) {
           applySettings(result);
         }
       } catch (error) {
         log("error", `Failed to update notification settings: ${error}`);
-        if (updateSeq === notificationSeq.current) {
-          const fallback = lastPersistedNotifications.current ?? defaultNotificationSettings;
+        if (updateSeq === notificationSeq) {
+          const fallback = lastPersistedNotifications ?? defaultNotificationSettings;
           ludusaviStore.setNotificationSettings(fallback);
         }
         notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
@@ -1339,13 +1366,13 @@ function Content() {
       log("warning", `onGameChange received invalid game selection value: ${String(value)}`);
       return;
     }
-    const lastQueued = lastQueuedSelectedGame.current ?? ludusaviStore.getSnapshot().selectedGame;
+    const lastQueued = lastQueuedSelectedGame ?? ludusaviStore.getSnapshot().selectedGame;
     if (value === lastQueued) {
       return;
     }
     log("info", `Selected game changed to ${value}`);
-    const updateSeq = ++selectedGameSeq.current;
-    lastQueuedSelectedGame.current = value;
+    const updateSeq = ++selectedGameSeq;
+    lastQueuedSelectedGame = value;
     ludusaviStore.setSelectedGame(value);
     if (isMounted.current) {
       setBusyLabel("Updating settings");
@@ -1363,18 +1390,18 @@ function Content() {
           throw new Error(result.message || result.status);
         }
         if (result.selected_game !== undefined) {
-          lastPersistedSelectedGame.current = result.selected_game;
+          lastPersistedSelectedGame = result.selected_game;
         }
-        if (updateSeq === selectedGameSeq.current) {
+        if (updateSeq === selectedGameSeq) {
           applySettings(result);
           ludusaviStore.setSelectedGame(result.selected_game);
         }
       } catch (error) {
         log("error", `Failed to persist selected game: ${error}`);
-        if (updateSeq === selectedGameSeq.current) {
-          const fallback = lastPersistedSelectedGame.current ?? "";
+        if (updateSeq === selectedGameSeq) {
+          const fallback = lastPersistedSelectedGame ?? "";
           ludusaviStore.setSelectedGame(fallback);
-          lastQueuedSelectedGame.current = fallback;
+          lastQueuedSelectedGame = fallback;
         }
         notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
       } finally {

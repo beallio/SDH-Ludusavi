@@ -1577,80 +1577,116 @@ def test_frontend_settings_serialization_queue() -> None:
 
 
 def test_frontend_settings_queue_rollback_behavior() -> None:
+    import re
+
     source = FRONTEND.read_text(encoding="utf-8")
 
-    # Assert that sequence variables exist
-    assert "const autoSyncSeq = useRef(0);" in source
-    assert "const notificationSeq = useRef(0);" in source
-    assert "const selectedGameSeq = useRef(0);" in source
+    # Verify that sequence variables are declared (e.g. let autoSyncSeq = 0;)
+    assert re.search(r"let\s+autoSyncSeq\s*=\s*0\s*;", source) is not None
+    assert re.search(r"let\s+notificationSeq\s*=\s*0\s*;", source) is not None
+    assert re.search(r"let\s+selectedGameSeq\s*=\s*0\s*;", source) is not None
 
-    # Assert that lastPersisted refs exist
-    assert "const lastPersistedAutoSync = useRef<boolean | null>(null);" in source
-    assert "const lastPersistedNotifications = useRef<NotificationSettings | null>(null);" in source
-    assert "const lastPersistedSelectedGame = useRef<string | null>(null);" in source
+    # Verify that lastPersisted variables are declared
+    assert re.search(r"let\s+lastPersistedAutoSync[\s\S]*?=\s*null\s*;", source) is not None
+    assert re.search(r"let\s+lastPersistedNotifications[\s\S]*?=\s*null\s*;", source) is not None
+    assert re.search(r"let\s+lastPersistedSelectedGame[\s\S]*?=\s*null\s*;", source) is not None
 
     # Assert sequence checks inside catch blocks
-    assert "if (updateSeq === autoSyncSeq.current) {" in source
-    assert "if (updateSeq === notificationSeq.current) {" in source
-    assert "if (updateSeq === selectedGameSeq.current) {" in source
+    assert re.search(r"if\s*\(\s*updateSeq\s*===\s*autoSyncSeq\s*\)", source) is not None
+    assert re.search(r"if\s*\(\s*updateSeq\s*===\s*notificationSeq\s*\)", source) is not None
+    assert re.search(r"if\s*\(\s*updateSeq\s*===\s*selectedGameSeq\s*\)", source) is not None
 
     # Assert rollback to fallbacks
-    assert "const fallback = lastPersistedAutoSync.current ?? false;" in source
     assert (
-        "const fallback = lastPersistedNotifications.current ?? defaultNotificationSettings;"
-        in source
+        re.search(
+            r"const\s+fallback\s*=\s*lastPersistedAutoSync\s*[\s\S]*?ludusaviStore\.setAutoSyncEnabled\(\s*fallback\s*\)",
+            source,
+        )
+        is not None
     )
-    assert 'const fallback = lastPersistedSelectedGame.current ?? "";' in source
+    assert (
+        re.search(
+            r"const\s+fallback\s*=\s*lastPersistedNotifications\s*[\s\S]*?ludusaviStore\.setNotificationSettings\(\s*fallback\s*\)",
+            source,
+        )
+        is not None
+    )
+    assert (
+        re.search(
+            r"const\s+fallback\s*=\s*lastPersistedSelectedGame\s*[\s\S]*?ludusaviStore\.setSelectedGame\(\s*fallback\s*\)",
+            source,
+        )
+        is not None
+    )
 
 
 def test_frontend_settings_consecutive_changes_not_ignored() -> None:
+    import re
+
     source = FRONTEND.read_text(encoding="utf-8")
 
-    # Assert that lastQueuedSelectedGame ref exists
-    assert "const lastQueuedSelectedGame = useRef<string | null>(null);" in source
+    # Assert that lastQueuedSelectedGame exists
+    assert re.search(r"let\s+lastQueuedSelectedGame[\s\S]*?=\s*null\s*;", source) is not None
 
     # Assert that it is checked in onGameChange to prevent early return desync
     assert (
-        "const lastQueued = lastQueuedSelectedGame.current ?? ludusaviStore.getSnapshot().selectedGame;"
-        in source
+        re.search(
+            r"const\s+lastQueued\s*=\s*lastQueuedSelectedGame\s*(?:\?\?|\|\|)\s*ludusaviStore\.getSnapshot\(\)\.selectedGame\s*;[\s\S]*?"
+            r"if\s*\(\s*value\s*===\s*lastQueued\s*\)",
+            source,
+        )
+        is not None
     )
-    assert "if (value === lastQueued) {" in source
 
 
 def test_frontend_settings_queue_is_module_scoped() -> None:
+    import re
+
     source = FRONTEND.read_text(encoding="utf-8")
 
     # Verify that settingsQueue is declared as a module-scoped variable (before Content component)
-    content_start_idx = source.index("function Content() {")
-    queue_decl_idx = source.index("const settingsQueue")
-
-    assert queue_decl_idx < content_start_idx, (
-        "settingsQueue must be declared at the module scope (before Content component) "
-        "to prevent recreation on component remount"
+    match_queue = re.search(r"const\s+settingsQueue", source)
+    match_content = re.search(r"function\s+Content\s*\(\s*\)", source)
+    assert match_queue is not None
+    assert match_content is not None
+    assert match_queue.start() < match_content.start(), (
+        "settingsQueue must be declared at the module scope (before Content component)"
     )
 
 
 def test_frontend_settings_intermediate_success_updates_last_persisted() -> None:
+    import re
+
     source = FRONTEND.read_text(encoding="utf-8")
 
     # Assert that lastPersisted refs are updated immediately on RPC success,
     # before checking sequence numbers.
-    idx_ref_update = source.index("lastPersistedAutoSync.current = result.auto_sync_enabled;")
-    idx_seq_check = source.index("if (updateSeq === autoSyncSeq.current) {")
-    assert idx_ref_update < idx_seq_check, (
-        "AutoSync lastPersisted ref must be updated before sequence check"
+    assert (
+        re.search(
+            r"try\s*\{\s*const\s+result\s*=\s*await\s+setAutoSyncEnabled\([\s\S]*?"
+            r"lastPersistedAutoSync\s*=\s*result\.auto_sync_enabled[\s\S]*?"
+            r"if\s*\(\s*updateSeq\s*===\s*autoSyncSeq\s*\)",
+            source,
+        )
+        is not None
     )
 
-    idx_ref_update_notif = source.index(
-        "lastPersistedNotifications.current = result.notifications;"
-    )
-    idx_seq_check_notif = source.index("if (updateSeq === notificationSeq.current) {")
-    assert idx_ref_update_notif < idx_seq_check_notif, (
-        "Notifications lastPersisted ref must be updated before sequence check"
+    assert (
+        re.search(
+            r"try\s*\{\s*const\s+result\s*=\s*await\s+setNotificationSettings\([\s\S]*?"
+            r"lastPersistedNotifications\s*=\s*result\.notifications[\s\S]*?"
+            r"if\s*\(\s*updateSeq\s*===\s*notificationSeq\s*\)",
+            source,
+        )
+        is not None
     )
 
-    idx_ref_update_game = source.index("lastPersistedSelectedGame.current = result.selected_game;")
-    idx_seq_check_game = source.index("if (updateSeq === selectedGameSeq.current) {")
-    assert idx_ref_update_game < idx_seq_check_game, (
-        "SelectedGame lastPersisted ref must be updated before sequence check"
+    assert (
+        re.search(
+            r"try\s*\{\s*const\s+result\s*=\s*await\s+setSelectedGameCall\([\s\S]*?"
+            r"lastPersistedSelectedGame\s*=\s*result\.selected_game[\s\S]*?"
+            r"if\s*\(\s*updateSeq\s*===\s*selectedGameSeq\s*\)",
+            source,
+        )
+        is not None
     )
