@@ -118,7 +118,7 @@ def test_frontend_toggle_reports_busy_and_failures() -> None:
     source = FRONTEND.read_text()
 
     assert 'setBusyLabel("Updating settings")' in source
-    assert "await setAutoSyncEnabled(enabled)" in source
+    assert "setAutoSyncEnabled(enabled)" in source
     assert '"SDH-Ludusavi settings failed"' in source
     assert 'notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed"' in source
 
@@ -1115,7 +1115,7 @@ def test_frontend_gates_warmed_background_refresh_without_loading_label() -> Non
 def test_frontend_applies_backend_selected_game_after_persisting() -> None:
     source = FRONTEND.read_text()
 
-    assert "const result = await setSelectedGameCall(value);" in source
+    assert "setSelectedGameCall(value)" in source
     assert "applySettingsGlobal(ludusaviStore, result);" in source
 
 
@@ -1215,7 +1215,7 @@ def test_frontend_applies_current_game_before_saved_selected_game() -> None:
     assert "pendingCurrentGameSelection.current = true;" in source
     assert "pendingCurrentGameSelection.current = false;" in source
     assert "onChange={onGameChange}" in source
-    assert "const result = await setSelectedGameCall(value);" in source
+    assert "setSelectedGameCall(value)" in source
 
 
 def test_frontend_logs_current_game_context_and_match_reason() -> None:
@@ -1951,6 +1951,48 @@ def test_frontend_manual_refresh_failure_notification() -> None:
             r"const\s+refreshGames\s*=\s*async\s*\(\s*\)\s*=>\s*\{[\s\S]*?"
             r"catch\s*\(\s*error\s*\)\s*\{[\s\S]*?"
             r"notify\(\s*ludusaviStore\s*,\s*\"failures_errors\"",
+            source,
+        )
+        is not None
+    )
+
+
+def test_frontend_settings_queue_timeout_handling() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that withTimeout utility is defined
+    assert (
+        re.search(
+            r"function\s+withTimeout\s*<[\s\S]*?>\s*\(\s*promise\s*:\s*Promise\s*<[\s\S]*?>\s*,\s*timeoutMs\s*:\s*number\s*,\s*errorMessage\s*:\s*string\s*\)",
+            source,
+        )
+        is not None
+    )
+
+    # Assert that withTimeout is called inside toggleAutoSync's queue task
+    assert (
+        re.search(
+            r"toggleAutoSync\s*=[\s\S]*?withTimeout\([\s\S]*?setAutoSyncEnabled\(\s*enabled\s*\)",
+            source,
+        )
+        is not None
+    )
+
+    # Assert that withTimeout is called inside toggleNotificationSetting's queue task
+    assert (
+        re.search(
+            r"toggleNotificationSetting\s*=[\s\S]*?withTimeout\([\s\S]*?setNotificationSettings\(\s*nextNotifications\s*\)",
+            source,
+        )
+        is not None
+    )
+
+    # Assert that withTimeout is called inside onGameChange's queue task
+    assert (
+        re.search(
+            r"onGameChange\s*=[\s\S]*?withTimeout\([\s\S]*?setSelectedGameCall\(\s*value\s*\)",
             source,
         )
         is not None

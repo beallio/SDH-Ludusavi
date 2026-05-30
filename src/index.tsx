@@ -930,6 +930,19 @@ function enqueueSettingsUpdate(task: () => Promise<void>) {
   void processSettingsQueue();
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
+  let timeoutId: number;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error(errorMessage));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    window.clearTimeout(timeoutId);
+  });
+}
+
+
 let autoSyncSeq = 0;
 let notificationSeq = 0;
 let selectedGameSeq = 0;
@@ -1363,7 +1376,7 @@ function Content() {
     enqueueSettingsUpdate(async () => {
       log("info", `Executing toggle auto-sync to ${enabled}`);
       try {
-        const result = await setAutoSyncEnabled(enabled);
+        const result = await withTimeout(setAutoSyncEnabled(enabled), 10000, "Setting auto-sync timed out");
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
@@ -1393,7 +1406,7 @@ function Content() {
     enqueueSettingsUpdate(async () => {
       log("info", `Executing toggle notification setting ${String(key)} to ${enabled}`);
       try {
-        const result = await setNotificationSettings(nextNotifications);
+        const result = await withTimeout(setNotificationSettings(nextNotifications), 10000, "Setting notifications timed out");
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
@@ -1432,7 +1445,7 @@ function Content() {
     enqueueSettingsUpdate(async () => {
       log("info", `Executing selected game change to ${value}`);
       try {
-        const result = await setSelectedGameCall(value);
+        const result = await withTimeout(setSelectedGameCall(value), 10000, "Selecting game timed out");
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
