@@ -1974,7 +1974,7 @@ def test_frontend_settings_queue_timeout_handling() -> None:
     # Assert that withTimeout is called inside toggleAutoSync's queue task
     assert (
         re.search(
-            r"toggleAutoSync\s*=[\s\S]*?withTimeout\([\s\S]*?setAutoSyncEnabled\(\s*enabled\s*\)",
+            r"toggleAutoSync\s*=[\s\S]*?withTimeout\([\s\S]*?(?:setAutoSyncEnabled\(\s*enabled\s*\)|originalPromise)",
             source,
         )
         is not None
@@ -1983,7 +1983,7 @@ def test_frontend_settings_queue_timeout_handling() -> None:
     # Assert that withTimeout is called inside toggleNotificationSetting's queue task
     assert (
         re.search(
-            r"toggleNotificationSetting\s*=[\s\S]*?withTimeout\([\s\S]*?setNotificationSettings\(\s*nextNotifications\s*\)",
+            r"toggleNotificationSetting\s*=[\s\S]*?withTimeout\([\s\S]*?(?:setNotificationSettings\(\s*nextNotifications\s*\)|originalPromise)",
             source,
         )
         is not None
@@ -1992,7 +1992,49 @@ def test_frontend_settings_queue_timeout_handling() -> None:
     # Assert that withTimeout is called inside onGameChange's queue task
     assert (
         re.search(
-            r"onGameChange\s*=[\s\S]*?withTimeout\([\s\S]*?setSelectedGameCall\(\s*value\s*\)",
+            r"onGameChange\s*=[\s\S]*?withTimeout\([\s\S]*?(?:setSelectedGameCall\(\s*value\s*\)|originalPromise)",
+            source,
+        )
+        is not None
+    )
+
+
+def test_frontend_code_review_refinements() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # 1. Assert that the wildcard style selector is NOT used inside dropdownStyleEl textContent
+    assert (
+        re.search(
+            r"\.sdh-ludusavi-game-dropdown\s*,\s*\.sdh-ludusavi-game-dropdown\s+\*",
+            source,
+        )
+        is None
+    )
+
+    # 2. Assert that activeInitPromise is defined as a module-scoped variable
+    assert (
+        re.search(
+            r"let\s+activeInitPromise\b",
+            source,
+        )
+        is not None
+    )
+
+    # 3. Assert that activeMetadataPromise is defined as a module-scoped variable
+    assert (
+        re.search(
+            r"let\s+activeMetadataPromise\b",
+            source,
+        )
+        is not None
+    )
+
+    # 4. Assert that late-resolution handling (timedOut flag check or updates) is implemented in settings queue
+    assert (
+        re.search(
+            r"let\s+timedOut\s*=\s*false",
             source,
         )
         is not None

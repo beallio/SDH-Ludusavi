@@ -955,7 +955,15 @@ let activeLudusaviStore: LudusaviStateStore | null = null;
 const dropdownStyleEl = document.createElement("style");
 dropdownStyleEl.textContent = `
   .sdh-ludusavi-game-dropdown,
-  .sdh-ludusavi-game-dropdown * {
+  .sdh-ludusavi-game-dropdown button,
+  .sdh-ludusavi-game-dropdown [class*="dropdown" i],
+  .sdh-ludusavi-game-dropdown [class*="button" i],
+  .sdh-ludusavi-game-dropdown [focusable="true"],
+  .sdh-ludusavi-game-dropdown [role="button"],
+  .sdh-ludusavi-game-dropdown span,
+  .sdh-ludusavi-game-dropdown [class*="label" i],
+  .sdh-ludusavi-game-dropdown [class*="text" i],
+  .sdh-ludusavi-game-dropdown [class*="value" i] {
     max-width: 100% !important;
     min-width: 0 !important;
   }
@@ -964,7 +972,6 @@ dropdownStyleEl.textContent = `
   .sdh-ludusavi-game-dropdown [class*="button" i],
   .sdh-ludusavi-game-dropdown [focusable="true"],
   .sdh-ludusavi-game-dropdown [role="button"] {
-    max-width: 100% !important;
     width: 100% !important;
   }
   .sdh-ludusavi-game-dropdown span,
@@ -977,6 +984,10 @@ dropdownStyleEl.textContent = `
     display: inline-block !important;
   }
 `;
+
+let activeInitPromise: Promise<OperationStatus> | null = null;
+let activeMetadataPromise: Promise<void> | null = null;
+
 
 function applySettingsGlobal(store: LudusaviStateStore, nextSettings: Settings) {
   activeLudusaviStore = store;
@@ -1142,17 +1153,22 @@ function Content() {
 
     fetchMetadata();
 
+    if (!activeInitPromise) {
+      log("debug", `Creating new initialization promise (warmed=${isWarmed})`);
+      activeInitPromise = (async () => {
+        const loadedSettings = await fetchInitialState();
+        await synchronizeGameList(isWarmed, loadedSettings);
+        return getOperationStatus();
+      })();
+    } else {
+      log("debug", "Reusing in-flight initialization promise");
+    }
+
     try {
-      log("debug", `Starting initial load (warmed=${isWarmed})`);
-      const loadedSettings = await fetchInitialState();
-      if (!isMounted.current) return;
-
-      await synchronizeGameList(isWarmed, loadedSettings);
-      if (!isMounted.current) return;
-
-      const loadedOperation = await getOperationStatus();
-      if (!isMounted.current) return;
-      setOperation(loadedOperation);
+      const loadedOperation = await activeInitPromise;
+      if (isMounted.current) {
+        setOperation(loadedOperation);
+      }
     } catch (error) {
       log("error", `Initial load failed: ${error}`);
     } finally {
@@ -1164,37 +1180,50 @@ function Content() {
   };
 
   const fetchMetadata = () => {
+    const snapshot = ludusaviStore.getSnapshot();
+    if (snapshot.versions !== null && snapshot.ludusaviCommand !== null) {
+      return;
+    }
+    if (activeMetadataPromise) {
+      return;
+    }
     // Load versions and commands in the background asynchronously.
-    void (async () => {
-      const [versionsResult, commandResult] = await Promise.allSettled([
-        getVersions(),
-        getLudusaviCommandCall()
-      ]);
+    activeMetadataPromise = (async () => {
+      try {
+        const [versionsResult, commandResult] = await Promise.allSettled([
+          getVersions(),
+          getLudusaviCommandCall()
+        ]);
 
-      if (versionsResult.status === "fulfilled") {
-        const loadedVersions = versionsResult.value;
-        log("debug", `Loaded versions: ${JSON.stringify(loadedVersions)}`);
-        if (isRpcStatus(loadedVersions)) {
-          logRpcStatus(loadedVersions, "versions");
-          ludusaviStore.setVersions({ message: loadedVersions.message || "Error" });
+        if (versionsResult.status === "fulfilled") {
+          const loadedVersions = versionsResult.value;
+          log("debug", `Loaded versions: ${JSON.stringify(loadedVersions)}`);
+          if (isRpcStatus(loadedVersions)) {
+            logRpcStatus(loadedVersions, "versions");
+            ludusaviStore.setVersions({ message: loadedVersions.message || "Error" });
+          } else {
+            ludusaviStore.setVersions(loadedVersions);
+          }
         } else {
-          ludusaviStore.setVersions(loadedVersions);
+          log("error", `Background load of versions failed: ${versionsResult.reason}`);
+          ludusaviStore.setVersions({ message: "Error" });
         }
-      } else {
-        log("error", `Background load of versions failed: ${versionsResult.reason}`);
-        ludusaviStore.setVersions({ message: "Error" });
-      }
 
-      if (commandResult.status === "fulfilled") {
-        const loadedCommand = commandResult.value;
-        log("debug", `Loaded command: ${JSON.stringify(loadedCommand)}`);
-        if (isRpcStatus(loadedCommand)) {
-          logRpcStatus(loadedCommand, "command discovery");
+        if (commandResult.status === "fulfilled") {
+          const loadedCommand = commandResult.value;
+          log("debug", `Loaded command: ${JSON.stringify(loadedCommand)}`);
+          if (isRpcStatus(loadedCommand)) {
+            logRpcStatus(loadedCommand, "command discovery");
+          } else {
+            ludusaviStore.setLudusaviCommand(loadedCommand);
+          }
         } else {
-          ludusaviStore.setLudusaviCommand(loadedCommand);
+          log("error", `Background load of command failed: ${commandResult.reason}`);
         }
-      } else {
-        log("error", `Background load of command failed: ${commandResult.reason}`);
+      } catch (err) {
+        log("error", `fetchMetadata failed: ${err}`);
+      } finally {
+        activeMetadataPromise = null;
       }
     })();
   };
@@ -1375,8 +1404,24 @@ function Content() {
 
     enqueueSettingsUpdate(async () => {
       log("info", `Executing toggle auto-sync to ${enabled}`);
+      let timedOut = false;
+      const originalPromise = setAutoSyncEnabled(enabled).then((res) => {
+        if (timedOut) {
+          log("info", `Late resolution of setAutoSyncEnabled to ${enabled} succeeded`);
+          if (updateSeq === autoSyncSeq && !isRpcStatus(res)) {
+            applySettingsGlobal(ludusaviStore, res);
+          }
+        }
+        return res;
+      }).catch((err) => {
+        if (timedOut) {
+          log("error", `Late failure of setAutoSyncEnabled to ${enabled}: ${err}`);
+        }
+        throw err;
+      });
+
       try {
-        const result = await withTimeout(setAutoSyncEnabled(enabled), 10000, "Setting auto-sync timed out");
+        const result = await withTimeout(originalPromise, 10000, "Setting auto-sync timed out");
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
@@ -1384,6 +1429,7 @@ function Content() {
           applySettingsGlobal(ludusaviStore, result);
         }
       } catch (error) {
+        timedOut = true;
         log("error", `Failed to toggle auto-sync: ${error}`);
         if (updateSeq === autoSyncSeq) {
           const fallback = lastPersistedAutoSync ?? false;
@@ -1405,8 +1451,24 @@ function Content() {
 
     enqueueSettingsUpdate(async () => {
       log("info", `Executing toggle notification setting ${String(key)} to ${enabled}`);
+      let timedOut = false;
+      const originalPromise = setNotificationSettings(nextNotifications).then((res) => {
+        if (timedOut) {
+          log("info", `Late resolution of setNotificationSettings to ${JSON.stringify(nextNotifications)} succeeded`);
+          if (updateSeq === notificationSeq && !isRpcStatus(res)) {
+            applySettingsGlobal(ludusaviStore, res);
+          }
+        }
+        return res;
+      }).catch((err) => {
+        if (timedOut) {
+          log("error", `Late failure of setNotificationSettings to ${JSON.stringify(nextNotifications)}: ${err}`);
+        }
+        throw err;
+      });
+
       try {
-        const result = await withTimeout(setNotificationSettings(nextNotifications), 10000, "Setting notifications timed out");
+        const result = await withTimeout(originalPromise, 10000, "Setting notifications timed out");
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
@@ -1414,6 +1476,7 @@ function Content() {
           applySettingsGlobal(ludusaviStore, result);
         }
       } catch (error) {
+        timedOut = true;
         log("error", `Failed to update notification settings: ${error}`);
         if (updateSeq === notificationSeq) {
           const fallback = lastPersistedNotifications ?? defaultNotificationSettings;
@@ -1444,8 +1507,24 @@ function Content() {
 
     enqueueSettingsUpdate(async () => {
       log("info", `Executing selected game change to ${value}`);
+      let timedOut = false;
+      const originalPromise = setSelectedGameCall(value).then((res) => {
+        if (timedOut) {
+          log("info", `Late resolution of setSelectedGameCall to ${value} succeeded`);
+          if (updateSeq === selectedGameSeq && !isRpcStatus(res)) {
+            applySettingsGlobal(ludusaviStore, res);
+          }
+        }
+        return res;
+      }).catch((err) => {
+        if (timedOut) {
+          log("error", `Late failure of setSelectedGameCall to ${value}: ${err}`);
+        }
+        throw err;
+      });
+
       try {
-        const result = await withTimeout(setSelectedGameCall(value), 10000, "Selecting game timed out");
+        const result = await withTimeout(originalPromise, 10000, "Selecting game timed out");
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
@@ -1453,6 +1532,7 @@ function Content() {
           applySettingsGlobal(ludusaviStore, result);
         }
       } catch (error) {
+        timedOut = true;
         log("error", `Failed to persist selected game: ${error}`);
         if (updateSeq === selectedGameSeq) {
           const fallback = lastPersistedSelectedGame ?? "";

@@ -1,0 +1,16 @@
+{
+  "date": "2026-05-30",
+  "task_objective": "Add timeout guards to setting queue RPC updates in sdh-ludusavi to prevent UI locks on hanging backend calls.",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py:test_frontend_settings_queue_timeout_handling (new)",
+    "tests/test_frontend_static.py:test_frontend_toggle_reports_busy_and_failures (updated)",
+    "tests/test_frontend_static.py:test_frontend_applies_backend_selected_game_after_persisting (updated)",
+    "tests/test_frontend_static.py:test_frontend_applies_current_game_before_saved_selected_game (updated)"
+  ],
+  "design_decisions": "Implemented `withTimeout` utility wrapping standard promises with `window.setTimeout` to enforce a 10s timeout limit on backend RPC operations. Applied `withTimeout` to `setAutoSyncEnabled`, `setNotificationSettings`, and `setSelectedGameCall` inside the settings update tasks. Updated existing static tests to check for the presence of the wrapped calls dynamically using substring match assertions.",
+  "results": "All checks passed, rollup build succeeded, typecheck succeeded, tests pass cleanly, Conventional Commit 6ce165b made on branch fix/dropdown-width."
+}
