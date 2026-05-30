@@ -1,13 +1,14 @@
 {
   "date": "2026-05-30",
-  "task_objective": "Address principal engineer review findings: sequence guard lastPersisted settings and fix indentation in applyRefreshResult",
+  "task_objective": "Address principal engineer review findings, fix dropdown styling for case-insensitive class matches, and solve multi-window QAM styling bugs",
   "files_modified": [
     "src/index.tsx",
     "tests/test_frontend_static.py"
   ],
   "tests_added": [
-    "tests/test_frontend_static.py:test_frontend_settings_intermediate_success_updates_last_persisted (refactored)"
+    "tests/test_frontend_static.py:test_frontend_settings_intermediate_success_updates_last_persisted (refactored)",
+    "tests/test_frontend_static.py:test_frontend_dropdown_truncation_styling (updated)"
   ],
-  "design_decisions": "Guarded settings cache updates (lastPersistedAutoSync, lastPersistedNotifications, and lastPersistedSelectedGame) inside update sequence checks in src/index.tsx to prevent state desyncs from delayed background RPC resolutions. Corrected the indentation of applyRefreshResult to ensure consistent spacing.",
+  "design_decisions": "Guarded settings cache updates with sequence numbers. Fixed indentation. Solved QAM styling issue where styles appended to document.head in the background context were not loaded in the QAM's separate window context by rendering <style>{dropdownStyleEl.textContent}</style> inside the Content JSX tree. Switched selectors to use case-insensitive matching [class*='...'] and targeted general focusable/button roles recursively.",
   "results": "All checks passed, build succeeded, tests pass cleanly, changes committed under fix/dropdown-width branch."
 }
