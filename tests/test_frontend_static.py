@@ -1117,7 +1117,6 @@ def test_frontend_applies_backend_selected_game_after_persisting() -> None:
 
     assert "const result = await setSelectedGameCall(value);" in source
     assert "applySettingsGlobal(ludusaviStore, result);" in source
-    assert "ludusaviStore.setSelectedGame(result.selected_game);" in source
 
 
 def test_frontend_syncs_warmed_settings_cache_when_refresh_defaults_selected_game() -> None:
@@ -1659,13 +1658,11 @@ def test_frontend_settings_intermediate_success_updates_last_persisted() -> None
 
     source = FRONTEND.read_text(encoding="utf-8")
 
-    # Assert that lastPersisted refs are updated only when sequence matches.
+    # Assert that applySettingsGlobal is called only when sequence matches.
     assert (
         re.search(
             r"if\s*\(\s*updateSeq\s*===\s*autoSyncSeq\s*\)\s*\{\s*"
-            r"if\s*\(\s*result\.auto_sync_enabled\s*!==\s*undefined\s*\)\s*\{\s*"
-            r"lastPersistedAutoSync\s*=\s*result\.auto_sync_enabled\s*;\s*"
-            r"\}",
+            r"applySettingsGlobal\(\s*ludusaviStore\s*,\s*result\s*\)\s*;",
             source,
         )
         is not None
@@ -1674,9 +1671,7 @@ def test_frontend_settings_intermediate_success_updates_last_persisted() -> None
     assert (
         re.search(
             r"if\s*\(\s*updateSeq\s*===\s*notificationSeq\s*\)\s*\{\s*"
-            r"if\s*\(\s*result\.notifications\s*\)\s*\{\s*"
-            r"lastPersistedNotifications\s*=\s*result\.notifications\s*;\s*"
-            r"\}",
+            r"applySettingsGlobal\(\s*ludusaviStore\s*,\s*result\s*\)\s*;",
             source,
         )
         is not None
@@ -1685,9 +1680,19 @@ def test_frontend_settings_intermediate_success_updates_last_persisted() -> None
     assert (
         re.search(
             r"if\s*\(\s*updateSeq\s*===\s*selectedGameSeq\s*\)\s*\{\s*"
-            r"if\s*\(\s*result\.selected_game\s*!==\s*undefined\s*\)\s*\{\s*"
-            r"lastPersistedSelectedGame\s*=\s*result\.selected_game\s*;\s*"
-            r"\}",
+            r"applySettingsGlobal\(\s*ludusaviStore\s*,\s*result\s*\)\s*;",
+            source,
+        )
+        is not None
+    )
+
+    # Assert that applySettingsGlobal updates the module-scoped lastPersisted variables
+    assert (
+        re.search(
+            r"function\s+applySettingsGlobal\b[\s\S]*?"
+            r"lastPersistedAutoSync\s*=\s*normalized\.auto_sync_enabled[\s\S]*?"
+            r"lastPersistedNotifications\s*=\s*normalized\.notifications[\s\S]*?"
+            r"lastPersistedSelectedGame\s*=\s*normalized\.selected_game",
             source,
         )
         is not None

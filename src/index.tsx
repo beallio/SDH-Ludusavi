@@ -1196,10 +1196,7 @@ function Content() {
     if (isRpcStatus(loadedSettings)) {
       logRpcStatus(loadedSettings, "settings");
     } else {
-      const normalizedSettings = applySettingsGlobal(ludusaviStore, loadedSettings);
-      if (normalizedSettings.selected_game) {
-        ludusaviStore.setSelectedGame(normalizedSettings.selected_game);
-      }
+      applySettingsGlobal(ludusaviStore, loadedSettings);
     }
 
     if (isRpcStatus(loadedHistory)) {
@@ -1371,9 +1368,6 @@ function Content() {
           throw new Error(result.message || result.status);
         }
         if (updateSeq === autoSyncSeq) {
-          if (result.auto_sync_enabled !== undefined) {
-            lastPersistedAutoSync = result.auto_sync_enabled;
-          }
           applySettingsGlobal(ludusaviStore, result);
         }
       } catch (error) {
@@ -1404,9 +1398,6 @@ function Content() {
           throw new Error(result.message || result.status);
         }
         if (updateSeq === notificationSeq) {
-          if (result.notifications) {
-            lastPersistedNotifications = result.notifications;
-          }
           applySettingsGlobal(ludusaviStore, result);
         }
       } catch (error) {
@@ -1446,11 +1437,7 @@ function Content() {
           throw new Error(result.message || result.status);
         }
         if (updateSeq === selectedGameSeq) {
-          if (result.selected_game !== undefined) {
-            lastPersistedSelectedGame = result.selected_game;
-          }
           applySettingsGlobal(ludusaviStore, result);
-          ludusaviStore.setSelectedGame(result.selected_game);
         }
       } catch (error) {
         log("error", `Failed to persist selected game: ${error}`);
