@@ -905,6 +905,15 @@ async function processSettingsQueue() {
           await task();
         } catch (err) {
           log("error", `Settings update failed in queue: ${err}`);
+          if (activeLudusaviStore) {
+            notify(
+              activeLudusaviStore,
+              "failures_errors",
+              "Settings Update Failed",
+              err instanceof Error ? err.message : String(err),
+              <FaExclamationTriangle />
+            );
+          }
         }
       }
       notifyQueueListeners();
@@ -928,6 +937,7 @@ let lastPersistedAutoSync: boolean | null = null;
 let lastPersistedNotifications: NotificationSettings | null = null;
 let lastPersistedSelectedGame: string | null = null;
 let lastQueuedSelectedGame: string | null = null;
+let activeLudusaviStore: LudusaviStateStore | null = null;
 
 const dropdownStyleEl = document.createElement("style");
 dropdownStyleEl.textContent = `
@@ -956,6 +966,7 @@ dropdownStyleEl.textContent = `
 `;
 
 function applySettingsGlobal(store: LudusaviStateStore, nextSettings: Settings) {
+  activeLudusaviStore = store;
   const normalized = store.applySettings(nextSettings);
   if (normalized.auto_sync_enabled !== undefined) {
     lastPersistedAutoSync = normalized.auto_sync_enabled;
@@ -977,6 +988,7 @@ function Content() {
   const wasQuickAccessVisible = useRef(false);
   const pendingCurrentGameSelection = useRef(false);
   const isMounted = useRef(true);
+  const styleElement = useMemo(() => <style>{dropdownStyleEl.textContent}</style>, []);
 
   const settings = ludusaviState.settings ?? defaultSettings();
   const games = ludusaviState.games ?? EMPTY_GAMES;
@@ -1490,7 +1502,7 @@ function Content() {
 
   return (
     <div ref={qamContentRef} className="sdh-ludusavi-qam-container">
-      <style>{dropdownStyleEl.textContent}</style>
+      {styleElement}
 
       <PanelSection title="GLOBAL">
         <PanelSectionRow>
@@ -1825,6 +1837,7 @@ export default definePlugin(() => {
   }
 
   const ludusaviStore = createLudusaviStateStore();
+  activeLudusaviStore = ludusaviStore;
   const activeSessions = new Map<number, RunningSession>();
   let fallbackIntervalID: number | null = null;
   let fallbackPreviousAppID: string | null = null;
@@ -2260,6 +2273,7 @@ export default definePlugin(() => {
       lastPersistedNotifications = null;
       lastPersistedSelectedGame = null;
       lastQueuedSelectedGame = null;
+      activeLudusaviStore = null;
 
       console.log("SDH-Ludusavi unloading");
     },

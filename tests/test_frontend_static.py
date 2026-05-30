@@ -1711,6 +1711,24 @@ def test_frontend_settings_queue_recovers_on_listener_error() -> None:
     )
 
 
+def test_frontend_settings_queue_notifies_on_unhandled_rejection() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that processSettingsQueue catches unhandled task rejections and calls notify with activeLudusaviStore
+    assert (
+        re.search(
+            r"async\s+function\s+processSettingsQueue\s*\(\s*\)[\s\S]*?"
+            r"catch\s*\(\s*err\s*\)\s*\{[\s\S]*?"
+            r"if\s*\(\s*activeLudusaviStore\s*\)\s*\{[\s\S]*?"
+            r"notify\(\s*activeLudusaviStore\s*,\s*\"failures_errors\"\s*,\s*\"Settings\s+Update\s+Failed\"",
+            source,
+        )
+        is not None
+    )
+
+
 def test_frontend_settings_variables_reset_on_dismount() -> None:
     import re
 
@@ -1729,7 +1747,8 @@ def test_frontend_settings_variables_reset_on_dismount() -> None:
             r"lastPersistedAutoSync\s*=\s*null\s*;[\s\S]*?"
             r"lastPersistedNotifications\s*=\s*null\s*;[\s\S]*?"
             r"lastPersistedSelectedGame\s*=\s*null\s*;[\s\S]*?"
-            r"lastQueuedSelectedGame\s*=\s*null\s*;",
+            r"lastQueuedSelectedGame\s*=\s*null\s*;[\s\S]*?"
+            r"activeLudusaviStore\s*=\s*null\s*;",
             source,
         )
         is not None
@@ -1861,10 +1880,19 @@ def test_frontend_dropdown_truncation_styling() -> None:
         is not None
     )
 
-    # Assert that style tag is rendered in the JSX of Content component
+    # Assert that styleElement is rendered in the JSX of Content component
     assert (
         re.search(
-            r"<style>\{\s*dropdownStyleEl\.textContent\s*\}</style>",
+            r"\{\s*styleElement\s*\}",
+            source,
+        )
+        is not None
+    )
+
+    # Assert that styleElement is memoized inside Content component
+    assert (
+        re.search(
+            r"const\s+styleElement\s*=\s*useMemo\(\s*\(\s*\)\s*=>\s*<style>\{\s*dropdownStyleEl\.textContent\s*\}</style>\s*,\s*\[\s*\]\s*\)",
             source,
         )
         is not None
