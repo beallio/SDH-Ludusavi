@@ -1,0 +1,13 @@
+{
+  "date": "2026-05-30",
+  "task_objective": "Address principal engineer review findings: sequence guard lastPersisted settings and fix indentation in applyRefreshResult",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py:test_frontend_settings_intermediate_success_updates_last_persisted (refactored)"
+  ],
+  "design_decisions": "Guarded settings cache updates (lastPersistedAutoSync, lastPersistedNotifications, and lastPersistedSelectedGame) inside update sequence checks in src/index.tsx to prevent state desyncs from delayed background RPC resolutions. Corrected the indentation of applyRefreshResult to ensure consistent spacing.",
+  "results": "All checks passed, build succeeded, tests pass cleanly, changes committed under fix/dropdown-width branch."
+}
