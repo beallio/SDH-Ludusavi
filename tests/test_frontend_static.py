@@ -1659,13 +1659,13 @@ def test_frontend_settings_intermediate_success_updates_last_persisted() -> None
 
     source = FRONTEND.read_text(encoding="utf-8")
 
-    # Assert that lastPersisted refs are updated immediately on RPC success,
-    # before checking sequence numbers.
+    # Assert that lastPersisted refs are updated only when sequence matches.
     assert (
         re.search(
-            r"try\s*\{\s*const\s+result\s*=\s*await\s+setAutoSyncEnabled\([\s\S]*?"
-            r"lastPersistedAutoSync\s*=\s*result\.auto_sync_enabled[\s\S]*?"
-            r"if\s*\(\s*updateSeq\s*===\s*autoSyncSeq\s*\)",
+            r"if\s*\(\s*updateSeq\s*===\s*autoSyncSeq\s*\)\s*\{\s*"
+            r"if\s*\(\s*result\.auto_sync_enabled\s*!==\s*undefined\s*\)\s*\{\s*"
+            r"lastPersistedAutoSync\s*=\s*result\.auto_sync_enabled\s*;\s*"
+            r"\}",
             source,
         )
         is not None
@@ -1673,9 +1673,10 @@ def test_frontend_settings_intermediate_success_updates_last_persisted() -> None
 
     assert (
         re.search(
-            r"try\s*\{\s*const\s+result\s*=\s*await\s+setNotificationSettings\([\s\S]*?"
-            r"lastPersistedNotifications\s*=\s*result\.notifications[\s\S]*?"
-            r"if\s*\(\s*updateSeq\s*===\s*notificationSeq\s*\)",
+            r"if\s*\(\s*updateSeq\s*===\s*notificationSeq\s*\)\s*\{\s*"
+            r"if\s*\(\s*result\.notifications\s*\)\s*\{\s*"
+            r"lastPersistedNotifications\s*=\s*result\.notifications\s*;\s*"
+            r"\}",
             source,
         )
         is not None
@@ -1683,9 +1684,10 @@ def test_frontend_settings_intermediate_success_updates_last_persisted() -> None
 
     assert (
         re.search(
-            r"try\s*\{\s*const\s+result\s*=\s*await\s+setSelectedGameCall\([\s\S]*?"
-            r"lastPersistedSelectedGame\s*=\s*result\.selected_game[\s\S]*?"
-            r"if\s*\(\s*updateSeq\s*===\s*selectedGameSeq\s*\)",
+            r"if\s*\(\s*updateSeq\s*===\s*selectedGameSeq\s*\)\s*\{\s*"
+            r"if\s*\(\s*result\.selected_game\s*!==\s*undefined\s*\)\s*\{\s*"
+            r"lastPersistedSelectedGame\s*=\s*result\.selected_game\s*;\s*"
+            r"\}",
             source,
         )
         is not None

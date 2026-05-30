@@ -1245,11 +1245,11 @@ function Content() {
 
     if (result.dependency_error) {
       log("error", `Ludusavi refresh failed: ${result.dependency_error}`, "refresh");
-    notify(ludusaviStore, "failures_errors", "SDH-Ludusavi refresh failed", result.dependency_error, <FaExclamationTriangle />);
-    return false;
-  }
+      notify(ludusaviStore, "failures_errors", "SDH-Ludusavi refresh failed", result.dependency_error, <FaExclamationTriangle />);
+      return false;
+    }
 
-  log("debug", `Applying refresh result (${result.games.length} games, ${Object.keys(result.aliases || {}).length} aliases)`);
+    log("debug", `Applying refresh result (${result.games.length} games, ${Object.keys(result.aliases || {}).length} aliases)`);
     ludusaviStore.applyRefreshResult(result);
     log("info", `Tracked ${ludusaviStore.getSnapshot().trackedNames.size} game names/aliases`);
 
@@ -1352,10 +1352,10 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
-        if (result.auto_sync_enabled !== undefined) {
-          lastPersistedAutoSync = result.auto_sync_enabled;
-        }
         if (updateSeq === autoSyncSeq) {
+          if (result.auto_sync_enabled !== undefined) {
+            lastPersistedAutoSync = result.auto_sync_enabled;
+          }
           applySettingsGlobal(ludusaviStore, result);
         }
       } catch (error) {
@@ -1385,10 +1385,10 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
-        if (result.notifications) {
-          lastPersistedNotifications = result.notifications;
-        }
         if (updateSeq === notificationSeq) {
+          if (result.notifications) {
+            lastPersistedNotifications = result.notifications;
+          }
           applySettingsGlobal(ludusaviStore, result);
         }
       } catch (error) {
@@ -1427,10 +1427,10 @@ function Content() {
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
-        if (result.selected_game !== undefined) {
-          lastPersistedSelectedGame = result.selected_game;
-        }
         if (updateSeq === selectedGameSeq) {
+          if (result.selected_game !== undefined) {
+            lastPersistedSelectedGame = result.selected_game;
+          }
           applySettingsGlobal(ludusaviStore, result);
           ludusaviStore.setSelectedGame(result.selected_game);
         }
