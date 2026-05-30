@@ -2031,11 +2031,45 @@ def test_frontend_code_review_refinements() -> None:
         is not None
     )
 
-    # 4. Assert that late-resolution handling (timedOut flag check or updates) is implemented in settings queue
+    # 4. Assert that late-resolution handling (awaitFailed flag check or updates) is implemented in settings queue
     assert (
         re.search(
-            r"let\s+timedOut\s*=\s*false",
+            r"let\s+awaitFailed\s*=\s*false",
             source,
         )
         is not None
+    )
+
+
+def test_frontend_active_init_promise_reset_after_settle() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # activeInitPromise must be set to null in the finally block of loadInitial
+    assert (
+        re.search(
+            r"}\s*finally\s*\{\s*\n\s*activeInitPromise\s*=\s*null\s*;",
+            source,
+        )
+        is not None
+    ), "activeInitPromise must be reset to null in the finally block of loadInitial"
+
+
+def test_frontend_on_dismount_resets_init_and_metadata_promises() -> None:
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Both promises must be reset to null in onDismount
+    assert "activeInitPromise = null;" in source
+    assert "activeMetadataPromise = null;" in source
+
+    # Verify they appear in the onDismount block (near activeLudusaviStore = null)
+    dismount_idx = source.find('console.log("SDH-Ludusavi unloading")')
+    assert dismount_idx != -1
+    cleanup_region = source[dismount_idx - 600 : dismount_idx]
+    assert "activeInitPromise = null;" in cleanup_region, (
+        "activeInitPromise must be reset in onDismount cleanup"
+    )
+    assert "activeMetadataPromise = null;" in cleanup_region, (
+        "activeMetadataPromise must be reset in onDismount cleanup"
     )

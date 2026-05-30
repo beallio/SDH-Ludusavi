@@ -1172,6 +1172,7 @@ function Content() {
     } catch (error) {
       log("error", `Initial load failed: ${error}`);
     } finally {
+      activeInitPromise = null;
       if (isMounted.current) {
         setBackgroundRefreshBusy(false);
         setBusyLabel(null);
@@ -1404,9 +1405,9 @@ function Content() {
 
     enqueueSettingsUpdate(async () => {
       log("info", `Executing toggle auto-sync to ${enabled}`);
-      let timedOut = false;
+      let awaitFailed = false;
       const originalPromise = setAutoSyncEnabled(enabled).then((res) => {
-        if (timedOut) {
+        if (awaitFailed) {
           log("info", `Late resolution of setAutoSyncEnabled to ${enabled} succeeded`);
           if (updateSeq === autoSyncSeq && !isRpcStatus(res)) {
             applySettingsGlobal(ludusaviStore, res);
@@ -1414,7 +1415,7 @@ function Content() {
         }
         return res;
       }).catch((err) => {
-        if (timedOut) {
+        if (awaitFailed) {
           log("error", `Late failure of setAutoSyncEnabled to ${enabled}: ${err}`);
         }
         throw err;
@@ -1429,7 +1430,7 @@ function Content() {
           applySettingsGlobal(ludusaviStore, result);
         }
       } catch (error) {
-        timedOut = true;
+        awaitFailed = true;
         log("error", `Failed to toggle auto-sync: ${error}`);
         if (updateSeq === autoSyncSeq) {
           const fallback = lastPersistedAutoSync ?? false;
@@ -1451,9 +1452,9 @@ function Content() {
 
     enqueueSettingsUpdate(async () => {
       log("info", `Executing toggle notification setting ${String(key)} to ${enabled}`);
-      let timedOut = false;
+      let awaitFailed = false;
       const originalPromise = setNotificationSettings(nextNotifications).then((res) => {
-        if (timedOut) {
+        if (awaitFailed) {
           log("info", `Late resolution of setNotificationSettings to ${JSON.stringify(nextNotifications)} succeeded`);
           if (updateSeq === notificationSeq && !isRpcStatus(res)) {
             applySettingsGlobal(ludusaviStore, res);
@@ -1461,7 +1462,7 @@ function Content() {
         }
         return res;
       }).catch((err) => {
-        if (timedOut) {
+        if (awaitFailed) {
           log("error", `Late failure of setNotificationSettings to ${JSON.stringify(nextNotifications)}: ${err}`);
         }
         throw err;
@@ -1476,7 +1477,7 @@ function Content() {
           applySettingsGlobal(ludusaviStore, result);
         }
       } catch (error) {
-        timedOut = true;
+        awaitFailed = true;
         log("error", `Failed to update notification settings: ${error}`);
         if (updateSeq === notificationSeq) {
           const fallback = lastPersistedNotifications ?? defaultNotificationSettings;
@@ -1507,9 +1508,9 @@ function Content() {
 
     enqueueSettingsUpdate(async () => {
       log("info", `Executing selected game change to ${value}`);
-      let timedOut = false;
+      let awaitFailed = false;
       const originalPromise = setSelectedGameCall(value).then((res) => {
-        if (timedOut) {
+        if (awaitFailed) {
           log("info", `Late resolution of setSelectedGameCall to ${value} succeeded`);
           if (updateSeq === selectedGameSeq && !isRpcStatus(res)) {
             applySettingsGlobal(ludusaviStore, res);
@@ -1517,7 +1518,7 @@ function Content() {
         }
         return res;
       }).catch((err) => {
-        if (timedOut) {
+        if (awaitFailed) {
           log("error", `Late failure of setSelectedGameCall to ${value}: ${err}`);
         }
         throw err;
@@ -1532,7 +1533,7 @@ function Content() {
           applySettingsGlobal(ludusaviStore, result);
         }
       } catch (error) {
-        timedOut = true;
+        awaitFailed = true;
         log("error", `Failed to persist selected game: ${error}`);
         if (updateSeq === selectedGameSeq) {
           const fallback = lastPersistedSelectedGame ?? "";
@@ -2353,6 +2354,8 @@ export default definePlugin(() => {
       lastPersistedNotifications = null;
       lastPersistedSelectedGame = null;
       lastQueuedSelectedGame = null;
+      activeInitPromise = null;
+      activeMetadataPromise = null;
       activeLudusaviStore = null;
 
       console.log("SDH-Ludusavi unloading");
