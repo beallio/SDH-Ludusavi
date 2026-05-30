@@ -931,20 +931,26 @@ let lastQueuedSelectedGame: string | null = null;
 
 const dropdownStyleEl = document.createElement("style");
 dropdownStyleEl.textContent = `
+  .sdh-ludusavi-game-dropdown,
+  .sdh-ludusavi-game-dropdown * {
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
   .sdh-ludusavi-game-dropdown button,
   .sdh-ludusavi-game-dropdown [class*="DropdownButton"],
   .sdh-ludusavi-game-dropdown [class*="dropdown_"] {
     max-width: 100% !important;
     width: 100% !important;
   }
-  .sdh-ludusavi-game-dropdown button > div,
+  .sdh-ludusavi-game-dropdown button div,
   .sdh-ludusavi-game-dropdown button span,
-  .sdh-ludusavi-game-dropdown [class*="DropdownButton"] > div,
-  .sdh-ludusavi-game-dropdown [class*="DropdownButton"] span {
+  .sdh-ludusavi-game-dropdown [class*="DropdownButton"] div,
+  .sdh-ludusavi-game-dropdown [class*="DropdownButton"] span,
+  .sdh-ludusavi-game-dropdown [class*="dropdown_"] div,
+  .sdh-ludusavi-game-dropdown [class*="dropdown_"] span {
     overflow: hidden !important;
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
-    max-width: 100% !important;
     display: block !important;
   }
 `;
