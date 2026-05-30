@@ -89,6 +89,19 @@ This composite marker changes whenever the user modifies Ludusavi settings, back
 **Limitation on External Backups Modifications:**
 Because the plugin uses an $O(1)$ constant-time metadata check to prevent blocking the Steam Deck UI thread, it does not scan the backups directory directly. If folders or files are added, modified, or deleted within the backups directory externally (e.g., via Dropbox, Syncthing, or manual folder management outside of the Ludusavi executable), the config markers remain unchanged. In such multi-device or manual sync environments, the cached status will not immediately update until a fresh backup/restore is run via Ludusavi or the user manually presses the refresh button in the QAM.
 
+### SteamOS Multi-Window UI & CSS Styling Constraints
+
+The Steam Deck user interface (SteamOS Big Picture Mode / Overlay / QAM) runs inside a multi-window Chromium Embedded Framework (CEF) environment. This has critical implications for UI styling and lifecycle logic:
+
+#### Multi-Window DOM Isolation
+- **The Problem:** The Quick Access Menu (QAM) overlay panel and the background plugin loader context run in separate window contexts with isolated `document` instances.
+- **Why it matters:** Programmatically appending a stylesheet (`<style>` tag) to `document.head` during plugin initialization inside `definePlugin` only affects the background/main window. The stylesheet will **not** be loaded or visible inside the QAM's document window.
+- **The Solution:** To style QAM components reliably, stylesheets must be rendered **declaratively directly within the React JSX tree** of the visible component (e.g. `<style>{dropdownStyleEl.textContent}</style>`). This forces React to mount the styles directly into the active QAM window's DOM.
+
+#### Flexbox Layout & Text Truncation Constraints
+- **Case-Insensitive Class Selectors:** SteamOS frequently updates its UI stylesheets, including randomized class suffixes (e.g., `.dropdown_DropdownButton_12345` vs `.dropdown_DropdownButton_Label_abcde`). CSS selectors targeting these elements should use case-insensitive matches (e.g., `[class*="dropdown" i]`) to prevent breaking changes on client updates.
+- **Flex Shrink Propagation:** Interactive components (like `DropdownItem`) are nested inside several layers of flex containers. If a child element has `white-space: nowrap` (e.g., a long game title), it forces the flex items to expand to their maximum width unless `min-width: 0 !important` and `max-width: 100% !important` are recursively applied to all elements in the parent chain.
+
 ## Technical Reference: Status & Operations
 
 ### Game Status Values
