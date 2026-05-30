@@ -16,7 +16,7 @@
   ],
   "results": "Static frontend validation, Ruff linting/formatting, Python type checks, Pytest, TypeScript compilation, and Rollup build all pass successfully.",
   "runtime_validation_status": "VERIFIED ON STEAM DECK",
-  "rollback_command": "git revert 3e12a299a7381448e08fdd552261c0d6eec3b231",
+  "rollback_command": "git revert 9b3f9022319c8f628c2a78927f464bbb8d7bfb56",
   "review_subagent_evidence": {
     "conversation_id": "2ba297a0-8e52-4069-8189-cd2ea0004aff",
     "role": "Clean Review Agent",

@@ -957,7 +957,7 @@ dropdownStyleEl.textContent = `
   /*
    * Temporary SteamOS workaround for the QAM dropdown long-name regression.
    * Scoped to prevent broad wildcard descendant side effects on Decky icons.
-   * This workaround should be removed via git revert 3e12a299a7381448e08fdd552261c0d6eec3b231 when SteamOS no longer requires it.
+   * This workaround should be removed via git revert 9b3f9022319c8f628c2a78927f464bbb8d7bfb56 when SteamOS no longer requires it.
    */
   .sdh-ludusavi-game-dropdown {
     width: 100%;

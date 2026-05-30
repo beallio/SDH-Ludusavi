@@ -76,7 +76,7 @@ landed after it.
 5. Do not create a rollback patch by default:
    - The required rollback mechanism is the isolated commit.
    - After committing, document the exact backout command:
-     - `git revert 3e12a299a7381448e08fdd552261c0d6eec3b231`
+     - `git revert 9b3f9022319c8f628c2a78927f464bbb8d7bfb56`
    - Create `docs/patches/...` only if explicitly requested later.
 
 6. Add the session log:
@@ -134,7 +134,7 @@ not claim the visual regression is fully fixed until this proof gate passes.
 - Commit the implementation as one isolated commit:
   - `fix(qam): restore game dropdown truncation workaround`
 - The single-purpose commit is the required future backout mechanism:
-  - `git revert 3e12a299a7381448e08fdd552261c0d6eec3b231`
+  - `git revert 9b3f9022319c8f628c2a78927f464bbb8d7bfb56`
 - Do not mix unrelated refactors into this commit.
 
 ## Assumptions
