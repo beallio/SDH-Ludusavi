@@ -1116,7 +1116,7 @@ def test_frontend_applies_backend_selected_game_after_persisting() -> None:
     source = FRONTEND.read_text()
 
     assert "const result = await setSelectedGameCall(value);" in source
-    assert "applySettings(result);" in source
+    assert "applySettingsGlobal(ludusaviStore, result);" in source
     assert "ludusaviStore.setSelectedGame(result.selected_game);" in source
 
 
@@ -1854,6 +1854,59 @@ def test_frontend_dropdown_truncation_styling() -> None:
     assert (
         re.search(
             r"text-overflow:\s*ellipsis\s*!important\s*;[\s\S]*?white-space:\s*nowrap\s*!important\s*;",
+            source,
+        )
+        is not None
+    )
+
+
+def test_frontend_dropdown_styling_lifecycle() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that style element is appended in definePlugin initialization
+    assert (
+        re.search(
+            r"export\s+default\s+definePlugin\(\s*\(\s*\)\s*=>\s*\{[\s\S]*?"
+            r"document\.head\.appendChild\(\s*dropdownStyleEl\s*\)",
+            source,
+        )
+        is not None
+    )
+
+    # Assert that style element is cleaned up in onDismount
+    assert (
+        re.search(
+            r"onDismount\s*\(\s*\)\s*\{[\s\S]*?"
+            r"dropdownStyleEl\.parentNode\.removeChild\(\s*dropdownStyleEl\s*\)",
+            source,
+        )
+        is not None
+    )
+
+
+def test_frontend_manual_refresh_failure_notification() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert that manual refresh failure notifications are triggered for both RpcStatus and exceptions
+    assert (
+        re.search(
+            r"const\s+refreshGames\s*=\s*async\s*\(\s*\)\s*=>\s*\{[\s\S]*?"
+            r"if\s*\(\s*isRpcStatus\(\s*result\s*\)\s*\)\s*\{[\s\S]*?"
+            r"notify\(\s*ludusaviStore\s*,\s*\"failures_errors\"",
+            source,
+        )
+        is not None
+    )
+
+    assert (
+        re.search(
+            r"const\s+refreshGames\s*=\s*async\s*\(\s*\)\s*=>\s*\{[\s\S]*?"
+            r"catch\s*\(\s*error\s*\)\s*\{[\s\S]*?"
+            r"notify\(\s*ludusaviStore\s*,\s*\"failures_errors\"",
             source,
         )
         is not None

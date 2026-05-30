@@ -949,6 +949,20 @@ dropdownStyleEl.textContent = `
   }
 `;
 
+function applySettingsGlobal(store: LudusaviStateStore, nextSettings: Settings) {
+  const normalized = store.applySettings(nextSettings);
+  if (normalized.auto_sync_enabled !== undefined) {
+    lastPersistedAutoSync = normalized.auto_sync_enabled;
+  }
+  if (normalized.notifications) {
+    lastPersistedNotifications = normalized.notifications;
+  }
+  if (normalized.selected_game !== undefined) {
+    lastPersistedSelectedGame = normalized.selected_game;
+  }
+  return normalized;
+}
+
 function Content() {
   const ludusaviState = useLudusaviState();
   const ludusaviStore = useLudusaviStateStore();
@@ -997,19 +1011,6 @@ function Content() {
     });
   }, []);
 
-  const applySettings = useCallback((nextSettings: Settings) => {
-    const normalized = ludusaviStore.applySettings(nextSettings);
-    if (normalized.auto_sync_enabled !== undefined) {
-      lastPersistedAutoSync = normalized.auto_sync_enabled;
-    }
-    if (normalized.notifications) {
-      lastPersistedNotifications = normalized.notifications;
-    }
-    if (normalized.selected_game !== undefined) {
-      lastPersistedSelectedGame = normalized.selected_game;
-    }
-    return normalized;
-  }, [ludusaviStore]);
 
   const syncSelectedGameCache = (nextSelectedGame: string) => {
     ludusaviStore.syncSelectedGameCache(nextSelectedGame);
@@ -1056,15 +1057,9 @@ function Content() {
     isMounted.current = true;
     lastQueuedSelectedGame = null;
     log("info", "Plugin mounted, starting initial load");
-    if (!dropdownStyleEl.parentNode) {
-      document.head.appendChild(dropdownStyleEl);
-    }
     void loadInitial();
     return () => {
       isMounted.current = false;
-      if (dropdownStyleEl.parentNode) {
-        dropdownStyleEl.parentNode.removeChild(dropdownStyleEl);
-      }
     };
   }, []);
 
@@ -1180,7 +1175,7 @@ function Content() {
     if (isRpcStatus(loadedSettings)) {
       logRpcStatus(loadedSettings, "settings");
     } else {
-      const normalizedSettings = applySettings(loadedSettings);
+      const normalizedSettings = applySettingsGlobal(ludusaviStore, loadedSettings);
       if (normalizedSettings.selected_game) {
         ludusaviStore.setSelectedGame(normalizedSettings.selected_game);
       }
@@ -1279,12 +1274,20 @@ function Content() {
     try {
       const installedAppIds = await getInstalledAppIdsString();
       const result = await refreshGamesCall(true, installedAppIds);
-      const operationStatus = await getOperationStatus();
-      const recentLogs = await getRecentLogs();
-      
-      if (applyRefreshResult(result)) {
+      if (isRpcStatus(result)) {
+        logRpcStatus(result, "refresh");
+        notify(
+          ludusaviStore,
+          "failures_errors",
+          "SDH-Ludusavi refresh failed",
+          result.message || "Failed to refresh games",
+          <FaExclamationTriangle />
+        );
+      } else if (applyRefreshResult(result)) {
         ludusaviStore.setInstalledAppIds(installedAppIds);
         notify(ludusaviStore, "refresh_status", "SDH-Ludusavi", "Ludusavi game status refreshed", <IoMdRefresh />);
+        const operationStatus = await getOperationStatus();
+        const recentLogs = await getRecentLogs();
         if (isMounted.current) {
           setOperation(operationStatus);
           setLogs(recentLogs);
@@ -1292,6 +1295,13 @@ function Content() {
       }
     } catch (error) {
       log("error", `Manual refresh failed: ${error}`);
+      notify(
+        ludusaviStore,
+        "failures_errors",
+        "SDH-Ludusavi refresh failed",
+        error instanceof Error ? error.message : String(error),
+        <FaExclamationTriangle />
+      );
     } finally {
       if (isMounted.current) {
         setBusyLabel(null);
@@ -1334,20 +1344,16 @@ function Content() {
 
     enqueueSettingsUpdate(async () => {
       log("info", `Executing toggle auto-sync to ${enabled}`);
-      if (isMounted.current) {
-        setBusyLabel("Updating settings");
-      }
-
       try {
         const result = await setAutoSyncEnabled(enabled);
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
-        if (isMounted.current && result.auto_sync_enabled !== undefined) {
+        if (result.auto_sync_enabled !== undefined) {
           lastPersistedAutoSync = result.auto_sync_enabled;
         }
         if (updateSeq === autoSyncSeq) {
-          applySettings(result);
+          applySettingsGlobal(ludusaviStore, result);
         }
       } catch (error) {
         log("error", `Failed to toggle auto-sync: ${error}`);
@@ -1356,13 +1362,9 @@ function Content() {
           ludusaviStore.setAutoSyncEnabled(fallback);
           notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
         }
-      } finally {
-        if (isMounted.current) {
-          setBusyLabel(null);
-        }
       }
     });
-  }, [ludusaviStore, applySettings]);
+  }, [ludusaviStore]);
 
   const toggleNotificationSetting = useCallback((key: keyof NotificationSettings, enabled: boolean) => {
     const updateSeq = ++notificationSeq;
@@ -1375,20 +1377,16 @@ function Content() {
 
     enqueueSettingsUpdate(async () => {
       log("info", `Executing toggle notification setting ${String(key)} to ${enabled}`);
-      if (isMounted.current) {
-        setBusyLabel("Updating settings");
-      }
-
       try {
         const result = await setNotificationSettings(nextNotifications);
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
-        if (isMounted.current && result.notifications) {
+        if (result.notifications) {
           lastPersistedNotifications = result.notifications;
         }
         if (updateSeq === notificationSeq) {
-          applySettings(result);
+          applySettingsGlobal(ludusaviStore, result);
         }
       } catch (error) {
         log("error", `Failed to update notification settings: ${error}`);
@@ -1397,13 +1395,9 @@ function Content() {
           ludusaviStore.setNotificationSettings(fallback);
           notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
         }
-      } finally {
-        if (isMounted.current) {
-          setBusyLabel(null);
-        }
       }
     });
-  }, [ludusaviStore, applySettings]);
+  }, [ludusaviStore]);
 
   const onGameChange = useCallback((data: SingleDropdownOption | string | null | undefined) => {
     const value = (typeof data === 'object' && data !== null) ? data.data : data;
@@ -1425,20 +1419,16 @@ function Content() {
 
     enqueueSettingsUpdate(async () => {
       log("info", `Executing selected game change to ${value}`);
-      if (isMounted.current) {
-        setBusyLabel("Updating settings");
-      }
-
       try {
         const result = await setSelectedGameCall(value);
         if (isRpcStatus(result)) {
           throw new Error(result.message || result.status);
         }
-        if (isMounted.current && result.selected_game !== undefined) {
+        if (result.selected_game !== undefined) {
           lastPersistedSelectedGame = result.selected_game;
         }
         if (updateSeq === selectedGameSeq) {
-          applySettings(result);
+          applySettingsGlobal(ludusaviStore, result);
           ludusaviStore.setSelectedGame(result.selected_game);
         }
       } catch (error) {
@@ -1449,13 +1439,9 @@ function Content() {
           lastQueuedSelectedGame = fallback;
           notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
         }
-      } finally {
-        if (isMounted.current) {
-          setBusyLabel(null);
-        }
       }
     });
-  }, [ludusaviStore, applySettings]);
+  }, [ludusaviStore]);
 
   const runForceOperation = async (
     label: "Backup" | "Restore",
@@ -1823,6 +1809,10 @@ function LudusaviPanel({
 
 export default definePlugin(() => {
   console.log("SDH-Ludusavi plugin initializing");
+
+  if (!dropdownStyleEl.parentNode) {
+    document.head.appendChild(dropdownStyleEl);
+  }
 
   const ludusaviStore = createLudusaviStateStore();
   const activeSessions = new Map<number, RunningSession>();
@@ -2244,6 +2234,10 @@ export default definePlugin(() => {
       clearAutoSyncStatusSyncTimeout();
       clearAutoSyncStatusShowTimeout();
       destroyAutoSyncStatusBrowserView();
+
+      if (dropdownStyleEl.parentNode) {
+        dropdownStyleEl.parentNode.removeChild(dropdownStyleEl);
+      }
 
       // Reset settings queue and tracking variables
       settingsQueue.length = 0;
