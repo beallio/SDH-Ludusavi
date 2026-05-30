@@ -1007,6 +1007,9 @@ function Content() {
     return subscribeQueue((busy) => {
       if (isMounted.current) {
         setQueueBusy(busy);
+        if (!busy) {
+          setBusyLabel((prev) => prev === "Updating settings" ? null : prev);
+        }
       }
     });
   }, []);
