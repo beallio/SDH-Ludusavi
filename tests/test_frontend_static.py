@@ -2073,3 +2073,70 @@ def test_frontend_on_dismount_resets_init_and_metadata_promises() -> None:
     assert "activeMetadataPromise = null;" in cleanup_region, (
         "activeMetadataPromise must be reset in onDismount cleanup"
     )
+
+
+def test_frontend_dropdown_uses_scoped_steamos_truncation_workaround() -> None:
+    import re
+
+    source = FRONTEND.read_text(encoding="utf-8")
+
+    # Assert no .sdh-ludusavi-game-dropdown * selector
+    assert (
+        re.search(
+            r"\.sdh-ludusavi-game-dropdown\s*,\s*\.sdh-ludusavi-game-dropdown\s+\*",
+            source,
+        )
+        is None
+    )
+    assert re.search(r"\.sdh-ludusavi-game-dropdown\s+\*", source) is None
+    assert ".sdh-ludusavi-game-dropdown *" not in source
+
+    # DropdownItem remains layout="below"
+    dropdown_match = re.search(
+        r'<DropdownItem[\s\S]*?menuLabel=(["\'])Select Game\1[\s\S]*?/>', source
+    )
+    assert dropdown_match is not None, "DropdownItem for Select Game not found in index.tsx"
+    dropdown_content = dropdown_match.group(0)
+    assert re.search(r'layout\s*=\s*(["\'])below\1', dropdown_content) is not None
+
+    # Scoped dropdown wrapper class className="sdh-ludusavi-game-dropdown"
+    assert (
+        re.search(
+            r'className="sdh-ludusavi-game-dropdown"[\s\S]*?<DropdownItem',
+            source,
+        )
+        is not None
+    )
+
+    # DropdownItem uses renderButtonValue
+    assert "renderButtonValue=" in dropdown_content
+
+    # Selected text wrapped in sdh-ludusavi-game-dropdown-value
+    assert "sdh-ludusavi-game-dropdown-value" in source
+
+    # CSS styles block in dropdownStyleEl.textContent exists
+    style_match = re.search(r"dropdownStyleEl\.textContent\s*=\s*`([\s\S]*?)`", source)
+    assert style_match is not None, "dropdownStyleEl.textContent styles block not found"
+    styles = style_match.group(1)
+
+    # CSS gives explicit min-width: 0 and max-width: 100% to scoped dropdown wrapper/control/flex-chain selectors
+    assert re.search(r"\.sdh-ludusavi-game-dropdown\b[\s\S]*?max-width:\s*100%", styles) is not None
+    assert (
+        re.search(r"\.sdh-ludusavi-game-dropdown\s+div\b[\s\S]*?min-width:\s*0\b", styles)
+        is not None
+    )
+
+    # CSS applies ellipsis to sdh-ludusavi-game-dropdown-value
+    assert (
+        re.search(
+            r"\.sdh-ludusavi-game-dropdown-value\b[\s\S]*?text-overflow:\s*ellipsis",
+            styles,
+        )
+        is not None
+    )
+
+    # CSS protects svg, [class*="icon" i], [class*="chevron" i], and [class*="arrow" i] with non-collapsing sizing
+    assert re.search(r"\.sdh-ludusavi-game-dropdown\s+svg\b", styles) is not None
+    assert re.search(r'\[class\*="icon"\s*i\]', styles) is not None
+    assert re.search(r'\[class\*="chevron"\s*i\]', styles) is not None
+    assert re.search(r'\[class\*="arrow"\s*i\]', styles) is not None

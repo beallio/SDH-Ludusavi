@@ -954,34 +954,56 @@ let activeLudusaviStore: LudusaviStateStore | null = null;
 
 const dropdownStyleEl = document.createElement("style");
 dropdownStyleEl.textContent = `
-  .sdh-ludusavi-game-dropdown,
-  .sdh-ludusavi-game-dropdown button,
+  /*
+   * Temporary SteamOS workaround for the QAM dropdown long-name regression.
+   * Scoped to prevent broad wildcard descendant side effects on Decky icons.
+   * This workaround should be removed via git revert 3e12a299a7381448e08fdd552261c0d6eec3b231 when SteamOS no longer requires it.
+   */
+  .sdh-ludusavi-game-dropdown {
+    width: 100%;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+  .sdh-ludusavi-game-dropdown button {
+    max-width: 100% !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  .sdh-ludusavi-game-dropdown [class*="DropdownField" i],
+  .sdh-ludusavi-game-dropdown [class*="DropdownControl" i],
+  .sdh-ludusavi-game-dropdown [class*="DropdownButton" i],
+  .sdh-ludusavi-game-dropdown [class*="DropdownMenu" i],
   .sdh-ludusavi-game-dropdown [class*="dropdown" i],
   .sdh-ludusavi-game-dropdown [class*="button" i],
   .sdh-ludusavi-game-dropdown [focusable="true"],
   .sdh-ludusavi-game-dropdown [role="button"],
-  .sdh-ludusavi-game-dropdown span,
-  .sdh-ludusavi-game-dropdown [class*="label" i],
-  .sdh-ludusavi-game-dropdown [class*="text" i],
-  .sdh-ludusavi-game-dropdown [class*="value" i] {
+  .sdh-ludusavi-game-dropdown div {
     max-width: 100% !important;
     min-width: 0 !important;
   }
-  .sdh-ludusavi-game-dropdown button,
+  .sdh-ludusavi-game-dropdown [class*="DropdownField" i],
+  .sdh-ludusavi-game-dropdown [class*="DropdownControl" i],
+  .sdh-ludusavi-game-dropdown [class*="DropdownButton" i],
+  .sdh-ludusavi-game-dropdown [class*="DropdownMenu" i],
   .sdh-ludusavi-game-dropdown [class*="dropdown" i],
   .sdh-ludusavi-game-dropdown [class*="button" i],
   .sdh-ludusavi-game-dropdown [focusable="true"],
   .sdh-ludusavi-game-dropdown [role="button"] {
     width: 100% !important;
   }
-  .sdh-ludusavi-game-dropdown span,
-  .sdh-ludusavi-game-dropdown [class*="label" i],
-  .sdh-ludusavi-game-dropdown [class*="text" i],
-  .sdh-ludusavi-game-dropdown [class*="value" i] {
+  .sdh-ludusavi-game-dropdown-value {
     overflow: hidden !important;
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
     display: inline-block !important;
+  }
+  .sdh-ludusavi-game-dropdown svg,
+  .sdh-ludusavi-game-dropdown [class*="icon" i],
+  .sdh-ludusavi-game-dropdown [class*="chevron" i],
+  .sdh-ludusavi-game-dropdown [class*="arrow" i] {
+    flex-shrink: 0 !important;
+    min-width: fit-content !important;
+    max-width: none !important;
   }
 `;
 
@@ -1623,6 +1645,9 @@ function Content() {
               rgOptions={gamesDropdownOptions}
               selectedOption={selectedGame}
               onChange={onGameChange}
+              renderButtonValue={(value: any) => (
+                <span className="sdh-ludusavi-game-dropdown-value">{value}</span>
+              )}
             />
           </div>
         </PanelSectionRow>
