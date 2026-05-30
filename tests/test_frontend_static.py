@@ -1861,6 +1861,15 @@ def test_frontend_dropdown_truncation_styling() -> None:
         is not None
     )
 
+    # Assert that style tag is rendered in the JSX of Content component
+    assert (
+        re.search(
+            r"<style>\{\s*dropdownStyleEl\.textContent\s*\}</style>",
+            source,
+        )
+        is not None
+    )
+
 
 def test_frontend_dropdown_styling_lifecycle() -> None:
     import re

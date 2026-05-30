@@ -1490,6 +1490,7 @@ function Content() {
 
   return (
     <div ref={qamContentRef} className="sdh-ludusavi-qam-container">
+      <style>{dropdownStyleEl.textContent}</style>
 
       <PanelSection title="GLOBAL">
         <PanelSectionRow>
