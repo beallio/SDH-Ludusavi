@@ -199,3 +199,30 @@ def test_record_update_install_requested_preserves_metadata(tmp_path: Path) -> N
     service.reconcile_pending_update_install("0.2.1")
     ctx3 = service.get_update_check_context()
     assert ctx3["pending_update_install"] is None
+
+
+def test_record_update_check_result_logs_failure(tmp_path: Path) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+
+    logged_messages = []
+
+    def mock_log(level: str, msg: str) -> None:
+        logged_messages.append((level, msg))
+
+    service.log = mock_log
+
+    failed_res = {
+        "status": "failed",
+        "checked_at": "2026-05-30T13:00:00Z",
+        "message": "SSL certificate verification failed",
+    }
+    service.record_update_check_result(failed_res)
+
+    assert any(
+        level == "error" and "SSL certificate verification failed" in msg
+        for level, msg in logged_messages
+    )

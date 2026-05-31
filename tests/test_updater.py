@@ -542,3 +542,27 @@ def test_validate_release_candidate_manifest_name_strict(monkeypatch) -> None:
     # Verify dev legacy matches
     current_manifest = manifest_dev_legacy
     assert validate_release_candidate(release_dev_legacy) is not None
+
+
+def test_ssl_context_loading(monkeypatch) -> None:
+    import ssl
+    from pathlib import Path
+    from sdh_ludusavi.updater import _get_ssl_context
+
+    loaded_paths = []
+
+    def mock_load(self, cafile: str) -> None:
+        loaded_paths.append(cafile)
+
+    monkeypatch.setattr(ssl.SSLContext, "load_verify_locations", mock_load)
+    monkeypatch.setattr(
+        Path, "exists", lambda self: str(self) == "/etc/ssl/certs/ca-certificates.crt"
+    )
+
+    ctx = _get_ssl_context()
+    assert "/etc/ssl/certs/ca-certificates.crt" in loaded_paths
+
+    # When no paths exist, it should not raise and return a context
+    monkeypatch.setattr(Path, "exists", lambda self: False)
+    ctx = _get_ssl_context()
+    assert isinstance(ctx, ssl.SSLContext)

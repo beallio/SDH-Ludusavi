@@ -4,6 +4,7 @@ import datetime
 import functools
 import json
 import re
+import ssl
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -109,6 +110,29 @@ def _get_user_agent() -> str:
     return f"SDH-Ludusavi/{ver}"
 
 
+def _get_ssl_context() -> ssl.SSLContext:
+    from pathlib import Path
+
+    context = ssl.create_default_context()
+    standard_paths = [
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/ca-bundle.pem",
+        "/etc/pki/tls/cacert.pem",
+        "/etc/ssl/certs/ca-bundle.crt",
+    ]
+    for path_str in standard_paths:
+        path = Path(path_str)
+        if path.exists():
+            try:
+                context.load_verify_locations(cafile=str(path))
+                break
+            # Intentionally broad
+            except Exception:
+                pass
+    return context
+
+
 def fetch_json(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
     req = urllib.request.Request(
         url,
@@ -119,7 +143,9 @@ def fetch_json(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
+        with urllib.request.urlopen(
+            req, timeout=timeout_seconds, context=_get_ssl_context()
+        ) as response:
             status = response.status
             resp_headers = {k.lower(): v for k, v in response.headers.items()}
             body_bytes = response.read()
@@ -478,6 +504,8 @@ def record_update_check_result(service: Any, result: dict[str, Any]) -> None:
             service._update_check_cache["last_checked_at"] = checked_at
             service._update_check_cache["last_checked_channel"] = service._update_channel
         elif status == "failed":
+            message = result.get("message")
+            service.log("error", f"Update check failed: {message}")
             retry_after_str = result.get("retry_after")
             if retry_after_str:
                 import datetime
