@@ -138,3 +138,104 @@ def test_post_commit_script_builds_the_project_zip() -> None:
     source = Path("scripts/post_commit.sh").read_text()
 
     assert "./run.sh uv run python scripts/package_plugin.py" in source
+
+
+def test_package_script_supports_release_arguments(tmp_path: Path) -> None:
+    import hashlib
+
+    # Record source versions and ensure they aren't modified
+    plugin_src = Path("plugin.json").read_text(encoding="utf-8")
+    package_src = Path("package.json").read_text(encoding="utf-8")
+
+    # Run release packaging with new args
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/package_plugin.py",
+            "--release",
+            "--release-version",
+            "0.2.1",
+            "--release-tag",
+            "v0.2.1",
+            "--versioned-output",
+            "--emit-release-metadata",
+            "--output-dir",
+            str(tmp_path),
+        ],
+        check=True,
+    )
+
+    # Ensure source JSONs are untouched
+    assert Path("plugin.json").read_text(encoding="utf-8") == plugin_src
+    assert Path("package.json").read_text(encoding="utf-8") == package_src
+
+    zip_path = tmp_path / "SDH-Ludusavi-v0.2.1.zip"
+    sha_path = tmp_path / "SDH-Ludusavi-v0.2.1.zip.sha256"
+    manifest_path = tmp_path / "SDH-Ludusavi-v0.2.1.manifest.json"
+
+    assert zip_path.exists()
+    assert sha_path.exists()
+    assert manifest_path.exists()
+
+    # Verify checksum
+    zip_bytes = zip_path.read_bytes()
+    expected_sha = hashlib.sha256(zip_bytes).hexdigest()
+    assert (
+        sha_path.read_text(encoding="utf-8").strip() == f"{expected_sha}  SDH-Ludusavi-v0.2.1.zip"
+    )
+
+    # Verify manifest
+    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest_data["schemaVersion"] == 1
+    assert manifest_data["pluginName"] == "SDH-Ludusavi"
+    assert manifest_data["packageName"] == "sdh-ludusavi"
+    assert manifest_data["version"] == "0.2.1"
+    assert manifest_data["sourceVersion"] == "0.1.0"
+    assert manifest_data["tag"] == "v0.2.1"
+    assert manifest_data["channel"] == "stable"
+    assert manifest_data["assetName"] == "SDH-Ludusavi-v0.2.1.zip"
+    assert manifest_data["sha256"] == expected_sha
+    assert "generatedAt" in manifest_data
+
+    # Verify contents of zip metadata
+    with zipfile.ZipFile(zip_path) as archive:
+        zip_plugin = json.loads(archive.read("SDH-Ludusavi/plugin.json"))
+        zip_package = json.loads(archive.read("SDH-Ludusavi/package.json"))
+        # Staged files must have the release version
+        assert zip_plugin["version"] == "0.2.1"
+        assert zip_package["version"] == "0.2.1"
+        # Staged plugin.json must have the tag-stable Raw GitHub URL for the publish image
+        assert (
+            zip_plugin["publish"]["image"]
+            == "https://raw.githubusercontent.com/beallio/SDH-Ludusavi/v0.2.1/assets/icon.png"
+        )
+
+
+def test_package_script_dev_prerelease(tmp_path: Path) -> None:
+    # Run release packaging with a dev/prerelease version
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/package_plugin.py",
+            "--release",
+            "--release-version",
+            "0.2.1-dev.55d87c6",
+            "--versioned-output",
+            "--emit-release-metadata",
+            "--output-dir",
+            str(tmp_path),
+        ],
+        check=True,
+    )
+
+    zip_path = tmp_path / "SDH-Ludusavi-v0.2.1-dev.55d87c6.zip"
+    manifest_path = tmp_path / "SDH-Ludusavi-v0.2.1-dev.55d87c6.manifest.json"
+
+    assert zip_path.exists()
+    assert manifest_path.exists()
+
+    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest_data["version"] == "0.2.1-dev.55d87c6"
+    assert manifest_data["tag"] == "v0.2.1-dev.55d87c6"
+    assert manifest_data["channel"] == "dev"
+    assert manifest_data["assetName"] == "SDH-Ludusavi-v0.2.1-dev.55d87c6.zip"

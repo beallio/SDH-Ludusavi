@@ -7,6 +7,6 @@
   "publish": {
     "tags": ["ludusavi", "backup", "saves"],
     "description": "Decky Loader controls for Ludusavi save backups and restores.",
-    "image": "https://opengraph.githubassets.com/1/SteamDeckHomebrew/PluginLoader"
+    "image": "https://raw.githubusercontent.com/beallio/SDH-Ludusavi/main/assets/icon.png"
   }
 }

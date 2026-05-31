@@ -134,10 +134,20 @@ def _get_git_hash() -> str | None:
         return None
 
 
-def build_plugin_zip(project_root: Path, output_dir: Path, is_release: bool = False) -> Path:
+def build_plugin_zip(
+    project_root: Path,
+    output_dir: Path,
+    is_release: bool = False,
+    release_version: str | None = None,
+    release_tag: str | None = None,
+    versioned_output: bool = False,
+    emit_release_metadata: bool = False,
+) -> Path:
     ensure_required_files(project_root, is_release=is_release)
     base_version = validate_package_versions(project_root)
-    if is_release:
+    if release_version:
+        version = release_version
+    elif is_release:
         version = base_version
     else:
         git_hash = _get_git_hash()
@@ -146,8 +156,13 @@ def build_plugin_zip(project_root: Path, output_dir: Path, is_release: bool = Fa
     plugin_paths = iter_required_plugin_paths(project_root)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = output_dir / ZIP_FILENAME
-    temporary_zip_path = output_dir / f".{ZIP_FILENAME}.tmp"
+    if versioned_output:
+        zip_filename = f"SDH-Ludusavi-v{version}.zip"
+    else:
+        zip_filename = ZIP_FILENAME
+
+    zip_path = output_dir / zip_filename
+    temporary_zip_path = output_dir / f".{zip_filename}.tmp"
 
     if temporary_zip_path.exists():
         temporary_zip_path.unlink()
@@ -160,11 +175,50 @@ def build_plugin_zip(project_root: Path, output_dir: Path, is_release: bool = Fa
             if plugin_path in ("plugin.json", "package.json"):
                 data = json.loads(full_path.read_text(encoding="utf-8"))
                 data["version"] = version
+                if plugin_path == "plugin.json" and release_tag:
+                    if "publish" in data and "image" in data["publish"]:
+                        data["publish"]["image"] = (
+                            f"https://raw.githubusercontent.com/beallio/SDH-Ludusavi/{release_tag}/assets/icon.png"
+                        )
                 archive.writestr(archive_name, json.dumps(data, indent=2))
             else:
                 archive.write(full_path, archive_name)
 
     temporary_zip_path.replace(zip_path)
+
+    if emit_release_metadata:
+        import datetime
+        import hashlib
+
+        # Calculate SHA256
+        sha256_hash = hashlib.sha256()
+        with open(zip_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        checksum = sha256_hash.hexdigest()
+
+        # Write checksum file
+        sha_path = output_dir / f"{zip_filename}.sha256"
+        sha_path.write_text(f"{checksum}  {zip_filename}\n", encoding="utf-8")
+
+        # Write manifest file
+        tag = release_tag if release_tag else f"v{version}"
+        channel = "dev" if "-" in version else "stable"
+        manifest_data = {
+            "schemaVersion": 1,
+            "pluginName": PROJECT_NAME,
+            "packageName": "sdh-ludusavi",
+            "version": version,
+            "sourceVersion": base_version,
+            "tag": tag,
+            "channel": channel,
+            "assetName": zip_filename,
+            "sha256": checksum,
+            "generatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        manifest_path = output_dir / f"SDH-Ludusavi-v{version}.manifest.json"
+        manifest_path.write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
+
     return zip_path
 
 
@@ -187,6 +241,26 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Omit the git hash from the version string for release builds.",
     )
+    parser.add_argument(
+        "--release-version",
+        type=str,
+        help="Stamped version for release builds.",
+    )
+    parser.add_argument(
+        "--release-tag",
+        type=str,
+        help="Release tag for manifest URL mapping.",
+    )
+    parser.add_argument(
+        "--versioned-output",
+        action="store_true",
+        help="Output ZIP is named SDH-Ludusavi-v{VERSION}.zip.",
+    )
+    parser.add_argument(
+        "--emit-release-metadata",
+        action="store_true",
+        help="Generate sha256 checksum and manifest files.",
+    )
     return parser.parse_args()
 
 
@@ -197,7 +271,15 @@ def main() -> None:
     if not output_dir.is_absolute():
         output_dir = project_root / output_dir
 
-    zip_path = build_plugin_zip(project_root, output_dir, is_release=args.release)
+    zip_path = build_plugin_zip(
+        project_root,
+        output_dir,
+        is_release=args.release,
+        release_version=args.release_version,
+        release_tag=args.release_tag,
+        versioned_output=args.versioned_output,
+        emit_release_metadata=args.emit_release_metadata,
+    )
     print(f"Created {zip_path}")
 
 
