@@ -45,9 +45,11 @@ import {
   AutoSyncStatusBrowserView,
   AutoSyncStatusBrowserViewOwner,
   Versions,
-  LogEntry
+  LogEntry,
+  UpdateChannel
 } from "./types";
 import { LogModal, LudusaviLogModal } from "./components/LogModal";
+import { PluginUpdateSection } from "./components/PluginUpdateSection";
 import { log } from "./utils/logging";
 import {
   LudusaviStateProvider,
@@ -170,6 +172,8 @@ const getVersions = callable<[], RpcResult<Versions>>("get_versions");
 const getOperationStatus = callable<[], OperationStatus>("get_operation_status");
 const getRecentLogs = callable<[], LogEntry[]>("get_recent_logs");
 const getLudusaviLogs = callable<[], RpcResult<string>>("get_ludusavi_logs");
+const setUpdateChannelCall = callable<[channel: string], RpcResult<Settings>>("set_update_channel");
+const setAutomaticUpdateChecksCall = callable<[enabled: boolean], RpcResult<Settings>>("set_automatic_update_checks");
 
 const getLudusaviCommandCall = callable<[], RpcResult<LudusaviLaunchCommand | null>>("get_ludusavi_command");
 const pauseGameProcessCall = callable<[pid: number], RpcResult<ProcessSignalResult>>("pause_game_process");
@@ -946,8 +950,12 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: st
 let autoSyncSeq = 0;
 let notificationSeq = 0;
 let selectedGameSeq = 0;
+let updateChannelSeq = 0;
+let automaticUpdateChecksSeq = 0;
 let lastPersistedAutoSync: boolean | null = null;
 let lastPersistedNotifications: NotificationSettings | null = null;
+let lastPersistedUpdateChannel: UpdateChannel | null = null;
+let lastPersistedAutomaticUpdateChecks: boolean | null = null;
 let lastPersistedSelectedGame: string | null = null;
 let lastQueuedSelectedGame: string | null = null;
 let activeLudusaviStore: LudusaviStateStore | null = null;
@@ -1022,6 +1030,12 @@ function applySettingsGlobal(store: LudusaviStateStore, nextSettings: Settings) 
   }
   if (normalized.selected_game !== undefined) {
     lastPersistedSelectedGame = normalized.selected_game;
+  }
+  if (normalized.update_channel !== undefined) {
+    lastPersistedUpdateChannel = normalized.update_channel;
+  }
+  if (normalized.automatic_update_checks !== undefined) {
+    lastPersistedAutomaticUpdateChecks = normalized.automatic_update_checks;
   }
   return normalized;
 }
@@ -1510,6 +1524,97 @@ function Content() {
     });
   }, [ludusaviStore]);
 
+  const toggleUpdateChannel = useCallback((enabled: boolean) => {
+    const channel = enabled ? "development" : "stable";
+    const updateSeq = ++updateChannelSeq;
+    ludusaviStore.setUpdateChannel(channel);
+    if (isMounted.current) {
+      setBusyLabel("Updating settings");
+    }
+
+    enqueueSettingsUpdate(async () => {
+      log("info", `Executing toggle update channel to ${channel}`);
+      let awaitFailed = false;
+      const originalPromise = setUpdateChannelCall(channel).then((res) => {
+        if (awaitFailed) {
+          log("info", `Late resolution of setUpdateChannel to ${channel} succeeded`);
+          if (updateSeq === updateChannelSeq && !isRpcStatus(res)) {
+            applySettingsGlobal(ludusaviStore, res);
+          }
+        }
+        return res;
+      }).catch((err) => {
+        if (awaitFailed) {
+          log("error", `Late failure of setUpdateChannel to ${channel}: ${err}`);
+        }
+        throw err;
+      });
+
+      try {
+        const result = await withTimeout(originalPromise, 10000, "Setting update channel timed out");
+        if (isRpcStatus(result)) {
+          throw new Error(result.message || result.status);
+        }
+        if (updateSeq === updateChannelSeq) {
+          applySettingsGlobal(ludusaviStore, result);
+        }
+      } catch (error) {
+        awaitFailed = true;
+        log("error", `Failed to toggle update channel: ${error}`);
+        if (updateSeq === updateChannelSeq) {
+          const fallback = lastPersistedUpdateChannel ?? "stable";
+          ludusaviStore.setUpdateChannel(fallback);
+          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+        }
+      }
+    });
+  }, [ludusaviStore]);
+
+  const toggleAutomaticUpdateChecks = useCallback((enabled: boolean) => {
+    const updateSeq = ++automaticUpdateChecksSeq;
+    ludusaviStore.setAutomaticUpdateChecks(enabled);
+    if (isMounted.current) {
+      setBusyLabel("Updating settings");
+    }
+
+    enqueueSettingsUpdate(async () => {
+      log("info", `Executing toggle automatic update checks to ${enabled}`);
+      let awaitFailed = false;
+      const originalPromise = setAutomaticUpdateChecksCall(enabled).then((res) => {
+        if (awaitFailed) {
+          log("info", `Late resolution of setAutomaticUpdateChecks to ${enabled} succeeded`);
+          if (updateSeq === automaticUpdateChecksSeq && !isRpcStatus(res)) {
+            applySettingsGlobal(ludusaviStore, res);
+          }
+        }
+        return res;
+      }).catch((err) => {
+        if (awaitFailed) {
+          log("error", `Late failure of setAutomaticUpdateChecks to ${enabled}: ${err}`);
+        }
+        throw err;
+      });
+
+      try {
+        const result = await withTimeout(originalPromise, 10000, "Setting automatic checks timed out");
+        if (isRpcStatus(result)) {
+          throw new Error(result.message || result.status);
+        }
+        if (updateSeq === automaticUpdateChecksSeq) {
+          applySettingsGlobal(ludusaviStore, result);
+        }
+      } catch (error) {
+        awaitFailed = true;
+        log("error", `Failed to toggle automatic checks: ${error}`);
+        if (updateSeq === automaticUpdateChecksSeq) {
+          const fallback = lastPersistedAutomaticUpdateChecks ?? true;
+          ludusaviStore.setAutomaticUpdateChecks(fallback);
+          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed", error instanceof Error ? error.message : String(error), <FaExclamationTriangle />);
+        }
+      }
+    });
+  }, [ludusaviStore]);
+
   const onGameChange = useCallback((data: SingleDropdownOption | string | null | undefined) => {
     const value = (typeof data === 'object' && data !== null) ? data.data : data;
     if (typeof value !== "string" || value.trim() === "") {
@@ -1818,6 +1923,14 @@ function Content() {
           </ButtonItem>
         </PanelSectionRow>
       </PanelSection>
+
+      <PluginUpdateSection
+        currentVersion={versions.sdh_ludusavi ?? "Unknown"}
+        updateChannel={settings.update_channel}
+        automaticUpdateChecks={settings.automatic_update_checks}
+        onToggleUpdateChannel={toggleUpdateChannel}
+        onToggleAutomaticUpdateChecks={toggleAutomaticUpdateChecks}
+      />
 
       <PanelSection title="Versions">
         <PanelSectionRow>
