@@ -244,6 +244,31 @@ def test_select_candidate() -> None:
     assert sel.version == "0.2.2-dev.g456"
     assert sel.action == "update"
 
+    # Test same-base dev ordering by published_at
+    c_dev_2_2_earlier = UpdateCandidate(
+        version="0.2.2-dev.g456",
+        tag="v0.2.2-dev.g456",
+        channel="development",
+        artifact_url="https://zip_dev2_earlier",
+        sha256="a" * 64,
+        release_url="https://release_dev2_earlier",
+        published_at="2026-05-28T12:00:00Z",
+        action="update",
+    )
+    c_dev_2_2_later = UpdateCandidate(
+        version="0.2.2-dev.g789",
+        tag="v0.2.2-dev.g789",
+        channel="development",
+        artifact_url="https://zip_dev2_later",
+        sha256="a" * 64,
+        release_url="https://release_dev2_later",
+        published_at="2026-05-29T12:00:00Z",
+        action="update",
+    )
+    sel_same_base = select_candidate([c_dev_2_2_earlier, c_dev_2_2_later], "0.2.1", "development")
+    assert sel_same_base is not None
+    assert sel_same_base.version == "0.2.2-dev.g789"
+
 
 def test_check_for_update(monkeypatch) -> None:
     from sdh_ludusavi.updater import check_for_update, JsonResponse

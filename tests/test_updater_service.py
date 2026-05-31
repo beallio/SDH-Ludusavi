@@ -83,3 +83,86 @@ def test_pending_update_install_reconciliation(tmp_path: Path) -> None:
     assert service._update_check_cache.get("pending_update_install") is None
     # Tag was already v0.2.2-dev.g456 from previous step, let's verify it didn't update to v0.2.1
     assert service._update_check_cache.get("installed_release_tag") == "v0.2.2-dev.g456"
+
+
+def test_cache_poisoning_guard(tmp_path: Path) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+
+    # 1. Simulate a successful update check result and record/cache it
+    successful_res = {
+        "status": "current",
+        "checked_at": "2026-05-30T12:00:00Z",
+        "channel": "stable",
+    }
+    service._update_check_cache["last_result"] = successful_res
+    service.record_update_check_result(successful_res)
+
+    # 2. Record a failed check result (e.g. rate-limit or network failure)
+    failed_res = {
+        "status": "failed",
+        "checked_at": "2026-05-30T13:00:00Z",
+        "message": "API rate limit exceeded",
+    }
+    service.record_update_check_result(failed_res)
+
+    # 3. Assert that last_result is STILL the successful check, not overwritten or poisoned
+    assert service._update_check_cache.get("last_result") == successful_res
+
+
+def test_decky_settings_store_defaults() -> None:
+    from typing import Any
+    from main import DeckySettingsStore
+
+    class MockManager:
+        def __init__(self) -> None:
+            self.settings: dict[str, Any] = {}
+
+        def read(self) -> None:
+            pass
+
+        def getSetting(self, key: str, default: Any) -> Any:
+            return self.settings.get(key, default)
+
+        def setSetting(self, key: str, value: Any) -> None:
+            self.settings[key] = value
+
+        def commit(self) -> None:
+            pass
+
+    manager = MockManager()
+    store = DeckySettingsStore(manager)
+
+    # Reading empty manager should yield default settings
+    settings = store.read()
+    assert settings["update_channel"] == "stable"
+    assert settings["automatic_update_checks"] is True
+
+    # Writing settings should commit them to the manager
+    store.write({"update_channel": "development", "automatic_update_checks": False})
+    assert manager.settings["update_channel"] == "development"
+    assert manager.settings["automatic_update_checks"] is False
+
+
+def test_transient_rate_limit_properties(tmp_path: Path) -> None:
+    import datetime
+
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+
+    # Set rate-limit reset timestamp
+    future_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
+    service._update_rate_limited_until = future_time
+
+    # Save state
+    service._save_state()
+
+    # Re-instantiate service from files and assert that rate-limit timestamp is not persisted
+    service2 = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+    assert service2._update_rate_limited_until is None

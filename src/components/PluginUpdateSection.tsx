@@ -47,6 +47,7 @@ export function PluginUpdateSection({
   const [checkResult, setCheckResult] = useState<UpdateCheckResult | null>(null);
   const [candidate, setCandidate] = useState<PluginUpdateCandidate | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [installedReleasePublishedAt, setInstalledReleasePublishedAt] = useState<string | null>(null);
   const hasChecked = useRef(false);
 
   const checkForUpdates = useCallback(
@@ -98,6 +99,9 @@ export function PluginUpdateSection({
         const ctx = await getUpdateCheckContextCall();
         if (!active) return;
         if (ctx) {
+          if (ctx.installed_release_published_at) {
+            setInstalledReleasePublishedAt(ctx.installed_release_published_at);
+          }
           if (ctx.last_checked_at && ctx.last_checked_channel === updateChannel) {
             const hasPending = !!ctx.pending_update_install;
             if (ctx.last_available_tag && !hasPending) {
@@ -219,14 +223,17 @@ export function PluginUpdateSection({
   const isLocalBuild = currentVersion.includes("+");
   const isDeckyAvailable = isDeckyInstallerAvailable();
 
-  const getActionText = (act: PluginUpdateCandidate["action"]) => {
-    switch (act) {
+  const getActionText = (c: PluginUpdateCandidate) => {
+    switch (c.action) {
       case "move_to_stable":
-        return `Move to Stable v${candidate?.version}`;
+        return `Move to Stable v${c.version}`;
       case "downgrade_to_stable":
-        return `Revert to Stable v${candidate?.version}`;
+        return `Revert to Stable v${c.version}`;
       default:
-        return `Update to v${candidate?.version}`;
+        if (c.channel === "development") {
+          return `Install development build v${c.version}`;
+        }
+        return `Update to v${c.version}`;
     }
   };
 
@@ -282,7 +289,11 @@ export function PluginUpdateSection({
               <span style={{ color: "#4ade80" }}>Up to date</span>
             )}
             {!isChecking && !errorMsg && checkResult?.status === "available" && (
-              <span style={{ color: "#60a5fa" }}>Update available</span>
+              <span style={{ color: "#60a5fa" }}>
+                {candidate?.channel === "development" && currentVersion.includes("dev") && !installedReleasePublishedAt
+                  ? "Latest available development build"
+                  : "Update available"}
+              </span>
             )}
             {!isChecking && !checkResult && (
               <span>Never checked</span>
@@ -329,7 +340,7 @@ export function PluginUpdateSection({
                   <span>Preparing...</span>
                 </div>
               ) : (
-                getActionText(candidate.action)
+                getActionText(candidate)
               )}
             </ButtonItem>
           )}
