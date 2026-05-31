@@ -129,3 +129,37 @@ def test_validator_rejects_forbidden_paths(tmp_path: Path) -> None:
     )
     assert res.returncode != 0
     assert "forbidden" in res.stderr.lower() or "forbidden" in res.stdout.lower()
+
+
+def test_validator_rejects_casing_bugs(tmp_path: Path) -> None:
+    # 1. Create a zip with lowercase root folder SDH-ludusavi/ instead of SDH-Ludusavi/
+    zip_path = tmp_path / "SDH-ludusavi.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        archive.writestr(
+            "SDH-ludusavi/plugin.json", json.dumps({"name": "SDH-Ludusavi", "version": "0.2.1"})
+        )
+        archive.writestr("SDH-ludusavi/package.json", json.dumps({"version": "0.2.1"}))
+        archive.writestr("SDH-ludusavi/main.py", "# main")
+        archive.writestr("SDH-ludusavi/LICENSE", "BSD")
+        archive.writestr("SDH-ludusavi/dist/index.js", "// index")
+        archive.writestr("SDH-ludusavi/py_modules/sdh_ludusavi/dummy.py", "# dummy")
+        archive.writestr("SDH-ludusavi/py_modules/pyludusavi/dummy.py", "# dummy")
+        archive.writestr("SDH-ludusavi/py_modules/pyludusavi-0.2.3.dist-info/dummy.py", "# dummy")
+
+    # Run validator with --expected-name SDH-Ludusavi
+    res = subprocess.run(
+        [
+            sys.executable,
+            "scripts/validate_plugin_zip.py",
+            str(zip_path),
+            "--expected-version",
+            "0.2.1",
+            "--expected-name",
+            "SDH-Ludusavi",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    # Must fail because expected-name is SDH-Ludusavi but root folder is SDH-ludusavi/
+    assert "starting with root directory" in res.stderr.lower()
