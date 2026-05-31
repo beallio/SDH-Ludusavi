@@ -770,7 +770,10 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
             "message": "SHA-256 mismatch during revalidation",
         }
     if validated.artifact_url != candidate.get("artifact_url"):
-        msg = f"Artifact URL mismatch during revalidation: candidate={candidate.get('artifact_url')}, fetched={validated.artifact_url}"
+        cand_url = candidate.get("artifact_url") or ""
+        cand_url_prefix = cand_url[:32] if cand_url else "none"
+        val_url_prefix = validated.artifact_url[:32] if validated.artifact_url else "none"
+        msg = f"Artifact URL mismatch during revalidation: candidate_prefix={cand_url_prefix}, fetched_prefix={val_url_prefix}"
         elapsed_ms = round((time.monotonic() - t0) * 1000)
         service.log("error", f"{msg}, elapsed_ms={elapsed_ms}")
         return {
