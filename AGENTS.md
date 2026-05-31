@@ -409,9 +409,21 @@ parameter in README image URLs so images refresh immediately.
 
 # 14. Release & Packaging Protocol
 
-For local development and testing, the packaging script (`scripts/package_plugin.py`) will automatically append the current git commit hash to the version string to distinguish local builds. 
+For local development and testing, the packaging script (`scripts/package_plugin.py`) will automatically append the current git commit hash to the version string to distinguish local builds. This local post-commit packaging behavior must be preserved.
 
-For official production releases, the `--release` flag MUST be used when invoking the packaging script to omit the git hash and use the strict version number defined in `package.json` / `plugin.json`. This process is automated via the GitHub Actions workflow (`.github/workflows/release.yml`) which runs when a release is published via the GitHub UI or `gh` CLI.
+For official releases:
+- Agents must NOT publish releases, push tags, or run release dispatch commands unless explicitly instructed by the user. GitHub Actions is the only publisher.
+- Never upload mutable public ZIP aliases.
+- Always use `./run.sh` for project tooling.
+
+Stable Releases:
+- Run `./run.sh uv run python scripts/set_release_version.py X.Y.Z` to update versions in both `package.json` and `plugin.json`.
+- Run all quality gate validations, commit the changes with Conventional Commits, tag the release (`vX.Y.Z`), and push the tag.
+- GitHub Actions `release.yml` workflow builds, validates, and uploads versioned-only assets: `SDH-Ludusavi-vX.Y.Z.zip`, `SDH-Ludusavi-vX.Y.Z.zip.sha256`, and `SDH-Ludusavi-vX.Y.Z.manifest.json`.
+
+Development Releases:
+- Run `./scripts/request_dev_release.sh <base_version> [commit]` to trigger a dev release via workflow dispatch.
+- This creates prereleases versioned as `vX.Y.Z-dev.SHORTSHA`.
 
 ---
 
