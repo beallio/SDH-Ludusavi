@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  ci-gate:
+    name: Full CI Gate and Dry-Run Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install Node Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Prepare Virtual Environment and Sync Dependencies
+        run: |
+          ./run.sh uv sync
+
+      - name: Run Ruff Linter
+        run: |
+          ./run.sh uv run ruff check .
+
+      - name: Run Ruff Formatter Check
+        run: |
+          ./run.sh uv run ruff format --check .
+
+      - name: Run Python Type Checks
+        run: |
+          ./run.sh uv run ty check py_modules/sdh_ludusavi/
+
+      - name: Run Pytest Suite
+        run: |
+          ./run.sh uv run pytest
+
+      - name: Run Frontend Verify (Supply Chain & Bundle Build)
+        run: |
+          ./run.sh pnpm run verify
+
+      - name: Build Dry-Run Package
+        run: |
+          PKG_VER=$(jq -r .version package.json)
+          ./run.sh uv run python scripts/package_plugin.py --release --release-version "$PKG_VER" --versioned-output --emit-release-metadata --output-dir out
+
+      - name: Validate Dry-Run Package ZIP
+        run: |
+          PKG_VER=$(jq -r .version package.json)
+          ./run.sh uv run python scripts/validate_plugin_zip.py out/SDH-Ludusavi-v$PKG_VER.zip --expected-version "$PKG_VER" --expected-name SDH-Ludusavi
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dry-run-artifacts
+          path: out/

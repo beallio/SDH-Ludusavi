@@ -1,19 +1,61 @@
 name: Build and Release Plugin
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build (e.g. v0.2.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
-  build-and-upload:
-    name: Build and Upload Plugin Zip
+  build-and-release:
+    name: Build and Upload Plugin Release
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
+
+      - name: Determine Tag Name and Version
+        shell: bash
+        run: |
+          TAG_NAME="${{ github.event.inputs.tag }}"
+          if [ -z "$TAG_NAME" ]; then
+            TAG_NAME="${{ github.ref_name }}"
+          fi
+          VERSION_FROM_TAG="${TAG_NAME#v}"
+          
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+          echo "VERSION_FROM_TAG=$VERSION_FROM_TAG" >> $GITHUB_ENV
+
+      - name: Validate Version Alignment
+        shell: bash
+        run: |
+          PKG_VER=$(jq -r .version package.json)
+          PLG_VER=$(jq -r .version plugin.json)
+          
+          echo "Tag version: $VERSION_FROM_TAG"
+          echo "package.json version: $PKG_VER"
+          echo "plugin.json version: $PLG_VER"
+          
+          if [ "$TAG_NAME" != "v$PKG_VER" ]; then
+            echo "Error: Tag name '$TAG_NAME' does not match version in package.json '$PKG_VER'" >&2
+            exit 1
+          fi
+          if [ "$PLG_VER" != "$PKG_VER" ]; then
+            echo "Error: plugin.json version '$PLG_VER' does not match package.json version '$PKG_VER'" >&2
+            exit 1
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -42,18 +84,56 @@ jobs:
       - name: Install Node Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Frontend
-        run: pnpm run build
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Package Plugin
-        run: python scripts/package_plugin.py --output-dir out --release
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
 
-      - name: Upload Zip to Release
+      - name: Prepare Virtual Environment and Sync Dependencies
+        run: |
+          ./run.sh uv sync
+
+      - name: Run Ruff Linter
+        run: |
+          ./run.sh uv run ruff check .
+
+      - name: Run Ruff Formatter Check
+        run: |
+          ./run.sh uv run ruff format --check .
+
+      - name: Run Python Type Checks
+        run: |
+          ./run.sh uv run ty check py_modules/sdh_ludusavi/
+
+      - name: Run Pytest Suite
+        run: |
+          ./run.sh uv run pytest
+
+      - name: Run Frontend Verify (Supply Chain & Bundle Build)
+        run: |
+          ./run.sh pnpm run verify
+
+      - name: Package Plugin (Versioned Release)
+        run: |
+          ./run.sh uv run python scripts/package_plugin.py --release --release-version "${{ env.VERSION_FROM_TAG }}" --release-tag "${{ env.TAG_NAME }}" --versioned-output --emit-release-metadata --output-dir out
+
+      - name: Validate Release Package ZIP
+        run: |
+          ./run.sh uv run python scripts/validate_plugin_zip.py "out/SDH-Ludusavi-${{ env.TAG_NAME }}.zip" --expected-version "${{ env.VERSION_FROM_TAG }}" --expected-name SDH-Ludusavi
+
+      - name: Publish Stable Release to GitHub
         uses: softprops/action-gh-release@v2
         with:
-          files: out/SDH-ludusavi.zip
+          tag_name: ${{ env.TAG_NAME }}
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: |
+            out/SDH-Ludusavi-${{ env.TAG_NAME }}.zip
+            out/SDH-Ludusavi-${{ env.TAG_NAME }}.zip.sha256
+            out/SDH-Ludusavi-${{ env.TAG_NAME }}.manifest.json

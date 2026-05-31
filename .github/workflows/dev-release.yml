@@ -1,0 +1,145 @@
+name: Dev Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Commit hash or ref to build (defaults to current SHA)"
+        required: false
+        type: string
+      base_version:
+        description: "Next intended stable base version (e.g. 0.2.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  dev-release:
+    name: Build and Publish Dev Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.commit || github.sha }}
+          fetch-depth: 0
+
+      - name: Resolve Commit SHAs and Validate Base Version
+        shell: bash
+        run: |
+          FULL_SHA=$(git rev-parse HEAD)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          BASE_VERSION="${{ github.event.inputs.base_version }}"
+          
+          if [[ ! "$BASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Base version '$BASE_VERSION' is not a stable semantic version (X.Y.Z)." >&2
+            exit 1
+          fi
+          
+          DEV_VERSION="${BASE_VERSION}-dev.${SHORT_SHA}"
+          echo "FULL_SHA=$FULL_SHA" >> $GITHUB_ENV
+          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
+          echo "DEV_VERSION=$DEV_VERSION" >> $GITHUB_ENV
+
+      - name: Check if Dev Tag Already Exists
+        shell: bash
+        run: |
+          git fetch --tags origin
+          if git rev-parse "v${{ env.DEV_VERSION }}" >/dev/null 2>&1; then
+            echo "Error: Tag v${{ env.DEV_VERSION }} already exists." >&2
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install Node Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Prepare Virtual Environment and Sync Dependencies
+        run: |
+          ./run.sh uv sync
+
+      - name: Run Ruff Linter
+        run: |
+          ./run.sh uv run ruff check .
+
+      - name: Run Ruff Formatter Check
+        run: |
+          ./run.sh uv run ruff format --check .
+
+      - name: Run Python Type Checks
+        run: |
+          ./run.sh uv run ty check py_modules/sdh_ludusavi/
+
+      - name: Run Pytest Suite
+        run: |
+          ./run.sh uv run pytest
+
+      - name: Run Frontend Verify (Supply Chain & Bundle Build)
+        run: |
+          ./run.sh pnpm run verify
+
+      - name: Package Plugin (Dev Release)
+        run: |
+          ./run.sh uv run python scripts/package_plugin.py --release --release-version "${{ env.DEV_VERSION }}" --release-tag "v${{ env.DEV_VERSION }}" --versioned-output --emit-release-metadata --output-dir out
+
+      - name: Validate Dev Package ZIP
+        run: |
+          ./run.sh uv run python scripts/validate_plugin_zip.py "out/SDH-Ludusavi-v${{ env.DEV_VERSION }}.zip" --expected-version "${{ env.DEV_VERSION }}" --expected-name SDH-Ludusavi
+
+      - name: Create and Push Dev Release Git Tag
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "v${{ env.DEV_VERSION }}" "${{ env.FULL_SHA }}"
+          git push origin "v${{ env.DEV_VERSION }}"
+
+      - name: Publish Dev Prerelease to GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ env.DEV_VERSION }}"
+          target_commitish: ${{ env.FULL_SHA }}
+          prerelease: true
+          make_latest: false
+          name: "SDH-Ludusavi v${{ env.DEV_VERSION }} (Dev)"
+          body: "Automated development pre-release built from commit ${{ env.FULL_SHA }}."
+          files: |
+            out/SDH-Ludusavi-v${{ env.DEV_VERSION }}.zip
+            out/SDH-Ludusavi-v${{ env.DEV_VERSION }}.zip.sha256
+            out/SDH-Ludusavi-v${{ env.DEV_VERSION }}.manifest.json
