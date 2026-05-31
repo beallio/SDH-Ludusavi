@@ -2225,3 +2225,13 @@ def test_frontend_updater_static() -> None:
     # Ensure any log statement including sha256 slices it
     assert "slice" in comp_content or "substring" in comp_content
     assert "sha256" in comp_content
+
+    # 6. Timing is logged with elapsed_ms and performance.now()
+    assert "elapsed_ms" in comp_content
+    assert "elapsed_ms" in installer_content
+    assert "performance.now()" in comp_content
+
+    # 7. Stable button row with minHeight and lineHeight
+    assert "minHeight" in comp_content
+    assert "lineHeight" in comp_content
+    assert "buttonRowStyle" in comp_content

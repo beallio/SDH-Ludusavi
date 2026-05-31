@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ButtonItem,
   ConfirmModal,
@@ -45,6 +45,25 @@ function generateUpdateTraceId(): string {
   return "tr-" + Date.now() + "-" + Math.random().toString(36).substr(2, 9);
 }
 
+const buttonRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "8px",
+  minHeight: "20px",
+  lineHeight: "20px",
+};
+
+const spinnerSlotStyle: React.CSSProperties = {
+  width: "16px",
+  height: "16px",
+  flex: "0 0 16px",
+  overflow: "hidden",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
 export interface PluginUpdateSectionProps {
   currentVersion: string;
   updateChannel: UpdateChannel;
@@ -76,19 +95,21 @@ export function PluginUpdateSection({
         return;
       }
       if (inFlightCheck.current) {
-        logUpdate(null, "check_reuse", { channel: updateChannel });
+        logUpdate(null, "check_reuse", { channel: updateChannel, elapsed_ms: 0 });
         return inFlightCheck.current;
       }
 
       const promise = (async () => {
+        const checkStart = performance.now();
         setIsChecking(true);
         setErrorMsg(null);
         logUpdate(null, "check_start", { channel: updateChannel });
         try {
           const res = await checkForPluginUpdateCall(currentVersion, opts.force);
+          const elapsed_ms = Math.round(performance.now() - checkStart);
           setCheckResult(res);
           if (res.status === "failed") {
-            logUpdate(null, "check_failed", { message: res.message || "unknown" });
+            logUpdate(null, "check_failed", { message: res.message || "unknown", elapsed_ms });
             setErrorMsg(res.message || "Failed to check for updates");
             if (opts.notify && opts.force) {
               toaster.toast({
@@ -98,16 +119,17 @@ export function PluginUpdateSection({
               });
             }
           } else if (res.status === "available") {
-            logUpdate(null, "check_success", { status: "available", version: res.candidate?.version });
+            logUpdate(null, "check_success", { status: "available", version: res.candidate?.version, elapsed_ms });
             setCandidate(res.candidate);
           } else {
-            logUpdate(null, "check_success", { status: "current" });
+            logUpdate(null, "check_success", { status: "current", elapsed_ms });
             setCandidate(null);
           }
           return res;
         } catch (err) {
+          const elapsed_ms = Math.round(performance.now() - checkStart);
           const msg = err instanceof Error ? err.message : String(err);
-          logUpdate(null, "check_failed", { message: msg });
+          logUpdate(null, "check_failed", { message: msg, elapsed_ms });
           setErrorMsg(msg);
           if (opts.notify && opts.force) {
             toaster.toast({
@@ -216,13 +238,15 @@ export function PluginUpdateSection({
     logUpdate(updateTraceId, "install_clicked", { version: targetCandidate.version });
 
     try {
+      const revalStart = performance.now();
       logUpdate(updateTraceId, "revalidate_start", { tag: targetCandidate.tag });
       const revalRes = await revalidatePluginUpdateCall(targetCandidate);
+      const revalElapsed = Math.round(performance.now() - revalStart);
       if (revalRes.status === "failed" || !revalRes.version) {
-        logUpdate(updateTraceId, "revalidate_failed", { message: revalRes.message || "unknown" });
+        logUpdate(updateTraceId, "revalidate_failed", { message: revalRes.message || "unknown", elapsed_ms: revalElapsed });
         throw new Error(revalRes.message || "Revalidation failed");
       }
-      logUpdate(updateTraceId, "revalidate_success", { version: revalRes.version });
+      logUpdate(updateTraceId, "revalidate_success", { version: revalRes.version, elapsed_ms: revalElapsed });
 
       const installType =
         targetCandidate.action === "downgrade_to_stable"
@@ -231,10 +255,12 @@ export function PluginUpdateSection({
 
       const payload = { ...revalRes, updateTraceId };
 
+      const recordStart = performance.now();
       logUpdate(updateTraceId, "record_install_start", { version: revalRes.version });
       await recordUpdateInstallRequestedCall(payload);
-      logUpdate(updateTraceId, "record_install_success", { version: revalRes.version });
+      logUpdate(updateTraceId, "record_install_success", { version: revalRes.version, elapsed_ms: Math.round(performance.now() - recordStart) });
 
+      const handoffStart = performance.now();
       logUpdate(updateTraceId, "handoff_start", {
         version: revalRes.version,
         sha256_prefix: revalRes.sha256 ? revalRes.sha256.slice(0, 8) : "none"
@@ -259,17 +285,17 @@ export function PluginUpdateSection({
       await Promise.race([installerPromise, handoffTimer]);
 
       if (handoffTimerFired) {
-        logUpdate(updateTraceId, "handoff_pending", { status: "installer_handoff_pending" });
+        logUpdate(updateTraceId, "handoff_pending", { status: "installer_handoff_pending", elapsed_ms: Math.round(performance.now() - handoffStart) });
         setIsHandoffPending(true);
         void (async () => {
           try {
             await installerPromise;
-            logUpdate(updateTraceId, "handoff_resolved", { status: "success" });
+            logUpdate(updateTraceId, "handoff_resolved", { status: "success", elapsed_ms: Math.round(performance.now() - handoffStart) });
             setIsInstalling(false);
             setIsHandoffPending(false);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            logUpdate(updateTraceId, "handoff_rejected", { message: msg });
+            logUpdate(updateTraceId, "handoff_rejected", { message: msg, elapsed_ms: Math.round(performance.now() - handoffStart) });
             setIsInstalling(false);
             setIsHandoffPending(false);
             setErrorMsg(msg);
@@ -282,7 +308,7 @@ export function PluginUpdateSection({
         })();
       } else {
         await installerPromise;
-        logUpdate(updateTraceId, "handoff_resolved", { status: "success" });
+        logUpdate(updateTraceId, "handoff_resolved", { status: "success", elapsed_ms: Math.round(performance.now() - handoffStart) });
         setIsInstalling(false);
         setIsHandoffPending(false);
         toaster.toast({
@@ -435,26 +461,18 @@ export function PluginUpdateSection({
               onClick={() => handleInstallClick(candidate)}
               disabled={isChecking || isInstalling}
             >
-              {isInstalling ? (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
-                  <div
-                    style={{
-                      width: "16px",
-                      height: "16px",
-                      flex: "0 0 16px",
-                      overflow: "hidden",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Spinner size="small" />
-                  </div>
-                  <span>{isHandoffPending ? "Waiting for Decky..." : "Preparing..."}</span>
-                </div>
-              ) : (
-                getActionText(candidate)
-              )}
+              <div style={buttonRowStyle}>
+                {isInstalling ? (
+                  <>
+                    <div style={spinnerSlotStyle}>
+                      <Spinner size="small" />
+                    </div>
+                    <span>{isHandoffPending ? "Waiting for Decky..." : "Preparing..."}</span>
+                  </>
+                ) : (
+                  <span>{getActionText(candidate)}</span>
+                )}
+              </div>
             </ButtonItem>
           )}
 

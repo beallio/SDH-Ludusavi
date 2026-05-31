@@ -32,24 +32,26 @@ export async function invokeDeckyInstaller(
   installType: typeof INSTALL_TYPE_UPDATE | typeof INSTALL_TYPE_DOWNGRADE,
   traceId?: string
 ): Promise<any> {
+  const start = performance.now();
   const backend = window.DeckyBackend;
   if (!backend) {
     throw new Error("Decky Loader backend is not available in this environment.");
   }
 
   const shaPrefix = sha256.slice(0, 8);
+  const elapsed = Math.round(performance.now() - start);
 
   if (typeof backend.callable === "function") {
     // installer_api: "callable"
     try {
-      void logCall("info", `handoff_start: trace_id=${traceId || "none"}, version=${version}, sha256_prefix=${shaPrefix}, installer_api="callable"`, "update");
+      void logCall("info", `handoff_start: trace_id=${traceId || "none"}, version=${version}, sha256_prefix=${shaPrefix}, installer_api="callable", elapsed_ms=${elapsed}`, "update");
     } catch (_) {}
     const installFn = backend.callable("utilities/install_plugin");
     return await installFn(url, EXPECTED_PLUGIN_NAME, version, sha256, installType);
   } else if (typeof backend.call === "function") {
     // installer_api: "call"
     try {
-      void logCall("info", `handoff_start: trace_id=${traceId || "none"}, version=${version}, sha256_prefix=${shaPrefix}, installer_api="call"`, "update");
+      void logCall("info", `handoff_start: trace_id=${traceId || "none"}, version=${version}, sha256_prefix=${shaPrefix}, installer_api="call", elapsed_ms=${elapsed}`, "update");
     } catch (_) {}
     return await backend.call("utilities/install_plugin", url, EXPECTED_PLUGIN_NAME, version, sha256, installType);
   } else {

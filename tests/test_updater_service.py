@@ -516,9 +516,11 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
 
     # Verify logs for check start, fetch status, candidate parsing, selection
     assert any("Update check started" in m for _, m in logged)
-    assert any("GitHub releases fetch response: status=200" in m for _, m in logged)
-    assert any("Parsed" in m and "valid candidate" in m for _, m in logged)
-    assert any("Selected update candidate:" in m for _, m in logged)
+    assert any(
+        "GitHub releases fetch response: status=200" in m and "elapsed_ms" in m for _, m in logged
+    )
+    assert any("Parsed" in m and "valid candidate" in m and "elapsed_ms" in m for _, m in logged)
+    assert any("Selected update candidate:" in m and "elapsed_ms" in m for _, m in logged)
 
     # Verify privacy: no full SHA-256 in logs
     for level, msg in logged:
@@ -530,7 +532,7 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     # B. Cache hit logging
     # Non-forced call should hit the cache if we just did a check
     res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=False))
-    assert any("cache hit" in m.lower() for _, m in logged)
+    assert any("cache hit" in m.lower() and "elapsed_ms" in m for _, m in logged)
     logged.clear()
 
     # C. Rate-limit block logging on update check
@@ -540,7 +542,9 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
     assert res["status"] == "failed"
     assert any(
-        "cooldown active" in m.lower() or "blocked by rate-limit" in m.lower() for _, m in logged
+        ("cooldown active" in m.lower() or "blocked by rate-limit" in m.lower())
+        and "elapsed_ms" in m
+        for _, m in logged
     )
     service._update_rate_limited_until = None
     logged.clear()
@@ -553,7 +557,10 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     )
     res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
     assert res["status"] == "failed"
-    assert any("fetch failed" in m.lower() or "failed to check" in m.lower() for _, m in logged)
+    assert any(
+        ("fetch failed" in m.lower() or "failed to check" in m.lower()) and "elapsed_ms" in m
+        for _, m in logged
+    )
     logged.clear()
 
     # E. Current logging
@@ -565,7 +572,8 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
     assert res["status"] == "current"
     assert any(
-        "no upgrade candidate found" in m.lower() or "already up to date" in m.lower()
+        ("no upgrade candidate found" in m.lower() or "already up to date" in m.lower())
+        and "elapsed_ms" in m
         for _, m in logged
     )
     logged.clear()
@@ -586,7 +594,8 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     res = service.revalidate_plugin_update(candidate)
     assert res["status"] == "failed"
     assert any(
-        "rate-limit cooldown" in m.lower() or "blocked by rate-limit" in m.lower()
+        ("rate-limit cooldown" in m.lower() or "blocked by rate-limit" in m.lower())
+        and "elapsed_ms" in m
         for _, m in logged
     )
     service._update_rate_limited_until = None
@@ -601,7 +610,9 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     res = service.revalidate_plugin_update(candidate)
     assert res["status"] == "failed"
     assert any(
-        "fetch failed" in m.lower() or "revalidation check failed" in m.lower() for _, m in logged
+        ("fetch failed" in m.lower() or "revalidation check failed" in m.lower())
+        and "elapsed_ms" in m
+        for _, m in logged
     )
     logged.clear()
 
@@ -614,7 +625,10 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     )
     res = service.revalidate_plugin_update(candidate)
     assert res["status"] == "failed"
-    assert any("validation failed during revalidation" in m.lower() for _, m in logged)
+    assert any(
+        "validation failed during revalidation" in m.lower() and "elapsed_ms" in m
+        for _, m in logged
+    )
     logged.clear()
 
     # D. Mismatch failures revalidation (e.g. SHA mismatch)
@@ -623,7 +637,8 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     res = service.revalidate_plugin_update(bad_sha_candidate)
     assert res["status"] == "failed"
     assert any(
-        "mismatch during revalidation" in m.lower() or "sha-256 mismatch" in m.lower()
+        ("mismatch during revalidation" in m.lower() or "sha-256 mismatch" in m.lower())
+        and "elapsed_ms" in m
         for _, m in logged
     )
     logged.clear()
@@ -631,7 +646,7 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     # E. Revalidation success
     res = service.revalidate_plugin_update(candidate)
     assert "version" in res
-    assert any("revalidation success" in m.lower() for _, m in logged)
+    assert any("revalidation success" in m.lower() and "elapsed_ms" in m for _, m in logged)
     logged.clear()
 
     # 3. Pending install save logging

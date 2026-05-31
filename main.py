@@ -107,7 +107,9 @@ class Plugin:
         def do_check() -> dict[str, Any]:
             service = self._service()
             import datetime
+            import time
 
+            t0 = time.monotonic()
             service.log("info", f"Update check started (version={current_version}, force={force})")
 
             if service._update_rate_limited_until:
@@ -115,9 +117,10 @@ class Plugin:
                     datetime.datetime.now(datetime.timezone.utc)
                     < service._update_rate_limited_until
                 ):
+                    elapsed_ms = round((time.monotonic() - t0) * 1000)
                     service.log(
                         "warning",
-                        f"Update check blocked by rate-limit cooldown until {service._update_rate_limited_until.isoformat()}",
+                        f"Update check blocked by rate-limit cooldown until {service._update_rate_limited_until.isoformat()}, elapsed_ms={elapsed_ms}",
                     )
                     return {
                         "status": "failed",
@@ -140,7 +143,11 @@ class Plugin:
                         ) - last_checked_at < datetime.timedelta(hours=24):
                             last_result = service._update_check_cache.get("last_result")
                             if last_result:
-                                service.log("info", "Update check cache hit (within 24h)")
+                                elapsed_ms = round((time.monotonic() - t0) * 1000)
+                                service.log(
+                                    "info",
+                                    f"Update check cache hit (within 24h), elapsed_ms={elapsed_ms}",
+                                )
                                 return last_result
                     # Intentionally broad
                     except Exception:

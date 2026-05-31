@@ -5,6 +5,7 @@ import functools
 import json
 import re
 import ssl
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -352,9 +353,13 @@ def check_for_update(
     url = "https://api.github.com/repos/beallio/SDH-Ludusavi/releases"
     if service:
         service.log("info", f"Fetching GitHub releases from {url}")
+    t0 = time.monotonic()
     resp = fetch_json(url)
+    elapsed_ms = round((time.monotonic() - t0) * 1000)
     if service:
-        service.log("info", f"GitHub releases fetch response: status={resp.status}")
+        service.log(
+            "info", f"GitHub releases fetch response: status={resp.status}, elapsed_ms={elapsed_ms}"
+        )
 
     checked_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -392,7 +397,7 @@ def check_for_update(
         if service:
             service.log(
                 "warning",
-                f"GitHub releases fetch rate-limited (status={resp.status}, message={msg})",
+                f"GitHub releases fetch rate-limited (status={resp.status}, message={msg}), elapsed_ms={elapsed_ms}",
             )
 
         return {
@@ -411,7 +416,8 @@ def check_for_update(
                 msg = str(resp.body["error"])
         if service:
             service.log(
-                "error", f"GitHub releases fetch failed (status={resp.status}, message={msg})"
+                "error",
+                f"GitHub releases fetch failed (status={resp.status}, message={msg}), elapsed_ms={elapsed_ms}",
             )
         return {
             "status": "failed",
@@ -420,20 +426,30 @@ def check_for_update(
         }
 
     candidates = []
+    t1 = time.monotonic()
     for r in resp.body:
         if not isinstance(r, dict):
             continue
         c = validate_release_candidate(r)
         if c:
             candidates.append(c)
+    parse_elapsed_ms = round((time.monotonic() - t1) * 1000)
 
     if service:
-        service.log("info", f"Parsed {len(candidates)} valid candidate releases")
+        service.log(
+            "info",
+            f"Parsed {len(candidates)} valid candidate releases, elapsed_ms={parse_elapsed_ms}",
+        )
 
+    t2 = time.monotonic()
     candidate = select_candidate(candidates, current_version, preferred_channel)
+    select_elapsed_ms = round((time.monotonic() - t2) * 1000)
     if candidate:
         if service:
-            service.log("info", f"Selected update candidate: {format_candidate_log(candidate)}")
+            service.log(
+                "info",
+                f"Selected update candidate: {format_candidate_log(candidate)}, elapsed_ms={select_elapsed_ms}",
+            )
         return {
             "status": "available",
             "checked_at": checked_at,
@@ -450,7 +466,10 @@ def check_for_update(
         }
 
     if service:
-        service.log("info", "No upgrade candidate found (already up to date)")
+        service.log(
+            "info",
+            f"No upgrade candidate found (already up to date), elapsed_ms={select_elapsed_ms}",
+        )
     return {
         "status": "current",
         "checked_at": checked_at,
@@ -619,14 +638,16 @@ def reconcile_pending_update_install(service: Any, current_version: str) -> None
 def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[str, Any]:
     import datetime
 
+    t0 = time.monotonic()
     service.log("info", f"Revalidation started for candidate: {format_candidate_log(candidate)}")
 
     with service._state_lock:
         if service._update_rate_limited_until:
             if datetime.datetime.now(datetime.timezone.utc) < service._update_rate_limited_until:
+                elapsed_ms = round((time.monotonic() - t0) * 1000)
                 service.log(
                     "warning",
-                    f"Revalidation blocked by rate-limit cooldown until {service._update_rate_limited_until.isoformat()}",
+                    f"Revalidation blocked by rate-limit cooldown until {service._update_rate_limited_until.isoformat()}, elapsed_ms={elapsed_ms}",
                 )
                 return {
                     "status": "failed",
@@ -649,8 +670,13 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
 
     url = f"https://api.github.com/repos/beallio/SDH-Ludusavi/releases/tags/{tag}"
     service.log("info", f"Fetching candidate release from {url}")
+    t1 = time.monotonic()
     resp = fetch_json(url)
-    service.log("info", f"Candidate release fetch response: status={resp.status}")
+    fetch_elapsed_ms = round((time.monotonic() - t1) * 1000)
+    service.log(
+        "info",
+        f"Candidate release fetch response: status={resp.status}, elapsed_ms={fetch_elapsed_ms}",
+    )
 
     if resp.status in (403, 429):
         retry_after_str = None
@@ -697,7 +723,8 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
             msg = str(resp.body["message"])
 
         service.log(
-            "warning", f"Revalidation fetch rate-limited (status={resp.status}, message={msg})"
+            "warning",
+            f"Revalidation fetch rate-limited (status={resp.status}, message={msg}), elapsed_ms={fetch_elapsed_ms}",
         )
 
         return {
@@ -709,7 +736,7 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
 
     if resp.status != 200 or not isinstance(resp.body, dict):
         msg = f"Failed to fetch release for tag {tag}: {resp.status}"
-        service.log("error", f"Revalidation fetch failed: {msg}")
+        service.log("error", f"Revalidation check failed: {msg}, elapsed_ms={fetch_elapsed_ms}")
         return {
             "status": "failed",
             "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -719,7 +746,8 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
     validated = validate_release_candidate(resp.body)
     if not validated:
         msg = "Release validation failed during revalidation"
-        service.log("error", msg)
+        elapsed_ms = round((time.monotonic() - t0) * 1000)
+        service.log("error", f"{msg}, elapsed_ms={elapsed_ms}")
         return {
             "status": "failed",
             "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -734,7 +762,8 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
 
     if validated.sha256 != candidate.get("sha256"):
         msg = f"SHA-256 mismatch during revalidation: candidate={cand_sha_prefix}, fetched={val_sha_prefix}"
-        service.log("error", msg)
+        elapsed_ms = round((time.monotonic() - t0) * 1000)
+        service.log("error", f"{msg}, elapsed_ms={elapsed_ms}")
         return {
             "status": "failed",
             "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -742,7 +771,8 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
         }
     if validated.artifact_url != candidate.get("artifact_url"):
         msg = f"Artifact URL mismatch during revalidation: candidate={candidate.get('artifact_url')}, fetched={validated.artifact_url}"
-        service.log("error", msg)
+        elapsed_ms = round((time.monotonic() - t0) * 1000)
+        service.log("error", f"{msg}, elapsed_ms={elapsed_ms}")
         return {
             "status": "failed",
             "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -750,14 +780,18 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
         }
     if validated.version != candidate.get("version"):
         msg = f"Version mismatch during revalidation: candidate={candidate.get('version')}, fetched={validated.version}"
-        service.log("error", msg)
+        elapsed_ms = round((time.monotonic() - t0) * 1000)
+        service.log("error", f"{msg}, elapsed_ms={elapsed_ms}")
         return {
             "status": "failed",
             "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "message": "Version mismatch during revalidation",
         }
 
-    service.log("info", f"Revalidation success for version v{validated.version}")
+    elapsed_ms = round((time.monotonic() - t0) * 1000)
+    service.log(
+        "info", f"Revalidation success for version v{validated.version}, elapsed_ms={elapsed_ms}"
+    )
     return {
         "version": validated.version,
         "tag": validated.tag,
