@@ -30,6 +30,8 @@ class DeckySettingsStore:
             "notifications": self._manager.getSetting(
                 "notifications", dict(DEFAULT_NOTIFICATION_SETTINGS)
             ),
+            "update_channel": self._manager.getSetting("update_channel", "stable"),
+            "automatic_update_checks": self._manager.getSetting("automatic_update_checks", True),
         }
 
     def write(self, settings: dict[str, object]) -> None:
@@ -81,6 +83,84 @@ class Plugin:
         return await self._call(
             "set_notification_settings",
             lambda: self._service().set_notification_settings(settings),
+        )
+
+    async def set_update_channel(self, channel: str) -> dict[str, Any]:
+        return await self._call(
+            "set_update_channel", lambda: self._service().set_update_channel(channel)
+        )
+
+    async def set_automatic_update_checks(self, enabled: bool) -> dict[str, Any]:
+        return await self._call(
+            "set_automatic_update_checks",
+            lambda: self._service().set_automatic_update_checks(enabled),
+        )
+
+    async def get_update_check_context(self) -> dict[str, Any]:
+        return await self._call(
+            "get_update_check_context", lambda: self._service().get_update_check_context()
+        )
+
+    async def check_for_plugin_update(
+        self, current_version: str, force: bool = False
+    ) -> dict[str, Any]:
+        def do_check() -> dict[str, Any]:
+            service = self._service()
+            import datetime
+
+            if service._update_rate_limited_until:
+                if (
+                    datetime.datetime.now(datetime.timezone.utc)
+                    < service._update_rate_limited_until
+                ):
+                    return {
+                        "status": "failed",
+                        "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "message": "Rate limit cooldown active",
+                        "retry_after": service._update_rate_limited_until.isoformat(),
+                    }
+                else:
+                    service._update_rate_limited_until = None
+
+            if not force:
+                last_checked_at_str = service._update_check_cache.get("last_checked_at")
+                last_checked_channel = service._update_check_cache.get("last_checked_channel")
+                if last_checked_at_str and last_checked_channel == service._update_channel:
+                    # Intentionally broad
+                    try:
+                        last_checked_at = datetime.datetime.fromisoformat(last_checked_at_str)
+                        if datetime.datetime.now(
+                            datetime.timezone.utc
+                        ) - last_checked_at < datetime.timedelta(hours=24):
+                            last_result = service._update_check_cache.get("last_result")
+                            if last_result:
+                                return last_result
+                    # Intentionally broad
+                    except Exception:
+                        pass
+
+            from sdh_ludusavi.updater import check_for_update
+
+            res = check_for_update(current_version, service._update_channel)
+            service.record_update_check_result(res)
+            if res.get("status") in ("available", "current"):
+                service._update_check_cache["last_result"] = res
+                service._save_state()
+            return res
+
+        return await self._call("check_for_plugin_update", do_check)
+
+    async def revalidate_plugin_update(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        from sdh_ludusavi.updater import revalidate_install_candidate
+
+        return await self._call(
+            "revalidate_plugin_update", lambda: revalidate_install_candidate(candidate)
+        )
+
+    async def record_update_install_requested(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        return await self._call(
+            "record_update_install_requested",
+            lambda: self._service().record_update_install_requested(candidate),
         )
 
     async def get_ludusavi_launcher_shortcut_id(self) -> int:
