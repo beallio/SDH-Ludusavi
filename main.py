@@ -289,7 +289,13 @@ class Plugin:
 
     async def _main(self) -> None:
         decky.logger.info("SDH-ludusavi backend loaded")
-        self._service()
+        service = self._service()
+        try:
+            from sdh_ludusavi._version import resolve_version
+
+            service.reconcile_pending_update_install(resolve_version())
+        except Exception:
+            decky.logger.exception("Failed to reconcile pending update install on startup")
 
     async def _unload(self) -> None:
         backend = self._backend

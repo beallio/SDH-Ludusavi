@@ -34,9 +34,9 @@ export async function invokeDeckyInstaller(
 
   if (typeof backend.callable === "function") {
     const installFn = backend.callable("utilities/install_plugin");
-    return await installFn(EXPECTED_PLUGIN_NAME, url, version, sha256, installType);
+    return await installFn(url, EXPECTED_PLUGIN_NAME, version, sha256, installType);
   } else if (typeof backend.call === "function") {
-    return await backend.call("utilities/install_plugin", EXPECTED_PLUGIN_NAME, url, version, sha256, installType);
+    return await backend.call("utilities/install_plugin", url, EXPECTED_PLUGIN_NAME, version, sha256, installType);
   } else {
     throw new Error("Decky Loader backend has no compatible RPC interface.");
   }

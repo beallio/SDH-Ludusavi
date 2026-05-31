@@ -413,3 +413,132 @@ def test_revalidate_install_candidate(monkeypatch) -> None:
     bad_candidate = dict(candidate, sha256="wrong_sha")
     with pytest.raises(ValueError, match="SHA-256 mismatch"):
         revalidate_install_candidate(bad_candidate)
+
+
+def test_validate_release_candidate_manifest_name_strict(monkeypatch) -> None:
+    from sdh_ludusavi.updater import validate_release_candidate, JsonResponse
+    import sdh_ludusavi.updater as updater_mod
+
+    # 1. Stable release with correct manifest name
+    release_stable = {
+        "draft": False,
+        "prerelease": False,
+        "tag_name": "v0.2.1",
+        "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.2.1",
+        "assets": [
+            {
+                "name": "SDH-Ludusavi-v0.2.1.manifest.json",
+                "browser_download_url": "https://github.com/manifest",
+            },
+            {
+                "name": "SDH-Ludusavi-v0.2.1.zip",
+                "browser_download_url": "https://github.com/zip",
+            },
+        ],
+    }
+
+    manifest_stable = {
+        "schemaVersion": 1,
+        "pluginName": "SDH-Ludusavi",
+        "packageName": "sdh-ludusavi",
+        "version": "0.2.1",
+        "tag": "v0.2.1",
+        "channel": "stable",
+        "assetName": "SDH-Ludusavi-v0.2.1.zip",
+        "sha256": "a" * 64,
+    }
+
+    # 2. Stable release with WRONG manifest name
+    release_wrong_name = {
+        "draft": False,
+        "prerelease": False,
+        "tag_name": "v0.2.1",
+        "assets": [
+            {
+                "name": "wrong.manifest.json",
+                "browser_download_url": "https://github.com/manifest",
+            },
+            {
+                "name": "SDH-Ludusavi-v0.2.1.zip",
+                "browser_download_url": "https://github.com/zip",
+            },
+        ],
+    }
+
+    # 3. Dev release with correct preferred dev manifest name
+    release_dev_gsha = {
+        "draft": False,
+        "prerelease": True,
+        "tag_name": "v0.2.1-dev.g55d87c",
+        "assets": [
+            {
+                "name": "SDH-Ludusavi-v0.2.1-dev.g55d87c.manifest.json",
+                "browser_download_url": "https://github.com/manifest",
+            },
+            {
+                "name": "SDH-Ludusavi-v0.2.1-dev.g55d87c.zip",
+                "browser_download_url": "https://github.com/zip",
+            },
+        ],
+    }
+
+    manifest_dev_gsha = {
+        "schemaVersion": 1,
+        "pluginName": "SDH-Ludusavi",
+        "packageName": "sdh-ludusavi",
+        "version": "0.2.1-dev.g55d87c",
+        "tag": "v0.2.1-dev.g55d87c",
+        "channel": "dev",
+        "assetName": "SDH-Ludusavi-v0.2.1-dev.g55d87c.zip",
+        "sha256": "a" * 64,
+    }
+
+    # 4. Dev release with correct legacy dev manifest name
+    release_dev_legacy = {
+        "draft": False,
+        "prerelease": True,
+        "tag_name": "v0.2.1-dev.55d87c",
+        "assets": [
+            {
+                "name": "SDH-Ludusavi-v0.2.1-dev.55d87c.manifest.json",
+                "browser_download_url": "https://github.com/manifest",
+            },
+            {
+                "name": "SDH-Ludusavi-v0.2.1-dev.55d87c.zip",
+                "browser_download_url": "https://github.com/zip",
+            },
+        ],
+    }
+
+    manifest_dev_legacy = {
+        "schemaVersion": 1,
+        "pluginName": "SDH-Ludusavi",
+        "packageName": "sdh-ludusavi",
+        "version": "0.2.1-dev.55d87c",
+        "tag": "v0.2.1-dev.55d87c",
+        "channel": "dev",
+        "assetName": "SDH-Ludusavi-v0.2.1-dev.55d87c.zip",
+        "sha256": "a" * 64,
+    }
+
+    current_manifest = manifest_stable
+
+    def mock_fetch_json(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
+        return JsonResponse(status=200, headers={}, body=current_manifest)
+
+    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_json)
+
+    # Verify correct stable matches
+    current_manifest = manifest_stable
+    assert validate_release_candidate(release_stable) is not None
+
+    # Verify wrong manifest name is rejected
+    assert validate_release_candidate(release_wrong_name) is None
+
+    # Verify dev gsha matches
+    current_manifest = manifest_dev_gsha
+    assert validate_release_candidate(release_dev_gsha) is not None
+
+    # Verify dev legacy matches
+    current_manifest = manifest_dev_legacy
+    assert validate_release_candidate(release_dev_legacy) is not None

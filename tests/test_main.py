@@ -640,3 +640,25 @@ def test_decky_settings_store_read_failure_handled_gracefully(
     assert any(
         "unreadable settings: permission denied" in record.message for record in caplog.records
     )
+
+
+def test_plugin_main_triggers_reconciliation(tmp_path: Path, monkeypatch) -> None:
+    from tests.test_main import fake_decky_module, import_main, FakeSettingsManager
+
+    decky, _ = fake_decky_module(tmp_path)
+    module = import_main(monkeypatch, decky, settings_manager=FakeSettingsManager)
+
+    plugin = module.Plugin()
+    service = plugin._service()
+
+    reconciled_version = None
+
+    def mock_reconcile(current_version: str) -> None:
+        nonlocal reconciled_version
+        reconciled_version = current_version
+
+    monkeypatch.setattr(service, "reconcile_pending_update_install", mock_reconcile)
+
+    asyncio.run(plugin._main())
+
+    assert reconciled_version is not None

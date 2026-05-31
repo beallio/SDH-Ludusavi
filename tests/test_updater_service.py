@@ -166,3 +166,36 @@ def test_transient_rate_limit_properties(tmp_path: Path) -> None:
     # Re-instantiate service from files and assert that rate-limit timestamp is not persisted
     service2 = SDHLudusaviService(settings_store=store, cache_path=cache_file)
     assert service2._update_rate_limited_until is None
+
+
+def test_record_update_install_requested_preserves_metadata(tmp_path: Path) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+
+    candidate = {
+        "version": "0.2.2-dev.g456",
+        "tag": "v0.2.2-dev.g456",
+        "channel": "development",
+        "published_at": "2026-05-30T12:00:00Z",
+        "action": "update",
+    }
+
+    # 1. Call record_update_install_requested
+    ctx = service.record_update_install_requested(candidate)
+
+    # 2. Assert the returned context STILL contains the pending_update_install metadata
+    assert ctx["pending_update_install"] is not None
+    assert ctx["pending_update_install"]["version"] == "0.2.2-dev.g456"
+
+    # 3. Assert calling get_update_check_context() does NOT clear the pending update metadata
+    ctx2 = service.get_update_check_context()
+    assert ctx2["pending_update_install"] is not None
+    assert ctx2["pending_update_install"]["version"] == "0.2.2-dev.g456"
+
+    # 4. Assert that calling reconcile_pending_update_install with mismatching version clears it
+    service.reconcile_pending_update_install("0.2.1")
+    ctx3 = service.get_update_check_context()
+    assert ctx3["pending_update_install"] is None

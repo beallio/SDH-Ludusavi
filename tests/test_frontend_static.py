@@ -2140,3 +2140,18 @@ def test_frontend_dropdown_uses_scoped_steamos_truncation_workaround() -> None:
     assert re.search(r'\[class\*="icon"\s*i\]', styles) is not None
     assert re.search(r'\[class\*="chevron"\s*i\]', styles) is not None
     assert re.search(r'\[class\*="arrow"\s*i\]', styles) is not None
+
+
+def test_decky_installer_argument_order() -> None:
+    path = Path("src/utils/deckyInstaller.ts")
+    assert path.exists(), "src/utils/deckyInstaller.ts does not exist"
+    content = path.read_text(encoding="utf-8")
+
+    # 1. Assert callable invocation order: url, EXPECTED_PLUGIN_NAME, version, sha256, installType
+    assert "installFn(url, EXPECTED_PLUGIN_NAME, version, sha256, installType)" in content
+
+    # 2. Assert call fallback invocation order: "utilities/install_plugin", url, EXPECTED_PLUGIN_NAME, version, sha256, installType
+    assert (
+        'call("utilities/install_plugin", url, EXPECTED_PLUGIN_NAME, version, sha256, installType)'
+        in content
+    )

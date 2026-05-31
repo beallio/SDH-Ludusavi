@@ -142,8 +142,19 @@ def validate_release_candidate(release: dict[str, Any]) -> UpdateCandidate | Non
     if release.get("draft", False):
         return None
 
+    tag_name = release.get("tag_name", "")
+    if not tag_name or not tag_name.startswith("v"):
+        return None
+
+    version_part = tag_name[1:]
+    parsed_version = parse_plugin_version(version_part)
+    if parsed_version is None:
+        return None
+
+    expected_manifest_name = f"SDH-Ludusavi-{tag_name}.manifest.json"
+
     assets = release.get("assets", [])
-    manifest_assets = [a for a in assets if a.get("name", "").endswith(".manifest.json")]
+    manifest_assets = [a for a in assets if a.get("name", "") == expected_manifest_name]
     if len(manifest_assets) != 1:
         return None
     manifest_asset = manifest_assets[0]
@@ -428,7 +439,6 @@ def set_automatic_update_checks(service: Any, enabled: bool) -> dict[str, Any]:
 
 def get_update_check_context(service: Any) -> dict[str, Any]:
     with service._state_lock:
-        reconcile_pending_update_install(service, resolve_version())
         rate_limited_until_str = None
         if service._update_rate_limited_until:
             import datetime
