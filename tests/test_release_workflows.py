@@ -129,9 +129,13 @@ def test_workflows_trigger_and_overwrite_and_checksum_verification() -> None:
     dev_content = Path(".github/workflows/dev-release.yml").read_text(encoding="utf-8")
     assert "prerelease: true" in dev_content
 
-    # 3. Verify overwrite: false is set for release publishing in both workflows
-    assert "overwrite: false" in release_content
-    assert "overwrite: false" in dev_content
+    # 3. Verify overwrite_files: false is set for release publishing in both workflows
+    assert "overwrite_files: false" in release_content
+    assert "overwrite_files: false" in dev_content
+
+    # Ensure the incorrect 'overwrite: false' parameter is not used
+    assert "overwrite: false" not in release_content
+    assert "overwrite: false" not in dev_content
 
     # 4. Verify checksum verification sha256sum -c is executed in all workflows
     assert "sha256sum -c" in release_content

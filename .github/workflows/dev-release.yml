@@ -155,7 +155,7 @@ jobs:
           target_commitish: ${{ env.FULL_SHA }}
           prerelease: true
           make_latest: false
-          overwrite: false
+          overwrite_files: false
           name: "SDH-Ludusavi v${{ env.DEV_VERSION }} (Dev)"
           body: "Automated development pre-release built from commit ${{ env.FULL_SHA }}."
           files: |

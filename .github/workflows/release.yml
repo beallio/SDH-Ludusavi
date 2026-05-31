@@ -142,7 +142,7 @@ jobs:
           prerelease: false
           make_latest: true
           fail_on_unmatched_files: true
-          overwrite: false
+          overwrite_files: false
           files: |
             out/SDH-Ludusavi-${{ env.TAG_NAME }}.zip
             out/SDH-Ludusavi-${{ env.TAG_NAME }}.zip.sha256
