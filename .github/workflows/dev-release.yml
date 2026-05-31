@@ -21,25 +21,42 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.commit || github.sha }}
-          fetch-depth: 0
-
-      - name: Resolve Commit SHAs and Validate Base Version
+      - name: Validate Inputs
         shell: bash
+        env:
+          INPUT_COMMIT: ${{ github.event.inputs.commit }}
+          INPUT_BASE_VERSION: ${{ github.event.inputs.base_version }}
         run: |
-          FULL_SHA=$(git rev-parse HEAD)
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          BASE_VERSION="${{ github.event.inputs.base_version }}"
-          
+          BASE_VERSION="$INPUT_BASE_VERSION"
           if [[ ! "$BASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Error: Base version '$BASE_VERSION' is not a stable semantic version (X.Y.Z)." >&2
             exit 1
           fi
           
-          DEV_VERSION="${BASE_VERSION}-dev.${SHORT_SHA}"
+          COMMIT_REF="$INPUT_COMMIT"
+          if [ -z "$COMMIT_REF" ]; then
+            COMMIT_REF="${{ github.sha }}"
+          fi
+          if [[ ! "$COMMIT_REF" =~ ^[a-zA-Z0-9./_-]+$ ]]; then
+            echo "Error: Commit ref contains invalid characters." >&2
+            exit 1
+          fi
+          
+          echo "BASE_VERSION=$BASE_VERSION" >> $GITHUB_ENV
+          echo "COMMIT_REF=$COMMIT_REF" >> $GITHUB_ENV
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_REF }}
+          fetch-depth: 0
+
+      - name: Resolve Commit SHAs and Versions
+        shell: bash
+        run: |
+          FULL_SHA=$(git rev-parse HEAD)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          DEV_VERSION="${{ env.BASE_VERSION }}-dev.${SHORT_SHA}"
           echo "FULL_SHA=$FULL_SHA" >> $GITHUB_ENV
           echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
           echo "DEV_VERSION=$DEV_VERSION" >> $GITHUB_ENV
@@ -121,6 +138,7 @@ jobs:
       - name: Validate Dev Package ZIP
         run: |
           ./run.sh uv run python scripts/validate_plugin_zip.py "out/SDH-Ludusavi-v${{ env.DEV_VERSION }}.zip" --expected-version "${{ env.DEV_VERSION }}" --expected-name SDH-Ludusavi
+          (cd out && sha256sum -c "SDH-Ludusavi-v${{ env.DEV_VERSION }}.zip.sha256")
 
       - name: Create and Push Dev Release Git Tag
         shell: bash
@@ -137,6 +155,7 @@ jobs:
           target_commitish: ${{ env.FULL_SHA }}
           prerelease: true
           make_latest: false
+          overwrite: false
           name: "SDH-Ludusavi v${{ env.DEV_VERSION }} (Dev)"
           body: "Automated development pre-release built from commit ${{ env.FULL_SHA }}."
           files: |

@@ -117,3 +117,33 @@ def test_request_dev_release_with_explicit_commit(tmp_path: Path) -> None:
     assert "workflow run dev-release.yml" in calls
     assert "-f commit=abcdefabcdefabcdefabcdefabcdefabcdefabcdef" in calls
     assert "-f base_version=0.2.1" in calls
+
+
+def test_workflows_trigger_and_overwrite_and_checksum_verification() -> None:
+    # 1. Verify stable release trigger tag glob pattern
+    release_content = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert "tags:" in release_content
+    assert "v*.*.*" in release_content or '"v*.*.*"' in release_content
+
+    # 2. Verify dev-release.yml prerelease settings
+    dev_content = Path(".github/workflows/dev-release.yml").read_text(encoding="utf-8")
+    assert "prerelease: true" in dev_content
+
+    # 3. Verify overwrite: false is set for release publishing in both workflows
+    assert "overwrite: false" in release_content
+    assert "overwrite: false" in dev_content
+
+    # 4. Verify checksum verification sha256sum -c is executed in all workflows
+    assert "sha256sum -c" in release_content
+    assert "sha256sum -c" in dev_content
+
+    ci_content = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "sha256sum -c" in ci_content
+
+    # 5. Verify absence of bad/lowercase asset names in all workflows
+    for path, content in [
+        (".github/workflows/release.yml", release_content),
+        (".github/workflows/dev-release.yml", dev_content),
+        (".github/workflows/ci.yml", ci_content),
+    ]:
+        assert "SDH-ludusavi.zip" not in content, f"Bad asset name found in {path}"

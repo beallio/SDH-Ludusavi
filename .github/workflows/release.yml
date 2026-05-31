@@ -3,7 +3,7 @@ name: Build and Release Plugin
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       tag:
@@ -20,23 +20,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-          fetch-depth: 0
-
-      - name: Determine Tag Name and Version
+      - name: Validate Inputs
         shell: bash
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
-          TAG_NAME="${{ github.event.inputs.tag }}"
+          TAG_NAME="$INPUT_TAG"
           if [ -z "$TAG_NAME" ]; then
             TAG_NAME="${{ github.ref_name }}"
           fi
-          VERSION_FROM_TAG="${TAG_NAME#v}"
           
+          # Validate stable tag shape: vX.Y.Z
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Tag '$TAG_NAME' does not match stable semver pattern vX.Y.Z" >&2
+            exit 1
+          fi
+          
+          VERSION_FROM_TAG="${TAG_NAME#v}"
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
           echo "VERSION_FROM_TAG=$VERSION_FROM_TAG" >> $GITHUB_ENV
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG_NAME }}
+          fetch-depth: 0
 
       - name: Validate Version Alignment
         shell: bash
@@ -125,6 +133,7 @@ jobs:
       - name: Validate Release Package ZIP
         run: |
           ./run.sh uv run python scripts/validate_plugin_zip.py "out/SDH-Ludusavi-${{ env.TAG_NAME }}.zip" --expected-version "${{ env.VERSION_FROM_TAG }}" --expected-name SDH-Ludusavi
+          (cd out && sha256sum -c "SDH-Ludusavi-${{ env.TAG_NAME }}.zip.sha256")
 
       - name: Publish Stable Release to GitHub
         uses: softprops/action-gh-release@v2
@@ -133,6 +142,7 @@ jobs:
           prerelease: false
           make_latest: true
           fail_on_unmatched_files: true
+          overwrite: false
           files: |
             out/SDH-Ludusavi-${{ env.TAG_NAME }}.zip
             out/SDH-Ludusavi-${{ env.TAG_NAME }}.zip.sha256
