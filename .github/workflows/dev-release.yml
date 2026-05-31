@@ -56,7 +56,7 @@ jobs:
         run: |
           FULL_SHA=$(git rev-parse HEAD)
           SHORT_SHA=$(git rev-parse --short HEAD)
-          DEV_VERSION="${{ env.BASE_VERSION }}-dev.${SHORT_SHA}"
+          DEV_VERSION="${{ env.BASE_VERSION }}-dev.g${SHORT_SHA}"
           echo "FULL_SHA=$FULL_SHA" >> $GITHUB_ENV
           echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
           echo "DEV_VERSION=$DEV_VERSION" >> $GITHUB_ENV
