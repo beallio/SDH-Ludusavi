@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass
 
 
+@functools.total_ordering
 @dataclass(frozen=True)
 class ParsedPluginVersion:
     major: int
@@ -12,6 +14,27 @@ class ParsedPluginVersion:
     is_dev: bool = False
     dev_suffix: str | None = None
     build_metadata: str | None = None
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ParsedPluginVersion):
+            return NotImplemented
+        return (
+            self.major == other.major
+            and self.minor == other.minor
+            and self.patch == other.patch
+            and self.is_dev == other.is_dev
+        )
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, ParsedPluginVersion):
+            return NotImplemented
+        self_base = (self.major, self.minor, self.patch)
+        other_base = (other.major, other.minor, other.patch)
+        if self_base != other_base:
+            return self_base < other_base
+        if self.is_dev and not other.is_dev:
+            return True
+        return False
 
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-dev\.([a-zA-Z0-9.-]+))?(?:\+([a-zA-Z0-9.-]+))?$")
