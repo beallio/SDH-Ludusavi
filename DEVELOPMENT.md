@@ -56,13 +56,56 @@ pnpm run build
 pnpm run verify
 ```
 
-### Create the Decky plugin zip:
+### Create the Decky plugin zip locally:
 
 ```bash
 ./run.sh uv run python scripts/package_plugin.py
 ```
 
 The package is written to `out/SDH-Ludusavi.zip` and contains a top-level `SDH-Ludusavi/` plugin directory. The local post-commit hook runs `scripts/post_commit.sh`, which rebuilds `dist/` and recreates that zip after each commit.
+
+### Release Packaging and Workflows
+
+GitHub Actions is the only publisher for public releases. Do not build, upload, or tag releases manually on GitHub unless instructed.
+
+#### Stable Release Process
+
+To create a stable release:
+1. Bump and align the versions in `package.json` and `plugin.json`:
+   ```bash
+   ./run.sh uv run python scripts/set_release_version.py X.Y.Z
+   ```
+2. Run quality checks locally:
+   ```bash
+   ./run.sh uv run ruff check . --fix
+   ./run.sh uv run ruff format .
+   ./run.sh uv run ty check py_modules/sdh_ludusavi/
+   ./run.sh uv run pytest
+   ./run.sh pnpm run verify
+   ```
+3. Commit the changes and tag it:
+   ```bash
+   git add package.json plugin.json assets/icon.png
+   git commit -m "chore(release): prepare vX.Y.Z"
+   git tag vX.Y.Z
+   git push origin main vX.Y.Z
+   ```
+4. The GitHub Actions release workflow will trigger on tag push to validate, build, and publish the release.
+
+#### Prerelease (Dev) Release Process
+
+To publish a development prerelease for testing, run:
+```bash
+./scripts/request_dev_release.sh <base_version> [commit]
+```
+This triggers the manual `dev-release.yml` GitHub workflow for the specified base version and commit.
+
+#### Release Artifacts
+
+The packaging automation produces the following versioned artifacts:
+- `SDH-Ludusavi-vX.Y.Z.zip`: The Decky-compliant plugin archive containing a single `SDH-Ludusavi/` root directory.
+- `SDH-Ludusavi-vX.Y.Z.zip.sha256`: A checksum file containing the SHA-256 hash of the ZIP.
+- `SDH-Ludusavi-vX.Y.Z.manifest.json`: A manifest metadata file containing information about the release version, source version, release tag, update channel (e.g. `stable` or `dev`), and archive checksum.
 
 ## State and Runtime Privileges
 

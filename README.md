@@ -14,6 +14,11 @@ SDH-Ludusavi is a Decky Loader plugin that surfaces Ludusavi save backup and res
 
 As the plugin is currently in development and not yet available in the Decky Store, follow these steps to install it manually.
 
+Download the latest release archive from the [GitHub Releases](https://github.com/beallio/SDH-Ludusavi/releases) page. Always download the versioned ZIP file (e.g., `SDH-Ludusavi-vX.Y.Z.zip`).
+
+> [!WARNING]
+> Prereleases (versioned with `-dev.SHORTSHA`) are intended for development, testing, and early access. They may contain bugs and should be used with caution.
+
 ### 1. Enable Decky Loader Developer Mode
 1. Open the Decky Loader menu in the Steam Deck Quick Access Menu (QAM).
 2. Go to **Settings** (the gear icon).
@@ -25,10 +30,10 @@ You have two options for manual installation through the Decky Loader's Develope
 - **Option A: Install from URL**
   1. In the Decky Settings, go to the **Developer** tab.
   2. Select **Install from URL**.
-  3. Enter the URL for the latest SDH-Ludusavi release (e.g., `https://example.com/SDH-Ludusavi.zip`) and click **Install**.
+  3. Enter the URL for the latest SDH-Ludusavi release ZIP from GitHub Releases (e.g., `https://github.com/beallio/SDH-Ludusavi/releases/download/v0.2.1/SDH-Ludusavi-v0.2.1.zip`) and click **Install**.
 
 - **Option B: Install from Local ZIP**
-  1. Download the latest `SDH-Ludusavi.zip` to your Steam Deck.
+  1. Download the latest versioned `SDH-Ludusavi-vX.Y.Z.zip` to your Steam Deck.
   2. In the Decky Settings, go to the **Developer** tab.
   3. Select **Install from Local ZIP**.
   4. Navigate to and select the downloaded `.zip` file.
