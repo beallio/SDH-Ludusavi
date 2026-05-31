@@ -27,5 +27,5 @@
     "tests/test_set_release_version.py (version setter tests)"
   ],
   "design decisions": "1. Extended scripts/package_plugin.py to serve as the unified packager for both local dev and production release builds, supporting version override, release URLs, checksums, and manifest creation. 2. Added a robust python-based scripts/validate_plugin_zip.py to verify Decky compatibility, structure, and check for forbidden paths/files. 3. Added scripts/set_release_version.py to programmatically and safely update versions in metadata json files. 4. Implemented GitHub Actions for CI, release tag packaging, and manual workflow dispatch for development prereleases. 5. Protected user assets by staging and tracking assets/icon.png.",
-  "results": "All python pytest test cases (402 passed), frontend audit and typechecks, and package builds pass successfully."
+  "results": "All python pytest test cases (404 passed), frontend audit and typechecks, and package builds pass successfully. Hardened release workflows by replacing 'overwrite: false' with 'overwrite_files: false' and asserting this constraint statically in tests."
 }
