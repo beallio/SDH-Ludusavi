@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import functools
 import json
 import re
@@ -281,3 +282,129 @@ def select_candidate(
         )
 
     return None
+
+
+def check_for_update(
+    current_version: str,
+    preferred_channel: Literal["stable", "development"],
+) -> dict[str, Any]:
+    url = "https://api.github.com/repos/beallio/SDH-Ludusavi/releases"
+    resp = fetch_json(url)
+
+    checked_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    if resp.status in (403, 429):
+        retry_after_str = None
+        if "retry-after" in resp.headers:
+            try:
+                seconds = int(resp.headers["retry-after"])
+                retry_after_str = (
+                    datetime.datetime.now(datetime.timezone.utc)
+                    + datetime.timedelta(seconds=seconds)
+                ).isoformat()
+            # Intentionally broad
+            except Exception:
+                pass
+        elif "x-ratelimit-reset" in resp.headers:
+            try:
+                reset_ts = int(resp.headers["x-ratelimit-reset"])
+                retry_after_str = datetime.datetime.fromtimestamp(
+                    reset_ts, datetime.timezone.utc
+                ).isoformat()
+            # Intentionally broad
+            except Exception:
+                pass
+
+        if not retry_after_str:
+            retry_after_str = (
+                datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=1)
+            ).isoformat()
+
+        msg = "Rate limit exceeded"
+        if isinstance(resp.body, dict) and "message" in resp.body:
+            msg = str(resp.body["message"])
+
+        return {
+            "status": "failed",
+            "checked_at": checked_at,
+            "message": msg,
+            "retry_after": retry_after_str,
+        }
+
+    if resp.status != 200 or not isinstance(resp.body, list):
+        msg = "Failed to check for updates"
+        if isinstance(resp.body, dict):
+            if "message" in resp.body:
+                msg = str(resp.body["message"])
+            elif "error" in resp.body:
+                msg = str(resp.body["error"])
+        return {
+            "status": "failed",
+            "checked_at": checked_at,
+            "message": msg,
+        }
+
+    candidates = []
+    for r in resp.body:
+        if not isinstance(r, dict):
+            continue
+        c = validate_release_candidate(r)
+        if c:
+            candidates.append(c)
+
+    candidate = select_candidate(candidates, current_version, preferred_channel)
+    if candidate:
+        return {
+            "status": "available",
+            "checked_at": checked_at,
+            "candidate": {
+                "version": candidate.version,
+                "tag": candidate.tag,
+                "channel": candidate.channel,
+                "artifact_url": candidate.artifact_url,
+                "sha256": candidate.sha256,
+                "release_url": candidate.release_url,
+                "published_at": candidate.published_at,
+                "action": candidate.action,
+            },
+        }
+
+    return {
+        "status": "current",
+        "checked_at": checked_at,
+        "channel": preferred_channel,
+    }
+
+
+def revalidate_install_candidate(candidate_dict: dict[str, Any]) -> dict[str, Any]:
+    tag = candidate_dict.get("tag")
+    if not tag:
+        raise ValueError("Candidate missing tag")
+
+    url = f"https://api.github.com/repos/beallio/SDH-Ludusavi/releases/tags/{tag}"
+    resp = fetch_json(url)
+    if resp.status != 200 or not isinstance(resp.body, dict):
+        raise ValueError(f"Failed to fetch release for tag {tag}: {resp.status}")
+
+    validated = validate_release_candidate(resp.body)
+    if not validated:
+        raise ValueError("Release validation failed during revalidaion")
+
+    # Verify matching candidate fields: sha256, artifact_url, version
+    if validated.sha256 != candidate_dict.get("sha256"):
+        raise ValueError("SHA-256 mismatch during revalidaion")
+    if validated.artifact_url != candidate_dict.get("artifact_url"):
+        raise ValueError("Artifact URL mismatch during revalidaion")
+    if validated.version != candidate_dict.get("version"):
+        raise ValueError("Version mismatch during revalidaion")
+
+    return {
+        "version": validated.version,
+        "tag": validated.tag,
+        "channel": validated.channel,
+        "artifact_url": validated.artifact_url,
+        "sha256": validated.sha256,
+        "release_url": validated.release_url,
+        "published_at": validated.published_at,
+        "action": candidate_dict.get("action", "update"),
+    }

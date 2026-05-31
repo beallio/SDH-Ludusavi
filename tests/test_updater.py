@@ -243,3 +243,148 @@ def test_select_candidate() -> None:
     assert sel is not None
     assert sel.version == "0.2.2-dev.g456"
     assert sel.action == "update"
+
+
+def test_check_for_update(monkeypatch) -> None:
+    from sdh_ludusavi.updater import check_for_update, JsonResponse
+    import sdh_ludusavi.updater as updater_mod
+
+    # Mock list of releases
+    releases = [
+        {
+            "draft": False,
+            "prerelease": False,
+            "tag_name": "v0.2.1",
+            "html_url": "https://release-url",
+            "published_at": "2026-05-30T12:00:00Z",
+            "assets": [
+                {
+                    "name": "SDH-Ludusavi-v0.2.1.manifest.json",
+                    "browser_download_url": "https://manifest-url",
+                },
+                {
+                    "name": "SDH-Ludusavi-v0.2.1.zip",
+                    "browser_download_url": "https://zip-url",
+                },
+            ],
+        }
+    ]
+
+    manifest = {
+        "schemaVersion": 1,
+        "pluginName": "SDH-Ludusavi",
+        "packageName": "sdh-ludusavi",
+        "version": "0.2.1",
+        "sourceVersion": "0.2.1",
+        "tag": "v0.2.1",
+        "channel": "stable",
+        "assetName": "SDH-Ludusavi-v0.2.1.zip",
+        "sha256": "a" * 64,
+        "generatedAt": "2026-05-30T12:00:00Z",
+    }
+
+    # Mock fetch_json to return releases, then manifest
+    call_count = 0
+
+    def mock_fetch_json(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
+        nonlocal call_count
+        call_count += 1
+        if "releases/tags" in url or "manifest" in url:
+            return JsonResponse(status=200, headers={}, body=manifest)
+        return JsonResponse(status=200, headers={}, body=releases)
+
+    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_json)
+
+    # Available update
+    res = check_for_update("0.2.0", "stable")
+    assert res["status"] == "available"
+    assert res["candidate"]["version"] == "0.2.1"
+    assert res["candidate"]["action"] == "update"
+
+    # Up to date
+    res = check_for_update("0.2.1", "stable")
+    assert res["status"] == "current"
+
+    # Rate limiting mock
+    def mock_fetch_rate_limit(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
+        return JsonResponse(
+            status=403,
+            headers={
+                "retry-after": "60",
+                "x-ratelimit-remaining": "0",
+                "x-ratelimit-reset": "1770000000",
+            },
+            body={"message": "API rate limit exceeded"},
+        )
+
+    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_rate_limit)
+    res = check_for_update("0.2.0", "stable")
+    assert res["status"] == "failed"
+    assert "rate limit" in res["message"].lower()
+    assert res["retry_after"] is not None
+
+
+def test_revalidate_install_candidate(monkeypatch) -> None:
+    from sdh_ludusavi.updater import revalidate_install_candidate, JsonResponse
+    import sdh_ludusavi.updater as updater_mod
+    import pytest
+
+    release = {
+        "draft": False,
+        "prerelease": False,
+        "tag_name": "v0.2.1",
+        "html_url": "https://release-url",
+        "published_at": "2026-05-30T12:00:00Z",
+        "assets": [
+            {
+                "name": "SDH-Ludusavi-v0.2.1.manifest.json",
+                "browser_download_url": "https://manifest-url",
+            },
+            {
+                "name": "SDH-Ludusavi-v0.2.1.zip",
+                "browser_download_url": "https://zip-url",
+            },
+        ],
+    }
+
+    manifest = {
+        "schemaVersion": 1,
+        "pluginName": "SDH-Ludusavi",
+        "packageName": "sdh-ludusavi",
+        "version": "0.2.1",
+        "sourceVersion": "0.2.1",
+        "tag": "v0.2.1",
+        "channel": "stable",
+        "assetName": "SDH-Ludusavi-v0.2.1.zip",
+        "sha256": "a" * 64,
+        "generatedAt": "2026-05-30T12:00:00Z",
+    }
+
+    # Mock fetch_json to return release, then manifest
+    def mock_fetch_json(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
+        if "manifest" in url or "manifest.json" in url:
+            return JsonResponse(status=200, headers={}, body=manifest)
+        return JsonResponse(status=200, headers={}, body=release)
+
+    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_json)
+
+    candidate = {
+        "version": "0.2.1",
+        "tag": "v0.2.1",
+        "channel": "stable",
+        "artifact_url": "https://zip-url",
+        "sha256": "a" * 64,
+        "release_url": "https://release-url",
+        "published_at": "2026-05-30T12:00:00Z",
+        "action": "update",
+    }
+
+    # Valid revalidation
+    validated = revalidate_install_candidate(candidate)
+    assert validated["version"] == "0.2.1"
+    assert validated["sha256"] == "a" * 64
+
+    # Invalid - sha mismatch
+    bad_candidate = dict(candidate, sha256="wrong_sha")
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        revalidate_install_candidate(bad_candidate)
