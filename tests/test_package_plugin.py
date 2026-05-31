@@ -60,8 +60,8 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
     assert all(name.startswith("SDH-Ludusavi/") for name in names)
     assert "SDH-Ludusavi/plugin.json" in names
 
-    # Version should start with 0.1.0 and may include a git hash
-    assert plugin_metadata["version"].startswith("0.1.0")
+    # Version should start with 0.2.0 and may include a git hash
+    assert plugin_metadata["version"].startswith("0.2.0")
     assert package_metadata["version"] == plugin_metadata["version"]
     assert "SDH-Ludusavi/dist/index.js" in names
     assert "SDH-Ludusavi/dist/index.js.map" in names
@@ -112,11 +112,11 @@ def test_package_metadata_versions_match_release_version() -> None:
     plugin_metadata = json.loads(Path("plugin.json").read_text())
     package_metadata = json.loads(Path("package.json").read_text())
 
-    assert plugin_metadata["version"] == "0.1.0"
-    assert package_metadata["version"] == "0.1.0"
+    assert plugin_metadata["version"] == "0.2.0"
+    assert package_metadata["version"] == "0.2.0"
     assert "_root" not in plugin_metadata.get("flags", [])
     assert "root" not in plugin_metadata["publish"]["tags"]
-    assert module.validate_package_versions(Path.cwd()) == "0.1.0"
+    assert module.validate_package_versions(Path.cwd()) == "0.2.0"
 
 
 def test_package_validation_rejects_mismatched_metadata(tmp_path: Path) -> None:
@@ -190,7 +190,7 @@ def test_package_script_supports_release_arguments(tmp_path: Path) -> None:
     assert manifest_data["pluginName"] == "SDH-Ludusavi"
     assert manifest_data["packageName"] == "sdh-ludusavi"
     assert manifest_data["version"] == "0.2.1"
-    assert manifest_data["sourceVersion"] == "0.1.0"
+    assert manifest_data["sourceVersion"] == "0.2.0"
     assert manifest_data["tag"] == "v0.2.1"
     assert manifest_data["channel"] == "stable"
     assert manifest_data["assetName"] == "SDH-Ludusavi-v0.2.1.zip"
