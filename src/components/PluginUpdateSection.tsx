@@ -26,6 +26,24 @@ const checkForPluginUpdateCall = callable<[currentVersion: string, force: boolea
 const revalidatePluginUpdateCall = callable<[candidate: any], any>("revalidate_plugin_update");
 const recordUpdateInstallRequestedCall = callable<[candidate: any], any>("record_update_install_requested");
 const getUpdateCheckContextCall = callable<[], any>("get_update_check_context");
+const logRpc = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
+
+function logUpdate(traceId: string | null, stage: string, details?: any) {
+  const detailsStr = details
+    ? Object.entries(details)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", ")
+    : "";
+  const prefix = traceId ? `trace_id=${traceId}` : "trace_id=none";
+  const message = `${stage}: ${prefix}${detailsStr ? ", " + detailsStr : ""}`;
+  try {
+    void logRpc("info", message, "update");
+  } catch (_) {}
+}
+
+function generateUpdateTraceId(): string {
+  return "tr-" + Date.now() + "-" + Math.random().toString(36).substr(2, 9);
+}
 
 export interface PluginUpdateSectionProps {
   currentVersion: string;
@@ -44,6 +62,7 @@ export function PluginUpdateSection({
 }: PluginUpdateSectionProps) {
   const [isChecking, setIsChecking] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
+  const [isHandoffPending, setIsHandoffPending] = useState(false);
   const [checkResult, setCheckResult] = useState<UpdateCheckResult | null>(null);
   const [candidate, setCandidate] = useState<PluginUpdateCandidate | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -57,16 +76,19 @@ export function PluginUpdateSection({
         return;
       }
       if (inFlightCheck.current) {
+        logUpdate(null, "check_reuse", { channel: updateChannel });
         return inFlightCheck.current;
       }
 
       const promise = (async () => {
         setIsChecking(true);
         setErrorMsg(null);
+        logUpdate(null, "check_start", { channel: updateChannel });
         try {
           const res = await checkForPluginUpdateCall(currentVersion, opts.force);
           setCheckResult(res);
           if (res.status === "failed") {
+            logUpdate(null, "check_failed", { message: res.message || "unknown" });
             setErrorMsg(res.message || "Failed to check for updates");
             if (opts.notify && opts.force) {
               toaster.toast({
@@ -76,13 +98,16 @@ export function PluginUpdateSection({
               });
             }
           } else if (res.status === "available") {
+            logUpdate(null, "check_success", { status: "available", version: res.candidate?.version });
             setCandidate(res.candidate);
           } else {
+            logUpdate(null, "check_success", { status: "current" });
             setCandidate(null);
           }
           return res;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
+          logUpdate(null, "check_failed", { message: msg });
           setErrorMsg(msg);
           if (opts.notify && opts.force) {
             toaster.toast({
@@ -107,7 +132,7 @@ export function PluginUpdateSection({
       inFlightCheck.current = promise;
       return promise;
     },
-    [currentVersion]
+    [currentVersion, updateChannel]
   );
 
   // Reconcile and load cache on mount
@@ -184,41 +209,98 @@ export function PluginUpdateSection({
   const handleInstall = async (targetCandidate: PluginUpdateCandidate) => {
     if (isInstalling) return;
     setIsInstalling(true);
+    setIsHandoffPending(false);
     setErrorMsg(null);
+
+    const updateTraceId = generateUpdateTraceId();
+    logUpdate(updateTraceId, "install_clicked", { version: targetCandidate.version });
+
     try {
+      logUpdate(updateTraceId, "revalidate_start", { tag: targetCandidate.tag });
       const revalRes = await revalidatePluginUpdateCall(targetCandidate);
       if (revalRes.status === "failed" || !revalRes.version) {
+        logUpdate(updateTraceId, "revalidate_failed", { message: revalRes.message || "unknown" });
         throw new Error(revalRes.message || "Revalidation failed");
       }
+      logUpdate(updateTraceId, "revalidate_success", { version: revalRes.version });
 
       const installType =
         targetCandidate.action === "downgrade_to_stable"
           ? INSTALL_TYPE_DOWNGRADE
           : INSTALL_TYPE_UPDATE;
 
-      await recordUpdateInstallRequestedCall(revalRes);
-      await invokeDeckyInstaller(
+      const payload = { ...revalRes, updateTraceId };
+
+      logUpdate(updateTraceId, "record_install_start", { version: revalRes.version });
+      await recordUpdateInstallRequestedCall(payload);
+      logUpdate(updateTraceId, "record_install_success", { version: revalRes.version });
+
+      logUpdate(updateTraceId, "handoff_start", {
+        version: revalRes.version,
+        sha256_prefix: revalRes.sha256 ? revalRes.sha256.slice(0, 8) : "none"
+      });
+
+      let handoffTimerFired = false;
+      const handoffTimer = new Promise<void>((resolve) => {
+        setTimeout(() => {
+          handoffTimerFired = true;
+          resolve();
+        }, 3000);
+      });
+
+      const installerPromise = invokeDeckyInstaller(
         revalRes.artifact_url,
         revalRes.version,
         revalRes.sha256,
-        installType
+        installType,
+        updateTraceId
       );
 
-      toaster.toast({
-        title: "Installation Initiated",
-        body: `Requested installation of v${revalRes.version} via Decky Loader.`,
-        duration: 3000
-      });
+      await Promise.race([installerPromise, handoffTimer]);
+
+      if (handoffTimerFired) {
+        logUpdate(updateTraceId, "handoff_pending", { status: "installer_handoff_pending" });
+        setIsHandoffPending(true);
+        void (async () => {
+          try {
+            await installerPromise;
+            logUpdate(updateTraceId, "handoff_resolved", { status: "success" });
+            setIsInstalling(false);
+            setIsHandoffPending(false);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            logUpdate(updateTraceId, "handoff_rejected", { message: msg });
+            setIsInstalling(false);
+            setIsHandoffPending(false);
+            setErrorMsg(msg);
+            toaster.toast({
+              title: "Installation Failed",
+              body: msg,
+              duration: 4000
+            });
+          }
+        })();
+      } else {
+        await installerPromise;
+        logUpdate(updateTraceId, "handoff_resolved", { status: "success" });
+        setIsInstalling(false);
+        setIsHandoffPending(false);
+        toaster.toast({
+          title: "Installation Initiated",
+          body: `Requested installation of v${revalRes.version} via Decky Loader.`,
+          duration: 3000
+        });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setErrorMsg(msg);
+      setIsInstalling(false);
+      setIsHandoffPending(false);
       toaster.toast({
         title: "Installation Failed",
         body: msg,
         duration: 4000
       });
-    } finally {
-      setIsInstalling(false);
     }
   };
 
@@ -355,8 +437,20 @@ export function PluginUpdateSection({
             >
               {isInstalling ? (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
-                  <Spinner size="small" />
-                  <span>Preparing...</span>
+                  <div
+                    style={{
+                      width: "16px",
+                      height: "16px",
+                      flex: "0 0 16px",
+                      overflow: "hidden",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Spinner size="small" />
+                  </div>
+                  <span>{isHandoffPending ? "Waiting for Decky..." : "Preparing..."}</span>
                 </div>
               ) : (
                 getActionText(candidate)

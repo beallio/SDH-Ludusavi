@@ -2173,3 +2173,55 @@ def test_frontend_update_check_inflight_guard() -> None:
 
     # 4. Enforce that the promise is cleared in finally block
     assert "inFlightCheck.current = null" in content
+
+
+def test_frontend_updater_static() -> None:
+    comp_path = Path("src/components/PluginUpdateSection.tsx")
+    assert comp_path.exists()
+    comp_content = comp_path.read_text(encoding="utf-8")
+
+    installer_path = Path("src/utils/deckyInstaller.ts")
+    assert installer_path.exists()
+    installer_content = installer_path.read_text(encoding="utf-8")
+
+    # 1. Update install flow logs major stages & update check in-flight reuse
+    assert "logUpdate" in comp_content
+    # check start/reuse logs
+    assert "check_start" in comp_content
+    assert "check_reuse" in comp_content
+    # install/revalidation/handoff logs
+    assert "install_clicked" in comp_content
+    assert "revalidate_start" in comp_content
+    assert "revalidate_success" in comp_content
+    assert "record_install_start" in comp_content
+    assert "record_install_success" in comp_content
+    assert "handoff_start" in comp_content
+    assert "handoff_pending" in comp_content
+    assert "handoff_resolved" in comp_content
+
+    # 2. Decky installer handoff has bounded pending behavior (Promise.race or timeout)
+    assert "Promise.race" in comp_content or "setTimeout" in comp_content
+    assert "Waiting for Decky..." in comp_content or "Decky prompt opened" in comp_content
+
+    # 3. Install button spinner is wrapped in fixed dimensions and cannot resize the button
+    assert "flex: 0 0 16px" in comp_content or 'flex: "0 0 16px"' in comp_content
+    assert "overflow: hidden" in comp_content or 'overflow: "hidden"' in comp_content
+
+    # 4. Decky installer adapter reports whether it used DeckyBackend.callable or DeckyBackend.call
+    assert (
+        'installer_api: "callable"' in comp_content
+        or "installer_api: 'callable'" in comp_content
+        or 'installer_api: "callable"' in installer_content
+        or "installer_api: 'callable'" in installer_content
+    )
+    assert (
+        'installer_api: "call"' in comp_content
+        or "installer_api: 'call'" in comp_content
+        or 'installer_api: "call"' in installer_content
+        or "installer_api: 'call'" in installer_content
+    )
+
+    # 5. Full SHA-256 values are not logged (e.g. substrings/slices are used)
+    # Ensure any log statement including sha256 slices it
+    assert "slice" in comp_content or "substring" in comp_content
+    assert "sha256" in comp_content
