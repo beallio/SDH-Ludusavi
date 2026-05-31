@@ -113,7 +113,17 @@ def test_cache_poisoning_guard(tmp_path: Path) -> None:
     assert service._update_check_cache.get("last_result") == successful_res
 
 
-def test_decky_settings_store_defaults() -> None:
+def test_decky_settings_store_defaults(monkeypatch) -> None:
+    import sys
+    import types
+
+    # Inject a dummy decky module so main.py can import it
+    dummy_decky = types.SimpleNamespace(
+        DECKY_USER_HOME="/tmp",
+        DECKY_HOME="/tmp",
+    )
+    monkeypatch.setitem(sys.modules, "decky", dummy_decky)
+
     from typing import Any
     from main import DeckySettingsStore
 
@@ -313,3 +323,90 @@ def test_revalidate_plugin_update_records_rate_limit(tmp_path: Path, monkeypatch
     assert res["retry_after"] is not None
     # Cooldown should be recorded in service
     assert service._update_rate_limited_until is not None
+
+
+def test_revalidate_plugin_update_does_not_hold_lock_during_fetch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from typing import Any
+    import threading
+
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+
+    candidate = {
+        "version": "0.2.1",
+        "tag": "v0.2.1",
+        "channel": "stable",
+        "artifact_url": "https://zip-url",
+        "sha256": "a" * 64,
+    }
+
+    import sdh_ludusavi.updater as updater_mod
+    from sdh_ludusavi.updater import JsonResponse
+
+    lock_held_during_fetch = None
+
+    def mock_fetch_json(url: str, **kwargs) -> Any:
+        nonlocal lock_held_during_fetch
+
+        # Try to acquire the lock from a separate thread to see if it is held by the main thread
+        def try_acquire():
+            nonlocal lock_held_during_fetch
+            # If the main thread holds the lock, this acquire(blocking=False) will return False
+            lock_held_during_fetch = not service._state_lock.acquire(blocking=False)
+            if not lock_held_during_fetch:
+                service._state_lock.release()
+
+        t = threading.Thread(target=try_acquire)
+        t.start()
+        t.join()
+
+        # Return a mock response so the function can finish
+        return JsonResponse(
+            status=200,
+            headers={},
+            body={
+                "tag_name": "v0.2.1",
+                "assets": [
+                    {
+                        "name": "SDH-Ludusavi-v0.2.1.zip",
+                        "browser_download_url": "https://zip-url",
+                    },
+                    {
+                        "name": "SDH-Ludusavi-v0.2.1.manifest.json",
+                        "browser_download_url": "https://manifest-url",
+                    },
+                ],
+            },
+        )
+
+    # We mock the second fetch_json call (for the manifest) to return manifest body
+    manifest_fetched = False
+
+    def mock_fetch_json_routing(url: str, **kwargs) -> Any:
+        nonlocal manifest_fetched
+        if "tags/" in url:
+            return mock_fetch_json(url, **kwargs)
+        else:
+            manifest_fetched = True
+            return JsonResponse(
+                status=200,
+                headers={},
+                body={
+                    "name": "SDH-Ludusavi",
+                    "version": "0.2.1",
+                    "manifest_version": 2,
+                    "sha256": "a" * 64,
+                },
+            )
+
+    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_json_routing)
+
+    service.revalidate_plugin_update(candidate)
+
+    assert lock_held_during_fetch is False
+    assert manifest_fetched is True

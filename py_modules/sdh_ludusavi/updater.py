@@ -551,9 +551,9 @@ def reconcile_pending_update_install(service: Any, current_version: str) -> None
 
 
 def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[str, Any]:
-    with service._state_lock:
-        import datetime
+    import datetime
 
+    with service._state_lock:
         if service._update_rate_limited_until:
             if datetime.datetime.now(datetime.timezone.utc) < service._update_rate_limited_until:
                 return {
@@ -564,47 +564,49 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
                 }
             else:
                 service._update_rate_limited_until = None
+                service._save_state()
 
-        tag = candidate.get("tag")
-        if not tag:
-            return {
-                "status": "failed",
-                "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "message": "Candidate missing tag",
-            }
+    tag = candidate.get("tag")
+    if not tag:
+        return {
+            "status": "failed",
+            "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "message": "Candidate missing tag",
+        }
 
-        url = f"https://api.github.com/repos/beallio/SDH-Ludusavi/releases/tags/{tag}"
-        resp = fetch_json(url)
+    url = f"https://api.github.com/repos/beallio/SDH-Ludusavi/releases/tags/{tag}"
+    resp = fetch_json(url)
 
-        if resp.status in (403, 429):
-            retry_after_str = None
-            if "retry-after" in resp.headers:
-                # Intentionally broad
-                try:
-                    seconds = int(resp.headers["retry-after"])
-                    retry_after_str = (
-                        datetime.datetime.now(datetime.timezone.utc)
-                        + datetime.timedelta(seconds=seconds)
-                    ).isoformat()
-                # Intentionally broad
-                except Exception:
-                    pass
-            elif "x-ratelimit-reset" in resp.headers:
-                # Intentionally broad
-                try:
-                    reset_ts = int(resp.headers["x-ratelimit-reset"])
-                    retry_after_str = datetime.datetime.fromtimestamp(
-                        reset_ts, datetime.timezone.utc
-                    ).isoformat()
-                # Intentionally broad
-                except Exception:
-                    pass
-
-            if not retry_after_str:
+    if resp.status in (403, 429):
+        retry_after_str = None
+        if "retry-after" in resp.headers:
+            # Intentionally broad
+            try:
+                seconds = int(resp.headers["retry-after"])
                 retry_after_str = (
-                    datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=1)
+                    datetime.datetime.now(datetime.timezone.utc)
+                    + datetime.timedelta(seconds=seconds)
                 ).isoformat()
+            # Intentionally broad
+            except Exception:
+                pass
+        elif "x-ratelimit-reset" in resp.headers:
+            # Intentionally broad
+            try:
+                reset_ts = int(resp.headers["x-ratelimit-reset"])
+                retry_after_str = datetime.datetime.fromtimestamp(
+                    reset_ts, datetime.timezone.utc
+                ).isoformat()
+            # Intentionally broad
+            except Exception:
+                pass
 
+        if not retry_after_str:
+            retry_after_str = (
+                datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=1)
+            ).isoformat()
+
+        with service._state_lock:
             # Intentionally broad
             try:
                 service._update_rate_limited_until = datetime.datetime.fromisoformat(
@@ -615,70 +617,70 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
                 pass
             service._save_state()
 
-            msg = "Rate limit exceeded"
-            if isinstance(resp.body, dict) and "message" in resp.body:
-                msg = str(resp.body["message"])
+        msg = "Rate limit exceeded"
+        if isinstance(resp.body, dict) and "message" in resp.body:
+            msg = str(resp.body["message"])
 
-            service.log("error", f"Revalidation failed due to rate limit: {msg}")
-
-            return {
-                "status": "failed",
-                "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "message": msg,
-                "retry_after": retry_after_str,
-            }
-
-        if resp.status != 200 or not isinstance(resp.body, dict):
-            msg = f"Failed to fetch release for tag {tag}: {resp.status}"
-            service.log("error", f"Revalidation check failed: {msg}")
-            return {
-                "status": "failed",
-                "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "message": msg,
-            }
-
-        validated = validate_release_candidate(resp.body)
-        if not validated:
-            msg = "Release validation failed during revalidation"
-            service.log("error", msg)
-            return {
-                "status": "failed",
-                "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "message": msg,
-            }
-
-        if validated.sha256 != candidate.get("sha256"):
-            msg = "SHA-256 mismatch during revalidation"
-            service.log("error", msg)
-            return {
-                "status": "failed",
-                "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "message": msg,
-            }
-        if validated.artifact_url != candidate.get("artifact_url"):
-            msg = "Artifact URL mismatch during revalidation"
-            service.log("error", msg)
-            return {
-                "status": "failed",
-                "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "message": msg,
-            }
-        if validated.version != candidate.get("version"):
-            msg = "Version mismatch during revalidation"
-            service.log("error", msg)
-            return {
-                "status": "failed",
-                "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "message": msg,
-            }
+        service.log("error", f"Revalidation failed due to rate limit: {msg}")
 
         return {
-            "version": validated.version,
-            "tag": validated.tag,
-            "channel": validated.channel,
-            "artifact_url": validated.artifact_url,
-            "sha256": validated.sha256,
-            "release_url": validated.release_url,
-            "published_at": validated.published_at,
-            "action": candidate.get("action", "update"),
+            "status": "failed",
+            "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "message": msg,
+            "retry_after": retry_after_str,
         }
+
+    if resp.status != 200 or not isinstance(resp.body, dict):
+        msg = f"Failed to fetch release for tag {tag}: {resp.status}"
+        service.log("error", f"Revalidation check failed: {msg}")
+        return {
+            "status": "failed",
+            "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "message": msg,
+        }
+
+    validated = validate_release_candidate(resp.body)
+    if not validated:
+        msg = "Release validation failed during revalidation"
+        service.log("error", msg)
+        return {
+            "status": "failed",
+            "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "message": msg,
+        }
+
+    if validated.sha256 != candidate.get("sha256"):
+        msg = "SHA-256 mismatch during revalidation"
+        service.log("error", msg)
+        return {
+            "status": "failed",
+            "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "message": msg,
+        }
+    if validated.artifact_url != candidate.get("artifact_url"):
+        msg = "Artifact URL mismatch during revalidation"
+        service.log("error", msg)
+        return {
+            "status": "failed",
+            "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "message": msg,
+        }
+    if validated.version != candidate.get("version"):
+        msg = "Version mismatch during revalidation"
+        service.log("error", msg)
+        return {
+            "status": "failed",
+            "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "message": msg,
+        }
+
+    return {
+        "version": validated.version,
+        "tag": validated.tag,
+        "channel": validated.channel,
+        "artifact_url": validated.artifact_url,
+        "sha256": validated.sha256,
+        "release_url": validated.release_url,
+        "published_at": validated.published_at,
+        "action": candidate.get("action", "update"),
+    }
