@@ -9,6 +9,7 @@ SDH-Ludusavi is a Decky Loader plugin that surfaces Ludusavi save backup and res
 - **Launch Gate**: Pauses game launch if a save conflict is detected, allowing you to choose which save to keep.
 - **Manual Control**: Force backup or restore for any Ludusavi-managed game at any time.
 - **Unified Logging**: View backend and frontend logs directly within the plugin's "View Logs" modal.
+- **In-Plugin Updates**: Automatically or manually check for newer GitHub Release builds, choose between Stable and Development channels, and perform one-click installations via Decky Loader.
 
 ## Installation (Early Access)
 
@@ -17,7 +18,7 @@ As the plugin is currently in development and not yet available in the Decky Sto
 Download the latest release archive from the [GitHub Releases](https://github.com/beallio/SDH-Ludusavi/releases) page. Always download the versioned ZIP file (e.g., `SDH-Ludusavi-vX.Y.Z.zip`).
 
 > [!WARNING]
-> Prereleases (versioned with `-dev.SHORTSHA`) are intended for development, testing, and early access. They may contain bugs and should be used with caution.
+> Prereleases (versioned with `-dev.gSHORTSHA`) are intended for development, testing, and early access. They may contain bugs and should be used with caution.
 
 ### 1. Enable Decky Loader Developer Mode
 1. Open the Decky Loader menu in the Steam Deck Quick Access Menu (QAM).
@@ -37,6 +38,15 @@ You have two options for manual installation through the Decky Loader's Develope
   2. In the Decky Settings, go to the **Developer** tab.
   3. Select **Install from Local ZIP**.
   4. Navigate to and select the downloaded `.zip` file.
+
+## In-Plugin Updates
+
+Once installed, the plugin can handle updates directly from the UI:
+
+- **Update Channels**: Choose between **Stable releases only** (default) or **Development releases** (includes prereleases for testing).
+- **Automatic & Manual Checks**: Optionally check for updates in the background or trigger a manual check at any time.
+- **Security Validation**: Pre-validates release checksums and metadata before initiating Decky's native installation prompts.
+- **Manual Fallback & Recovery**: If one-click installation fails (e.g., due to a temporary network issue or Decky API drift), you can view release notes on GitHub and perform a manual reinstall using Option A or B.
 
 ## Prerequisites
 

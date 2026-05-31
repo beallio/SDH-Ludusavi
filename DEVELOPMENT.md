@@ -145,6 +145,37 @@ The Steam Deck user interface (SteamOS Big Picture Mode / Overlay / QAM) runs in
 - **Case-Insensitive Class Selectors:** SteamOS frequently updates its UI stylesheets, including randomized class suffixes (e.g., `.dropdown_DropdownButton_12345` vs `.dropdown_DropdownButton_Label_abcde`). CSS selectors targeting these elements should use case-insensitive matches (e.g., `[class*="dropdown" i]`) to prevent breaking changes on client updates.
 - **Flex Shrink Propagation:** Interactive components (like `DropdownItem`) are nested inside several layers of flex containers. If a child element has `white-space: nowrap` (e.g., a long game title), it forces the flex items to expand to their maximum width unless `min-width: 0 !important` and `max-width: 100% !important` are recursively applied to all elements in the parent chain.
 
+## In-Plugin Updater Architecture
+
+The updater architecture handles background update checking, version validation, and update installation without blocking the main event loops or unzipping files directly.
+
+### 1. Discovery & Validation
+- **Path**: `py_modules/sdh_ludusavi/updater.py`
+- **JSON Fetch**: Uses only Python's standard library `urllib.request` to fetch GitHub Release assets (limiting timeouts to 10-15s).
+- **Candidate Validation**: Enforces strict verification of:
+  - Draft state (ignored).
+  - Single release manifest JSON (enforces name, package, version, tag, channel, and a 64-char hexadecimal SHA-256).
+  - Matches tag name exactly to the manifest tag.
+  - Matches the channel value (`stable` or `dev`) to the GitHub prerelease flag.
+  - Exactly one matching ZIP whose name is defined in `manifest.assetName`.
+
+### 2. Version Comparison & Selection
+- **Stable Channel**: Inspects only stable versions. Stable `X.Y.Z` wins over installed prerelease or local build of the same base.
+- **Development Channel**: Considers both stable and prereleases.
+- **Prerelease & Dev Suffixes**: Handles stable `X.Y.Z`, development `X.Y.Z-dev.g<sha>`, legacy dev `X.Y.Z-dev.<sha>`, and local build metadata `X.Y.Z+<metadata>`.
+- **Local Build Metadata**: `X.Y.Z+...` is treated as stable-equivalent to `X.Y.Z` (preventing same-base stable updates).
+- **Dev Ordering**: For dev releases with the same base (e.g. `0.2.0-dev.g123` vs `0.2.0-dev.g456`), they are ordered by validated GitHub `published_at` timestamp.
+
+### 3. Settings & Cache Persistence
+- **Settings**: Persistent preferences (`update_channel`, `automatic_update_checks`) are stored in Decky settings.
+- **Cache**: Operational metadata (`last_checked_at`, `pending_update_install`, etc.) are written to cache.
+- **Rate-limit interpretation**: On `403` or `429`, retry timelines are stored in-memory only. Successful checks cache findings for 24 hours.
+
+### 4. Revalidation & Installation Flow
+- **Direct Installer Adapter**: Exposes `src/utils/deckyInstaller.ts` to isolate `window.DeckyBackend` calls.
+- **Pre-install Revalidation**: The installer action first calls `revalidate_plugin_update(candidate)` to verify the release URL and SHA-256 immediately before installation.
+- **Decky Hand-off**: Determines the installation type (`UPDATE: 2` or `DOWNGRADE: 3`) and enqueues `record_update_install_requested` before invoking Decky Loader's `utilities/install_plugin` method.
+
 ## Technical Reference: Status & Operations
 
 ### Game Status Values
