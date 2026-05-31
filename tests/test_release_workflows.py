@@ -123,7 +123,9 @@ def test_workflows_trigger_and_overwrite_and_checksum_verification() -> None:
     # 1. Verify stable release trigger tag glob pattern
     release_content = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     assert "tags:" in release_content
-    assert "v*.*.*" in release_content or '"v*.*.*"' in release_content
+    assert "v*.*.*" in release_content
+    assert "!v*.*.*-*" in release_content
+    assert release_content.index("v*.*.*") < release_content.index("!v*.*.*-*")
 
     # 2. Verify dev-release.yml prerelease settings
     dev_content = Path(".github/workflows/dev-release.yml").read_text(encoding="utf-8")
