@@ -443,6 +443,11 @@ class SDHLudusaviService:
 
         updater.reconcile_pending_update_install(self, current_version)
 
+    def revalidate_plugin_update(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        from . import updater
+
+        return updater.revalidate_plugin_update(self, candidate)
+
 
 # Keep fuzzy matching module-level functions mapped to GameRegistryMatcher
 def _normalize(game_name: str) -> str:

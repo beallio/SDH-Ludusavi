@@ -151,10 +151,9 @@ class Plugin:
         return await self._call("check_for_plugin_update", do_check)
 
     async def revalidate_plugin_update(self, candidate: dict[str, Any]) -> dict[str, Any]:
-        from sdh_ludusavi.updater import revalidate_install_candidate
-
         return await self._call(
-            "revalidate_plugin_update", lambda: revalidate_install_candidate(candidate)
+            "revalidate_plugin_update",
+            lambda: self._service().revalidate_plugin_update(candidate),
         )
 
     async def record_update_install_requested(self, candidate: dict[str, Any]) -> dict[str, Any]:

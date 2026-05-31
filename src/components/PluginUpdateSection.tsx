@@ -49,46 +49,65 @@ export function PluginUpdateSection({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [installedReleasePublishedAt, setInstalledReleasePublishedAt] = useState<string | null>(null);
   const hasChecked = useRef(false);
+  const inFlightCheck = useRef<Promise<any> | null>(null);
 
   const checkForUpdates = useCallback(
     async (opts: { force: boolean; notify: boolean }) => {
-      if (isChecking || !currentVersion || currentVersion === "Loading...") {
+      if (!currentVersion || currentVersion === "Loading...") {
         return;
       }
-      setIsChecking(true);
-      setErrorMsg(null);
-      try {
-        const res = await checkForPluginUpdateCall(currentVersion, opts.force);
-        setCheckResult(res);
-        if (res.status === "failed") {
-          setErrorMsg(res.message || "Failed to check for updates");
+      if (inFlightCheck.current) {
+        return inFlightCheck.current;
+      }
+
+      const promise = (async () => {
+        setIsChecking(true);
+        setErrorMsg(null);
+        try {
+          const res = await checkForPluginUpdateCall(currentVersion, opts.force);
+          setCheckResult(res);
+          if (res.status === "failed") {
+            setErrorMsg(res.message || "Failed to check for updates");
+            if (opts.notify && opts.force) {
+              toaster.toast({
+                title: "Update Check Failed",
+                body: res.message || "Failed to check for updates",
+                duration: 3000
+              });
+            }
+          } else if (res.status === "available") {
+            setCandidate(res.candidate);
+          } else {
+            setCandidate(null);
+          }
+          return res;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          setErrorMsg(msg);
           if (opts.notify && opts.force) {
             toaster.toast({
               title: "Update Check Failed",
-              body: res.message || "Failed to check for updates",
+              body: msg,
               duration: 3000
             });
           }
-        } else if (res.status === "available") {
-          setCandidate(res.candidate);
-        } else {
-          setCandidate(null);
+          const failedRes: UpdateCheckResult = {
+            status: "failed",
+            checked_at: new Date().toISOString(),
+            message: msg
+          };
+          setCheckResult(failedRes);
+          return failedRes;
+        } finally {
+          setIsChecking(false);
+          inFlightCheck.current = null;
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setErrorMsg(msg);
-        if (opts.notify && opts.force) {
-          toaster.toast({
-            title: "Update Check Failed",
-            body: msg,
-            duration: 3000
-          });
-        }
-      } finally {
-        setIsChecking(false);
-      }
+      })();
+
+      inFlightCheck.current = promise;
+      return promise;
     },
-    [isChecking, currentVersion]
+    [currentVersion]
   );
 
   // Reconcile and load cache on mount

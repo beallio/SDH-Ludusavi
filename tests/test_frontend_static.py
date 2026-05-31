@@ -2155,3 +2155,21 @@ def test_decky_installer_argument_order() -> None:
         'call("utilities/install_plugin", url, EXPECTED_PLUGIN_NAME, version, sha256, installType)'
         in content
     )
+
+
+def test_frontend_update_check_inflight_guard() -> None:
+    path = Path("src/components/PluginUpdateSection.tsx")
+    assert path.exists(), "src/components/PluginUpdateSection.tsx does not exist"
+    content = path.read_text(encoding="utf-8")
+
+    # 1. Enforce that an in-flight check ref is defined
+    assert "inFlightCheck = useRef" in content
+
+    # 2. Enforce that concurrent calls observe/return the existing in-flight check promise
+    assert "if (inFlightCheck.current)" in content
+
+    # 3. Enforce that the promise is assigned to the ref
+    assert "inFlightCheck.current = " in content
+
+    # 4. Enforce that the promise is cleared in finally block
+    assert "inFlightCheck.current = null" in content

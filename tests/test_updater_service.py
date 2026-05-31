@@ -226,3 +226,90 @@ def test_record_update_check_result_logs_failure(tmp_path: Path) -> None:
         level == "error" and "SSL certificate verification failed" in msg
         for level, msg in logged_messages
     )
+
+
+def test_revalidate_plugin_update_respects_rate_limit(tmp_path: Path, monkeypatch) -> None:
+    from typing import Any
+
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+
+    # Set rate-limit reset timestamp in the future
+    import datetime
+
+    future_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
+    service._update_rate_limited_until = future_time
+
+    # Candidate to revalidate
+    candidate = {
+        "version": "0.2.1",
+        "tag": "v0.2.1",
+        "channel": "stable",
+        "artifact_url": "https://zip-url",
+        "sha256": "a" * 64,
+    }
+
+    # Mock fetch_json to ensure it is NEVER called when rate limited
+    fetch_called = False
+    import sdh_ludusavi.updater as updater_mod
+
+    def mock_fetch_json(url: str, **kwargs) -> Any:
+        nonlocal fetch_called
+        fetch_called = True
+        raise RuntimeError("Should not be called")
+
+    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_json)
+
+    # Call revalidate_plugin_update
+    res = service.revalidate_plugin_update(candidate)
+
+    assert not fetch_called
+    assert res["status"] == "failed"
+    assert "Rate limit cooldown active" in res["message"]
+    assert res["retry_after"] == future_time.isoformat()
+
+
+def test_revalidate_plugin_update_records_rate_limit(tmp_path: Path, monkeypatch) -> None:
+    from typing import Any
+
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+
+    candidate = {
+        "version": "0.2.1",
+        "tag": "v0.2.1",
+        "channel": "stable",
+        "artifact_url": "https://zip-url",
+        "sha256": "a" * 64,
+    }
+
+    # Mock fetch_json to return 403 rate limit response
+    import sdh_ludusavi.updater as updater_mod
+    from sdh_ludusavi.updater import JsonResponse
+
+    def mock_fetch_json(url: str, **kwargs) -> Any:
+        return JsonResponse(
+            status=403,
+            headers={
+                "retry-after": "120",
+                "x-ratelimit-remaining": "0",
+            },
+            body={"message": "API rate limit exceeded"},
+        )
+
+    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_json)
+
+    # Call revalidate_plugin_update
+    res = service.revalidate_plugin_update(candidate)
+
+    assert res["status"] == "failed"
+    assert "rate limit exceeded" in res["message"].lower()
+    assert res["retry_after"] is not None
+    # Cooldown should be recorded in service
+    assert service._update_rate_limited_until is not None
