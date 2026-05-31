@@ -410,3 +410,300 @@ def test_revalidate_plugin_update_does_not_hold_lock_during_fetch(
 
     assert lock_held_during_fetch is False
     assert manifest_fetched is True
+
+
+def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> None:
+    import datetime
+    import sys
+    import types
+    import asyncio
+    from sdh_ludusavi.updater import JsonResponse
+    import sdh_ludusavi.updater as updater_mod
+
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+
+    logged = []
+
+    def mock_log(
+        level: str, msg: str, operation: str | None = None, game_name: str | None = None
+    ) -> None:
+        logged.append((level, msg))
+
+    service.log = mock_log
+
+    # 1. Update check log testing
+    # A. Check available candidate logging
+    releases = [
+        {
+            "draft": False,
+            "prerelease": False,
+            "tag_name": "v0.2.1",
+            "html_url": "https://release-url",
+            "published_at": "2026-05-30T12:00:00Z",
+            "assets": [
+                {
+                    "name": "SDH-Ludusavi-v0.2.1.manifest.json",
+                    "browser_download_url": "https://manifest-url",
+                },
+                {
+                    "name": "SDH-Ludusavi-v0.2.1.zip",
+                    "browser_download_url": "https://zip-url",
+                },
+            ],
+        }
+    ]
+    manifest = {
+        "schemaVersion": 1,
+        "pluginName": "SDH-Ludusavi",
+        "packageName": "sdh-ludusavi",
+        "version": "0.2.1",
+        "sourceVersion": "0.2.1",
+        "tag": "v0.2.1",
+        "channel": "stable",
+        "assetName": "SDH-Ludusavi-v0.2.1.zip",
+        "sha256": "f" * 64,
+        "generatedAt": "2026-05-30T12:00:00Z",
+    }
+
+    def mock_fetch_success(url: str, **kwargs) -> JsonResponse:
+        if "manifest" in url or "manifest.json" in url:
+            return JsonResponse(status=200, headers={}, body=manifest)
+        if "tags/" in url:
+            return JsonResponse(status=200, headers={}, body=releases[0])
+        return JsonResponse(status=200, headers={}, body=releases)
+
+    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_success)
+
+    # Let's call main.py Plugin.check_for_plugin_update indirectly or directly via service/helpers
+    # For testing, we mock decky for main.py import
+    decky_logs = []
+
+    class MockDeckyLogger:
+        def info(self, msg, *args):
+            decky_logs.append(msg)
+
+        def warning(self, msg, *args):
+            decky_logs.append(msg)
+
+        def exception(self, msg, *args):
+            decky_logs.append(msg)
+
+    dummy_decky = types.SimpleNamespace(
+        DECKY_USER_HOME=str(tmp_path),
+        DECKY_HOME=str(tmp_path),
+        DECKY_PLUGIN_SETTINGS_DIR=str(tmp_path / "settings"),
+        DECKY_PLUGIN_RUNTIME_DIR=str(tmp_path / "data"),
+        logger=MockDeckyLogger(),
+    )
+    monkeypatch.setitem(sys.modules, "decky", dummy_decky)
+    monkeypatch.setitem(
+        sys.modules, "settings", types.SimpleNamespace(SettingsManager=lambda *args, **kwargs: None)
+    )
+
+    # We want to test check_for_plugin_update via Plugin or directly. Let's do it via service helper
+    # First check: check_for_update through service record and call
+    sys.modules.pop("main", None)
+    import main
+
+    plugin = main.Plugin()
+    plugin._backend = service
+
+    res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
+    assert res["status"] == "available"
+
+    # Verify logs for check start, fetch status, candidate parsing, selection
+    assert any("Update check started" in m for _, m in logged)
+    assert any("GitHub releases fetch response: status=200" in m for _, m in logged)
+    assert any("Parsed" in m and "valid candidate" in m for _, m in logged)
+    assert any("Selected update candidate:" in m for _, m in logged)
+
+    # Verify privacy: no full SHA-256 in logs
+    for level, msg in logged:
+        assert "f" * 64 not in msg
+        assert "a" * 64 not in msg
+
+    logged.clear()
+
+    # B. Cache hit logging
+    # Non-forced call should hit the cache if we just did a check
+    res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=False))
+    assert any("cache hit" in m.lower() for _, m in logged)
+    logged.clear()
+
+    # C. Rate-limit block logging on update check
+    service._update_rate_limited_until = datetime.datetime.now(
+        datetime.timezone.utc
+    ) + datetime.timedelta(hours=1)
+    res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
+    assert res["status"] == "failed"
+    assert any(
+        "cooldown active" in m.lower() or "blocked by rate-limit" in m.lower() for _, m in logged
+    )
+    service._update_rate_limited_until = None
+    logged.clear()
+
+    # D. Failed fetch logging
+    monkeypatch.setattr(
+        updater_mod,
+        "fetch_json",
+        lambda url, **kwargs: JsonResponse(status=500, headers={}, body={"error": "fetch failed"}),
+    )
+    res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
+    assert res["status"] == "failed"
+    assert any("fetch failed" in m.lower() or "failed to check" in m.lower() for _, m in logged)
+    logged.clear()
+
+    # E. Current logging
+    monkeypatch.setattr(
+        updater_mod,
+        "fetch_json",
+        lambda url, **kwargs: JsonResponse(status=200, headers={}, body=[]),
+    )
+    res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
+    assert res["status"] == "current"
+    assert any(
+        "no upgrade candidate found" in m.lower() or "already up to date" in m.lower()
+        for _, m in logged
+    )
+    logged.clear()
+
+    # 2. Revalidation log testing
+    candidate = {
+        "version": "0.2.1",
+        "tag": "v0.2.1",
+        "channel": "stable",
+        "artifact_url": "https://zip-url",
+        "sha256": "f" * 64,
+    }
+
+    # A. Rate-limit block revalidation
+    service._update_rate_limited_until = datetime.datetime.now(
+        datetime.timezone.utc
+    ) + datetime.timedelta(hours=1)
+    res = service.revalidate_plugin_update(candidate)
+    assert res["status"] == "failed"
+    assert any(
+        "rate-limit cooldown" in m.lower() or "blocked by rate-limit" in m.lower()
+        for _, m in logged
+    )
+    service._update_rate_limited_until = None
+    logged.clear()
+
+    # B. Fetch failure revalidation
+    monkeypatch.setattr(
+        updater_mod,
+        "fetch_json",
+        lambda url, **kwargs: JsonResponse(status=404, headers={}, body={}),
+    )
+    res = service.revalidate_plugin_update(candidate)
+    assert res["status"] == "failed"
+    assert any(
+        "fetch failed" in m.lower() or "revalidation check failed" in m.lower() for _, m in logged
+    )
+    logged.clear()
+
+    # C. Validation failure revalidation
+    # Mock tags fetch to return invalid release object
+    monkeypatch.setattr(
+        updater_mod,
+        "fetch_json",
+        lambda url, **kwargs: JsonResponse(status=200, headers={}, body={"draft": True}),
+    )
+    res = service.revalidate_plugin_update(candidate)
+    assert res["status"] == "failed"
+    assert any("validation failed during revalidation" in m.lower() for _, m in logged)
+    logged.clear()
+
+    # D. Mismatch failures revalidation (e.g. SHA mismatch)
+    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_success)
+    bad_sha_candidate = dict(candidate, sha256="e" * 64)
+    res = service.revalidate_plugin_update(bad_sha_candidate)
+    assert res["status"] == "failed"
+    assert any(
+        "mismatch during revalidation" in m.lower() or "sha-256 mismatch" in m.lower()
+        for _, m in logged
+    )
+    logged.clear()
+
+    # E. Revalidation success
+    res = service.revalidate_plugin_update(candidate)
+    assert "version" in res
+    assert any("revalidation success" in m.lower() for _, m in logged)
+    logged.clear()
+
+    # 3. Pending install save logging
+    # We pass updateTraceId from frontend
+    save_cand = dict(candidate, updateTraceId="test-trace-id")
+    service.record_update_install_requested(save_cand)
+    assert any(
+        "pending install saved" in m.lower() and "test-trace-id" in m.lower() for _, m in logged
+    )
+    logged.clear()
+
+    # 4. Startup reconciliation logs
+    # A. Pending promoted
+    service._update_check_cache["pending_update_install"] = {
+        "version": "0.2.1",
+        "tag": "v0.2.1",
+        "channel": "stable",
+        "published_at": "2026-05-30T12:00:00Z",
+    }
+    service.reconcile_pending_update_install("0.2.1")
+    assert any("pending update promoted" in m.lower() for _, m in logged)
+    logged.clear()
+
+    # B. Pending cleared (mismatched version)
+    service._update_check_cache["pending_update_install"] = {
+        "version": "0.2.2",
+        "tag": "v0.2.2",
+        "channel": "stable",
+        "published_at": "2026-05-30T12:00:00Z",
+    }
+    service.reconcile_pending_update_install("0.2.1")
+    assert any("cleared due to version mismatch" in m.lower() for _, m in logged)
+    logged.clear()
+
+    # C. No pending update
+    service.reconcile_pending_update_install("0.2.1")
+    assert any("no pending update found" in m.lower() for _, m in logged)
+    logged.clear()
+
+    # 5. Unload logs
+    # Mock decky logger is already configured on dummy_decky
+    decky_logs.clear()
+
+    # Check unload with pending update
+    service._update_check_cache["pending_update_install"] = {
+        "version": "0.2.2",
+    }
+    asyncio.run(plugin._unload())
+    assert any(
+        "unload started" in m.lower() and "pending_update=true" in m.lower() for m in decky_logs
+    ) or any(
+        "unload started" in m.lower() and "pending_update=true" in m.lower() for _, m in logged
+    )
+    assert any("unload ended" in m.lower() for m in decky_logs) or any(
+        "unload ended" in m.lower() for _, m in logged
+    )
+    decky_logs.clear()
+    logged.clear()
+
+    # Check unload without pending update
+    service._update_check_cache.pop("pending_update_install", None)
+    asyncio.run(plugin._unload())
+    assert any(
+        "unload started" in m.lower() and "pending_update=false" in m.lower() for m in decky_logs
+    ) or any(
+        "unload started" in m.lower() and "pending_update=false" in m.lower() for _, m in logged
+    )
+    assert any("unload ended" in m.lower() for m in decky_logs) or any(
+        "unload ended" in m.lower() for _, m in logged
+    )
+
+    # Privacy check again on all collected log entries to make sure full SHA-256 was NEVER written
+    for level, msg in logged:
+        assert "f" * 64 not in msg
+        assert "a" * 64 not in msg

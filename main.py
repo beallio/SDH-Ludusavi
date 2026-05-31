@@ -108,11 +108,17 @@ class Plugin:
             service = self._service()
             import datetime
 
+            service.log("info", f"Update check started (version={current_version}, force={force})")
+
             if service._update_rate_limited_until:
                 if (
                     datetime.datetime.now(datetime.timezone.utc)
                     < service._update_rate_limited_until
                 ):
+                    service.log(
+                        "warning",
+                        f"Update check blocked by rate-limit cooldown until {service._update_rate_limited_until.isoformat()}",
+                    )
                     return {
                         "status": "failed",
                         "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -134,6 +140,7 @@ class Plugin:
                         ) - last_checked_at < datetime.timedelta(hours=24):
                             last_result = service._update_check_cache.get("last_result")
                             if last_result:
+                                service.log("info", "Update check cache hit (within 24h)")
                                 return last_result
                     # Intentionally broad
                     except Exception:
@@ -141,7 +148,7 @@ class Plugin:
 
             from sdh_ludusavi.updater import check_for_update
 
-            res = check_for_update(current_version, service._update_channel)
+            res = check_for_update(current_version, service._update_channel, service=service)
             service.record_update_check_result(res)
             if res.get("status") in ("available", "current"):
                 service._update_check_cache["last_result"] = res
@@ -298,6 +305,22 @@ class Plugin:
 
     async def _unload(self) -> None:
         backend = self._backend
+        has_pending = False
+        if backend is not None:
+            state_lock = getattr(backend, "_state_lock", None)
+            cache = getattr(backend, "_update_check_cache", None)
+            if state_lock is not None and cache is not None:
+                with state_lock:
+                    has_pending = cache.get("pending_update_install") is not None
+
+            log_fn = getattr(backend, "log", None)
+            if log_fn is not None:
+                backend.log("info", f"Unload started (pending_update={has_pending})")
+            else:
+                decky.logger.info(f"Unload started (pending_update={has_pending})")
+        else:
+            decky.logger.info("Unload started (no backend service)")
+
         try:
             if backend is not None:
                 result = await self._call("unload_stop", backend.stop)
@@ -307,6 +330,7 @@ class Plugin:
                     )
                     try:
                         backend.stop()
+                    # Intentionally broad
                     except Exception:
                         decky.logger.exception("Synchronous unload stop fallback failed")
         except asyncio.CancelledError:
@@ -314,10 +338,16 @@ class Plugin:
                 decky.logger.warning("Unload stop was cancelled; falling back to synchronous stop")
                 try:
                     backend.stop()
+                # Intentionally broad
                 except Exception:
                     decky.logger.exception("Synchronous unload stop fallback failed")
             raise
         finally:
+            log_fn = getattr(backend, "log", None) if backend is not None else None
+            if log_fn is not None:
+                backend.log("info", "Unload ended")
+            else:
+                decky.logger.info("Unload ended")
             decky.logger.info("SDH-ludusavi backend unloaded")
 
     async def _uninstall(self) -> None:

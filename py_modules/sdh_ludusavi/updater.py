@@ -321,12 +321,40 @@ def select_candidate(
     return None
 
 
+def format_candidate_log(candidate: Any) -> str:
+    """Safely format candidate/update context for logging without exposing full SHA-256."""
+    if not candidate:
+        return "none"
+    if not isinstance(candidate, dict):
+        try:
+            version = getattr(candidate, "version", "unknown")
+            tag = getattr(candidate, "tag", "unknown")
+            channel = getattr(candidate, "channel", "unknown")
+            sha256 = getattr(candidate, "sha256", None)
+            sha_prefix = sha256[:8] if (isinstance(sha256, str) and len(sha256) >= 8) else "unknown"
+            return f"version={version}, tag={tag}, channel={channel}, sha256_prefix={sha_prefix}"
+        # Intentionally broad
+        except Exception:
+            return "malformed candidate"
+    version = candidate.get("version", "unknown")
+    tag = candidate.get("tag", "unknown")
+    channel = candidate.get("channel", "unknown")
+    sha256 = candidate.get("sha256")
+    sha_prefix = sha256[:8] if (isinstance(sha256, str) and len(sha256) >= 8) else "unknown"
+    return f"version={version}, tag={tag}, channel={channel}, sha256_prefix={sha_prefix}"
+
+
 def check_for_update(
     current_version: str,
     preferred_channel: Literal["stable", "development"],
+    service: Any | None = None,
 ) -> dict[str, Any]:
     url = "https://api.github.com/repos/beallio/SDH-Ludusavi/releases"
+    if service:
+        service.log("info", f"Fetching GitHub releases from {url}")
     resp = fetch_json(url)
+    if service:
+        service.log("info", f"GitHub releases fetch response: status={resp.status}")
 
     checked_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -361,6 +389,12 @@ def check_for_update(
         if isinstance(resp.body, dict) and "message" in resp.body:
             msg = str(resp.body["message"])
 
+        if service:
+            service.log(
+                "warning",
+                f"GitHub releases fetch rate-limited (status={resp.status}, message={msg})",
+            )
+
         return {
             "status": "failed",
             "checked_at": checked_at,
@@ -375,6 +409,10 @@ def check_for_update(
                 msg = str(resp.body["message"])
             elif "error" in resp.body:
                 msg = str(resp.body["error"])
+        if service:
+            service.log(
+                "error", f"GitHub releases fetch failed (status={resp.status}, message={msg})"
+            )
         return {
             "status": "failed",
             "checked_at": checked_at,
@@ -389,8 +427,13 @@ def check_for_update(
         if c:
             candidates.append(c)
 
+    if service:
+        service.log("info", f"Parsed {len(candidates)} valid candidate releases")
+
     candidate = select_candidate(candidates, current_version, preferred_channel)
     if candidate:
+        if service:
+            service.log("info", f"Selected update candidate: {format_candidate_log(candidate)}")
         return {
             "status": "available",
             "checked_at": checked_at,
@@ -406,6 +449,8 @@ def check_for_update(
             },
         }
 
+    if service:
+        service.log("info", "No upgrade candidate found (already up to date)")
     return {
         "status": "current",
         "checked_at": checked_at,
@@ -525,14 +570,22 @@ def record_update_install_requested(service: Any, candidate: dict[str, Any]) -> 
     with service._state_lock:
         import datetime
 
+        trace_id = candidate.get("updateTraceId")
         service._update_check_cache["pending_update_install"] = {
             "version": candidate.get("version"),
             "tag": candidate.get("tag"),
             "channel": candidate.get("channel"),
             "published_at": candidate.get("published_at"),
             "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "update_trace_id": trace_id,
         }
         service._save_state()
+        service.log(
+            "info",
+            f"Pending install saved: version={candidate.get('version')}, "
+            f"tag={candidate.get('tag')}, channel={candidate.get('channel')}, "
+            f"action={candidate.get('action')}, trace_id={trace_id}",
+        )
         return get_update_check_context(service)
 
 
@@ -541,21 +594,40 @@ def reconcile_pending_update_install(service: Any, current_version: str) -> None
         pending = service._update_check_cache.get("pending_update_install")
         if pending:
             pending_version = pending.get("version")
+            pending_tag = pending.get("tag")
             if pending_version == current_version:
-                service._update_check_cache["installed_release_tag"] = pending.get("tag")
+                service._update_check_cache["installed_release_tag"] = pending_tag
                 service._update_check_cache["installed_release_published_at"] = pending.get(
                     "published_at"
                 )
+                service.log(
+                    "info",
+                    f"Startup reconciliation: Pending update promoted (version={pending_version}, tag={pending_tag})",
+                )
+            else:
+                service.log(
+                    "warning",
+                    f"Startup reconciliation: Pending update cleared due to version mismatch "
+                    f"(pending={pending_version}, loaded={current_version})",
+                )
             service._update_check_cache.pop("pending_update_install", None)
             service._save_state()
+        else:
+            service.log("info", "Startup reconciliation: No pending update found")
 
 
 def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[str, Any]:
     import datetime
 
+    service.log("info", f"Revalidation started for candidate: {format_candidate_log(candidate)}")
+
     with service._state_lock:
         if service._update_rate_limited_until:
             if datetime.datetime.now(datetime.timezone.utc) < service._update_rate_limited_until:
+                service.log(
+                    "warning",
+                    f"Revalidation blocked by rate-limit cooldown until {service._update_rate_limited_until.isoformat()}",
+                )
                 return {
                     "status": "failed",
                     "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -568,6 +640,7 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
 
     tag = candidate.get("tag")
     if not tag:
+        service.log("error", "Revalidation failed: Candidate missing tag")
         return {
             "status": "failed",
             "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -575,7 +648,9 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
         }
 
     url = f"https://api.github.com/repos/beallio/SDH-Ludusavi/releases/tags/{tag}"
+    service.log("info", f"Fetching candidate release from {url}")
     resp = fetch_json(url)
+    service.log("info", f"Candidate release fetch response: status={resp.status}")
 
     if resp.status in (403, 429):
         retry_after_str = None
@@ -621,7 +696,9 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
         if isinstance(resp.body, dict) and "message" in resp.body:
             msg = str(resp.body["message"])
 
-        service.log("error", f"Revalidation failed due to rate limit: {msg}")
+        service.log(
+            "warning", f"Revalidation fetch rate-limited (status={resp.status}, message={msg})"
+        )
 
         return {
             "status": "failed",
@@ -632,7 +709,7 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
 
     if resp.status != 200 or not isinstance(resp.body, dict):
         msg = f"Failed to fetch release for tag {tag}: {resp.status}"
-        service.log("error", f"Revalidation check failed: {msg}")
+        service.log("error", f"Revalidation fetch failed: {msg}")
         return {
             "status": "failed",
             "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -649,31 +726,38 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
             "message": msg,
         }
 
+    # Verify matching candidate fields safely using prefixes or exact compares
+    # Let's get prefixes for log message to avoid full SHA
+    cand_sha = candidate.get("sha256")
+    cand_sha_prefix = cand_sha[:8] if isinstance(cand_sha, str) else "none"
+    val_sha_prefix = validated.sha256[:8] if isinstance(validated.sha256, str) else "none"
+
     if validated.sha256 != candidate.get("sha256"):
-        msg = "SHA-256 mismatch during revalidation"
+        msg = f"SHA-256 mismatch during revalidation: candidate={cand_sha_prefix}, fetched={val_sha_prefix}"
         service.log("error", msg)
         return {
             "status": "failed",
             "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "message": msg,
+            "message": "SHA-256 mismatch during revalidation",
         }
     if validated.artifact_url != candidate.get("artifact_url"):
-        msg = "Artifact URL mismatch during revalidation"
+        msg = f"Artifact URL mismatch during revalidation: candidate={candidate.get('artifact_url')}, fetched={validated.artifact_url}"
         service.log("error", msg)
         return {
             "status": "failed",
             "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "message": msg,
+            "message": "Artifact URL mismatch during revalidation",
         }
     if validated.version != candidate.get("version"):
-        msg = "Version mismatch during revalidation"
+        msg = f"Version mismatch during revalidation: candidate={candidate.get('version')}, fetched={validated.version}"
         service.log("error", msg)
         return {
             "status": "failed",
             "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "message": msg,
+            "message": "Version mismatch during revalidation",
         }
 
+    service.log("info", f"Revalidation success for version v{validated.version}")
     return {
         "version": validated.version,
         "tag": validated.tag,
