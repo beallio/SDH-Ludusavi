@@ -9,7 +9,13 @@ DEFAULT_NOTIFICATION_SETTINGS: dict[str, bool] = {
     "failures_errors": True,
 }
 
-SETTINGS_KEYS = ("auto_sync_enabled", "selected_game", "notifications")
+SETTINGS_KEYS = (
+    "auto_sync_enabled",
+    "selected_game",
+    "notifications",
+    "update_channel",
+    "automatic_update_checks",
+)
 
 MAX_INSTALLED_APP_IDS_BYTES = 16_384
 

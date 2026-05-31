@@ -408,3 +408,105 @@ def revalidate_install_candidate(candidate_dict: dict[str, Any]) -> dict[str, An
         "published_at": validated.published_at,
         "action": candidate_dict.get("action", "update"),
     }
+
+
+def set_update_channel(service: Any, channel: str) -> dict[str, Any]:
+    if channel not in ("stable", "development"):
+        channel = "stable"
+    service._update_channel = channel
+    service._save_state()
+    service.log("info", f"Update channel set to {channel}")
+    return service.get_settings()
+
+
+def set_automatic_update_checks(service: Any, enabled: bool) -> dict[str, Any]:
+    service._automatic_update_checks = bool(enabled)
+    service._save_state()
+    service.log("info", f"Automatic update checks {'enabled' if enabled else 'disabled'}")
+    return service.get_settings()
+
+
+def get_update_check_context(service: Any) -> dict[str, Any]:
+    with service._state_lock:
+        reconcile_pending_update_install(service, resolve_version())
+        rate_limited_until_str = None
+        if service._update_rate_limited_until:
+            import datetime
+
+            if datetime.datetime.now(datetime.timezone.utc) >= service._update_rate_limited_until:
+                service._update_rate_limited_until = None
+            else:
+                rate_limited_until_str = service._update_rate_limited_until.isoformat()
+
+        return {
+            "update_channel": service._update_channel,
+            "automatic_update_checks": service._automatic_update_checks,
+            "installed_version": resolve_version(),
+            "last_checked_at": service._update_check_cache.get("last_checked_at"),
+            "last_checked_channel": service._update_check_cache.get("last_checked_channel"),
+            "last_available_tag": service._update_check_cache.get("last_available_tag"),
+            "last_notified_tag": service._update_check_cache.get("last_notified_tag"),
+            "installed_release_tag": service._update_check_cache.get("installed_release_tag"),
+            "installed_release_published_at": service._update_check_cache.get(
+                "installed_release_published_at"
+            ),
+            "pending_update_install": service._update_check_cache.get("pending_update_install"),
+            "rate_limited_until": rate_limited_until_str,
+        }
+
+
+def record_update_check_result(service: Any, result: dict[str, Any]) -> None:
+    with service._state_lock:
+        status = result.get("status")
+        checked_at = result.get("checked_at")
+        if status == "available":
+            candidate = result.get("candidate", {})
+            service._update_check_cache["last_checked_at"] = checked_at
+            service._update_check_cache["last_checked_channel"] = service._update_channel
+            service._update_check_cache["last_available_tag"] = candidate.get("tag")
+        elif status == "current":
+            service._update_check_cache["last_checked_at"] = checked_at
+            service._update_check_cache["last_checked_channel"] = service._update_channel
+        elif status == "failed":
+            retry_after_str = result.get("retry_after")
+            if retry_after_str:
+                import datetime
+
+                # Intentionally broad
+                try:
+                    service._update_rate_limited_until = datetime.datetime.fromisoformat(
+                        retry_after_str
+                    )
+                # Intentionally broad
+                except Exception:
+                    pass
+        service._save_state()
+
+
+def record_update_install_requested(service: Any, candidate: dict[str, Any]) -> dict[str, Any]:
+    with service._state_lock:
+        import datetime
+
+        service._update_check_cache["pending_update_install"] = {
+            "version": candidate.get("version"),
+            "tag": candidate.get("tag"),
+            "channel": candidate.get("channel"),
+            "published_at": candidate.get("published_at"),
+            "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        service._save_state()
+        return get_update_check_context(service)
+
+
+def reconcile_pending_update_install(service: Any, current_version: str) -> None:
+    with service._state_lock:
+        pending = service._update_check_cache.get("pending_update_install")
+        if pending:
+            pending_version = pending.get("version")
+            if pending_version == current_version:
+                service._update_check_cache["installed_release_tag"] = pending.get("tag")
+                service._update_check_cache["installed_release_published_at"] = pending.get(
+                    "published_at"
+                )
+            service._update_check_cache.pop("pending_update_install", None)
+            service._save_state()

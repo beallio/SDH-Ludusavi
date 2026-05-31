@@ -84,9 +84,15 @@ class SDHLudusaviService:
         # 1. Local settings properties
         self._auto_sync_enabled = False
         self._selected_game = ""
-        self._notification_settings = dict(DEFAULT_NOTIFICATION_SETTINGS)
+        self._notification_settings = _coerce_notification_settings(DEFAULT_NOTIFICATION_SETTINGS)
         self._ludusavi_launcher_shortcut_id = -1
         self._state_lock = threading.RLock()
+
+        # Update Settings
+        self._update_channel = "stable"
+        self._automatic_update_checks = True
+        self._update_check_cache: dict[str, Any] = {}
+        self._update_rate_limited_until: Any = None
 
         # 2. Sub-managers setup
         from .log_buffer import DiagnosticLogBuffer
@@ -151,8 +157,8 @@ class SDHLudusaviService:
                 run_locked=self._run_locked,
                 is_auto_sync_enabled=lambda: self._auto_sync_enabled,
                 log=self.log,
-                skip=self._skip,
-                conflict_metadata=self._conflict_metadata,
+                skip=lambda op, game, r: _skip(self, op, game, r),
+                conflict_metadata=lambda game_name: _conflict_metadata(self, game_name),
             )
         )
 
@@ -201,6 +207,8 @@ class SDHLudusaviService:
             "auto_sync_enabled": self._auto_sync_enabled,
             "selected_game": self._selected_game,
             "notifications": dict(self._notification_settings),
+            "update_channel": self._update_channel,
+            "automatic_update_checks": self._automatic_update_checks,
         }
 
     def get_game_history(self) -> dict[str, dict[str, Any]]:
@@ -216,14 +224,14 @@ class SDHLudusaviService:
 
     def set_selected_game(self, game_name: str) -> dict[str, Any]:
         """Update the currently selected game and persist it to disk."""
-        self._selected_game = self._sanitize_name(game_name)
+        self._selected_game = _sanitize_name(game_name)
         self._save_state()
         self.log("debug", f"Selected game changed to {self._selected_game}")
         return self.get_settings()
 
     def set_notification_settings(self, settings: dict[str, object]) -> dict[str, Any]:
         """Update notification preferences and persist them to disk."""
-        self._notification_settings = self._coerce_notification_settings(settings)
+        self._notification_settings = _coerce_notification_settings(settings)
         self._save_state()
         self.log("info", "Notification settings updated")
         return self.get_settings()
@@ -354,7 +362,7 @@ class SDHLudusaviService:
 
         self._auto_sync_enabled = bool(settings.get("auto_sync_enabled", False))
         self._selected_game = str(settings.get("selected_game", ""))
-        self._notification_settings = self._coerce_notification_settings(
+        self._notification_settings = _coerce_notification_settings(
             settings.get("notifications", {})
         )
 
@@ -367,6 +375,14 @@ class SDHLudusaviService:
         self._registry.load_cache(cache)
         self._game_history_raw = cache.get("game_history", {})
 
+        # Load update properties
+        self._update_channel = settings.get("update_channel", "stable")
+        if self._update_channel not in ("stable", "development"):
+            self._update_channel = "stable"
+        self._automatic_update_checks = bool(settings.get("automatic_update_checks", True))
+        self._update_check_cache = cache.get("update_check_cache", {})
+        self._update_rate_limited_until = None
+
     def _save_state(self) -> None:
         """Persist current plugin settings and runtime cache."""
         with self._state_lock:
@@ -375,6 +391,8 @@ class SDHLudusaviService:
                 "auto_sync_enabled": self._auto_sync_enabled,
                 "selected_game": self._selected_game,
                 "notifications": dict(self._notification_settings),
+                "update_channel": self._update_channel,
+                "automatic_update_checks": self._automatic_update_checks,
             }
             self._persistence.save_settings(settings_payload)
 
@@ -384,6 +402,7 @@ class SDHLudusaviService:
             cache_payload = {
                 "ludusaviLauncherShortcutAppId": self._ludusavi_launcher_shortcut_id,
                 "game_history": game_history,
+                "update_check_cache": self._update_check_cache,
                 **self._registry.cache_payload(),
             }
             self._persistence.save_cache(cache_payload)
@@ -391,53 +410,38 @@ class SDHLudusaviService:
     def _match_game(self, game_name: str, app_id: str | None = None) -> GameStatus | None:
         return self._registry.match_game(game_name, app_id)
 
-    def _conflict_metadata(self, game_name: str) -> dict[str, object]:
-        try:
-            metadata = self._gateway.get_adapter().get_conflict_metadata(game_name)
-        # Intentionally broad
-        except Exception as exc:
-            self.log(
-                "debug",
-                f"Unable to collect conflict metadata for {game_name}: {exc}",
-                "start",
-                game_name,
-            )
-            metadata = {}
-        return {
-            "localModifiedAt": metadata.get("localModifiedAt"),
-            "backupModifiedAt": metadata.get("backupModifiedAt"),
-            "backupPath": metadata.get("backupPath"),
-        }
+    # Updater helper methods
+    def set_update_channel(self, channel: str) -> dict[str, Any]:
+        """Update the update channel setting and persist it to disk."""
+        from . import updater
 
-    def _skip(self, operation: str, game_name: str, reason: str) -> dict[str, object]:
-        self.log("info", f"Skipped {operation} for {game_name}: {reason}", operation, game_name)
-        if reason not in ("auto_sync_disabled", "operation_running", "unmatched_game"):
-            if operation in ("backup", "restore"):
-                trigger = f"manual_{operation}"
-            elif operation == "start":
-                trigger = "auto_start"
-            elif operation == "exit":
-                trigger = "auto_exit"
-            else:
-                trigger = "unknown"
-            self._history.record_history(game_name, operation, trigger, "skipped", reason=reason)
-        return {"status": "skipped", "game": game_name, "reason": reason}
+        return updater.set_update_channel(self, channel)
 
-    def _sanitize_name(self, name: str | None) -> str:
-        if not name:
-            return ""
-        return " ".join(str(name).split())
+    def set_automatic_update_checks(self, enabled: bool) -> dict[str, Any]:
+        """Update the automatic update checks setting and persist it to disk."""
+        from . import updater
 
-    def _coerce_notification_settings(self, settings: object) -> dict[str, bool]:
-        coerced = dict(DEFAULT_NOTIFICATION_SETTINGS)
-        if not isinstance(settings, dict):
-            return coerced
-        typed_settings = cast(dict[str, object], settings)
-        for key in DEFAULT_NOTIFICATION_SETTINGS:
-            value = typed_settings.get(key)
-            if isinstance(value, bool):
-                coerced[key] = value
-        return coerced
+        return updater.set_automatic_update_checks(self, enabled)
+
+    def get_update_check_context(self) -> dict[str, Any]:
+        from . import updater
+
+        return updater.get_update_check_context(self)
+
+    def record_update_check_result(self, result: dict[str, Any]) -> None:
+        from . import updater
+
+        updater.record_update_check_result(self, result)
+
+    def record_update_install_requested(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        from . import updater
+
+        return updater.record_update_install_requested(self, candidate)
+
+    def reconcile_pending_update_install(self, current_version: str) -> None:
+        from . import updater
+
+        updater.reconcile_pending_update_install(self, current_version)
 
 
 # Keep fuzzy matching module-level functions mapped to GameRegistryMatcher
@@ -459,3 +463,57 @@ def _normalize_installed_app_ids(raw: str | None) -> str | None:
     from .registry import _normalize_installed_app_ids as norm
 
     return norm(raw)
+
+
+def _conflict_metadata(service: SDHLudusaviService, game_name: str) -> dict[str, object]:
+    try:
+        metadata = service._gateway.get_adapter().get_conflict_metadata(game_name)
+    # Intentionally broad
+    except Exception as exc:
+        service.log(
+            "debug",
+            f"Unable to collect conflict metadata for {game_name}: {exc}",
+            "start",
+            game_name,
+        )
+        metadata = {}
+    return {
+        "localModifiedAt": metadata.get("localModifiedAt"),
+        "backupModifiedAt": metadata.get("backupModifiedAt"),
+        "backupPath": metadata.get("backupPath"),
+    }
+
+
+def _skip(
+    service: SDHLudusaviService, operation: str, game_name: str, reason: str
+) -> dict[str, object]:
+    service.log("info", f"Skipped {operation} for {game_name}: {reason}", operation, game_name)
+    if reason not in ("auto_sync_disabled", "operation_running", "unmatched_game"):
+        if operation in ("backup", "restore"):
+            trigger = f"manual_{operation}"
+        elif operation == "start":
+            trigger = "auto_start"
+        elif operation == "exit":
+            trigger = "auto_exit"
+        else:
+            trigger = "unknown"
+        service._history.record_history(game_name, operation, trigger, "skipped", reason=reason)
+    return {"status": "skipped", "game": game_name, "reason": reason}
+
+
+def _sanitize_name(name: str | None) -> str:
+    if not name:
+        return ""
+    return " ".join(str(name).split())
+
+
+def _coerce_notification_settings(settings: object) -> dict[str, bool]:
+    coerced = dict(DEFAULT_NOTIFICATION_SETTINGS)
+    if not isinstance(settings, dict):
+        return coerced
+    typed_settings = cast(dict[str, object], settings)
+    for key in DEFAULT_NOTIFICATION_SETTINGS:
+        value = typed_settings.get(key)
+        if isinstance(value, bool):
+            coerced[key] = value
+    return coerced

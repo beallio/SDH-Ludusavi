@@ -131,11 +131,15 @@ def expected_settings(
     auto_sync_enabled: bool = False,
     selected_game: str = "",
     notifications: dict[str, bool] | None = None,
+    update_channel: str = "stable",
+    automatic_update_checks: bool = True,
 ) -> dict[str, object]:
     return {
         "auto_sync_enabled": auto_sync_enabled,
         "selected_game": selected_game,
         "notifications": notifications or dict(DEFAULT_NOTIFICATIONS),
+        "update_channel": update_channel,
+        "automatic_update_checks": automatic_update_checks,
     }
 
 
@@ -712,6 +716,8 @@ def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
         "auto_sync_enabled": True,
         "selected_game": "",
         "notifications": DEFAULT_NOTIFICATIONS,
+        "update_channel": "stable",
+        "automatic_update_checks": True,
     }
 
 
@@ -730,6 +736,8 @@ def test_persists_settings_and_cache_separately(tmp_path: Path) -> None:
         "auto_sync_enabled": True,
         "selected_game": "Hades",
         "notifications": DEFAULT_NOTIFICATIONS,
+        "update_channel": "stable",
+        "automatic_update_checks": True,
     }
     assert "games" not in settings
     assert "ludusaviLauncherShortcutAppId" not in settings
@@ -760,6 +768,7 @@ def test_persists_settings_and_cache_separately(tmp_path: Path) -> None:
         "installed_app_ids": "111,222",
         "ludusavi_config_mtime_ns": 100,
         "game_history": {},
+        "update_check_cache": {},
     }
     assert "auto_sync_enabled" not in cache
     assert "selected_game" not in cache
