@@ -9,10 +9,43 @@ export type NotificationSettings = {
 
 export type NotificationCategory = keyof Omit<NotificationSettings, "enabled">;
 
+export type UpdateChannel = "stable" | "development";
+
+export type PluginUpdateCandidate = {
+  version: string;
+  tag: string;
+  channel: UpdateChannel;
+  artifact_url: string;
+  sha256: string;
+  release_url: string;
+  published_at: string;
+  action: "update" | "move_to_stable" | "downgrade_to_stable";
+};
+
+export type UpdateCheckResult =
+  | {
+      status: "available";
+      checked_at: string;
+      candidate: PluginUpdateCandidate;
+    }
+  | {
+      status: "current";
+      checked_at: string;
+      channel: UpdateChannel;
+    }
+  | {
+      status: "failed";
+      checked_at: string;
+      message: string;
+      retry_after?: string;
+    };
+
 export type Settings = {
   auto_sync_enabled: boolean;
   selected_game: string;
   notifications: NotificationSettings;
+  update_channel: UpdateChannel;
+  automatic_update_checks: boolean;
 };
 
 export type GameOperationHistoryEntry = {

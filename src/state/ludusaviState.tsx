@@ -12,7 +12,8 @@ import {
   NotificationSettings,
   RefreshResult,
   Settings,
-  Versions
+  Versions,
+  UpdateChannel
 } from "../types";
 import { LudusaviLaunchCommand } from "../ludusaviLauncher";
 import { normalize } from "../utils/steam";
@@ -29,7 +30,9 @@ export const defaultNotificationSettings: NotificationSettings = {
 export const defaultSettings = (): Settings => ({
   auto_sync_enabled: false,
   selected_game: "",
-  notifications: { ...defaultNotificationSettings }
+  notifications: { ...defaultNotificationSettings },
+  update_channel: "stable",
+  automatic_update_checks: true
 });
 
 export function normalizeNotificationSettings(
@@ -48,7 +51,9 @@ export function normalizeNotificationSettings(
 export function normalizeSettings(settings: Settings): Settings {
   return {
     ...settings,
-    notifications: normalizeNotificationSettings(settings.notifications)
+    notifications: normalizeNotificationSettings(settings.notifications),
+    update_channel: settings.update_channel === "development" ? "development" : "stable",
+    automatic_update_checks: typeof settings.automatic_update_checks === "boolean" ? settings.automatic_update_checks : true
   };
 }
 
@@ -159,6 +164,26 @@ export class LudusaviStateStore {
     this.commit({
       settings,
       notificationSettings: normalizedNotifications
+    });
+  }
+
+  setUpdateChannel(channel: UpdateChannel) {
+    const settings = {
+      ...(this.snapshot.settings ?? defaultSettings()),
+      update_channel: channel
+    };
+    this.commit({
+      settings
+    });
+  }
+
+  setAutomaticUpdateChecks(enabled: boolean) {
+    const settings = {
+      ...(this.snapshot.settings ?? defaultSettings()),
+      automatic_update_checks: enabled
+    };
+    this.commit({
+      settings
     });
   }
 
