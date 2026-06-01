@@ -12,6 +12,7 @@ class ConcatenatedFrontendPath:
             Path("src/utils/logging.ts"),
             Path("src/components/LogModal.tsx"),
             Path("src/components/modals/ConflictResolutionModal.tsx"),
+            Path("src/components/qam/LudusaviLauncherSection.tsx"),
             Path("src/components/qam/QamStyles.tsx"),
             Path("src/formatting/dateTime.ts"),
             Path("src/formatting/operationText.ts"),
@@ -85,7 +86,9 @@ def test_frontend_exposes_notification_preferences_panel() -> None:
 
     assert 'label="Auto-sync Progress"' not in source
     assert 'label="Auto-sync Results"' not in source
-    assert source.index('PanelSection title="Notifications"') < source.index("<LudusaviPanel")
+    assert source.index('PanelSection title="Notifications"') < source.index(
+        "<LudusaviLauncherSection"
+    )
 
 
 def test_frontend_centralizes_notification_aware_toasts() -> None:
@@ -992,7 +995,9 @@ def test_frontend_qam_uses_requested_row_separators() -> None:
     assert 'bottomSeparator="none"' in force_backup
 
     notifications_panel = source[
-        source.index('PanelSection title="Notifications"') : source.index("<LudusaviPanel")
+        source.index('PanelSection title="Notifications"') : source.index(
+            "<LudusaviLauncherSection"
+        )
     ]
     for text in [
         'label="All Notifications"',

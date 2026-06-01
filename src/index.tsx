@@ -19,7 +19,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { FaSave, FaDownload, FaExclamationTriangle } from "react-icons/fa";
 import { IoMdRefresh } from "react-icons/io";
 
-import { launchLudusavi, LudusaviLaunchCommand } from "./ludusaviLauncher";
 import {
   backupGameOnExitCall,
   checkGameExitCall,
@@ -71,6 +70,7 @@ import {
 import { LogModal, LudusaviLogModal } from "./components/LogModal";
 import { ConflictResolutionModal } from "./components/modals/ConflictResolutionModal";
 import { PluginUpdateSection } from "./components/PluginUpdateSection";
+import { LudusaviLauncherSection } from "./components/qam/LudusaviLauncherSection";
 import { QamStyles } from "./components/qam/QamStyles";
 import { formatDateMDY, formatTime12h } from "./formatting/dateTime";
 import { getLastOperationText, summarizeOperationResult } from "./formatting/operationText";
@@ -1786,7 +1786,10 @@ function Content() {
         </PanelSectionRow>
       </PanelSection>
 
-      <LudusaviPanel ludusaviCommand={ludusaviCommand} isLoading={busyLabel === "Loading"} />
+      <LudusaviLauncherSection
+        ludusaviCommand={ludusaviCommand}
+        isLoading={busyLabel === "Loading"}
+      />
 
       <PanelSection title="Logs">
         <PanelSectionRow>
@@ -1836,69 +1839,6 @@ function Content() {
     </div>
   );
 };
-
-function LudusaviPanel({ 
-  ludusaviCommand,
-  isLoading
-}: { 
-  ludusaviCommand: LudusaviLaunchCommand | null,
-  isLoading: boolean
-}) {
-  const [status, setStatus] = useState<string | null>(null);
-  const [isLaunching, setIsLaunching] = useState(false);
-
-  async function onLaunch() {
-    try {
-      setIsLaunching(true);
-      setStatus("Launching Ludusavi...");
-
-      if (!ludusaviCommand) {
-        throw new Error("Ludusavi not found on system.");
-      }
-
-      await launchLudusavi(ludusaviCommand, { logger: log });
-
-      setStatus("Ludusavi launch requested.");
-      // Best-effort clear status after 3s
-      setTimeout(() => setStatus(null), 3000);
-    } catch (err) {
-      console.error(err);
-      setStatus(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsLaunching(false);
-    }
-  }
-
-  return (
-    <PanelSection title="Ludusavi">
-      <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          onClick={onLaunch}
-          disabled={isLaunching || !ludusaviCommand}
-        >
-          Launch
-        </ButtonItem>
-      </PanelSectionRow>
-
-      {status && (
-        <PanelSectionRow>
-          <div style={{ color: "#60a5fa", fontSize: "14px", fontWeight: "bold", padding: "0 4px" }}>
-            {status}
-          </div>
-        </PanelSectionRow>
-      )}
-      
-      {!ludusaviCommand && !isLaunching && !isLoading && (
-        <PanelSectionRow>
-          <div style={{ color: "#ef4444", fontSize: "12px", padding: "0 4px" }}>
-            Ludusavi not found. Please install it via Flatpak or add to PATH.
-          </div>
-        </PanelSectionRow>
-      )}
-    </PanelSection>
-  );
-}
 
 export default definePlugin(() => {
   console.log("SDH-Ludusavi plugin initializing");
