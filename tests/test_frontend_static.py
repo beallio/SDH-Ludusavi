@@ -97,7 +97,10 @@ def test_frontend_exposes_notification_preferences_panel() -> None:
     assert source.index('PanelSection title="GLOBAL"') < source.index(
         'PanelSection title="Notifications"'
     )
-    assert root_source.index("<AutoSyncSettingsSection") < root_source.index(
+    assert root_source.index("<NotificationSettingsSection") > root_source.index(
+        'PanelSection title="GAME"'
+    )
+    assert root_source.index("<NotificationSettingsSection") < root_source.index(
         "<LudusaviLauncherSection"
     )
 
@@ -930,6 +933,9 @@ def test_frontend_qam_uses_global_and_game_panels() -> None:
         'PanelSection title="GAME"'
     )
     assert root_source.index('PanelSection title="GAME"') < root_source.index(
+        "<NotificationSettingsSection"
+    )
+    assert root_source.index("<NotificationSettingsSection") < root_source.index(
         "<LudusaviLauncherSection"
     )
 
@@ -1051,16 +1057,29 @@ def test_frontend_qam_uses_requested_row_separators() -> None:
 
 def test_frontend_qam_rows_use_native_full_row_focus() -> None:
     source = FRONTEND.read_text()
+    automatic_sync_row_start = source.rindex(
+        "<PanelSectionRow", 0, source.index('label="Automatic Sync"')
+    )
+    automatic_sync_row = source[
+        automatic_sync_row_start : source.index(
+            "</PanelSectionRow>", source.index('label="Automatic Sync"')
+        )
+    ]
 
     for text in [
         "Field",
         "highlightOnFocus={true}",
         "focusable={true}",
-        '<PanelSectionRow>\n          <ToggleField\n            label="Automatic Sync"\n            description="Runs Ludusavi automatically when configured games start or exit."',
         "highlightOnFocus={false}",
         "focusable={false}",
     ]:
         assert text in source
+    assert "<ToggleField" in automatic_sync_row
+    assert 'label="Automatic Sync"' in automatic_sync_row
+    assert (
+        'description="Runs Ludusavi automatically when configured games start or exit."'
+        in automatic_sync_row
+    )
 
     versions_panel = source[source.index('PanelSection title="Versions"') :]
     assert (
@@ -1560,7 +1579,16 @@ def test_frontend_toggles_wrapped_in_panel_section_row_without_highlight_on_focu
     source = FRONTEND.read_text()
 
     # The 5 ToggleField elements must be wrapped inside a PanelSectionRow.
-    assert source.count("<PanelSectionRow>\n          <ToggleField") == 5
+    idx = 0
+    toggle_rows = 0
+    for _ in range(5):
+        toggle_start = source.index("<ToggleField", idx)
+        row_start = source.rindex("<PanelSectionRow", 0, toggle_start)
+        row_end = source.index("</PanelSectionRow>", toggle_start)
+        assert row_start < toggle_start < row_end
+        toggle_rows += 1
+        idx = row_end
+    assert toggle_rows == 5
 
     # ToggleField components should not contain 'highlightOnFocus' prop inside their definition.
     idx = 0

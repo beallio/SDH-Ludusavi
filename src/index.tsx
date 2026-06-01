@@ -67,7 +67,10 @@ import {
 import { LogModal, LudusaviLogModal } from "./components/LogModal";
 import { ConflictResolutionModal } from "./components/modals/ConflictResolutionModal";
 import { PluginUpdateSection } from "./components/PluginUpdateSection";
-import { AutoSyncSettingsSection } from "./components/qam/AutoSyncSettingsSection";
+import {
+  AutoSyncSettingsSection,
+  NotificationSettingsSection
+} from "./components/qam/AutoSyncSettingsSection";
 import { LudusaviLauncherSection } from "./components/qam/LudusaviLauncherSection";
 import { QamStyles } from "./components/qam/QamStyles";
 import { SpinnerButton } from "./components/qam/SpinnerButton";
@@ -1584,7 +1587,6 @@ function Content() {
         refreshLoading={busyLabel === "Refreshing games"}
         onToggleAutoSync={(enabled) => void toggleAutoSync(enabled)}
         onRefreshGames={() => void refreshGames()}
-        onToggleNotificationSetting={(key, enabled) => void toggleNotificationSetting(key, enabled)}
       />
 
       <PanelSection title="GAME">
@@ -1715,6 +1717,12 @@ function Content() {
           </SpinnerButton>
         </PanelSectionRow>
       </PanelSection>
+
+      <NotificationSettingsSection
+        settings={settings}
+        isBusy={isBusy}
+        onToggleNotificationSetting={(key, enabled) => void toggleNotificationSetting(key, enabled)}
+      />
 
       <LudusaviLauncherSection
         ludusaviCommand={ludusaviCommand}
