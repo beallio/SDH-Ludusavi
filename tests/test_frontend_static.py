@@ -2336,3 +2336,42 @@ def test_frontend_updater_post_install_ui_state() -> None:
         "Component must clear the installed override when currentVersion changes away "
         "from the pre-install version"
     )
+
+
+def test_frontend_updater_post_reload_stale_coercion() -> None:
+    """
+    After plugin reload, installedOverride is null but the backend cache may
+    return the just-installed version as 'available'. The component must
+    coerce any available candidate whose version matches effectiveCurrentVersion
+    (i.e. currentVersion after reload) to 'current', even when there is no
+    in-memory installedOverride.
+
+    This guards the codex P2 finding: stale cached available results after
+    reload can resurrect the install button for the just-installed version.
+    """
+    import re
+
+    comp_path = Path("src/components/PluginUpdateSection.tsx")
+    assert comp_path.exists()
+    comp = comp_path.read_text(encoding="utf-8")
+
+    # The coercion guard must also fire when the candidate version equals
+    # effectiveCurrentVersion, not only when it matches installedOverride.version.
+    # This covers the post-reload case where installedOverride is null but the
+    # backend cache still returns the just-installed version as available.
+    #
+    # A correct implementation will have a condition resembling:
+    #   res.candidate?.version === effectiveCurrentVersion
+    # (possibly combined with the installedOverride guard via ||)
+    coercion_vs_effective = re.search(
+        r"candidate[?\w.]*\.version\s*===\s*effectiveCurrentVersion"
+        r"|effectiveCurrentVersion\s*===\s*candidate[?\w.]*\.version"
+        r"|candidateVersion\s*===\s*effectiveCurrentVersion"
+        r"|effectiveCurrentVersion\s*===\s*candidateVersion",
+        comp,
+    )
+    assert coercion_vs_effective is not None, (
+        "The stale-check coercion must also reject available candidates whose "
+        "version matches effectiveCurrentVersion (currentVersion after reload), "
+        "not only candidates matching the in-memory installedOverride.version"
+    )

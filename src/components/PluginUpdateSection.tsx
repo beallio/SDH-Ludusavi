@@ -131,14 +131,21 @@ export function PluginUpdateSection({
               });
             }
           } else if (res.status === "available") {
-            // Coerce stale available results: if the server says a version is available
-            // that matches what we just installed, treat it as current.
-            if (installedOverride && res.candidate?.version === installedOverride.version) {
+            // Coerce stale available results in two cases:
+            // 1. In-memory override window: candidate matches the just-installed version.
+            // 2. Post-reload (override is null): candidate matches effectiveCurrentVersion
+            //    (i.e. currentVersion) — guards against the backend cache returning a
+            //    now-current version as still-available after the plugin reloads.
+            const candidateVersion = res.candidate?.version;
+            const isStale =
+              (installedOverride && candidateVersion === installedOverride.version) ||
+              candidateVersion === effectiveCurrentVersion;
+            if (isStale) {
               logUpdate(null, "check_success", { status: "current", stale_coerced: true, elapsed_ms });
               setCheckResult({ status: "current", checked_at: res.checked_at, channel: updateChannel });
               setCandidate(null);
             } else {
-              logUpdate(null, "check_success", { status: "available", version: res.candidate?.version, elapsed_ms });
+              logUpdate(null, "check_success", { status: "available", version: candidateVersion, elapsed_ms });
               setCandidate(res.candidate);
             }
           } else {
