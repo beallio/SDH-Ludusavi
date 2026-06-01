@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def test_frontend_format_date_mdy_exists_and_is_used() -> None:
-    source = Path("src/index.tsx").read_text(encoding="utf-8")
+    source = Path("src/components/qam/GameSettingsSection.tsx").read_text(encoding="utf-8")
     formatting_source = Path("src/formatting/dateTime.ts").read_text(encoding="utf-8")
 
     # Use regular expressions to handle potential spacing/formatting variation

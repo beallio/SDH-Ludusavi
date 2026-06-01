@@ -1,8 +1,4 @@
 import {
-  DropdownItem,
-  Field,
-  PanelSection,
-  PanelSectionRow,
   showModal,
   Router,
   SingleDropdownOption
@@ -12,7 +8,7 @@ import {
   toaster,
   useQuickAccessVisible
 } from "@decky/api";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FaSave, FaDownload, FaExclamationTriangle } from "react-icons/fa";
 import { IoMdRefresh } from "react-icons/io";
 
@@ -67,16 +63,13 @@ import {
 import { LogModal, LudusaviLogModal } from "./components/LogModal";
 import { ConflictResolutionModal } from "./components/modals/ConflictResolutionModal";
 import { PluginUpdateSection } from "./components/PluginUpdateSection";
-import {
-  AutoSyncSettingsSection,
-  NotificationSettingsSection
-} from "./components/qam/AutoSyncSettingsSection";
+import { AutoSyncSettingsSection } from "./components/qam/AutoSyncSettingsSection";
+import { GameSettingsSection } from "./components/qam/GameSettingsSection";
 import { LudusaviLauncherSection } from "./components/qam/LudusaviLauncherSection";
+import { NotificationSettingsSection } from "./components/qam/NotificationSettingsSection";
 import { QamStyles } from "./components/qam/QamStyles";
-import { SpinnerButton } from "./components/qam/SpinnerButton";
 import { VersionAndLogsSection } from "./components/qam/VersionAndLogsSection";
-import { formatDateMDY, formatTime12h } from "./formatting/dateTime";
-import { getLastOperationText, summarizeOperationResult } from "./formatting/operationText";
+import { summarizeOperationResult } from "./formatting/operationText";
 import { log } from "./utils/logging";
 import {
   LudusaviStateProvider,
@@ -119,13 +112,6 @@ async function syncGlobalHistory(store: LudusaviStateStore) {
 
 
 const EMPTY_GAMES: readonly GameStatus[] = Object.freeze([]);
-
-const statusLabels: Record<GameStatus["status"], string> = {
-  configured: "Configured",
-  has_backup: "Backup ready",
-  needs_first_backup: "Needs first backup",
-  error: "Error"
-};
 
 function PluginIcon() {
   return (
@@ -686,12 +672,6 @@ function showConflictResolutionModal(
       />
     );
   });
-}
-
-
-
-function CompactFieldLabel({ children }: { children: ReactNode }) {
-  return <span style={{ fontSize: "14px" }}>{children}</span>;
 }
 
 function notify(
@@ -1589,134 +1569,17 @@ function Content() {
         onRefreshGames={() => void refreshGames()}
       />
 
-      <PanelSection title="GAME">
-        <PanelSectionRow>
-          <div className="sdh-ludusavi-game-dropdown" style={{ width: "100%" }}>
-            <DropdownItem
-              layout="below"
-              menuLabel="Select Game"
-              highlightOnFocus={true}
-              focusable={true}
-              bottomSeparator="none"
-              disabled={isBusy}
-              rgOptions={gamesDropdownOptions}
-              selectedOption={selectedGame}
-              onChange={onGameChange}
-              renderButtonValue={(value: any) => (
-                <span className="sdh-ludusavi-game-dropdown-value">{value}</span>
-              )}
-            />
-          </div>
-        </PanelSectionRow>
-
-        <PanelSectionRow>
-          <Field
-            highlightOnFocus={false}
-            focusable={false}
-            padding="standard"
-            bottomSeparator="none"
-            childrenLayout="below"
-          >
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
-              {/* Status Row */}
-              <div style={{ display: "flex", width: "100%", alignItems: "center", fontSize: "12px" }}>
-                <span style={{ width: "110px", flexShrink: 0 }}>
-                  <CompactFieldLabel>Status:</CompactFieldLabel>
-                </span>
-                <div style={{ flexGrow: 1, color: "#cbd5e1", minWidth: 0, textAlign: "left" }}>
-                  {isBusy && busyLabel === "Loading" ? (
-                    <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Loading game list...</span>
-                  ) : isBusy && busyLabel === "Refreshing games" ? (
-                    <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Game refresh in progress...</span>
-                  ) : isBusy && busyLabel === "Backup running" ? (
-                    <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Backup in progress...</span>
-                  ) : isBusy && busyLabel === "Restore running" ? (
-                    <span style={{ color: "#60a5fa", fontWeight: "bold" }}>Restore in progress...</span>
-                  ) : (
-                    selectedStatus ? statusLabels[selectedStatus.status] : "No Ludusavi games found"
-                  )}
-                </div>
-              </div>
-
-              {/* Last Operation Row */}
-              {selectedHistory && !isBusy && (
-                <div style={{ display: "flex", width: "100%", alignItems: "baseline", fontSize: "12px" }}>
-                  <span style={{ width: "110px", flexShrink: 0 }}>
-                    <CompactFieldLabel>Last Operation:</CompactFieldLabel>
-                  </span>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      flexGrow: 1,
-                      minWidth: 0,
-                      textAlign: "left"
-                    }}
-                  >
-                    <div
-                      style={{
-                        color: selectedHistory.status === "failed" ? "#f87171" : "#cbd5e1",
-                        whiteSpace: "normal",
-                        wordBreak: "break-word"
-                      }}
-                    >
-                      {getLastOperationText(
-                        selectedHistory.status,
-                        selectedHistory.reason,
-                        selectedHistory.message
-                      )}
-                    </div>
-                    {(() => {
-                      if (!selectedHistory.timestamp) return null;
-                      const parts = selectedHistory.timestamp.split(/[T ]/);
-                      const timePart = parts[1]?.split(".")[0];
-                      if (!timePart) return null;
-
-                      return (
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            opacity: 0.65,
-                            marginTop: "2px",
-                            fontVariantNumeric: "tabular-nums"
-                          }}
-                        >
-                          ({formatDateMDY(selectedHistory.timestamp)} {formatTime12h(timePart)})
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              )}
-            </div>
-          </Field>
-        </PanelSectionRow>
-
-        <PanelSectionRow>
-          <SpinnerButton
-            layout="below"
-            highlightOnFocus={true}
-            bottomSeparator="none"
-            disabled={isBusy || !selectedStatus}
-            loading={busyLabel === "Backup running"}
-            onClick={() => void runForceOperation("Backup", forceBackupCall)}
-          >
-            Force Backup
-          </SpinnerButton>
-        </PanelSectionRow>
-
-        <PanelSectionRow>
-          <SpinnerButton
-            layout="below"
-            highlightOnFocus={true}
-            disabled={isBusy || selectedStatus?.status !== "has_backup"}
-            loading={busyLabel === "Restore running"}
-            onClick={() => void runForceOperation("Restore", forceRestoreCall)}
-          >
-            Force Restore
-          </SpinnerButton>
-        </PanelSectionRow>
-      </PanelSection>
+      <GameSettingsSection
+        isBusy={isBusy}
+        busyLabel={busyLabel}
+        gamesDropdownOptions={gamesDropdownOptions}
+        selectedGame={selectedGame}
+        selectedStatus={selectedStatus}
+        selectedHistory={selectedHistory}
+        onGameChange={onGameChange}
+        onForceBackup={() => void runForceOperation("Backup", forceBackupCall)}
+        onForceRestore={() => void runForceOperation("Restore", forceRestoreCall)}
+      />
 
       <NotificationSettingsSection
         settings={settings}

@@ -13,6 +13,8 @@ class ConcatenatedFrontendPath:
             Path("src/components/LogModal.tsx"),
             Path("src/components/modals/ConflictResolutionModal.tsx"),
             Path("src/components/qam/AutoSyncSettingsSection.tsx"),
+            Path("src/components/qam/GameSettingsSection.tsx"),
+            Path("src/components/qam/NotificationSettingsSection.tsx"),
             Path("src/components/qam/LudusaviLauncherSection.tsx"),
             Path("src/components/qam/QamStyles.tsx"),
             Path("src/components/qam/SpinnerButton.tsx"),
@@ -98,7 +100,7 @@ def test_frontend_exposes_notification_preferences_panel() -> None:
         'PanelSection title="Notifications"'
     )
     assert root_source.index("<NotificationSettingsSection") > root_source.index(
-        'PanelSection title="GAME"'
+        "<GameSettingsSection"
     )
     assert root_source.index("<NotificationSettingsSection") < root_source.index(
         "<LudusaviLauncherSection"
@@ -929,10 +931,8 @@ def test_frontend_qam_uses_global_and_game_panels() -> None:
     assert 'PanelSection title="GLOBAL"' in source
     assert 'PanelSection title="GAME"' in source
     assert 'PanelSection title="Sync"' not in source
-    assert root_source.index("<AutoSyncSettingsSection") < root_source.index(
-        'PanelSection title="GAME"'
-    )
-    assert root_source.index('PanelSection title="GAME"') < root_source.index(
+    assert root_source.index("<AutoSyncSettingsSection") < root_source.index("<GameSettingsSection")
+    assert root_source.index("<GameSettingsSection") < root_source.index(
         "<NotificationSettingsSection"
     )
     assert root_source.index("<NotificationSettingsSection") < root_source.index(
@@ -940,13 +940,11 @@ def test_frontend_qam_uses_global_and_game_panels() -> None:
     )
 
     global_panel = source[
-        source.index('PanelSection title="GLOBAL"') : source.index(
-            'PanelSection title="Notifications"'
-        )
+        source.index('PanelSection title="GLOBAL"') : source.index('PanelSection title="GAME"')
     ]
-    game_panel = root_source[
-        root_source.index('PanelSection title="GAME"') : root_source.index(
-            "<LudusaviLauncherSection"
+    game_panel = source[
+        source.index('PanelSection title="GAME"') : source.index(
+            'PanelSection title="Notifications"'
         )
     ]
 
