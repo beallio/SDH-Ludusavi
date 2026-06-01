@@ -1,6 +1,6 @@
 {
   "name": "sdh-ludusavi",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Decky Loader panel for Ludusavi save backup and restore controls",
   "private": true,
   "type": "module",
