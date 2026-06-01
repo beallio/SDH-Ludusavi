@@ -10,6 +10,8 @@ class ConcatenatedFrontendPath:
             Path("src/types/index.ts"),
             Path("src/utils/logging.ts"),
             Path("src/components/LogModal.tsx"),
+            Path("src/formatting/dateTime.ts"),
+            Path("src/formatting/operationText.ts"),
             Path("src/utils/steam.ts"),
             Path("src/index.tsx"),
         ]
