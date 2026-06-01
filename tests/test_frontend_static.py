@@ -12,6 +12,7 @@ class ConcatenatedFrontendPath:
             Path("src/utils/logging.ts"),
             Path("src/components/LogModal.tsx"),
             Path("src/components/modals/ConflictResolutionModal.tsx"),
+            Path("src/components/qam/QamStyles.tsx"),
             Path("src/formatting/dateTime.ts"),
             Path("src/formatting/operationText.ts"),
             Path("src/utils/steam.ts"),
@@ -1902,14 +1903,16 @@ def test_frontend_dropdown_truncation_styling() -> None:
         is not None
     )
 
-    # Assert that styleElement is memoized inside Content component
+    # Assert that styleElement is memoized inside Content component and mounted via QamStyles
     assert (
         re.search(
-            r"const\s+styleElement\s*=\s*useMemo\(\s*\(\s*\)\s*=>\s*<style>\{\s*dropdownStyleEl\.textContent\s*\}</style>\s*,\s*\[\s*\]\s*\)",
+            r"const\s+styleElement\s*=\s*useMemo\([\s\S]*?<QamStyles\s+cssText=\{\s*dropdownStyleEl\.textContent\s*\}\s*/>[\s\S]*?\[\s*\]\s*\)",
             source,
         )
         is not None
     )
+    assert "export function QamStyles" in source
+    assert "return <style>{cssText}</style>;" in source
 
 
 def test_frontend_dropdown_styling_lifecycle() -> None:

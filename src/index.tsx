@@ -71,6 +71,7 @@ import {
 import { LogModal, LudusaviLogModal } from "./components/LogModal";
 import { ConflictResolutionModal } from "./components/modals/ConflictResolutionModal";
 import { PluginUpdateSection } from "./components/PluginUpdateSection";
+import { QamStyles } from "./components/qam/QamStyles";
 import { formatDateMDY, formatTime12h } from "./formatting/dateTime";
 import { getLastOperationText, summarizeOperationResult } from "./formatting/operationText";
 import { log } from "./utils/logging";
@@ -921,7 +922,10 @@ function Content() {
   const wasQuickAccessVisible = useRef(false);
   const pendingCurrentGameSelection = useRef(false);
   const isMounted = useRef(true);
-  const styleElement = useMemo(() => <style>{dropdownStyleEl.textContent}</style>, []);
+  const styleElement = useMemo(
+    () => <QamStyles cssText={dropdownStyleEl.textContent} />,
+    []
+  );
 
   const settings = ludusaviState.settings ?? defaultSettings();
   const games = ludusaviState.games ?? EMPTY_GAMES;
