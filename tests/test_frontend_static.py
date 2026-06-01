@@ -11,6 +11,7 @@ class ConcatenatedFrontendPath:
             Path("src/api/ludusaviRpc.ts"),
             Path("src/utils/logging.ts"),
             Path("src/components/LogModal.tsx"),
+            Path("src/components/modals/ConflictResolutionModal.tsx"),
             Path("src/formatting/dateTime.ts"),
             Path("src/formatting/operationText.ts"),
             Path("src/utils/steam.ts"),
