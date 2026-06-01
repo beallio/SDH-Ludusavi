@@ -22,6 +22,7 @@ class ConcatenatedFrontendPath:
             Path("src/formatting/dateTime.ts"),
             Path("src/formatting/operationText.ts"),
             Path("src/utils/steam.ts"),
+            Path("src/settings/settingsMutationController.tsx"),
             Path("src/index.tsx"),
         ]
         contents = []
@@ -146,7 +147,10 @@ def test_frontend_toggle_reports_busy_and_failures() -> None:
     assert 'setBusyLabel("Updating settings")' in source
     assert "setAutoSyncEnabled(enabled)" in source
     assert '"SDH-Ludusavi settings failed"' in source
-    assert 'notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed"' in source
+    assert (
+        'notify(ludusaviStore, "failures_errors", title, body, <FaExclamationTriangle />)' in source
+    )
+    assert "notifyFailure: notifySettingsFailure" in source
 
 
 def test_frontend_silences_lifecycle_toasts_when_auto_sync_is_disabled() -> None:
@@ -1776,13 +1780,13 @@ def test_frontend_settings_queue_notifies_on_unhandled_rejection() -> None:
 
     source = FRONTEND.read_text(encoding="utf-8")
 
-    # Assert that processSettingsQueue catches unhandled task rejections and calls notify with activeLudusaviStore
+    # Assert that processSettingsQueue catches unhandled task rejections and calls the active failure notifier.
     assert (
         re.search(
             r"async\s+function\s+processSettingsQueue\s*\(\s*\)[\s\S]*?"
             r"catch\s*\(\s*err\s*\)\s*\{[\s\S]*?"
-            r"if\s*\(\s*activeLudusaviStore\s*\)\s*\{[\s\S]*?"
-            r"notify\(\s*activeLudusaviStore\s*,\s*\"failures_errors\"\s*,\s*\"Settings\s+Update\s+Failed\"",
+            r"if\s*\(\s*activeLudusaviStore\s*&&\s*activeFailureNotifier\s*\)\s*\{[\s\S]*?"
+            r"activeFailureNotifier\(\s*\"Settings\s+Update\s+Failed\"",
             source,
         )
         is not None
@@ -1794,13 +1798,14 @@ def test_frontend_settings_variables_reset_on_dismount() -> None:
 
     source = FRONTEND.read_text(encoding="utf-8")
 
-    # Assert that onDismount resets queue and sequence variables
+    # Assert that the controller reset clears queue and sequence variables, and onDismount delegates to it.
+    assert "resetSettingsMutationController();" in source
     assert (
         re.search(
-            r"onDismount\s*\(\s*\)\s*\{[\s\S]*?"
+            r"function\s+resetSettingsMutationController\s*\(\s*\)\s*\{[\s\S]*?"
             r"settingsQueue\.length\s*=\s*0\s*;[\s\S]*?"
             r"settingsProcessing\s*=\s*false\s*;[\s\S]*?"
-            r"queueListeners\.clear\(\s*\)\s*;[\s\S]*?"
+            r"notifyQueueListeners\(\s*\)\s*;[\s\S]*?"
             r"autoSyncSeq\s*=\s*0\s*;[\s\S]*?"
             r"notificationSeq\s*=\s*0\s*;[\s\S]*?"
             r"selectedGameSeq\s*=\s*0\s*;[\s\S]*?"
@@ -1812,6 +1817,7 @@ def test_frontend_settings_variables_reset_on_dismount() -> None:
             r"lastPersistedAutomaticUpdateChecks\s*=\s*null\s*;[\s\S]*?"
             r"lastPersistedSelectedGame\s*=\s*null\s*;[\s\S]*?"
             r"lastQueuedSelectedGame\s*=\s*null\s*;[\s\S]*?"
+            r"activeFailureNotifier\s*=\s*null\s*;[\s\S]*?"
             r"activeLudusaviStore\s*=\s*null\s*;",
             source,
         )
@@ -1830,7 +1836,7 @@ def test_frontend_settings_subscribe_queue_invokes_immediately() -> None:
             r"function\s+subscribeQueue\s*\(\s*listener[\s\S]*?\)\s*\{[\s\S]*?"
             r"queueListeners\.add\(\s*listener\s*\)\s*;[\s\S]*?"
             r"try\s*\{[\s\S]*?"
-            r"listener\(\s*settingsProcessing\s*\|\|\s*settingsQueue\.length\s*>\s*0\s*\)\s*;[\s\S]*?"
+            r"listener\(\s*getSettingsQueueBusy\(\s*\)\s*\)\s*;[\s\S]*?"
             r"\}\s*catch\s*\(\s*err\s*\)\s*\{",
             source,
         )
@@ -1847,7 +1853,7 @@ def test_frontend_selected_game_sync_effect() -> None:
     assert (
         re.search(
             r"useEffect\(\s*\(\s*\)\s*=>\s*\{\s*"
-            r"lastQueuedSelectedGame\s*=\s*selectedGame\s*;\s*"
+            r"syncLastQueuedSelectedGame\(\s*selectedGame\s*\)\s*;\s*"
             r"\}\s*,\s*\[\s*selectedGame\s*\]\s*\)\s*;",
             source,
         )
