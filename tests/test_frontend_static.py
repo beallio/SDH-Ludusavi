@@ -1805,6 +1805,7 @@ def test_frontend_settings_variables_reset_on_dismount() -> None:
             r"function\s+resetSettingsMutationController\s*\(\s*\)\s*\{[\s\S]*?"
             r"settingsQueue\.length\s*=\s*0\s*;[\s\S]*?"
             r"settingsProcessing\s*=\s*false\s*;[\s\S]*?"
+            r"queueListeners\.clear\(\s*\)\s*;[\s\S]*?"
             r"notifyQueueListeners\(\s*\)\s*;[\s\S]*?"
             r"autoSyncSeq\s*=\s*0\s*;[\s\S]*?"
             r"notificationSeq\s*=\s*0\s*;[\s\S]*?"

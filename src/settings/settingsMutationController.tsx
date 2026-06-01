@@ -167,6 +167,7 @@ export function setActiveSettingsStore(store: LudusaviStateStore, notifyFailure:
 export function resetSettingsMutationController() {
   settingsQueue.length = 0;
   settingsProcessing = false;
+  queueListeners.clear();
   notifyQueueListeners();
   autoSyncSeq = 0;
   notificationSeq = 0;
