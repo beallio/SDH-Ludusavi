@@ -72,6 +72,7 @@ import { ConflictResolutionModal } from "./components/modals/ConflictResolutionM
 import { PluginUpdateSection } from "./components/PluginUpdateSection";
 import { LudusaviLauncherSection } from "./components/qam/LudusaviLauncherSection";
 import { QamStyles } from "./components/qam/QamStyles";
+import { VersionAndLogsSection } from "./components/qam/VersionAndLogsSection";
 import { formatDateMDY, formatTime12h } from "./formatting/dateTime";
 import { getLastOperationText, summarizeOperationResult } from "./formatting/operationText";
 import { log } from "./utils/logging";
@@ -1791,19 +1792,6 @@ function Content() {
         isLoading={busyLabel === "Loading"}
       />
 
-      <PanelSection title="Logs">
-        <PanelSectionRow>
-          <ButtonItem layout="below" bottomSeparator="none" onClick={() => void showPluginLogs()}>
-            View Logs
-          </ButtonItem>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ButtonItem layout="below" bottomSeparator="standard" onClick={() => void showLudusaviLogs()}>
-            View Ludusavi Logs
-          </ButtonItem>
-        </PanelSectionRow>
-      </PanelSection>
-
       <PluginUpdateSection
         currentVersion={versions.sdh_ludusavi ?? "Unknown"}
         updateChannel={settings.update_channel}
@@ -1812,30 +1800,11 @@ function Content() {
         onToggleAutomaticUpdateChecks={toggleAutomaticUpdateChecks}
       />
 
-      <PanelSection title="Versions">
-        <PanelSectionRow>
-          <Field highlightOnFocus={true} focusable={true} childrenLayout="below" padding="standard" bottomSeparator="none">
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-                gap: "7px",
-                minWidth: 0,
-                textAlign: "left",
-                fontSize: "14px",
-                color: "#cbd5e1",
-                paddingLeft: "10px"
-              }}
-            >
-              <div>SDH-Ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
-              <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
-              <div>pyludusavi: {versions.pyludusavi ?? "Unknown"}</div>
-              <div>Decky: {versions.decky ?? "Unknown"}</div>
-            </div>
-          </Field>
-        </PanelSectionRow>
-      </PanelSection>
+      <VersionAndLogsSection
+        versions={versions}
+        onShowPluginLogs={() => void showPluginLogs()}
+        onShowLudusaviLogs={() => void showLudusaviLogs()}
+      />
     </div>
   );
 };

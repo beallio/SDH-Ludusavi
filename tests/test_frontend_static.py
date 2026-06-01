@@ -14,6 +14,7 @@ class ConcatenatedFrontendPath:
             Path("src/components/modals/ConflictResolutionModal.tsx"),
             Path("src/components/qam/LudusaviLauncherSection.tsx"),
             Path("src/components/qam/QamStyles.tsx"),
+            Path("src/components/qam/VersionAndLogsSection.tsx"),
             Path("src/formatting/dateTime.ts"),
             Path("src/formatting/operationText.ts"),
             Path("src/utils/steam.ts"),
@@ -813,7 +814,8 @@ def test_frontend_uses_decky_log_modal() -> None:
         "const currentLogs = await getRecentLogs();",
         "setLogs(currentLogs);",
         "showModal(<LogModal logs={currentLogs} />)",
-        "onClick={() => void showPluginLogs()}",
+        "onShowPluginLogs={() => void showPluginLogs()}",
+        "onClick={onShowPluginLogs}",
     ]:
         assert required_text in source
 
