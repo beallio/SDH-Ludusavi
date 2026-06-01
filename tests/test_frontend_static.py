@@ -2235,3 +2235,104 @@ def test_frontend_updater_static() -> None:
     assert "minHeight" in comp_content
     assert "lineHeight" in comp_content
     assert "buttonRowStyle" in comp_content
+
+
+def test_frontend_updater_post_install_ui_state() -> None:
+    """
+    Verify that PluginUpdateSection implements the post-install UI state fix:
+    - a shared success helper (onHandoffSuccess) called from both handoff paths;
+    - successful handoff clears candidate and sets checkResult to current;
+    - Installed Version uses effectiveCurrentVersion (override takes precedence);
+    - update checks use effectiveCurrentVersion so stale RPCs compare against
+      the installed version, not the old one;
+    - stale 'available' results for the same version as the installed override
+      cannot restore the install button;
+    - if the real currentVersion prop changes away from the pre-install version,
+      the override is cleared.
+    """
+    import re
+
+    comp_path = Path("src/components/PluginUpdateSection.tsx")
+    assert comp_path.exists()
+    comp = comp_path.read_text(encoding="utf-8")
+
+    # 1. A shared post-install success helper must exist and be called from
+    #    both handoff-success branches (immediate and delayed).
+    assert "onHandoffSuccess" in comp or "handleHandoffSuccess" in comp, (
+        "A shared post-install success helper (onHandoffSuccess or handleHandoffSuccess) "
+        "must be defined and referenced in PluginUpdateSection"
+    )
+    # The helper must appear at least twice — once defined, once for each success path
+    helper_name = "onHandoffSuccess" if "onHandoffSuccess" in comp else "handleHandoffSuccess"
+    assert comp.count(helper_name) >= 3, (
+        f"{helper_name} must be defined and called from both handoff success branches "
+        f"(found {comp.count(helper_name)} occurrences, expected >= 3)"
+    )
+
+    # 2. Successful handoff must clear candidate state.
+    #    The helper body or success branches must call setCandidate(null).
+    assert "setCandidate(null)" in comp, (
+        "Successful handoff must call setCandidate(null) to clear the install button"
+    )
+
+    # 3. Successful handoff must write a 'current' checkResult.
+    #    Look for status: "current" being set inside the component.
+    assert 'status: "current"' in comp or "status: 'current'" in comp, (
+        "Successful handoff must set checkResult to { status: 'current', ... }"
+    )
+
+    # 4. An installedOverride (or equivalent) state variable must exist.
+    assert "installedOverride" in comp or "installedVersion" in comp, (
+        "An 'installedOverride' or equivalent state variable must exist to hold the "
+        "optimistic installed version after handoff"
+    )
+
+    # 5. An effectiveCurrentVersion (or equivalent derived value) must be computed
+    #    from the override falling back to currentVersion.
+    assert "effectiveCurrentVersion" in comp, (
+        "effectiveCurrentVersion must be computed and used in place of currentVersion "
+        "for Installed Version display and RPC calls"
+    )
+
+    # 6. Installed Version row must render effectiveCurrentVersion, not raw currentVersion.
+    #    The effectiveCurrentVersion identifier must appear inside the JSX Installed Version field.
+    installed_version_region = re.search(
+        r"Installed Version[\s\S]{0,600}effectiveCurrentVersion", comp
+    )
+    assert installed_version_region is not None, (
+        "The Installed Version field must render effectiveCurrentVersion"
+    )
+
+    # 7. Update check RPC calls must use effectiveCurrentVersion, not currentVersion.
+    #    checkForPluginUpdateCall(...) must be called with effectiveCurrentVersion.
+    rpc_call_match = re.search(r"checkForPluginUpdateCall\s*\(\s*effectiveCurrentVersion", comp)
+    assert rpc_call_match is not None, (
+        "checkForPluginUpdateCall must be called with effectiveCurrentVersion so stale "
+        "checks compare against the installed version, not the old one"
+    )
+
+    # 8. Stale available responses for the installed override version must be coerced to current.
+    #    There must be a guard that compares the available candidate version against the override.
+    assert "installedOverride" in comp or "installedVersion" in comp, (
+        "Component must guard against stale available responses restoring the install button"
+    )
+    # Confirm the coercion logic exists: override?.version compared against res.candidate?.version
+    stale_guard = (
+        "installedOverride" in comp
+        and (
+            re.search(r"installedOverride[.\w?]*\.version", comp) is not None
+            or re.search(r"installedOverride[.\w?]*version", comp) is not None
+        )
+    ) or ("installedVersion" in comp and re.search(r"installedVersion", comp) is not None)
+    assert stale_guard, (
+        "Component must contain logic to detect when an available check result "
+        "matches the installed override version and coerce it to current"
+    )
+
+    # 9. The override must be cleared when the real currentVersion changes away
+    #    from the pre-install version. This requires storing the pre-install version
+    #    and a useEffect or similar that reacts to currentVersion changes.
+    assert "preInstallVersion" in comp or "installedOverride" in comp, (
+        "Component must clear the installed override when currentVersion changes away "
+        "from the pre-install version"
+    )

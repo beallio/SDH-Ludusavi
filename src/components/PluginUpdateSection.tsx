@@ -72,6 +72,12 @@ export interface PluginUpdateSectionProps {
   onToggleAutomaticUpdateChecks: (enabled: boolean) => void;
 }
 
+interface InstalledOverride {
+  version: string;
+  channel: UpdateChannel;
+  preInstallVersion: string;
+}
+
 export function PluginUpdateSection({
   currentVersion,
   updateChannel,
@@ -86,8 +92,14 @@ export function PluginUpdateSection({
   const [candidate, setCandidate] = useState<PluginUpdateCandidate | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [installedReleasePublishedAt, setInstalledReleasePublishedAt] = useState<string | null>(null);
+  const [installedOverride, setInstalledOverride] = useState<InstalledOverride | null>(null);
   const hasChecked = useRef(false);
   const inFlightCheck = useRef<Promise<any> | null>(null);
+
+  // Effective version used for display and RPC calls.
+  // After a successful handoff, shows the installed target version until the
+  // real currentVersion prop updates (which clears the override).
+  const effectiveCurrentVersion = installedOverride?.version ?? currentVersion;
 
   const checkForUpdates = useCallback(
     async (opts: { force: boolean; notify: boolean }) => {
@@ -105,7 +117,7 @@ export function PluginUpdateSection({
         setErrorMsg(null);
         logUpdate(null, "check_start", { channel: updateChannel });
         try {
-          const res = await checkForPluginUpdateCall(currentVersion, opts.force);
+          const res = await checkForPluginUpdateCall(effectiveCurrentVersion, opts.force);
           const elapsed_ms = Math.round(performance.now() - checkStart);
           setCheckResult(res);
           if (res.status === "failed") {
@@ -119,8 +131,16 @@ export function PluginUpdateSection({
               });
             }
           } else if (res.status === "available") {
-            logUpdate(null, "check_success", { status: "available", version: res.candidate?.version, elapsed_ms });
-            setCandidate(res.candidate);
+            // Coerce stale available results: if the server says a version is available
+            // that matches what we just installed, treat it as current.
+            if (installedOverride && res.candidate?.version === installedOverride.version) {
+              logUpdate(null, "check_success", { status: "current", stale_coerced: true, elapsed_ms });
+              setCheckResult({ status: "current", checked_at: res.checked_at, channel: updateChannel });
+              setCandidate(null);
+            } else {
+              logUpdate(null, "check_success", { status: "available", version: res.candidate?.version, elapsed_ms });
+              setCandidate(res.candidate);
+            }
           } else {
             logUpdate(null, "check_success", { status: "current", elapsed_ms });
             setCandidate(null);
@@ -154,8 +174,42 @@ export function PluginUpdateSection({
       inFlightCheck.current = promise;
       return promise;
     },
-    [currentVersion, updateChannel]
+    [currentVersion, updateChannel, installedOverride, effectiveCurrentVersion]
   );
+
+  // Shared post-install success helper. Called from both handoff success paths:
+  // immediate (installerPromise resolved before 3 s) and delayed (after timeout).
+  const handleHandoffSuccess = React.useCallback(
+    (version: string, channel: UpdateChannel, traceId: string, handoffStart: number) => {
+      logUpdate(traceId, "handoff_resolved", { status: "success", elapsed_ms: Math.round(performance.now() - handoffStart) });
+      setInstalledOverride({ version, channel, preInstallVersion: currentVersion });
+      setCheckResult({ status: "current", checked_at: new Date().toISOString(), channel });
+      setCandidate(null);
+      setErrorMsg(null);
+      setIsInstalling(false);
+      setIsHandoffPending(false);
+      toaster.toast({
+        title: "Installation Initiated",
+        body: `Requested installation of v${version} via Decky Loader.`,
+        duration: 3000
+      });
+    },
+    [currentVersion]
+  );
+
+  // Clear the installed override once the real loaded version matches or exceeds
+  // what we installed — or diverges unexpectedly. This ensures the override is
+  // only active while waiting for Decky to reload the plugin.
+  useEffect(() => {
+    if (!installedOverride) return;
+    if (
+      currentVersion &&
+      currentVersion !== "Loading..." &&
+      currentVersion !== installedOverride.preInstallVersion
+    ) {
+      setInstalledOverride(null);
+    }
+  }, [currentVersion, installedOverride]);
 
   // Reconcile and load cache on mount
   useEffect(() => {
@@ -290,9 +344,7 @@ export function PluginUpdateSection({
         void (async () => {
           try {
             await installerPromise;
-            logUpdate(updateTraceId, "handoff_resolved", { status: "success", elapsed_ms: Math.round(performance.now() - handoffStart) });
-            setIsInstalling(false);
-            setIsHandoffPending(false);
+            handleHandoffSuccess(revalRes.version, revalRes.channel as UpdateChannel, updateTraceId, handoffStart);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             logUpdate(updateTraceId, "handoff_rejected", { message: msg, elapsed_ms: Math.round(performance.now() - handoffStart) });
@@ -308,14 +360,7 @@ export function PluginUpdateSection({
         })();
       } else {
         await installerPromise;
-        logUpdate(updateTraceId, "handoff_resolved", { status: "success", elapsed_ms: Math.round(performance.now() - handoffStart) });
-        setIsInstalling(false);
-        setIsHandoffPending(false);
-        toaster.toast({
-          title: "Installation Initiated",
-          body: `Requested installation of v${revalRes.version} via Decky Loader.`,
-          duration: 3000
-        });
+        handleHandoffSuccess(revalRes.version, revalRes.channel as UpdateChannel, updateTraceId, handoffStart);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -347,7 +392,7 @@ export function PluginUpdateSection({
     }
   };
 
-  const isLocalBuild = currentVersion.includes("+");
+  const isLocalBuild = effectiveCurrentVersion.includes("+");
   const isDeckyAvailable = isDeckyInstallerAvailable();
 
   const getActionText = (c: PluginUpdateCandidate) => {
@@ -369,7 +414,7 @@ export function PluginUpdateSection({
       <PanelSectionRow>
         <Field label="Installed Version" padding="standard">
           <div style={{ fontSize: "14px", color: "#cbd5e1" }}>
-            {currentVersion} {isLocalBuild ? "(Local Build)" : ""}
+            {effectiveCurrentVersion} {isLocalBuild ? "(Local Build)" : ""}
           </div>
         </Field>
       </PanelSectionRow>
