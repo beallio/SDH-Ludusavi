@@ -60,7 +60,7 @@ import { GameSettingsSection } from "./components/qam/GameSettingsSection";
 import { LudusaviLauncherSection } from "./components/qam/LudusaviLauncherSection";
 import { NotificationSettingsSection } from "./components/qam/NotificationSettingsSection";
 import { QamStyles } from "./components/qam/QamStyles";
-import { VersionAndLogsSection } from "./components/qam/VersionAndLogsSection";
+import { LogsSection, VersionsSection } from "./components/qam/VersionAndLogsSection";
 import { summarizeOperationResult } from "./formatting/operationText";
 import { log } from "./utils/logging";
 import {
@@ -1265,6 +1265,11 @@ function Content() {
         isLoading={busyLabel === "Loading"}
       />
 
+      <LogsSection
+        onShowPluginLogs={() => void showPluginLogs()}
+        onShowLudusaviLogs={() => void showLudusaviLogs()}
+      />
+
       <PluginUpdateSection
         currentVersion={versions.sdh_ludusavi ?? "Unknown"}
         updateChannel={settings.update_channel}
@@ -1273,11 +1278,7 @@ function Content() {
         onToggleAutomaticUpdateChecks={toggleAutomaticUpdateChecks}
       />
 
-      <VersionAndLogsSection
-        versions={versions}
-        onShowPluginLogs={() => void showPluginLogs()}
-        onShowLudusaviLogs={() => void showLudusaviLogs()}
-      />
+      <VersionsSection versions={versions} />
     </div>
   );
 };

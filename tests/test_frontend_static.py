@@ -942,6 +942,8 @@ def test_frontend_qam_uses_global_and_game_panels() -> None:
     assert root_source.index("<NotificationSettingsSection") < root_source.index(
         "<LudusaviLauncherSection"
     )
+    assert root_source.index("<LogsSection") < root_source.index("<PluginUpdateSection")
+    assert root_source.index("<PluginUpdateSection") < root_source.index("<VersionsSection")
 
     global_panel = source[
         source.index('PanelSection title="GLOBAL"') : source.index('PanelSection title="GAME"')
@@ -1146,10 +1148,9 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert versions_panel.index("Ludusavi:") < versions_panel.index("pyludusavi:")
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
     assert 'childrenLayout="below"' in versions_panel
-    assert (
-        'fontSize: "14px",\n                color: "#cbd5e1",\n                paddingLeft: "10px"'
-        in versions_panel
-    )
+    assert 'fontSize: "14px"' in versions_panel
+    assert 'color: "#cbd5e1"' in versions_panel
+    assert 'paddingLeft: "10px"' in versions_panel
     assert 'gap: "7px"' in versions_panel
 
 
