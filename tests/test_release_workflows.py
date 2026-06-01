@@ -130,6 +130,9 @@ def test_workflows_trigger_and_overwrite_and_checksum_verification() -> None:
     # 2. Verify dev-release.yml prerelease settings
     dev_content = Path(".github/workflows/dev-release.yml").read_text(encoding="utf-8")
     assert "prerelease: true" in dev_content
+    assert (
+        'SETUPTOOLS_SCM_PRETEND_VERSION="${{ env.BASE_VERSION }}" ./run.sh uv sync' in dev_content
+    )
 
     # 3. Verify overwrite_files: false is set for release publishing in both workflows
     assert "overwrite_files: false" in release_content
