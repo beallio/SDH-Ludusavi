@@ -12,8 +12,10 @@ class ConcatenatedFrontendPath:
             Path("src/utils/logging.ts"),
             Path("src/components/LogModal.tsx"),
             Path("src/components/modals/ConflictResolutionModal.tsx"),
+            Path("src/components/qam/AutoSyncSettingsSection.tsx"),
             Path("src/components/qam/LudusaviLauncherSection.tsx"),
             Path("src/components/qam/QamStyles.tsx"),
+            Path("src/components/qam/SpinnerButton.tsx"),
             Path("src/components/qam/VersionAndLogsSection.tsx"),
             Path("src/formatting/dateTime.ts"),
             Path("src/formatting/operationText.ts"),
@@ -72,6 +74,7 @@ def test_frontend_wires_backend_calls_and_toasts() -> None:
 
 def test_frontend_exposes_notification_preferences_panel() -> None:
     source = FRONTEND.read_text()
+    root_source = Path("src/index.tsx").read_text()
 
     for required_text in [
         'PanelSection title="Notifications"',
@@ -81,13 +84,20 @@ def test_frontend_exposes_notification_preferences_panel() -> None:
         'label="Failures and Errors"',
         "settings.notifications.enabled",
         "disabled={!settings.notifications.enabled || isBusy}",
-        "onChange={(enabled: boolean) => void toggleNotificationSetting",
+        'onChange={(enabled: boolean) => onToggleNotificationSetting("enabled", enabled)}',
     ]:
         assert required_text in source
 
+    assert (
+        "onToggleNotificationSetting={(key, enabled) => void toggleNotificationSetting(key, enabled)}"
+        in root_source
+    )
     assert 'label="Auto-sync Progress"' not in source
     assert 'label="Auto-sync Results"' not in source
-    assert source.index('PanelSection title="Notifications"') < source.index(
+    assert source.index('PanelSection title="GLOBAL"') < source.index(
+        'PanelSection title="Notifications"'
+    )
+    assert root_source.index("<AutoSyncSettingsSection") < root_source.index(
         "<LudusaviLauncherSection"
     )
 
@@ -114,12 +124,14 @@ def test_frontend_centralizes_notification_aware_toasts() -> None:
 
 def test_frontend_uses_decky_toggle_for_automatic_sync() -> None:
     source = FRONTEND.read_text()
+    root_source = Path("src/index.tsx").read_text()
 
     assert "ToggleField" in source
     assert 'label="Automatic Sync"' in source
     assert "checked={settings.auto_sync_enabled}" in source
     assert "disabled={isBusy}" in source
-    assert "onChange={(enabled: boolean) => void toggleAutoSync(enabled)}" in source
+    assert "onChange={(enabled: boolean) => onToggleAutoSync(enabled)}" in source
+    assert "onToggleAutoSync={(enabled) => void toggleAutoSync(enabled)}" in root_source
     assert 'type="checkbox"' not in source
 
 
@@ -909,17 +921,26 @@ def test_frontend_displays_durable_operation_history() -> None:
 
 def test_frontend_qam_uses_global_and_game_panels() -> None:
     source = FRONTEND.read_text()
+    root_source = Path("src/index.tsx").read_text()
 
     assert 'PanelSection title="GLOBAL"' in source
     assert 'PanelSection title="GAME"' in source
     assert 'PanelSection title="Sync"' not in source
+    assert root_source.index("<AutoSyncSettingsSection") < root_source.index(
+        'PanelSection title="GAME"'
+    )
+    assert root_source.index('PanelSection title="GAME"') < root_source.index(
+        "<LudusaviLauncherSection"
+    )
 
     global_panel = source[
-        source.index('PanelSection title="GLOBAL"') : source.index('PanelSection title="GAME"')
-    ]
-    game_panel = source[
-        source.index('PanelSection title="GAME"') : source.index(
+        source.index('PanelSection title="GLOBAL"') : source.index(
             'PanelSection title="Notifications"'
+        )
+    ]
+    game_panel = root_source[
+        root_source.index('PanelSection title="GAME"') : root_source.index(
+            "<LudusaviLauncherSection"
         )
     ]
 
@@ -988,9 +1009,7 @@ def test_frontend_qam_uses_requested_row_separators() -> None:
     assert 'bottomSeparator="none"' in status_control
 
     game_panel = source[
-        source.index('PanelSection title="GAME"') : source.index(
-            'PanelSection title="Notifications"'
-        )
+        source.index('PanelSection title="GAME"') : source.index("<LudusaviLauncherSection")
     ]
     force_backup_start = game_panel.rindex("<SpinnerButton", 0, game_panel.index("Force Backup"))
     force_backup = game_panel[force_backup_start : game_panel.index("Force Restore")]
@@ -998,7 +1017,7 @@ def test_frontend_qam_uses_requested_row_separators() -> None:
 
     notifications_panel = source[
         source.index('PanelSection title="Notifications"') : source.index(
-            "<LudusaviLauncherSection"
+            "export function SpinnerButton"
         )
     ]
     for text in [
@@ -1054,9 +1073,7 @@ def test_frontend_qam_last_operation_uses_inline_wrapping_layout() -> None:
     source = FRONTEND.read_text()
 
     game_panel = source[
-        source.index('PanelSection title="GAME"') : source.index(
-            'PanelSection title="Notifications"'
-        )
+        source.index('PanelSection title="GAME"') : source.index("<LudusaviLauncherSection")
     ]
     last_op_start = game_panel.rindex(
         "<Field", 0, game_panel.index("<CompactFieldLabel>Last Operation:</CompactFieldLabel>")
