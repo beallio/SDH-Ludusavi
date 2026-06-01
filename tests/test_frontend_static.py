@@ -1749,8 +1749,12 @@ def test_frontend_settings_variables_reset_on_dismount() -> None:
             r"autoSyncSeq\s*=\s*0\s*;[\s\S]*?"
             r"notificationSeq\s*=\s*0\s*;[\s\S]*?"
             r"selectedGameSeq\s*=\s*0\s*;[\s\S]*?"
+            r"updateChannelSeq\s*=\s*0\s*;[\s\S]*?"
+            r"automaticUpdateChecksSeq\s*=\s*0\s*;[\s\S]*?"
             r"lastPersistedAutoSync\s*=\s*null\s*;[\s\S]*?"
             r"lastPersistedNotifications\s*=\s*null\s*;[\s\S]*?"
+            r"lastPersistedUpdateChannel\s*=\s*null\s*;[\s\S]*?"
+            r"lastPersistedAutomaticUpdateChecks\s*=\s*null\s*;[\s\S]*?"
             r"lastPersistedSelectedGame\s*=\s*null\s*;[\s\S]*?"
             r"lastQueuedSelectedGame\s*=\s*null\s*;[\s\S]*?"
             r"activeLudusaviStore\s*=\s*null\s*;",
