@@ -8,6 +8,7 @@ class ConcatenatedFrontendPath:
     def read_text(self, encoding: str = "utf-8") -> str:
         files = [
             Path("src/types/index.ts"),
+            Path("src/api/ludusaviRpc.ts"),
             Path("src/utils/logging.ts"),
             Path("src/components/LogModal.tsx"),
             Path("src/formatting/dateTime.ts"),

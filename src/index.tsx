@@ -12,7 +12,6 @@ import {
   SingleDropdownOption
 } from "@decky/ui";
 import {
-  callable,
   definePlugin,
   toaster,
   useQuickAccessVisible
@@ -22,19 +21,42 @@ import { FaSave, FaDownload, FaExclamationTriangle } from "react-icons/fa";
 import { IoMdRefresh } from "react-icons/io";
 
 import { launchLudusavi, LudusaviLaunchCommand } from "./ludusaviLauncher";
+import {
+  backupGameOnExitCall,
+  checkGameExitCall,
+  checkGameStartCall,
+  forceBackupCall,
+  forceRestoreCall,
+  getGameHistoryCall,
+  getLudusaviCommandCall,
+  getLudusaviLogs,
+  getOperationStatus,
+  getRecentLogs,
+  getSettings,
+  getVersions,
+  isGameCacheCurrentCall,
+  pauseGameProcessCall,
+  refreshGamesCall,
+  resolveGameStartConflictCall,
+  restoreGameOnStartCall,
+  resumeGameProcessCall,
+  setAutomaticUpdateChecksCall,
+  setAutoSyncEnabled,
+  setNotificationSettings,
+  setSelectedGameCall,
+  setUpdateChannelCall
+} from "./api/ludusaviRpc";
 
 import {
   NotificationSettings,
   NotificationCategory,
   Settings,
-  GameOperationHistory,
   GameStatus,
   RefreshResult,
   OperationStatus,
   OperationResult,
   ConflictResolution,
   LifecycleCheckResult,
-  ProcessSignalResult,
   AppLifetimeNotification,
   RunningSession,
   RpcStatus,
@@ -44,7 +66,6 @@ import {
   AutoSyncStatusState,
   AutoSyncStatusBrowserView,
   AutoSyncStatusBrowserViewOwner,
-  Versions,
   LogEntry,
   UpdateChannel
 } from "./types";
@@ -90,33 +111,6 @@ async function syncGlobalHistory(store: LudusaviStateStore) {
   }
 }
 
-
-
-
-const getSettings = callable<[], RpcResult<Settings>>("get_settings");
-const getGameHistoryCall = callable<[], RpcResult<Record<string, GameOperationHistory>>>("get_game_history");
-const setAutoSyncEnabled = callable<[enabled: boolean], RpcResult<Settings>>("set_auto_sync_enabled");
-const setNotificationSettings = callable<[settings: NotificationSettings], RpcResult<Settings>>("set_notification_settings");
-const setSelectedGameCall = callable<[gameName: string], RpcResult<Settings>>("set_selected_game");
-const refreshGamesCall = callable<[force: boolean, installed_app_ids?: string], RpcResult<RefreshResult>>("refresh_games");
-const isGameCacheCurrentCall = callable<[installed_app_ids?: string], boolean>("is_game_cache_current");
-const forceBackupCall = callable<[gameName: string], RpcResult<OperationResult>>("force_backup");
-const forceRestoreCall = callable<[gameName: string], RpcResult<OperationResult>>("force_restore");
-const getVersions = callable<[], RpcResult<Versions>>("get_versions");
-const getOperationStatus = callable<[], OperationStatus>("get_operation_status");
-const getRecentLogs = callable<[], LogEntry[]>("get_recent_logs");
-const getLudusaviLogs = callable<[], RpcResult<string>>("get_ludusavi_logs");
-const setUpdateChannelCall = callable<[channel: string], RpcResult<Settings>>("set_update_channel");
-const setAutomaticUpdateChecksCall = callable<[enabled: boolean], RpcResult<Settings>>("set_automatic_update_checks");
-
-const getLudusaviCommandCall = callable<[], RpcResult<LudusaviLaunchCommand | null>>("get_ludusavi_command");
-const pauseGameProcessCall = callable<[pid: number], RpcResult<ProcessSignalResult>>("pause_game_process");
-const resumeGameProcessCall = callable<[pid: number], RpcResult<ProcessSignalResult>>("resume_game_process");
-const checkGameStartCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_start");
-const restoreGameOnStartCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("restore_game_on_start");
-const resolveGameStartConflictCall = callable<[gameName: string, app_id: string | undefined, resolution: ConflictResolution], RpcResult<OperationResult>>("resolve_game_start_conflict");
-const checkGameExitCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_exit");
-const backupGameOnExitCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("backup_game_on_exit");
 
 
 
