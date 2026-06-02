@@ -8,9 +8,24 @@ class ConcatenatedFrontendPath:
     def read_text(self, encoding: str = "utf-8") -> str:
         files = [
             Path("src/types/index.ts"),
+            Path("src/api/ludusaviRpc.ts"),
             Path("src/utils/logging.ts"),
             Path("src/components/LogModal.tsx"),
+            Path("src/components/modals/ConflictResolutionModal.tsx"),
+            Path("src/components/qam/AutoSyncSettingsSection.tsx"),
+            Path("src/components/qam/GameSettingsSection.tsx"),
+            Path("src/components/qam/NotificationSettingsSection.tsx"),
+            Path("src/components/qam/LudusaviLauncherSection.tsx"),
+            Path("src/components/qam/LudusaviContent.tsx"),
+            Path("src/components/qam/QamStyles.tsx"),
+            Path("src/components/qam/SpinnerButton.tsx"),
+            Path("src/components/qam/VersionAndLogsSection.tsx"),
+            Path("src/formatting/dateTime.ts"),
+            Path("src/formatting/operationText.ts"),
             Path("src/utils/steam.ts"),
+            Path("src/settings/settingsMutationController.tsx"),
+            Path("src/surfaces/autoSyncStatusSurface.tsx"),
+            Path("src/controllers/gameLifecycleController.tsx"),
             Path("src/index.tsx"),
         ]
         contents = []
@@ -65,6 +80,7 @@ def test_frontend_wires_backend_calls_and_toasts() -> None:
 
 def test_frontend_exposes_notification_preferences_panel() -> None:
     source = FRONTEND.read_text()
+    content_source = Path("src/components/qam/LudusaviContent.tsx").read_text()
 
     for required_text in [
         'PanelSection title="Notifications"',
@@ -74,13 +90,25 @@ def test_frontend_exposes_notification_preferences_panel() -> None:
         'label="Failures and Errors"',
         "settings.notifications.enabled",
         "disabled={!settings.notifications.enabled || isBusy}",
-        "onChange={(enabled: boolean) => void toggleNotificationSetting",
+        'onChange={(enabled: boolean) => onToggleNotificationSetting("enabled", enabled)}',
     ]:
         assert required_text in source
 
+    assert (
+        "onToggleNotificationSetting={(key, enabled) => void toggleNotificationSetting(key, enabled)}"
+        in content_source
+    )
     assert 'label="Auto-sync Progress"' not in source
     assert 'label="Auto-sync Results"' not in source
-    assert source.index('PanelSection title="Notifications"') < source.index("<LudusaviPanel")
+    assert source.index('PanelSection title="GLOBAL"') < source.index(
+        'PanelSection title="Notifications"'
+    )
+    assert content_source.index("<NotificationSettingsSection") > content_source.index(
+        "<GameSettingsSection"
+    )
+    assert content_source.index("<NotificationSettingsSection") < content_source.index(
+        "<LudusaviLauncherSection"
+    )
 
 
 def test_frontend_centralizes_notification_aware_toasts() -> None:
@@ -105,12 +133,14 @@ def test_frontend_centralizes_notification_aware_toasts() -> None:
 
 def test_frontend_uses_decky_toggle_for_automatic_sync() -> None:
     source = FRONTEND.read_text()
+    content_source = Path("src/components/qam/LudusaviContent.tsx").read_text()
 
     assert "ToggleField" in source
     assert 'label="Automatic Sync"' in source
     assert "checked={settings.auto_sync_enabled}" in source
     assert "disabled={isBusy}" in source
-    assert "onChange={(enabled: boolean) => void toggleAutoSync(enabled)}" in source
+    assert "onChange={(enabled: boolean) => onToggleAutoSync(enabled)}" in source
+    assert "onToggleAutoSync={(enabled) => void toggleAutoSync(enabled)}" in content_source
     assert 'type="checkbox"' not in source
 
 
@@ -120,7 +150,10 @@ def test_frontend_toggle_reports_busy_and_failures() -> None:
     assert 'setBusyLabel("Updating settings")' in source
     assert "setAutoSyncEnabled(enabled)" in source
     assert '"SDH-Ludusavi settings failed"' in source
-    assert 'notify(ludusaviStore, "failures_errors", "SDH-Ludusavi settings failed"' in source
+    assert (
+        'notify(ludusaviStore, "failures_errors", title, body, <FaExclamationTriangle />)' in source
+    )
+    assert "notifyFailure: notifySettingsFailure" in source
 
 
 def test_frontend_silences_lifecycle_toasts_when_auto_sync_is_disabled() -> None:
@@ -173,7 +206,7 @@ def test_frontend_uses_browserview_only_autosync_status_strip() -> None:
         "unregisterLifecycleNotifications();",
         "window.clearInterval(fallbackIntervalID);",
         "activeSessions.clear();",
-        "destroyAutoSyncStatusBrowserView();",
+        "resetAutoSyncStatusSurface();",
     ]:
         assert required_text in source
 
@@ -269,7 +302,7 @@ def test_frontend_status_strip_replaces_autosync_success_toasts() -> None:
         'publishAutoSyncStatus("has_backup", {',
         'publishAutoSyncStatus("unknown", {',
         'publishAutoSyncStatus("error", {',
-        'notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync"',
+        'notifyFailure("SDH-Ludusavi Auto-sync"',
     ]:
         assert required_text in source
 
@@ -353,8 +386,12 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
     assert "raw === owner" in source
     assert "SetTopmost" in source
 
-    dismount_source = source[source.index("onDismount()") :]
-    assert "clearAutoSyncStatusShowTimeout();" in dismount_source
+    reset_source = source[
+        source.index("function resetAutoSyncStatusSurface()") : source.index(
+            "function showConflictResolutionModal("
+        )
+    ]
+    assert "clearAutoSyncStatusShowTimeout();" in reset_source
 
 
 def test_frontend_status_strip_destroy_disposes_owner_and_nested_view() -> None:
@@ -745,6 +782,57 @@ def test_frontend_lifecycle_resolution_handles_non_steam_shortcuts() -> None:
     assert "activeSessions.get(notification.nInstanceID)" in source
 
 
+def test_frontend_lifecycle_orchestration_is_owned_by_controller() -> None:
+    root_source = Path("src/index.tsx").read_text()
+    controller_source = Path("src/controllers/gameLifecycleController.tsx").read_text()
+
+    for required_text in [
+        "type GameLifecycleControllerDependencies = {",
+        "export function createGameLifecycleController(",
+        "const handleAppStart = async",
+        "const handleAppExit = async",
+        "function start()",
+        "function dispose()",
+        "registerLifetime.call(gameSessions",
+        "window.setInterval(checkMainApp, 1000);",
+        "window.clearInterval(fallbackIntervalID);",
+        "activeSessions.clear();",
+    ]:
+        assert required_text in controller_source
+
+    for required_text in [
+        "const lifecycleController = createGameLifecycleController({",
+        "lifecycleController.start();",
+        "lifecycleController.dispose();",
+    ]:
+        assert required_text in root_source
+
+    for root_owned_algorithm in [
+        "const handleAppStart = async",
+        "const handleAppExit = async",
+        "const handleLifetimeNotification",
+        "const checkMainApp",
+        "const startFallbackPolling",
+        "const activeSessions = new Map<number, RunningSession>();",
+    ]:
+        assert root_owned_algorithm not in root_source
+
+
+def test_frontend_root_renders_extracted_ludusavi_content() -> None:
+    root_source = Path("src/index.tsx").read_text()
+    content_source = Path("src/components/qam/LudusaviContent.tsx").read_text()
+
+    assert "LudusaviContent" in root_source
+    assert 'from "./components/qam/LudusaviContent";' in root_source
+    assert "<LudusaviContent" in root_source
+    assert "function Content()" not in root_source
+    assert "export function LudusaviContent(" in content_source
+    assert "useQuickAccessVisible()" in content_source
+    assert "createSettingsMutationController({" in content_source
+    assert "<PluginUpdateSection" in content_source
+    assert "<VersionsSection" in content_source
+
+
 def test_frontend_initial_load_skips_logs_and_warmed_refresh_when_cache_current() -> None:
     source = FRONTEND.read_text()
 
@@ -756,9 +844,13 @@ def test_frontend_initial_load_skips_logs_and_warmed_refresh_when_cache_current(
         "const installedAppIdsChanged = ludusaviState.installedAppIds !== installedAppIds;"
         in load_initial
     )
-    assert (
-        "const cacheCurrentResult = isWarmed && !installedAppIdsChanged ? await isGameCacheCurrentCall(installedAppIds) : false;"
-    ) in load_initial
+    for required_text in [
+        "const cacheCurrentResult =",
+        "isWarmed && !installedAppIdsChanged",
+        "await isGameCacheCurrentCall(installedAppIds)",
+        ": false;",
+    ]:
+        assert required_text in load_initial
     assert (
         "const cacheCurrent = !isRpcStatus(cacheCurrentResult) && cacheCurrentResult === true;"
     ) in load_initial
@@ -805,7 +897,8 @@ def test_frontend_uses_decky_log_modal() -> None:
         "const currentLogs = await getRecentLogs();",
         "setLogs(currentLogs);",
         "showModal(<LogModal logs={currentLogs} />)",
-        "onClick={() => void showPluginLogs()}",
+        "onShowPluginLogs={() => void showPluginLogs()}",
+        "onClick={onShowPluginLogs}",
     ]:
         assert required_text in source
 
@@ -899,10 +992,22 @@ def test_frontend_displays_durable_operation_history() -> None:
 
 def test_frontend_qam_uses_global_and_game_panels() -> None:
     source = FRONTEND.read_text()
+    content_source = Path("src/components/qam/LudusaviContent.tsx").read_text()
 
     assert 'PanelSection title="GLOBAL"' in source
     assert 'PanelSection title="GAME"' in source
     assert 'PanelSection title="Sync"' not in source
+    assert content_source.index("<AutoSyncSettingsSection") < content_source.index(
+        "<GameSettingsSection"
+    )
+    assert content_source.index("<GameSettingsSection") < content_source.index(
+        "<NotificationSettingsSection"
+    )
+    assert content_source.index("<NotificationSettingsSection") < content_source.index(
+        "<LudusaviLauncherSection"
+    )
+    assert content_source.index("<LogsSection") < content_source.index("<PluginUpdateSection")
+    assert content_source.index("<PluginUpdateSection") < content_source.index("<VersionsSection")
 
     global_panel = source[
         source.index('PanelSection title="GLOBAL"') : source.index('PanelSection title="GAME"')
@@ -978,16 +1083,16 @@ def test_frontend_qam_uses_requested_row_separators() -> None:
     assert 'bottomSeparator="none"' in status_control
 
     game_panel = source[
-        source.index('PanelSection title="GAME"') : source.index(
-            'PanelSection title="Notifications"'
-        )
+        source.index('PanelSection title="GAME"') : source.index("<LudusaviLauncherSection")
     ]
     force_backup_start = game_panel.rindex("<SpinnerButton", 0, game_panel.index("Force Backup"))
     force_backup = game_panel[force_backup_start : game_panel.index("Force Restore")]
     assert 'bottomSeparator="none"' in force_backup
 
     notifications_panel = source[
-        source.index('PanelSection title="Notifications"') : source.index("<LudusaviPanel")
+        source.index('PanelSection title="Notifications"') : source.index(
+            "export function SpinnerButton"
+        )
     ]
     for text in [
         'label="All Notifications"',
@@ -1020,16 +1125,29 @@ def test_frontend_qam_uses_requested_row_separators() -> None:
 
 def test_frontend_qam_rows_use_native_full_row_focus() -> None:
     source = FRONTEND.read_text()
+    automatic_sync_row_start = source.rindex(
+        "<PanelSectionRow", 0, source.index('label="Automatic Sync"')
+    )
+    automatic_sync_row = source[
+        automatic_sync_row_start : source.index(
+            "</PanelSectionRow>", source.index('label="Automatic Sync"')
+        )
+    ]
 
     for text in [
         "Field",
         "highlightOnFocus={true}",
         "focusable={true}",
-        '<PanelSectionRow>\n          <ToggleField\n            label="Automatic Sync"\n            description="Runs Ludusavi automatically when configured games start or exit."',
         "highlightOnFocus={false}",
         "focusable={false}",
     ]:
         assert text in source
+    assert "<ToggleField" in automatic_sync_row
+    assert 'label="Automatic Sync"' in automatic_sync_row
+    assert (
+        'description="Runs Ludusavi automatically when configured games start or exit."'
+        in automatic_sync_row
+    )
 
     versions_panel = source[source.index('PanelSection title="Versions"') :]
     assert (
@@ -1042,9 +1160,7 @@ def test_frontend_qam_last_operation_uses_inline_wrapping_layout() -> None:
     source = FRONTEND.read_text()
 
     game_panel = source[
-        source.index('PanelSection title="GAME"') : source.index(
-            'PanelSection title="Notifications"'
-        )
+        source.index('PanelSection title="GAME"') : source.index("<LudusaviLauncherSection")
     ]
     last_op_start = game_panel.rindex(
         "<Field", 0, game_panel.index("<CompactFieldLabel>Last Operation:</CompactFieldLabel>")
@@ -1096,10 +1212,9 @@ def test_frontend_versions_order_places_decky_last() -> None:
     assert versions_panel.index("Ludusavi:") < versions_panel.index("pyludusavi:")
     assert versions_panel.index("pyludusavi:") < versions_panel.index("Decky:")
     assert 'childrenLayout="below"' in versions_panel
-    assert (
-        'fontSize: "14px",\n                color: "#cbd5e1",\n                paddingLeft: "10px"'
-        in versions_panel
-    )
+    assert 'fontSize: "14px"' in versions_panel
+    assert 'color: "#cbd5e1"' in versions_panel
+    assert 'paddingLeft: "10px"' in versions_panel
     assert 'gap: "7px"' in versions_panel
 
 
@@ -1152,7 +1267,8 @@ def test_frontend_logs_and_retries_qam_scroll_reset() -> None:
         'function resetQuickAccessScroll(container: HTMLElement | null, reason = "qam_open")',
         "const resetDelays = [50, 150, 350];",
         "resetDelays.forEach((delay) => {",
-        "window.setTimeout(() => resetQuickAccessScroll(qamContentRef.current, `qam_open_retry_${delay}`), delay);",
+        "window.setTimeout(",
+        "resetQuickAccessScroll(qamContentRef.current, `qam_open_retry_${delay}`)",
         "const beforeContainerTop = container?.getBoundingClientRect?.().top ?? -1;",
         "Math.abs(beforeContainerTop - containerTop) <= QUICK_ACCESS_TOP_EPSILON_PX",
         "`QAM scroll reset (${reason}): before=${beforeTop}, after=${afterTop}, containerTop=${containerTop}, scrollable=${scrollableTag}`",
@@ -1169,13 +1285,33 @@ def test_frontend_preserves_always_render_for_lifecycle_and_status_surface() -> 
     assert "alwaysRender: true" in plugin_return
     assert "onDismount()" in plugin_return
     for required_text in [
+        "lifecycleController.dispose();",
+        "resetAutoSyncStatusSurface();",
+    ]:
+        assert required_text in plugin_return
+
+    lifecycle_dispose_source = source[
+        source.index("function dispose()") : source.index("return {\n    start,\n    dispose")
+    ]
+    for required_text in [
         "unregisterLifecycleNotifications();",
         "window.clearInterval(fallbackIntervalID);",
         "activeSessions.clear();",
+    ]:
+        assert required_text in lifecycle_dispose_source
+
+    reset_source = source[
+        source.index("function resetAutoSyncStatusSurface()") : source.index(
+            "function showConflictResolutionModal("
+        )
+    ]
+    for required_text in [
         "clearAutoSyncStatusHideTimeout();",
+        "clearAutoSyncStatusSyncTimeout();",
+        "clearAutoSyncStatusShowTimeout();",
         "destroyAutoSyncStatusBrowserView();",
     ]:
-        assert required_text in plugin_return
+        assert required_text in reset_source
 
 
 def test_frontend_prefers_main_running_app_for_qam_game_selection() -> None:
@@ -1375,12 +1511,12 @@ def test_frontend_load_initial_optimizations() -> None:
     load_initial = load_initial[: load_initial.index("const applyRefreshResult")]
 
     assert "Load versions and commands in the background" in load_initial
-    assert (
-        "const [loadedSettings, loadedHistory] = await Promise.all([\n"
-        "        getSettings(),\n"
-        "        getGameHistoryCall()\n"
-        "      ]);"
-    ) in load_initial
+    for required_text in [
+        "const [loadedSettings, loadedHistory] = await Promise.all([",
+        "getSettings(),",
+        "getGameHistoryCall()",
+    ]:
+        assert required_text in load_initial
     assert "const loadedSettings = await getSettings();" not in load_initial
     assert "const loadedHistory = await getGameHistoryCall();" not in load_initial
 
@@ -1495,7 +1631,8 @@ def test_frontend_syncs_history_via_dedicated_rpc() -> None:
         in source
     )
     assert "async function syncGlobalHistory(store: LudusaviStateStore)" in source
-    assert "await syncGlobalHistory(ludusaviStore);" in source
+    assert "syncGlobalHistory: () => syncGlobalHistory(ludusaviStore)" in source
+    assert "await syncGlobalHistory();" in source
 
 
 def test_frontend_status_strip_clears_on_hide() -> None:
@@ -1531,7 +1668,16 @@ def test_frontend_toggles_wrapped_in_panel_section_row_without_highlight_on_focu
     source = FRONTEND.read_text()
 
     # The 5 ToggleField elements must be wrapped inside a PanelSectionRow.
-    assert source.count("<PanelSectionRow>\n          <ToggleField") == 5
+    idx = 0
+    toggle_rows = 0
+    for _ in range(5):
+        toggle_start = source.index("<ToggleField", idx)
+        row_start = source.rindex("<PanelSectionRow", 0, toggle_start)
+        row_end = source.index("</PanelSectionRow>", toggle_start)
+        assert row_start < toggle_start < row_end
+        toggle_rows += 1
+        idx = row_end
+    assert toggle_rows == 5
 
     # ToggleField components should not contain 'highlightOnFocus' prop inside their definition.
     idx = 0
@@ -1641,15 +1787,17 @@ def test_frontend_settings_consecutive_changes_not_ignored() -> None:
 def test_frontend_settings_queue_is_module_scoped() -> None:
     import re
 
-    source = FRONTEND.read_text(encoding="utf-8")
+    settings_source = Path("src/settings/settingsMutationController.tsx").read_text()
 
-    # Verify that settingsQueue is declared as a module-scoped variable (before Content component)
-    match_queue = re.search(r"const\s+settingsQueue", source)
-    match_content = re.search(r"function\s+Content\s*\(\s*\)", source)
+    # Verify that settingsQueue is declared at settings controller module scope.
+    match_queue = re.search(r"const\s+settingsQueue", settings_source)
+    match_factory = re.search(
+        r"export\s+function\s+createSettingsMutationController", settings_source
+    )
     assert match_queue is not None
-    assert match_content is not None
-    assert match_queue.start() < match_content.start(), (
-        "settingsQueue must be declared at the module scope (before Content component)"
+    assert match_factory is not None
+    assert match_queue.start() < match_factory.start(), (
+        "settingsQueue must be declared at the settings controller module scope"
     )
 
 
@@ -1721,13 +1869,13 @@ def test_frontend_settings_queue_notifies_on_unhandled_rejection() -> None:
 
     source = FRONTEND.read_text(encoding="utf-8")
 
-    # Assert that processSettingsQueue catches unhandled task rejections and calls notify with activeLudusaviStore
+    # Assert that processSettingsQueue catches unhandled task rejections and calls the active failure notifier.
     assert (
         re.search(
             r"async\s+function\s+processSettingsQueue\s*\(\s*\)[\s\S]*?"
             r"catch\s*\(\s*err\s*\)\s*\{[\s\S]*?"
-            r"if\s*\(\s*activeLudusaviStore\s*\)\s*\{[\s\S]*?"
-            r"notify\(\s*activeLudusaviStore\s*,\s*\"failures_errors\"\s*,\s*\"Settings\s+Update\s+Failed\"",
+            r"if\s*\(\s*activeLudusaviStore\s*&&\s*activeFailureNotifier\s*\)\s*\{[\s\S]*?"
+            r"activeFailureNotifier\(\s*\"Settings\s+Update\s+Failed\"",
             source,
         )
         is not None
@@ -1739,20 +1887,27 @@ def test_frontend_settings_variables_reset_on_dismount() -> None:
 
     source = FRONTEND.read_text(encoding="utf-8")
 
-    # Assert that onDismount resets queue and sequence variables
+    # Assert that the controller reset clears queue and sequence variables, and onDismount delegates to it.
+    assert "resetSettingsMutationController();" in source
     assert (
         re.search(
-            r"onDismount\s*\(\s*\)\s*\{[\s\S]*?"
+            r"function\s+resetSettingsMutationController\s*\(\s*\)\s*\{[\s\S]*?"
             r"settingsQueue\.length\s*=\s*0\s*;[\s\S]*?"
             r"settingsProcessing\s*=\s*false\s*;[\s\S]*?"
             r"queueListeners\.clear\(\s*\)\s*;[\s\S]*?"
+            r"notifyQueueListeners\(\s*\)\s*;[\s\S]*?"
             r"autoSyncSeq\s*=\s*0\s*;[\s\S]*?"
             r"notificationSeq\s*=\s*0\s*;[\s\S]*?"
             r"selectedGameSeq\s*=\s*0\s*;[\s\S]*?"
+            r"updateChannelSeq\s*=\s*0\s*;[\s\S]*?"
+            r"automaticUpdateChecksSeq\s*=\s*0\s*;[\s\S]*?"
             r"lastPersistedAutoSync\s*=\s*null\s*;[\s\S]*?"
             r"lastPersistedNotifications\s*=\s*null\s*;[\s\S]*?"
+            r"lastPersistedUpdateChannel\s*=\s*null\s*;[\s\S]*?"
+            r"lastPersistedAutomaticUpdateChecks\s*=\s*null\s*;[\s\S]*?"
             r"lastPersistedSelectedGame\s*=\s*null\s*;[\s\S]*?"
             r"lastQueuedSelectedGame\s*=\s*null\s*;[\s\S]*?"
+            r"activeFailureNotifier\s*=\s*null\s*;[\s\S]*?"
             r"activeLudusaviStore\s*=\s*null\s*;",
             source,
         )
@@ -1771,7 +1926,7 @@ def test_frontend_settings_subscribe_queue_invokes_immediately() -> None:
             r"function\s+subscribeQueue\s*\(\s*listener[\s\S]*?\)\s*\{[\s\S]*?"
             r"queueListeners\.add\(\s*listener\s*\)\s*;[\s\S]*?"
             r"try\s*\{[\s\S]*?"
-            r"listener\(\s*settingsProcessing\s*\|\|\s*settingsQueue\.length\s*>\s*0\s*\)\s*;[\s\S]*?"
+            r"listener\(\s*getSettingsQueueBusy\(\s*\)\s*\)\s*;[\s\S]*?"
             r"\}\s*catch\s*\(\s*err\s*\)\s*\{",
             source,
         )
@@ -1788,7 +1943,7 @@ def test_frontend_selected_game_sync_effect() -> None:
     assert (
         re.search(
             r"useEffect\(\s*\(\s*\)\s*=>\s*\{\s*"
-            r"lastQueuedSelectedGame\s*=\s*selectedGame\s*;\s*"
+            r"syncLastQueuedSelectedGame\(\s*selectedGame\s*\)\s*;\s*"
             r"\}\s*,\s*\[\s*selectedGame\s*\]\s*\)\s*;",
             source,
         )
@@ -1894,14 +2049,16 @@ def test_frontend_dropdown_truncation_styling() -> None:
         is not None
     )
 
-    # Assert that styleElement is memoized inside Content component
+    # Assert that styleElement is memoized inside Content component and mounted via QamStyles
     assert (
         re.search(
-            r"const\s+styleElement\s*=\s*useMemo\(\s*\(\s*\)\s*=>\s*<style>\{\s*dropdownStyleEl\.textContent\s*\}</style>\s*,\s*\[\s*\]\s*\)",
+            r"const\s+styleElement\s*=\s*useMemo\([\s\S]*?<QamStyles\s+cssText=\{\s*dropdownCssText\s*\}\s*/>[\s\S]*?\[\s*dropdownCssText\s*\]\s*\)",
             source,
         )
         is not None
     )
+    assert "export function QamStyles" in source
+    assert "return <style>{cssText}</style>;" in source
 
 
 def test_frontend_dropdown_styling_lifecycle() -> None:
@@ -2063,16 +2220,11 @@ def test_frontend_on_dismount_resets_init_and_metadata_promises() -> None:
     assert "activeInitPromise = null;" in source
     assert "activeMetadataPromise = null;" in source
 
-    # Verify they appear in the onDismount block (near activeLudusaviStore = null)
+    # Verify root onDismount delegates to the content reset hook.
     dismount_idx = source.find('console.log("SDH-Ludusavi unloading")')
     assert dismount_idx != -1
     cleanup_region = source[dismount_idx - 600 : dismount_idx]
-    assert "activeInitPromise = null;" in cleanup_region, (
-        "activeInitPromise must be reset in onDismount cleanup"
-    )
-    assert "activeMetadataPromise = null;" in cleanup_region, (
-        "activeMetadataPromise must be reset in onDismount cleanup"
-    )
+    assert "resetLudusaviContentLoadState();" in cleanup_region
 
 
 def test_frontend_dropdown_uses_scoped_steamos_truncation_workaround() -> None:
