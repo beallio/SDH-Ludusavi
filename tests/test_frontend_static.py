@@ -16,6 +16,7 @@ class ConcatenatedFrontendPath:
             Path("src/components/qam/GameSettingsSection.tsx"),
             Path("src/components/qam/NotificationSettingsSection.tsx"),
             Path("src/components/qam/LudusaviLauncherSection.tsx"),
+            Path("src/components/qam/LudusaviContent.tsx"),
             Path("src/components/qam/QamStyles.tsx"),
             Path("src/components/qam/SpinnerButton.tsx"),
             Path("src/components/qam/VersionAndLogsSection.tsx"),
@@ -79,7 +80,7 @@ def test_frontend_wires_backend_calls_and_toasts() -> None:
 
 def test_frontend_exposes_notification_preferences_panel() -> None:
     source = FRONTEND.read_text()
-    root_source = Path("src/index.tsx").read_text()
+    content_source = Path("src/components/qam/LudusaviContent.tsx").read_text()
 
     for required_text in [
         'PanelSection title="Notifications"',
@@ -95,17 +96,17 @@ def test_frontend_exposes_notification_preferences_panel() -> None:
 
     assert (
         "onToggleNotificationSetting={(key, enabled) => void toggleNotificationSetting(key, enabled)}"
-        in root_source
+        in content_source
     )
     assert 'label="Auto-sync Progress"' not in source
     assert 'label="Auto-sync Results"' not in source
     assert source.index('PanelSection title="GLOBAL"') < source.index(
         'PanelSection title="Notifications"'
     )
-    assert root_source.index("<NotificationSettingsSection") > root_source.index(
+    assert content_source.index("<NotificationSettingsSection") > content_source.index(
         "<GameSettingsSection"
     )
-    assert root_source.index("<NotificationSettingsSection") < root_source.index(
+    assert content_source.index("<NotificationSettingsSection") < content_source.index(
         "<LudusaviLauncherSection"
     )
 
@@ -132,14 +133,14 @@ def test_frontend_centralizes_notification_aware_toasts() -> None:
 
 def test_frontend_uses_decky_toggle_for_automatic_sync() -> None:
     source = FRONTEND.read_text()
-    root_source = Path("src/index.tsx").read_text()
+    content_source = Path("src/components/qam/LudusaviContent.tsx").read_text()
 
     assert "ToggleField" in source
     assert 'label="Automatic Sync"' in source
     assert "checked={settings.auto_sync_enabled}" in source
     assert "disabled={isBusy}" in source
     assert "onChange={(enabled: boolean) => onToggleAutoSync(enabled)}" in source
-    assert "onToggleAutoSync={(enabled) => void toggleAutoSync(enabled)}" in root_source
+    assert "onToggleAutoSync={(enabled) => void toggleAutoSync(enabled)}" in content_source
     assert 'type="checkbox"' not in source
 
 
@@ -817,6 +818,21 @@ def test_frontend_lifecycle_orchestration_is_owned_by_controller() -> None:
         assert root_owned_algorithm not in root_source
 
 
+def test_frontend_root_renders_extracted_ludusavi_content() -> None:
+    root_source = Path("src/index.tsx").read_text()
+    content_source = Path("src/components/qam/LudusaviContent.tsx").read_text()
+
+    assert "LudusaviContent" in root_source
+    assert 'from "./components/qam/LudusaviContent";' in root_source
+    assert "<LudusaviContent" in root_source
+    assert "function Content()" not in root_source
+    assert "export function LudusaviContent(" in content_source
+    assert "useQuickAccessVisible()" in content_source
+    assert "createSettingsMutationController({" in content_source
+    assert "<PluginUpdateSection" in content_source
+    assert "<VersionsSection" in content_source
+
+
 def test_frontend_initial_load_skips_logs_and_warmed_refresh_when_cache_current() -> None:
     source = FRONTEND.read_text()
 
@@ -828,9 +844,13 @@ def test_frontend_initial_load_skips_logs_and_warmed_refresh_when_cache_current(
         "const installedAppIdsChanged = ludusaviState.installedAppIds !== installedAppIds;"
         in load_initial
     )
-    assert (
-        "const cacheCurrentResult = isWarmed && !installedAppIdsChanged ? await isGameCacheCurrentCall(installedAppIds) : false;"
-    ) in load_initial
+    for required_text in [
+        "const cacheCurrentResult =",
+        "isWarmed && !installedAppIdsChanged",
+        "await isGameCacheCurrentCall(installedAppIds)",
+        ": false;",
+    ]:
+        assert required_text in load_initial
     assert (
         "const cacheCurrent = !isRpcStatus(cacheCurrentResult) && cacheCurrentResult === true;"
     ) in load_initial
@@ -972,20 +992,22 @@ def test_frontend_displays_durable_operation_history() -> None:
 
 def test_frontend_qam_uses_global_and_game_panels() -> None:
     source = FRONTEND.read_text()
-    root_source = Path("src/index.tsx").read_text()
+    content_source = Path("src/components/qam/LudusaviContent.tsx").read_text()
 
     assert 'PanelSection title="GLOBAL"' in source
     assert 'PanelSection title="GAME"' in source
     assert 'PanelSection title="Sync"' not in source
-    assert root_source.index("<AutoSyncSettingsSection") < root_source.index("<GameSettingsSection")
-    assert root_source.index("<GameSettingsSection") < root_source.index(
+    assert content_source.index("<AutoSyncSettingsSection") < content_source.index(
+        "<GameSettingsSection"
+    )
+    assert content_source.index("<GameSettingsSection") < content_source.index(
         "<NotificationSettingsSection"
     )
-    assert root_source.index("<NotificationSettingsSection") < root_source.index(
+    assert content_source.index("<NotificationSettingsSection") < content_source.index(
         "<LudusaviLauncherSection"
     )
-    assert root_source.index("<LogsSection") < root_source.index("<PluginUpdateSection")
-    assert root_source.index("<PluginUpdateSection") < root_source.index("<VersionsSection")
+    assert content_source.index("<LogsSection") < content_source.index("<PluginUpdateSection")
+    assert content_source.index("<PluginUpdateSection") < content_source.index("<VersionsSection")
 
     global_panel = source[
         source.index('PanelSection title="GLOBAL"') : source.index('PanelSection title="GAME"')
@@ -1245,7 +1267,8 @@ def test_frontend_logs_and_retries_qam_scroll_reset() -> None:
         'function resetQuickAccessScroll(container: HTMLElement | null, reason = "qam_open")',
         "const resetDelays = [50, 150, 350];",
         "resetDelays.forEach((delay) => {",
-        "window.setTimeout(() => resetQuickAccessScroll(qamContentRef.current, `qam_open_retry_${delay}`), delay);",
+        "window.setTimeout(",
+        "resetQuickAccessScroll(qamContentRef.current, `qam_open_retry_${delay}`)",
         "const beforeContainerTop = container?.getBoundingClientRect?.().top ?? -1;",
         "Math.abs(beforeContainerTop - containerTop) <= QUICK_ACCESS_TOP_EPSILON_PX",
         "`QAM scroll reset (${reason}): before=${beforeTop}, after=${afterTop}, containerTop=${containerTop}, scrollable=${scrollableTag}`",
@@ -1488,12 +1511,12 @@ def test_frontend_load_initial_optimizations() -> None:
     load_initial = load_initial[: load_initial.index("const applyRefreshResult")]
 
     assert "Load versions and commands in the background" in load_initial
-    assert (
-        "const [loadedSettings, loadedHistory] = await Promise.all([\n"
-        "        getSettings(),\n"
-        "        getGameHistoryCall()\n"
-        "      ]);"
-    ) in load_initial
+    for required_text in [
+        "const [loadedSettings, loadedHistory] = await Promise.all([",
+        "getSettings(),",
+        "getGameHistoryCall()",
+    ]:
+        assert required_text in load_initial
     assert "const loadedSettings = await getSettings();" not in load_initial
     assert "const loadedHistory = await getGameHistoryCall();" not in load_initial
 
@@ -1764,15 +1787,17 @@ def test_frontend_settings_consecutive_changes_not_ignored() -> None:
 def test_frontend_settings_queue_is_module_scoped() -> None:
     import re
 
-    source = FRONTEND.read_text(encoding="utf-8")
+    settings_source = Path("src/settings/settingsMutationController.tsx").read_text()
 
-    # Verify that settingsQueue is declared as a module-scoped variable (before Content component)
-    match_queue = re.search(r"const\s+settingsQueue", source)
-    match_content = re.search(r"function\s+Content\s*\(\s*\)", source)
+    # Verify that settingsQueue is declared at settings controller module scope.
+    match_queue = re.search(r"const\s+settingsQueue", settings_source)
+    match_factory = re.search(
+        r"export\s+function\s+createSettingsMutationController", settings_source
+    )
     assert match_queue is not None
-    assert match_content is not None
-    assert match_queue.start() < match_content.start(), (
-        "settingsQueue must be declared at the module scope (before Content component)"
+    assert match_factory is not None
+    assert match_queue.start() < match_factory.start(), (
+        "settingsQueue must be declared at the settings controller module scope"
     )
 
 
@@ -2027,7 +2052,7 @@ def test_frontend_dropdown_truncation_styling() -> None:
     # Assert that styleElement is memoized inside Content component and mounted via QamStyles
     assert (
         re.search(
-            r"const\s+styleElement\s*=\s*useMemo\([\s\S]*?<QamStyles\s+cssText=\{\s*dropdownStyleEl\.textContent\s*\}\s*/>[\s\S]*?\[\s*\]\s*\)",
+            r"const\s+styleElement\s*=\s*useMemo\([\s\S]*?<QamStyles\s+cssText=\{\s*dropdownCssText\s*\}\s*/>[\s\S]*?\[\s*dropdownCssText\s*\]\s*\)",
             source,
         )
         is not None
@@ -2195,16 +2220,11 @@ def test_frontend_on_dismount_resets_init_and_metadata_promises() -> None:
     assert "activeInitPromise = null;" in source
     assert "activeMetadataPromise = null;" in source
 
-    # Verify they appear in the onDismount block (near activeLudusaviStore = null)
+    # Verify root onDismount delegates to the content reset hook.
     dismount_idx = source.find('console.log("SDH-Ludusavi unloading")')
     assert dismount_idx != -1
     cleanup_region = source[dismount_idx - 600 : dismount_idx]
-    assert "activeInitPromise = null;" in cleanup_region, (
-        "activeInitPromise must be reset in onDismount cleanup"
-    )
-    assert "activeMetadataPromise = null;" in cleanup_region, (
-        "activeMetadataPromise must be reset in onDismount cleanup"
-    )
+    assert "resetLudusaviContentLoadState();" in cleanup_region
 
 
 def test_frontend_dropdown_uses_scoped_steamos_truncation_workaround() -> None:
