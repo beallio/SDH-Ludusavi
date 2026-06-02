@@ -156,3 +156,30 @@ def test_workflows_trigger_and_overwrite_and_checksum_verification() -> None:
         (".github/workflows/ci.yml", ci_content),
     ]:
         assert "SDH-ludusavi.zip" not in content, f"Bad asset name found in {path}"
+
+
+def test_workflows_use_node24_action_runtime_and_current_action_majors() -> None:
+    workflows = {
+        ".github/workflows/ci.yml": Path(".github/workflows/ci.yml").read_text(encoding="utf-8"),
+        ".github/workflows/release.yml": Path(".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        ),
+        ".github/workflows/dev-release.yml": Path(".github/workflows/dev-release.yml").read_text(
+            encoding="utf-8"
+        ),
+    }
+
+    for path, content in workflows.items():
+        assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in content, (
+            f"{path} must opt GitHub JavaScript actions into the Node 24 runtime"
+        )
+        assert "uses: actions/checkout@v6" in content
+        assert "uses: actions/setup-node@v6" in content
+        assert "uses: pnpm/action-setup@v6" in content
+        assert "uses: actions/cache@v5" in content
+        assert "uses: actions/setup-python@v6" in content
+        assert "uses: astral-sh/setup-uv@v8.1.0" in content
+
+    assert "uses: actions/upload-artifact@v7" in workflows[".github/workflows/ci.yml"]
+    assert "uses: softprops/action-gh-release@v3" in workflows[".github/workflows/release.yml"]
+    assert "uses: softprops/action-gh-release@v3" in workflows[".github/workflows/dev-release.yml"]
