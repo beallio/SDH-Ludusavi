@@ -31,7 +31,7 @@ You have two options for manual installation through the Decky Loader's Develope
 - **Option A: Install from URL**
   1. In the Decky Settings, go to the **Developer** tab.
   2. Select **Install from URL**.
-  3. Enter the URL for the latest SDH-Ludusavi release ZIP from GitHub Releases (e.g., `https://github.com/beallio/SDH-Ludusavi/releases/download/v0.2.2/SDH-Ludusavi-v0.2.2.zip`) and click **Install**.
+  3. Enter the URL for the latest SDH-Ludusavi release ZIP from GitHub Releases (e.g., `https://github.com/beallio/SDH-Ludusavi/releases/download/v0.2.3/SDH-Ludusavi-v0.2.3.zip`) and click **Install**.
 
 - **Option B: Install from Local ZIP**
   1. Download the latest versioned `SDH-Ludusavi-vX.Y.Z.zip` to your Steam Deck.

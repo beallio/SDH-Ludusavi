@@ -1,0 +1,19 @@
+{
+  "date": "2026-06-02",
+  "task_objective": "Merge the post-install Versions section hotfix to main and prepare the v0.2.3 stable patch release.",
+  "files_modified": [
+    "README.md",
+    "package.json",
+    "plugin.json",
+    "tests/test_package_plugin.py",
+    "docs/agent_conversations/2026-06-02_release_v0_2_3.json"
+  ],
+  "tests_added": [],
+  "design_decisions": [
+    "Used the stable tag-driven release path for a patch fix.",
+    "Updated package metadata, README install guidance, and package-release test expectations to v0.2.3."
+  ],
+  "results": [
+    "Release validation is run before the release commit and tag are pushed."
+  ]
+}
