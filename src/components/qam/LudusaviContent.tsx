@@ -537,6 +537,16 @@ export function LudusaviContent({
     }
   };
 
+  const confirmInstalledPluginVersion = useCallback(
+    (version: string) => {
+      ludusaviStore.setVersions({
+        ...(ludusaviStore.getSnapshot().versions ?? {}),
+        sdh_ludusavi: version
+      });
+    },
+    [ludusaviStore]
+  );
+
   const {
     onGameChange,
     toggleAutoSync,
@@ -645,6 +655,7 @@ export function LudusaviContent({
         automaticUpdateChecks={settings.automatic_update_checks}
         onToggleUpdateChannel={toggleUpdateChannel}
         onToggleAutomaticUpdateChecks={toggleAutomaticUpdateChecks}
+        onInstallVersionConfirmed={confirmInstalledPluginVersion}
       />
 
       <VersionsSection versions={versions} />

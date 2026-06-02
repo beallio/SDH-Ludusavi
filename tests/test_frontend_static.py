@@ -2527,3 +2527,35 @@ def test_frontend_updater_post_reload_stale_coercion() -> None:
         "version matches effectiveCurrentVersion (currentVersion after reload), "
         "not only candidates matching the in-memory installedOverride.version"
     )
+
+
+def test_frontend_updater_success_updates_versions_section() -> None:
+    """
+    A successful updater handoff must refresh the shared Versions section state,
+    not only PluginUpdateSection's local Installed Version row.
+    """
+    import re
+
+    comp = Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+    content = Path("src/components/qam/LudusaviContent.tsx").read_text(encoding="utf-8")
+
+    assert "onInstallVersionConfirmed" in comp, (
+        "PluginUpdateSection must expose a success callback so parent QAM state "
+        "can update the Versions section immediately after installer handoff"
+    )
+    assert re.search(r"onInstallVersionConfirmed\?\.\(\s*version\s*\)", comp), (
+        "handleHandoffSuccess must call onInstallVersionConfirmed(version)"
+    )
+    assert "onInstallVersionConfirmed={" in content, (
+        "LudusaviContent must pass an install-version confirmation callback to PluginUpdateSection"
+    )
+    assert re.search(
+        r"setVersions\(\s*\{\s*\.\.\.\(ludusaviStore\.getSnapshot\(\)\.versions\s*\?\?",
+        content,
+    ), (
+        "The install-version callback must preserve existing version metadata "
+        "while overriding versions.sdh_ludusavi"
+    )
+    assert "sdh_ludusavi: version" in content, (
+        "The shared Versions section state must be updated to the installed version"
+    )

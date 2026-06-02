@@ -70,6 +70,7 @@ export interface PluginUpdateSectionProps {
   automaticUpdateChecks: boolean;
   onToggleUpdateChannel: (enabled: boolean) => void;
   onToggleAutomaticUpdateChecks: (enabled: boolean) => void;
+  onInstallVersionConfirmed?: (version: string) => void;
 }
 
 interface InstalledOverride {
@@ -83,7 +84,8 @@ export function PluginUpdateSection({
   updateChannel,
   automaticUpdateChecks,
   onToggleUpdateChannel,
-  onToggleAutomaticUpdateChecks
+  onToggleAutomaticUpdateChecks,
+  onInstallVersionConfirmed
 }: PluginUpdateSectionProps) {
   const [isChecking, setIsChecking] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
@@ -195,13 +197,14 @@ export function PluginUpdateSection({
       setErrorMsg(null);
       setIsInstalling(false);
       setIsHandoffPending(false);
+      onInstallVersionConfirmed?.(version);
       toaster.toast({
         title: "Installation Initiated",
         body: `Requested installation of v${version} via Decky Loader.`,
         duration: 3000
       });
     },
-    [currentVersion]
+    [currentVersion, onInstallVersionConfirmed]
   );
 
   // Clear the installed override once the real loaded version matches or exceeds
