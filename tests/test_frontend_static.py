@@ -24,6 +24,7 @@ class ConcatenatedFrontendPath:
             Path("src/utils/steam.ts"),
             Path("src/settings/settingsMutationController.tsx"),
             Path("src/surfaces/autoSyncStatusSurface.tsx"),
+            Path("src/controllers/gameLifecycleController.tsx"),
             Path("src/index.tsx"),
         ]
         contents = []
@@ -300,7 +301,7 @@ def test_frontend_status_strip_replaces_autosync_success_toasts() -> None:
         'publishAutoSyncStatus("has_backup", {',
         'publishAutoSyncStatus("unknown", {',
         'publishAutoSyncStatus("error", {',
-        'notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync"',
+        'notifyFailure("SDH-Ludusavi Auto-sync"',
     ]:
         assert required_text in source
 
@@ -780,6 +781,42 @@ def test_frontend_lifecycle_resolution_handles_non_steam_shortcuts() -> None:
     assert "activeSessions.get(notification.nInstanceID)" in source
 
 
+def test_frontend_lifecycle_orchestration_is_owned_by_controller() -> None:
+    root_source = Path("src/index.tsx").read_text()
+    controller_source = Path("src/controllers/gameLifecycleController.tsx").read_text()
+
+    for required_text in [
+        "type GameLifecycleControllerDependencies = {",
+        "export function createGameLifecycleController(",
+        "const handleAppStart = async",
+        "const handleAppExit = async",
+        "function start()",
+        "function dispose()",
+        "registerLifetime.call(gameSessions",
+        "window.setInterval(checkMainApp, 1000);",
+        "window.clearInterval(fallbackIntervalID);",
+        "activeSessions.clear();",
+    ]:
+        assert required_text in controller_source
+
+    for required_text in [
+        "const lifecycleController = createGameLifecycleController({",
+        "lifecycleController.start();",
+        "lifecycleController.dispose();",
+    ]:
+        assert required_text in root_source
+
+    for root_owned_algorithm in [
+        "const handleAppStart = async",
+        "const handleAppExit = async",
+        "const handleLifetimeNotification",
+        "const checkMainApp",
+        "const startFallbackPolling",
+        "const activeSessions = new Map<number, RunningSession>();",
+    ]:
+        assert root_owned_algorithm not in root_source
+
+
 def test_frontend_initial_load_skips_logs_and_warmed_refresh_when_cache_current() -> None:
     source = FRONTEND.read_text()
 
@@ -1225,12 +1262,20 @@ def test_frontend_preserves_always_render_for_lifecycle_and_status_surface() -> 
     assert "alwaysRender: true" in plugin_return
     assert "onDismount()" in plugin_return
     for required_text in [
-        "unregisterLifecycleNotifications();",
-        "window.clearInterval(fallbackIntervalID);",
-        "activeSessions.clear();",
+        "lifecycleController.dispose();",
         "resetAutoSyncStatusSurface();",
     ]:
         assert required_text in plugin_return
+
+    lifecycle_dispose_source = source[
+        source.index("function dispose()") : source.index("return {\n    start,\n    dispose")
+    ]
+    for required_text in [
+        "unregisterLifecycleNotifications();",
+        "window.clearInterval(fallbackIntervalID);",
+        "activeSessions.clear();",
+    ]:
+        assert required_text in lifecycle_dispose_source
 
     reset_source = source[
         source.index("function resetAutoSyncStatusSurface()") : source.index(
@@ -1563,7 +1608,8 @@ def test_frontend_syncs_history_via_dedicated_rpc() -> None:
         in source
     )
     assert "async function syncGlobalHistory(store: LudusaviStateStore)" in source
-    assert "await syncGlobalHistory(ludusaviStore);" in source
+    assert "syncGlobalHistory: () => syncGlobalHistory(ludusaviStore)" in source
+    assert "await syncGlobalHistory();" in source
 
 
 def test_frontend_status_strip_clears_on_hide() -> None:

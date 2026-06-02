@@ -1,7 +1,4 @@
-import {
-  showModal,
-  Router
-} from "@decky/ui";
+import { showModal } from "@decky/ui";
 import {
   definePlugin,
   toaster,
@@ -41,8 +38,6 @@ import {
   OperationResult,
   ConflictResolution,
   LifecycleCheckResult,
-  AppLifetimeNotification,
-  RunningSession,
   RpcStatus,
   RpcResult,
   LogEntry
@@ -56,6 +51,7 @@ import { LudusaviLauncherSection } from "./components/qam/LudusaviLauncherSectio
 import { NotificationSettingsSection } from "./components/qam/NotificationSettingsSection";
 import { QamStyles } from "./components/qam/QamStyles";
 import { LogsSection, VersionsSection } from "./components/qam/VersionAndLogsSection";
+import { createGameLifecycleController } from "./controllers/gameLifecycleController";
 import { summarizeOperationResult } from "./formatting/operationText";
 import { log } from "./utils/logging";
 import {
@@ -84,8 +80,6 @@ import {
 } from "./surfaces/autoSyncStatusSurface";
 import {
   getInstalledAppIdsString,
-  sessionFromAppOverview,
-  getMainRunningSession,
   captureSteamUiGameContext,
   getPreferredSteamGameSession,
   findGameForRunningSession,
@@ -787,399 +781,29 @@ export default definePlugin(() => {
   setActiveSettingsStore(ludusaviStore, (title, body) => {
     notify(ludusaviStore, "failures_errors", title, body, <FaExclamationTriangle />);
   });
-  const activeSessions = new Map<number, RunningSession>();
-  let fallbackIntervalID: number | null = null;
-  let fallbackPreviousAppID: string | null = null;
-  let fallbackPreviousAppName: string | null = null;
-  let lifecycleRegistration: unknown = null;
-
-  const isTracked = (name: string, appID: string) => {
-    return ludusaviStore.isTracked(
-      name,
-      appID,
-      (reason, detail) => {
-        if (reason === "appId") {
-          log("debug", `Match found via AppID: ${detail}`);
-        } else if (reason === "exact") {
-          log("debug", `Match found via exact name: ${detail}`);
-        } else if (reason === "substring") {
-          log("debug", `Match found via substring: ${detail}`);
-        }
-      },
-      (normalizedInput) => {
-        log("debug", `No match for ${name} (${appID}) [normalized: ${normalizedInput}]`);
-      }
-    );
-  };
-
-  function shouldPublishAutoSyncStatusBeforeRpc(store: LudusaviStateStore, tracked: boolean) {
-    return store.shouldPublishAutoSyncStatusBeforeRpc(tracked);
-  }
-
-  const handleAppStart = async (name: string, appID: string, instanceID?: number) => {
-    const tracked = isTracked(name, appID);
-    log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
-    let paused = false;
-    
-    if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
-      publishAutoSyncStatus("checking", {
-        source: "lifecycle_start",
-        gameName: name,
-        appID,
-        tracked
-      });
-    }
-
-    try {
-      const autoSyncEnabled = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
-      const shouldPauseLaunch =
-        autoSyncEnabled &&
-        tracked &&
-        typeof instanceID === "number" &&
-        instanceID > 1;
-
-      if (shouldPauseLaunch) {
-        const pauseResult = await pauseGameProcessCall(instanceID);
-        if (!isRpcStatus(pauseResult) && pauseResult.status === "paused") {
-          paused = true;
-        }
-      }
-
-      log("info", `Calling check_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-      const checkResult = await checkGameStartCall(name, appID);
-      log("info", `check_game_start result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
-      // Show result toast for all outcomes (restored, failed, conflict, or skipped)
-      // unless auto-sync is completely disabled, another operation is running,
-      // or the game simply isn't managed by Ludusavi (unmatched or ignored).
-      const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
-      if (checkResult.status === "skipped" && silentReasons.includes(checkResult.reason ?? "")) {
-        hideAutoSyncStatus({
-          source: "hide",
-          gameName: name,
-          appID,
-          tracked,
-          resultStatus: checkResult.status
-        });
-        return;
-      }
-
-      if (checkResult.status === "needed" && checkResult.operation === "restore") {
-        if (!paused) {
-          const result: OperationResult = {
-            status: "failed",
-            game: name,
-            message: "Launch gate unavailable; restore skipped while game is loading."
-          };
-          completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
-          return;
-        }
-        publishAutoSyncStatus("restoring", {
-          source: "lifecycle_start",
-          gameName: name,
-          appID,
-          tracked
-        });
-        log("info", `Calling restore_game_on_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-        const result = await restoreGameOnStartCall(name, appID);
-        log("info", `restore_game_on_start result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
-        completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-        if (result.status === "failed") {
-          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
-        }
-        return;
-      }
-
-      if (checkResult.status === "conflict") {
-        publishAutoSyncStatus("conflict", {
-          source: "lifecycle_start",
-          gameName: name,
-          appID,
-          tracked,
-          resultStatus: checkResult.status
-        });
-        if (!paused) {
-          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", "Launch gate unavailable; conflict resolution skipped while game is loading.", <FaExclamationTriangle />);
-          return;
-        }
-        const resolution = await showConflictResolutionModal(checkResult);
-        if (!resolution) {
-          completeAutoSyncStatus({ status: "skipped", game: name, reason: "conflict_unresolved" }, { gameName: name, appID, tracked });
-          return;
-        }
-        const result = await resolveGameStartConflictCall(checkResult.game ?? name, appID, resolution);
-        completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-        if (result.status === "failed") {
-          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
-        }
-        return;
-      }
-
-      completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
-      if (checkResult.status === "failed") {
-        notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
-      }
-    } catch (err) {
-      log("error", `App start handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
-      hideAutoSyncStatus({
-        source: "hide",
-        gameName: name,
-        appID,
-        tracked,
-        resultStatus: "failed"
-      });
-    } finally {
-      if (paused && typeof instanceID === "number") {
-        try {
-          await resumeGameProcessCall(instanceID);
-        } catch (err) {
-          log("error", `Failed to resume game process ${instanceID}: ${err}`, "lifecycle", name);
-        }
-      }
-      await syncGlobalHistory(ludusaviStore);
-    }
-  };
-
-  const handleAppExit = async (name: string, appID: string) => {
-    const tracked = isTracked(name, appID);
-    log("info", `App exited: ${name} (${appID}) tracked=${tracked}`);
-    
-    if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
-      publishAutoSyncStatus("checking", {
-        source: "lifecycle_exit",
-        gameName: name,
-        appID,
-        tracked
-      });
-    }
-    
-    try {
-      log("info", `Calling check_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-      const checkResult = await checkGameExitCall(name, appID);
-      log("info", `check_game_exit result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
-      const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
-      if (checkResult.status === "skipped" && silentReasons.includes(checkResult.reason ?? "")) {
-        hideAutoSyncStatus({
-          source: "hide",
-          gameName: name,
-          appID,
-          tracked,
-          resultStatus: checkResult.status
-        });
-        return;
-      }
-
-      if (checkResult.status === "needed" && checkResult.operation === "backup") {
-        publishAutoSyncStatus("backing_up", {
-          source: "lifecycle_exit",
-          gameName: name,
-          appID,
-          tracked
-        });
-        log("info", `Calling backup_game_on_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-        const result = await backupGameOnExitCall(name, appID);
-        log("info", `backup_game_on_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
-        completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-        if (result.status === "failed") {
-          notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"), <FaExclamationTriangle />);
-        }
-        return;
-      }
-
-      completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
-      if (checkResult.status === "failed") {
-        notify(ludusaviStore, "failures_errors", "SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"), <FaExclamationTriangle />);
-      }
-    } catch (err) {
-      log("error", `App exit handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
-      hideAutoSyncStatus({
-        source: "hide",
-        gameName: name,
-        appID,
-        tracked,
-        resultStatus: "failed"
-      });
-    } finally {
-      await syncGlobalHistory(ludusaviStore);
-    }
-  };
-
-  const findRunningSessionByAppID = (appID: string): RunningSession | null => {
-    // Router.RunningApps lets Steam app lifetime events recover the display name.
-    const runningApps = (Router as any).RunningApps;
-    if (Array.isArray(runningApps)) {
-      for (const app of runningApps) {
-        const session = sessionFromAppOverview(app);
-        if (session?.appID === appID) {
-          return session;
-        }
-      }
-    }
-
-    const mainSession = getMainRunningSession();
-    if (mainSession?.appID === appID) {
-      return mainSession;
-    }
-
-    return null;
-  };
-
-  const findStartupSession = (notification: AppLifetimeNotification): RunningSession | null => {
-    const startupSession = activeSessions.get(-1) ?? null;
-    if (!startupSession) {
-      return null;
-    }
-    if (notification.unAppID === 0 || startupSession.appID === String(notification.unAppID)) {
-      return startupSession;
-    }
-    return null;
-  };
-
-  const resolveLifetimeSession = (notification: AppLifetimeNotification): RunningSession | null => {
-    const existingSession = activeSessions.get(notification.nInstanceID);
-    if (existingSession) {
-      return existingSession;
-    }
-
-    if (!notification.bRunning) {
-      const startupSession = findStartupSession(notification);
-      if (startupSession) {
-        return startupSession;
-      }
-    }
-
-    if (notification.unAppID > 0) {
-      const appID = String(notification.unAppID);
-      const runningSession = findRunningSessionByAppID(appID);
-      if (runningSession) {
-        return runningSession;
-      }
-      return { appID, name: "" };
-    }
-
-    // unAppID may be 0 for non-Steam shortcuts, so fall back to Router state.
-    return getMainRunningSession();
-  };
-
-  const handleLifetimeNotification = (notification: AppLifetimeNotification) => {
-    try {
-      const session = resolveLifetimeSession(notification);
-      if (!session?.name) {
-        log(
-          "warning",
-          `Could not resolve app lifetime notification: ${JSON.stringify(notification)}`,
-          "lifecycle"
-        );
-        return;
-      }
-
-      if (notification.bRunning) {
-        const startupSession = findStartupSession(notification);
-        if (startupSession?.appID === session.appID) {
-          activeSessions.delete(-1);
-          activeSessions.set(notification.nInstanceID, session);
-          log(
-            "debug",
-            `Promoted startup session for ${session.name} (${session.appID})`,
-            "lifecycle",
-            session.name
-          );
-          return;
-        }
-
-        if (activeSessions.has(notification.nInstanceID)) {
-          log(
-            "debug",
-            `Duplicate app start ignored for ${session.name} (${session.appID})`,
-            "lifecycle",
-            session.name
-          );
-          return;
-        }
-
-        activeSessions.set(notification.nInstanceID, session);
-        void handleAppStart(session.name, session.appID, notification.nInstanceID);
-        return;
-      }
-
-      activeSessions.delete(notification.nInstanceID);
-      const startupSession = activeSessions.get(-1);
-      if (startupSession?.appID === session.appID) {
-        activeSessions.delete(-1);
-      }
-      void handleAppExit(session.name, session.appID);
-    } catch (err) {
-      console.error("SDH-Ludusavi: app lifetime notification failed", err);
-    }
-  };
-
-  const checkMainApp = () => {
-    try {
-      const mainApp = (Router as any).MainRunningApp;
-      const currentAppID = mainApp?.appid ? String(mainApp.appid) : null;
-      const currentAppName = mainApp?.display_name || null;
-
-      if (currentAppID !== fallbackPreviousAppID) {
-        // Change detected
-        if (fallbackPreviousAppID && fallbackPreviousAppName) {
-          void handleAppExit(fallbackPreviousAppName, fallbackPreviousAppID);
-        }
-        if (currentAppID && currentAppName) {
-          void handleAppStart(currentAppName, currentAppID);
-        }
-        
-        fallbackPreviousAppID = currentAppID;
-        fallbackPreviousAppName = currentAppName;
-      }
-    } catch (err) {
-      console.error("SDH-Ludusavi: watcher loop failed", err);
-    }
-  };
-
-  const startFallbackPolling = () => {
-    log("warning", "Steam app lifetime notifications unavailable; using Router polling", "lifecycle");
-    fallbackIntervalID = window.setInterval(checkMainApp, 1000);
-  };
-
-  const reconcileStartupSession = () => {
-    const session = getMainRunningSession();
-    if (!session) {
-      return;
-    }
-
-    activeSessions.set(-1, session);
-    void handleAppStart(session.name, session.appID);
-  };
-
-  const unregisterLifecycleNotifications = () => {
-    const registration = lifecycleRegistration as
-      | { unregister?: () => void; Unregister?: () => void }
-      | (() => void)
-      | null;
-    if (!registration) {
-      return;
-    }
-
-    if (typeof registration === "function") {
-      registration();
-    } else if (typeof registration.unregister === "function") {
-      registration.unregister();
-    } else if (typeof registration.Unregister === "function") {
-      registration.Unregister();
-    }
-  };
-
-  const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
-  const gameSessions = steamClient?.GameSessions;
-  const registerLifetime = gameSessions?.RegisterForAppLifetimeNotifications;
-  if (typeof registerLifetime === "function") {
-    lifecycleRegistration = registerLifetime.call(gameSessions, (notification: AppLifetimeNotification) => {
-      handleLifetimeNotification(notification);
-    });
-    reconcileStartupSession();
-  } else {
-    startFallbackPolling();
-  }
+  const lifecycleController = createGameLifecycleController({
+    store: ludusaviStore,
+    rpc: {
+      checkGameStart: checkGameStartCall,
+      restoreGameOnStart: restoreGameOnStartCall,
+      resolveGameStartConflict: resolveGameStartConflictCall,
+      checkGameExit: checkGameExitCall,
+      backupGameOnExit: backupGameOnExitCall,
+      pauseGameProcess: pauseGameProcessCall,
+      resumeGameProcess: resumeGameProcessCall
+    },
+    statusSurface: {
+      publish: publishAutoSyncStatus,
+      hide: hideAutoSyncStatus,
+      complete: completeAutoSyncStatus
+    },
+    resolveConflict: showConflictResolutionModal,
+    notifyFailure: (title, body) => {
+      notify(ludusaviStore, "failures_errors", title, body, <FaExclamationTriangle />);
+    },
+    syncGlobalHistory: () => syncGlobalHistory(ludusaviStore)
+  });
+  lifecycleController.start();
 
   return {
     name: "SDH-Ludusavi",
@@ -1192,11 +816,7 @@ export default definePlugin(() => {
     icon: <PluginIcon />,
     alwaysRender: true,
     onDismount() {
-      unregisterLifecycleNotifications();
-      if (fallbackIntervalID !== null) {
-        window.clearInterval(fallbackIntervalID);
-      }
-      activeSessions.clear();
+      lifecycleController.dispose();
       resetAutoSyncStatusSurface();
 
       if (dropdownStyleEl.parentNode) {
