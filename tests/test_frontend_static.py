@@ -2559,3 +2559,42 @@ def test_frontend_updater_success_updates_versions_section() -> None:
     assert "sdh_ludusavi: version" in content, (
         "The shared Versions section state must be updated to the installed version"
     )
+
+
+def test_frontend_updater_hydrates_pending_install_version_after_reload() -> None:
+    """
+    After Decky reloads, the immediate handoff callback may no longer be in memory.
+    PluginUpdateSection must hydrate the pending install target from durable backend
+    context so the Updates panel and shared Versions section show the target version
+    before the user exits QAM.
+    """
+    import re
+
+    comp = Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+
+    assert "pending_update_install" in comp, (
+        "PluginUpdateSection must inspect pending_update_install from get_update_check_context"
+    )
+    assert re.search(r"pendingInstall\s*=\s*ctx\.pending_update_install", comp), (
+        "loadCache must assign ctx.pending_update_install to a pendingInstall variable"
+    )
+    assert re.search(r"setInstalledOverride\(\s*\{[\s\S]{0,220}pendingInstall\.version", comp), (
+        "loadCache must seed installedOverride from pendingInstall.version after reload"
+    )
+    assert "preInstallVersion: ctx.installed_version ?? currentVersion" in comp, (
+        "pending hydration must use backend installed_version as preInstallVersion so "
+        "the override is not cleared when get_versions replaces Loading..."
+    )
+    assert "currentVersion !== installedOverride.version" in comp, (
+        "the override-clearing effect must not clear when the parent currentVersion "
+        "is optimistically updated to the pending installed version"
+    )
+    assert re.search(r"onInstallVersionConfirmed\?\.\(\s*pendingInstall\.version\s*\)", comp), (
+        "loadCache must refresh shared Versions state from pendingInstall.version"
+    )
+    assert "confirmUpdateInstallHandoffCall" in comp, (
+        "successful installer handoff must confirm pending install metadata before reload"
+    )
+    assert "clearPendingUpdateInstallCall" in comp, (
+        "failed installer handoff must clear pending install metadata"
+    )

@@ -1,0 +1,38 @@
+{
+  "date": "2026-06-02T08:33:39-07:00",
+  "task_objective": "Fix Updates panel version reconciliation after Decky installer handoff when the previous frontend-only optimistic update did not survive reload/startup timing.",
+  "files_modified": [
+    "docs/plans/2026-06-02_fix_updater_version_reconciliation.md",
+    "py_modules/sdh_ludusavi/updater.py",
+    "src/components/PluginUpdateSection.tsx",
+    "tests/test_updater_service.py",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "tests/test_updater_service.py::test_update_context_uses_pending_install_as_effective_version",
+    "tests/test_updater_service.py::test_confirmed_pending_install_freshness_uses_confirmation_time",
+    "tests/test_updater_service.py::test_unconfirmed_pending_install_does_not_become_effective_version",
+    "tests/test_updater_service.py::test_clear_pending_update_install_removes_failed_handoff_metadata",
+    "tests/test_updater_service.py::test_fresh_confirmed_pending_update_install_survives_startup_mismatch",
+    "tests/test_frontend_static.py::test_frontend_updater_hydrates_pending_install_version_after_reload"
+  ],
+  "design_decisions": [
+    "Keep fresh pending update installs through a short startup mismatch grace window instead of clearing them while the old backend version may still be loaded.",
+    "Expose effective_installed_version in update-check context so the frontend can distinguish fresh pending install state from stale pending metadata.",
+    "Require installer handoff confirmation before pending metadata becomes the effective installed version, and clear pending metadata when installer handoff fails.",
+    "Hydrate PluginUpdateSection's installed override from pending install context and update shared Versions state after reload.",
+    "Use the backend installed_version as the hydrated pre-install baseline so old version metadata replacing Loading... does not clear the pending display.",
+    "Guard late in-flight stale update checks against the pending target version so they cannot restore the install button."
+  ],
+  "results": [
+    "./run.sh uv run pytest tests/test_updater_service.py::test_record_update_install_requested_preserves_metadata tests/test_updater_service.py::test_update_context_uses_pending_install_as_effective_version tests/test_updater_service.py::test_unconfirmed_pending_install_does_not_become_effective_version tests/test_updater_service.py::test_clear_pending_update_install_removes_failed_handoff_metadata tests/test_updater_service.py::test_fresh_confirmed_pending_update_install_survives_startup_mismatch tests/test_frontend_static.py::test_frontend_updater_hydrates_pending_install_version_after_reload: passed",
+    "./run.sh uv run pytest tests/test_updater_service.py::test_confirmed_pending_install_freshness_uses_confirmation_time tests/test_frontend_static.py::test_frontend_updater_hydrates_pending_install_version_after_reload: passed",
+    "./run.sh uv run pytest tests/test_updater_service.py: passed",
+    "./run.sh uv run pytest tests/test_frontend_static.py: passed",
+    "./run.sh uv run ruff check . --fix: passed",
+    "./run.sh uv run ruff format .: passed",
+    "./run.sh uv run ty check py_modules/sdh_ludusavi/: passed",
+    "./run.sh uv run pytest: passed (445 tests)",
+    "./run.sh pnpm run verify: passed with registry access for pnpm audit"
+  ]
+}

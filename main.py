@@ -101,6 +101,18 @@ class Plugin:
             "get_update_check_context", lambda: self._service().get_update_check_context()
         )
 
+    async def confirm_update_install_handoff(self, version: str) -> dict[str, Any]:
+        return await self._call(
+            "confirm_update_install_handoff",
+            lambda: self._service().confirm_update_install_handoff(version),
+        )
+
+    async def clear_pending_update_install(self, version: str | None = None) -> dict[str, Any]:
+        return await self._call(
+            "clear_pending_update_install",
+            lambda: self._service().clear_pending_update_install(version),
+        )
+
     async def check_for_plugin_update(
         self, current_version: str, force: bool = False
     ) -> dict[str, Any]:

@@ -25,6 +25,8 @@ import {
 const checkForPluginUpdateCall = callable<[currentVersion: string, force: boolean], UpdateCheckResult>("check_for_plugin_update");
 const revalidatePluginUpdateCall = callable<[candidate: any], any>("revalidate_plugin_update");
 const recordUpdateInstallRequestedCall = callable<[candidate: any], any>("record_update_install_requested");
+const confirmUpdateInstallHandoffCall = callable<[version: string], any>("confirm_update_install_handoff");
+const clearPendingUpdateInstallCall = callable<[version: string], any>("clear_pending_update_install");
 const getUpdateCheckContextCall = callable<[], any>("get_update_check_context");
 const logRpc = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
 
@@ -97,6 +99,8 @@ export function PluginUpdateSection({
   const [installedOverride, setInstalledOverride] = useState<InstalledOverride | null>(null);
   const hasChecked = useRef(false);
   const inFlightCheck = useRef<Promise<any> | null>(null);
+  const pendingInstallVersion = useRef<string | null>(null);
+  const hydratedPendingInstallVersion = useRef<string | null>(null);
 
   // Effective version used for display and RPC calls.
   // After a successful handoff, shows the installed target version until the
@@ -141,6 +145,7 @@ export function PluginUpdateSection({
             const candidateVersion = res.candidate?.version;
             const isStale =
               (installedOverride && candidateVersion === installedOverride.version) ||
+              candidateVersion === pendingInstallVersion.current ||
               candidateVersion === effectiveCurrentVersion;
             if (isStale) {
               logUpdate(null, "check_success", { status: "current", stale_coerced: true, elapsed_ms });
@@ -189,7 +194,13 @@ export function PluginUpdateSection({
   // Shared post-install success helper. Called from both handoff success paths:
   // immediate (installerPromise resolved before 3 s) and delayed (after timeout).
   const handleHandoffSuccess = React.useCallback(
-    (version: string, channel: UpdateChannel, traceId: string, handoffStart: number) => {
+    async (version: string, channel: UpdateChannel, traceId: string, handoffStart: number) => {
+      try {
+        await confirmUpdateInstallHandoffCall(version);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logUpdate(traceId, "handoff_confirm_failed", { message: msg });
+      }
       logUpdate(traceId, "handoff_resolved", { status: "success", elapsed_ms: Math.round(performance.now() - handoffStart) });
       setInstalledOverride({ version, channel, preInstallVersion: currentVersion });
       setCheckResult({ status: "current", checked_at: new Date().toISOString(), channel });
@@ -215,7 +226,8 @@ export function PluginUpdateSection({
     if (
       currentVersion &&
       currentVersion !== "Loading..." &&
-      currentVersion !== installedOverride.preInstallVersion
+      currentVersion !== installedOverride.preInstallVersion &&
+      currentVersion !== installedOverride.version
     ) {
       setInstalledOverride(null);
     }
@@ -232,8 +244,34 @@ export function PluginUpdateSection({
           if (ctx.installed_release_published_at) {
             setInstalledReleasePublishedAt(ctx.installed_release_published_at);
           }
+          const pendingInstall = ctx.pending_update_install;
+          if (
+            pendingInstall?.version &&
+            ctx.effective_installed_version === pendingInstall.version &&
+            hydratedPendingInstallVersion.current !== pendingInstall.version
+          ) {
+            const pendingChannel: UpdateChannel =
+              pendingInstall.channel === "development" ? "development" : "stable";
+            pendingInstallVersion.current = pendingInstall.version;
+            hydratedPendingInstallVersion.current = pendingInstall.version;
+            setInstalledOverride({
+              version: pendingInstall.version,
+              channel: pendingChannel,
+              preInstallVersion: ctx.installed_version ?? currentVersion
+            });
+            setCheckResult({
+              status: "current",
+              checked_at: ctx.last_checked_at ?? new Date().toISOString(),
+              channel: pendingChannel
+            });
+            setCandidate(null);
+            setErrorMsg(null);
+            onInstallVersionConfirmed?.(pendingInstall.version);
+          }
           if (ctx.last_checked_at && ctx.last_checked_channel === updateChannel) {
-            const hasPending = !!ctx.pending_update_install;
+            const hasPending =
+              !!ctx.pending_update_install &&
+              ctx.effective_installed_version === ctx.pending_update_install.version;
             if (ctx.last_available_tag && !hasPending) {
               // Trigger a non-blocking check to restore candidate state
               void checkForUpdates({ force: false, notify: false });
@@ -248,7 +286,7 @@ export function PluginUpdateSection({
     return () => {
       active = false;
     };
-  }, [updateChannel]);
+  }, [currentVersion, onInstallVersionConfirmed, updateChannel]);
 
   // Run check on mount or when update channel changes
   useEffect(() => {
@@ -352,15 +390,21 @@ export function PluginUpdateSection({
         logUpdate(updateTraceId, "handoff_pending", { status: "installer_handoff_pending", elapsed_ms: Math.round(performance.now() - handoffStart) });
         setIsHandoffPending(true);
         void (async () => {
-          try {
-            await installerPromise;
-            handleHandoffSuccess(revalRes.version, revalRes.channel as UpdateChannel, updateTraceId, handoffStart);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            logUpdate(updateTraceId, "handoff_rejected", { message: msg, elapsed_ms: Math.round(performance.now() - handoffStart) });
-            setIsInstalling(false);
-            setIsHandoffPending(false);
-            setErrorMsg(msg);
+            try {
+              await installerPromise;
+              await handleHandoffSuccess(revalRes.version, revalRes.channel as UpdateChannel, updateTraceId, handoffStart);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              logUpdate(updateTraceId, "handoff_rejected", { message: msg, elapsed_ms: Math.round(performance.now() - handoffStart) });
+              try {
+                await clearPendingUpdateInstallCall(revalRes.version);
+              } catch (clearErr) {
+                const clearMsg = clearErr instanceof Error ? clearErr.message : String(clearErr);
+                logUpdate(updateTraceId, "pending_clear_failed", { message: clearMsg });
+              }
+              setIsInstalling(false);
+              setIsHandoffPending(false);
+              setErrorMsg(msg);
             toaster.toast({
               title: "Installation Failed",
               body: msg,
@@ -370,10 +414,16 @@ export function PluginUpdateSection({
         })();
       } else {
         await installerPromise;
-        handleHandoffSuccess(revalRes.version, revalRes.channel as UpdateChannel, updateTraceId, handoffStart);
+        await handleHandoffSuccess(revalRes.version, revalRes.channel as UpdateChannel, updateTraceId, handoffStart);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      try {
+        await clearPendingUpdateInstallCall(targetCandidate.version);
+      } catch (clearErr) {
+        const clearMsg = clearErr instanceof Error ? clearErr.message : String(clearErr);
+        logUpdate(updateTraceId, "pending_clear_failed", { message: clearMsg });
+      }
       setErrorMsg(msg);
       setIsInstalling(false);
       setIsHandoffPending(false);

@@ -438,6 +438,16 @@ class SDHLudusaviService:
 
         return updater.record_update_install_requested(self, candidate)
 
+    def confirm_update_install_handoff(self, version: str) -> dict[str, Any]:
+        from . import updater
+
+        return updater.confirm_update_install_handoff(self, version)
+
+    def clear_pending_update_install(self, version: str | None = None) -> dict[str, Any]:
+        from . import updater
+
+        return updater.clear_pending_update_install(self, version)
+
     def reconcile_pending_update_install(self, current_version: str) -> None:
         from . import updater
 

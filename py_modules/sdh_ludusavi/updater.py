@@ -80,6 +80,7 @@ class JsonResponse:
 
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-dev\.([a-zA-Z0-9.-]+))?(?:\+([a-zA-Z0-9.-]+))?$")
+_PENDING_INSTALL_MISMATCH_GRACE = datetime.timedelta(minutes=15)
 
 
 def parse_plugin_version(version_str: str) -> ParsedPluginVersion | None:
@@ -132,6 +133,49 @@ def _get_ssl_context() -> ssl.SSLContext:
             except Exception:
                 pass
     return context
+
+
+def _is_fresh_pending_install(pending: Any) -> bool:
+    if not isinstance(pending, dict):
+        return False
+    requested_at = (
+        pending.get("handoff_confirmed_at")
+        if _is_confirmed_pending_install(pending)
+        else pending.get("requested_at")
+    )
+    if not isinstance(requested_at, str) or not requested_at:
+        return False
+
+    try:
+        requested = datetime.datetime.fromisoformat(requested_at.replace("Z", "+00:00"))
+    # Intentionally broad
+    except Exception:
+        return False
+
+    if requested.tzinfo is None:
+        requested = requested.replace(tzinfo=datetime.timezone.utc)
+    return (
+        datetime.datetime.now(datetime.timezone.utc) - requested <= _PENDING_INSTALL_MISMATCH_GRACE
+    )
+
+
+def _is_confirmed_pending_install(pending: Any) -> bool:
+    if not isinstance(pending, dict):
+        return False
+    confirmed_at = pending.get("handoff_confirmed_at")
+    return isinstance(confirmed_at, str) and bool(confirmed_at)
+
+
+def _effective_pending_install_version(pending: Any) -> str | None:
+    if (
+        isinstance(pending, dict)
+        and _is_fresh_pending_install(pending)
+        and _is_confirmed_pending_install(pending)
+    ):
+        version = pending.get("version")
+        if isinstance(version, str) and version:
+            return version
+    return None
 
 
 def fetch_json(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
@@ -538,10 +582,15 @@ def get_update_check_context(service: Any) -> dict[str, Any]:
             else:
                 rate_limited_until_str = service._update_rate_limited_until.isoformat()
 
+        installed_version = resolve_version()
+        pending_install = service._update_check_cache.get("pending_update_install")
+        pending_version = _effective_pending_install_version(pending_install)
+
         return {
             "update_channel": service._update_channel,
             "automatic_update_checks": service._automatic_update_checks,
-            "installed_version": resolve_version(),
+            "installed_version": installed_version,
+            "effective_installed_version": pending_version or installed_version,
             "last_checked_at": service._update_check_cache.get("last_checked_at"),
             "last_checked_channel": service._update_check_cache.get("last_checked_channel"),
             "last_available_tag": service._update_check_cache.get("last_available_tag"),
@@ -550,7 +599,7 @@ def get_update_check_context(service: Any) -> dict[str, Any]:
             "installed_release_published_at": service._update_check_cache.get(
                 "installed_release_published_at"
             ),
-            "pending_update_install": service._update_check_cache.get("pending_update_install"),
+            "pending_update_install": pending_install,
             "rate_limited_until": rate_limited_until_str,
         }
 
@@ -608,6 +657,34 @@ def record_update_install_requested(service: Any, candidate: dict[str, Any]) -> 
         return get_update_check_context(service)
 
 
+def confirm_update_install_handoff(service: Any, version: str) -> dict[str, Any]:
+    with service._state_lock:
+        pending = service._update_check_cache.get("pending_update_install")
+        if isinstance(pending, dict) and pending.get("version") == version:
+            pending["handoff_confirmed_at"] = datetime.datetime.now(
+                datetime.timezone.utc
+            ).isoformat()
+            service._save_state()
+            service.log("info", f"Pending install handoff confirmed: version={version}")
+        else:
+            service.log(
+                "warning",
+                f"Pending install handoff confirmation ignored: version={version}",
+            )
+        return get_update_check_context(service)
+
+
+def clear_pending_update_install(service: Any, version: str | None = None) -> dict[str, Any]:
+    with service._state_lock:
+        pending = service._update_check_cache.get("pending_update_install")
+        pending_version = pending.get("version") if isinstance(pending, dict) else None
+        if pending and (version is None or pending_version == version):
+            service._update_check_cache.pop("pending_update_install", None)
+            service._save_state()
+            service.log("info", f"Pending install cleared: version={pending_version}")
+        return get_update_check_context(service)
+
+
 def reconcile_pending_update_install(service: Any, current_version: str) -> None:
     with service._state_lock:
         pending = service._update_check_cache.get("pending_update_install")
@@ -623,14 +700,22 @@ def reconcile_pending_update_install(service: Any, current_version: str) -> None
                     "info",
                     f"Startup reconciliation: Pending update promoted (version={pending_version}, tag={pending_tag})",
                 )
+                service._update_check_cache.pop("pending_update_install", None)
+                service._save_state()
+            elif _is_fresh_pending_install(pending) and _is_confirmed_pending_install(pending):
+                service.log(
+                    "info",
+                    f"Startup reconciliation: Pending update retained during reload grace window "
+                    f"(pending={pending_version}, loaded={current_version})",
+                )
             else:
                 service.log(
                     "warning",
                     f"Startup reconciliation: Pending update cleared due to version mismatch "
                     f"(pending={pending_version}, loaded={current_version})",
                 )
-            service._update_check_cache.pop("pending_update_install", None)
-            service._save_state()
+                service._update_check_cache.pop("pending_update_install", None)
+                service._save_state()
         else:
             service.log("info", "Startup reconciliation: No pending update found")
 

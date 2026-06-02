@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 from sdh_ludusavi.service import SDHLudusaviService
 from sdh_ludusavi.persistence import JsonSettingsStore
@@ -178,12 +179,13 @@ def test_transient_rate_limit_properties(tmp_path: Path) -> None:
     assert service2._update_rate_limited_until is None
 
 
-def test_record_update_install_requested_preserves_metadata(tmp_path: Path) -> None:
+def test_record_update_install_requested_preserves_metadata(monkeypatch, tmp_path: Path) -> None:
     settings_file = tmp_path / "settings.json"
     cache_file = tmp_path / "cache.json"
 
     store = JsonSettingsStore(settings_file)
     service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+    monkeypatch.setattr("sdh_ludusavi.updater.resolve_version", lambda: "0.2.1")
 
     candidate = {
         "version": "0.2.2-dev.g456",
@@ -205,10 +207,135 @@ def test_record_update_install_requested_preserves_metadata(tmp_path: Path) -> N
     assert ctx2["pending_update_install"] is not None
     assert ctx2["pending_update_install"]["version"] == "0.2.2-dev.g456"
 
-    # 4. Assert that calling reconcile_pending_update_install with mismatching version clears it
+    assert ctx2["effective_installed_version"] == "0.2.1"
+
+    ctx_confirmed = service.confirm_update_install_handoff("0.2.2-dev.g456")
+    assert ctx_confirmed["pending_update_install"]["handoff_confirmed_at"] is not None
+    assert ctx_confirmed["effective_installed_version"] == "0.2.2-dev.g456"
+
+    # 4. A fresh confirmed mismatch should not clear the pending install.
+    # Decky can keep the old backend loaded briefly after the installer handoff.
     service.reconcile_pending_update_install("0.2.1")
     ctx3 = service.get_update_check_context()
-    assert ctx3["pending_update_install"] is None
+    assert ctx3["pending_update_install"] is not None
+    assert ctx3["pending_update_install"]["version"] == "0.2.2-dev.g456"
+    assert ctx3["effective_installed_version"] == "0.2.2-dev.g456"
+
+
+def test_update_context_uses_pending_install_as_effective_version(
+    monkeypatch, tmp_path: Path
+) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+    service._update_check_cache["pending_update_install"] = {
+        "version": "0.2.4",
+        "tag": "v0.2.4",
+        "channel": "stable",
+        "published_at": "2026-06-02T12:00:00Z",
+        "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "handoff_confirmed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    monkeypatch.setattr("sdh_ludusavi.updater.resolve_version", lambda: "0.2.3")
+
+    ctx = service.get_update_check_context()
+
+    assert ctx["installed_version"] == "0.2.3"
+    assert ctx["effective_installed_version"] == "0.2.4"
+
+
+def test_confirmed_pending_install_freshness_uses_confirmation_time(
+    monkeypatch, tmp_path: Path
+) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    old_requested_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
+    fresh_confirmed_at = datetime.datetime.now(datetime.timezone.utc)
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+    service._update_check_cache["pending_update_install"] = {
+        "version": "0.2.4",
+        "tag": "v0.2.4",
+        "channel": "stable",
+        "published_at": "2026-06-02T12:00:00Z",
+        "requested_at": old_requested_at.isoformat(),
+        "handoff_confirmed_at": fresh_confirmed_at.isoformat(),
+    }
+    monkeypatch.setattr("sdh_ludusavi.updater.resolve_version", lambda: "0.2.3")
+
+    ctx = service.get_update_check_context()
+    service.reconcile_pending_update_install("0.2.3")
+
+    assert ctx["effective_installed_version"] == "0.2.4"
+    assert service._update_check_cache["pending_update_install"]["version"] == "0.2.4"
+
+
+def test_unconfirmed_pending_install_does_not_become_effective_version(
+    monkeypatch, tmp_path: Path
+) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+    service._update_check_cache["pending_update_install"] = {
+        "version": "0.2.4",
+        "tag": "v0.2.4",
+        "channel": "stable",
+        "published_at": "2026-06-02T12:00:00Z",
+        "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    monkeypatch.setattr("sdh_ludusavi.updater.resolve_version", lambda: "0.2.3")
+
+    ctx = service.get_update_check_context()
+
+    assert ctx["installed_version"] == "0.2.3"
+    assert ctx["effective_installed_version"] == "0.2.3"
+
+
+def test_clear_pending_update_install_removes_failed_handoff_metadata(tmp_path: Path) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+    service._update_check_cache["pending_update_install"] = {
+        "version": "0.2.4",
+        "tag": "v0.2.4",
+        "channel": "stable",
+        "published_at": "2026-06-02T12:00:00Z",
+        "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+
+    ctx = service.clear_pending_update_install("0.2.4")
+
+    assert ctx["pending_update_install"] is None
+
+
+def test_fresh_confirmed_pending_update_install_survives_startup_mismatch(
+    tmp_path: Path,
+) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+    service._update_check_cache["pending_update_install"] = {
+        "version": "0.2.4",
+        "tag": "v0.2.4",
+        "channel": "stable",
+        "published_at": "2026-06-02T12:00:00Z",
+        "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "handoff_confirmed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+
+    service.reconcile_pending_update_install("0.2.3")
+
+    assert service._update_check_cache["pending_update_install"]["version"] == "0.2.4"
+    assert service._update_check_cache.get("installed_release_tag") is None
 
 
 def test_record_update_check_result_logs_failure(tmp_path: Path) -> None:
