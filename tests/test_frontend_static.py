@@ -23,6 +23,7 @@ class ConcatenatedFrontendPath:
             Path("src/formatting/operationText.ts"),
             Path("src/utils/steam.ts"),
             Path("src/settings/settingsMutationController.tsx"),
+            Path("src/surfaces/autoSyncStatusSurface.tsx"),
             Path("src/index.tsx"),
         ]
         contents = []
@@ -203,7 +204,7 @@ def test_frontend_uses_browserview_only_autosync_status_strip() -> None:
         "unregisterLifecycleNotifications();",
         "window.clearInterval(fallbackIntervalID);",
         "activeSessions.clear();",
-        "destroyAutoSyncStatusBrowserView();",
+        "resetAutoSyncStatusSurface();",
     ]:
         assert required_text in source
 
@@ -383,8 +384,12 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
     assert "raw === owner" in source
     assert "SetTopmost" in source
 
-    dismount_source = source[source.index("onDismount()") :]
-    assert "clearAutoSyncStatusShowTimeout();" in dismount_source
+    reset_source = source[
+        source.index("function resetAutoSyncStatusSurface()") : source.index(
+            "function showConflictResolutionModal("
+        )
+    ]
+    assert "clearAutoSyncStatusShowTimeout();" in reset_source
 
 
 def test_frontend_status_strip_destroy_disposes_owner_and_nested_view() -> None:
@@ -1223,10 +1228,22 @@ def test_frontend_preserves_always_render_for_lifecycle_and_status_surface() -> 
         "unregisterLifecycleNotifications();",
         "window.clearInterval(fallbackIntervalID);",
         "activeSessions.clear();",
-        "clearAutoSyncStatusHideTimeout();",
-        "destroyAutoSyncStatusBrowserView();",
+        "resetAutoSyncStatusSurface();",
     ]:
         assert required_text in plugin_return
+
+    reset_source = source[
+        source.index("function resetAutoSyncStatusSurface()") : source.index(
+            "function showConflictResolutionModal("
+        )
+    ]
+    for required_text in [
+        "clearAutoSyncStatusHideTimeout();",
+        "clearAutoSyncStatusSyncTimeout();",
+        "clearAutoSyncStatusShowTimeout();",
+        "destroyAutoSyncStatusBrowserView();",
+    ]:
+        assert required_text in reset_source
 
 
 def test_frontend_prefers_main_running_app_for_qam_game_selection() -> None:
