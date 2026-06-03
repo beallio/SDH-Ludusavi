@@ -1,0 +1,28 @@
+{
+  "date": "2026-06-02T19:32:58-07:00",
+  "task_objective": "Fix CI uv sync failures caused by non-PEP-440 dev release tags on main.",
+  "files_modified": [
+    ".github/workflows/ci.yml",
+    "docs/plans/2026-06-02_fix_ci_dev_tag_version.md",
+    "docs/agent_conversations/2026-06-02_fix_ci_dev_tag_version.json",
+    "tests/test_release_workflows.py"
+  ],
+  "tests_added": [
+    "tests/test_release_workflows.py::test_workflows_trigger_and_overwrite_and_checksum_verification"
+  ],
+  "design_decisions": [
+    "Do not rely on hatch-vcs parsing development prerelease tags during regular CI dependency sync.",
+    "Use package.json version as SETUPTOOLS_SCM_PRETEND_VERSION in CI, matching the established dev-release workflow pattern.",
+    "Avoid changing release tags or hatch-vcs parsing rules because the dev tag's -dev.g suffix is not PEP 440."
+  ],
+  "results": [
+    "./run.sh uv run pytest tests/test_release_workflows.py::test_workflows_trigger_and_overwrite_and_checksum_verification: passed",
+    "./run.sh uv run ruff check . --fix: passed",
+    "./run.sh uv run ruff format .: passed",
+    "./run.sh uv run ty check py_modules/sdh_ludusavi/: passed",
+    "./run.sh uv run pytest tests/test_release_workflows.py: passed",
+    "SETUPTOOLS_SCM_PRETEND_VERSION=0.2.3 ./run.sh uv sync: passed",
+    "./run.sh uv run pytest: passed (445 tests)",
+    "./run.sh pnpm run verify: passed with registry access for pnpm audit"
+  ]
+}

@@ -148,6 +148,8 @@ def test_workflows_trigger_and_overwrite_and_checksum_verification() -> None:
 
     ci_content = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert "sha256sum -c" in ci_content
+    assert "PKG_VER=$(jq -r .version package.json)" in ci_content
+    assert 'SETUPTOOLS_SCM_PRETEND_VERSION="$PKG_VER" ./run.sh uv sync' in ci_content
 
     # 5. Verify absence of bad/lowercase asset names in all workflows
     for path, content in [
