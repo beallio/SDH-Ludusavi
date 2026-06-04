@@ -2645,3 +2645,11 @@ def test_frontend_updater_stuck_check_state_handling() -> None:
 
     # 10. The toggle effect uses a hydration guard to prevent redundant check on mount
     assert "automaticCheckToggleHydrated" in comp
+
+    # 11. Stale hydration calls do not set contextHydrated to true when active is false
+    import re
+
+    assert (
+        re.search(r"if\s*\(\s*active\s*\)\s*\{\s*setContextHydrated\(\s*true\s*\)\s*;?\s*\}", comp)
+        is not None
+    )

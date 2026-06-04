@@ -344,7 +344,9 @@ export function PluginUpdateSection({
       } catch (err) {
         // Quiet failure on context check
       } finally {
-        setContextHydrated(true);
+        if (active) {
+          setContextHydrated(true);
+        }
       }
     }
     void loadCache();
