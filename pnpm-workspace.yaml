@@ -1,4 +1,7 @@
 minimumReleaseAge: 20160
+minimumReleaseAgeExclude:
+  - react-router
+  - "@remix-run/router"
 storeDir: /tmp/sdh_ludusavi/.pnpm-store
 virtualStoreDir: /tmp/sdh_ludusavi/pnpm-virtual-store
 sideEffectsCache: false
