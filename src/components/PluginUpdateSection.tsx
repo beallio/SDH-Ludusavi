@@ -605,7 +605,7 @@ export function PluginUpdateSection({
             )}
             {!isChecking && !errorMsg && checkResult?.status === "available" && (
               <span style={{ color: "#60a5fa" }}>
-                {candidate?.channel === "development" && currentVersion.includes("dev") && !installedReleasePublishedAt
+                {candidate?.channel === "development" && effectiveCurrentVersion.includes("dev") && !installedReleasePublishedAt
                   ? "Latest available development build"
                   : "Update available"}
               </span>

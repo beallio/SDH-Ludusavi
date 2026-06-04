@@ -207,7 +207,7 @@ def test_record_update_install_requested_preserves_metadata(monkeypatch, tmp_pat
     assert ctx2["pending_update_install"] is not None
     assert ctx2["pending_update_install"]["version"] == "0.2.2-dev.g456"
 
-    assert ctx2["effective_installed_version"] == "0.2.1"
+    assert ctx2["effective_installed_version"] == "0.2.2-dev.g456"
 
     ctx_confirmed = service.confirm_update_install_handoff("0.2.2-dev.g456")
     assert ctx_confirmed["pending_update_install"]["handoff_confirmed_at"] is not None
@@ -273,9 +273,7 @@ def test_confirmed_pending_install_freshness_uses_confirmation_time(
     assert service._update_check_cache["pending_update_install"]["version"] == "0.2.4"
 
 
-def test_unconfirmed_pending_install_does_not_become_effective_version(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_unconfirmed_pending_install_becomes_effective_version(monkeypatch, tmp_path: Path) -> None:
     settings_file = tmp_path / "settings.json"
     cache_file = tmp_path / "cache.json"
 
@@ -293,7 +291,7 @@ def test_unconfirmed_pending_install_does_not_become_effective_version(
     ctx = service.get_update_check_context()
 
     assert ctx["installed_version"] == "0.2.3"
-    assert ctx["effective_installed_version"] == "0.2.3"
+    assert ctx["effective_installed_version"] == "0.2.4"
 
 
 def test_clear_pending_update_install_removes_failed_handoff_metadata(tmp_path: Path) -> None:
@@ -1047,3 +1045,98 @@ def test_updater_cache_version_aware_and_invalidation(tmp_path: Path, monkeypatc
     assert service._update_check_cache.get("last_available_tag") is None
     assert service._update_check_cache.get("last_checked_version") is None
     assert service._update_check_cache.get("pending_update_install") is None
+
+
+def test_record_update_install_requested_returns_immediate_effective_version(
+    monkeypatch, tmp_path: Path
+) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+    monkeypatch.setattr("sdh_ludusavi.updater.resolve_version", lambda: "0.2.2-dev.g123")
+
+    candidate = {
+        "version": "0.2.3",
+        "tag": "v0.2.3",
+        "channel": "stable",
+        "published_at": "2026-06-04T12:00:00Z",
+        "action": "move_to_stable",
+    }
+
+    ctx = service.record_update_install_requested(candidate)
+    assert ctx["effective_installed_version"] == "0.2.3"
+    assert ctx["installed_version"] == "0.2.2-dev.g123"
+
+
+def test_unconfirmed_pending_install_ttl(monkeypatch, tmp_path: Path) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+    monkeypatch.setattr("sdh_ludusavi.updater.resolve_version", lambda: "0.2.2-dev.g123")
+
+    candidate = {
+        "version": "0.2.3",
+        "tag": "v0.2.3",
+        "channel": "stable",
+        "published_at": "2026-06-04T12:00:00Z",
+        "action": "move_to_stable",
+    }
+
+    service.record_update_install_requested(candidate)
+
+    # 1. Fresh unconfirmed install is effective
+    ctx = service.get_update_check_context()
+    assert ctx["effective_installed_version"] == "0.2.3"
+
+    # 2. Mock time to make it stale
+    stale_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=20)
+    service._update_check_cache["pending_update_install"]["requested_at"] = stale_time.isoformat()
+
+    ctx_stale = service.get_update_check_context()
+    assert ctx_stale["effective_installed_version"] == "0.2.2-dev.g123"
+
+
+def test_reconcile_promotion_stable_equivalents(monkeypatch, tmp_path: Path) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+
+    def set_pending_stable() -> None:
+        service._update_check_cache["pending_update_install"] = {
+            "version": "0.2.3",
+            "tag": "v0.2.3",
+            "channel": "stable",
+            "published_at": "2026-06-04T12:00:00Z",
+            "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+
+    # 1. Pending stable 0.2.3 promotes when loaded version is 0.2.3
+    set_pending_stable()
+    service.reconcile_pending_update_install("0.2.3")
+    assert service._update_check_cache.get("installed_release_tag") == "v0.2.3"
+    assert service._update_check_cache.get("pending_update_install") is None
+
+    # 2. Pending stable 0.2.3 promotes when loaded version is 0.2.3+metadata
+    set_pending_stable()
+    service.reconcile_pending_update_install("0.2.3+metadata")
+    assert service._update_check_cache.get("installed_release_tag") == "v0.2.3"
+    assert service._update_check_cache.get("pending_update_install") is None
+
+    # 3. Pending stable 0.2.3 does NOT promote when loaded version is 0.2.3-dev.gabcdef
+    service._update_check_cache.pop("installed_release_tag", None)
+    service._update_check_cache["pending_update_install"] = {
+        "version": "0.2.3",
+        "tag": "v0.2.3-new",
+        "channel": "stable",
+        "published_at": "2026-06-04T12:00:00Z",
+        "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    service.reconcile_pending_update_install("0.2.3-dev.gabcdef")
+    assert service._update_check_cache.get("installed_release_tag") is None
+    assert service._update_check_cache.get("pending_update_install") is not None

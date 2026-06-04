@@ -166,12 +166,26 @@ def _is_confirmed_pending_install(pending: Any) -> bool:
     return isinstance(confirmed_at, str) and bool(confirmed_at)
 
 
+def _pending_install_matches_loaded_version(pending_version: str, current_version: str) -> bool:
+    if pending_version == current_version:
+        return True
+
+    parsed_pending = parse_plugin_version(pending_version)
+    parsed_current = parse_plugin_version(current_version)
+    if not parsed_pending or not parsed_current:
+        return False
+
+    if parsed_current.is_dev:
+        return False
+
+    if not parsed_pending.is_dev and parsed_pending == parsed_current:
+        return True
+
+    return False
+
+
 def _effective_pending_install_version(pending: Any) -> str | None:
-    if (
-        isinstance(pending, dict)
-        and _is_fresh_pending_install(pending)
-        and _is_confirmed_pending_install(pending)
-    ):
+    if isinstance(pending, dict) and _is_fresh_pending_install(pending):
         version = pending.get("version")
         if isinstance(version, str) and version:
             return version
@@ -705,7 +719,9 @@ def reconcile_pending_update_install(service: Any, current_version: str) -> None
         if pending:
             pending_version = pending.get("version")
             pending_tag = pending.get("tag")
-            if pending_version == current_version:
+            if pending_version and _pending_install_matches_loaded_version(
+                pending_version, current_version
+            ):
                 service._update_check_cache["installed_release_tag"] = pending_tag
                 service._update_check_cache["installed_release_published_at"] = pending.get(
                     "published_at"
@@ -717,7 +733,7 @@ def reconcile_pending_update_install(service: Any, current_version: str) -> None
                 service._update_check_cache.pop("pending_update_install", None)
                 clear_stale_update_check_cache(service)
                 service._save_state()
-            elif _is_fresh_pending_install(pending) and _is_confirmed_pending_install(pending):
+            elif _is_fresh_pending_install(pending):
                 service.log(
                     "info",
                     f"Startup reconciliation: Pending update retained during reload grace window "

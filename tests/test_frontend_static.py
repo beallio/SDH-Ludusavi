@@ -2669,3 +2669,34 @@ def test_frontend_updater_check_for_updates_guard_and_hydration_skip() -> None:
     assert "skipInitialCheck.current = true;" in comp, (
         "skipInitialCheck.current must be set to true during pending install hydration reload"
     )
+
+
+def test_frontend_updater_dev_to_stable_static() -> None:
+    comp_path = Path("src/components/PluginUpdateSection.tsx")
+    assert comp_path.exists()
+    comp = comp_path.read_text(encoding="utf-8")
+
+    # 1. Status copy must not use raw currentVersion.includes("dev")
+    assert 'currentVersion.includes("dev")' not in comp, (
+        "Status copy must not use raw currentVersion.includes('dev')"
+    )
+    assert 'effectiveCurrentVersion.includes("dev")' in comp, (
+        "Status copy must use effectiveCurrentVersion.includes('dev')"
+    )
+
+    # 2. Hydration checks ctx.effective_installed_version === pendingInstall.version
+    assert "ctx.effective_installed_version === pendingInstall.version" in comp, (
+        "Hydration must check ctx.effective_installed_version === pendingInstall.version"
+    )
+
+    # 3. Coercion logic handles stale candidate version matching effectiveCurrentVersion,
+    #    installedOverride.version, or pendingInstallVersion.current
+    assert "installedOverride.version" in comp or "installedOverride" in comp
+    assert "pendingInstallVersion.current" in comp
+    assert "effectiveCurrentVersion" in comp
+
+    # 4. Action text logic handles dev-to-stable actions
+    assert "move_to_stable" in comp
+    assert "downgrade_to_stable" in comp
+    assert "Move to Stable" in comp
+    assert "Revert to Stable" in comp
