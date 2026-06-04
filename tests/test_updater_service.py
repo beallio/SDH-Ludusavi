@@ -849,3 +849,201 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     for level, msg in logged:
         assert "f" * 64 not in msg
         assert "a" * 64 not in msg
+
+
+def test_updater_cache_version_aware_and_invalidation(tmp_path: Path, monkeypatch) -> None:
+    import sys
+    import asyncio
+    import types
+    from sdh_ludusavi.service import SDHLudusaviService
+    from sdh_ludusavi.persistence import JsonSettingsStore
+    from sdh_ludusavi.updater import JsonResponse
+
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+    settings_file.write_text("{}", encoding="utf-8")
+    cache_file.write_text("{}", encoding="utf-8")
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+
+    manifest = {
+        "schemaVersion": 1,
+        "pluginName": "SDH-Ludusavi",
+        "packageName": "sdh-ludusavi",
+        "version": "0.2.1",
+        "sourceVersion": "0.2.1",
+        "tag": "v0.2.1",
+        "channel": "stable",
+        "assetName": "SDH-Ludusavi-v0.2.1.zip",
+        "sha256": "a" * 64,
+        "generatedAt": "2026-05-30T12:00:00Z",
+    }
+    releases = [
+        {
+            "draft": False,
+            "prerelease": False,
+            "tag_name": "v0.2.1",
+            "html_url": "https://release-url",
+            "published_at": "2026-05-30T12:00:00Z",
+            "assets": [
+                {
+                    "name": "SDH-Ludusavi-v0.2.1.manifest.json",
+                    "browser_download_url": "https://manifest-url",
+                },
+                {
+                    "name": "SDH-Ludusavi-v0.2.1.zip",
+                    "browser_download_url": "https://zip-url",
+                },
+            ],
+        }
+    ]
+
+    # Mock release fetch: return a release candidate
+    import sdh_ludusavi.updater as updater_mod
+
+    monkeypatch.setattr(
+        updater_mod,
+        "fetch_json",
+        lambda url, **kwargs: (
+            JsonResponse(status=200, headers={}, body=manifest)
+            if "manifest" in url or "manifest.json" in url
+            else JsonResponse(status=200, headers={}, body="a" * 64)
+            if "sha256" in url
+            else JsonResponse(status=200, headers={}, body=releases)
+        ),
+    )
+
+    # Setup plugin for main.py check_for_plugin_update
+    dummy_decky = types.SimpleNamespace(
+        DECKY_USER_HOME=str(tmp_path),
+        DECKY_HOME=str(tmp_path),
+        DECKY_PLUGIN_SETTINGS_DIR=str(tmp_path / "settings"),
+        DECKY_PLUGIN_RUNTIME_DIR=str(tmp_path / "data"),
+        logger=types.SimpleNamespace(
+            info=lambda *a, **k: None,
+            warning=lambda *a, **k: None,
+            exception=lambda *a, **k: None,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "decky", dummy_decky)
+    monkeypatch.setitem(
+        sys.modules, "settings", types.SimpleNamespace(SettingsManager=lambda *args, **kwargs: None)
+    )
+
+    sys.modules.pop("main", None)
+    import main
+
+    plugin = main.Plugin()
+    plugin._backend = service
+
+    # 1. Version-aware backend cache reuse test
+    # Run a live check with version 0.2.0
+    res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=False))
+    assert res["status"] == "available"
+    # This should store the cached result and the checked version (0.2.0)
+    assert service._update_check_cache.get("last_checked_version") == "0.2.0"
+    assert service._update_check_cache.get("last_result") == res
+
+    # Calling check_for_plugin_update with the same version ("0.2.0") should HIT cache
+    # Let's count how many times fetch_json is called
+    fetch_calls = 0
+
+    def mock_fetch_counted(url, **kwargs):
+        nonlocal fetch_calls
+        fetch_calls += 1
+        if "manifest" in url or "manifest.json" in url:
+            return JsonResponse(status=200, headers={}, body=manifest)
+        if "sha256" in url:
+            return JsonResponse(status=200, headers={}, body="a" * 64)
+        return JsonResponse(status=200, headers={}, body=releases)
+
+    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_counted)
+
+    # Call with same version: cached hit, fetch_calls should remain 0
+    res2 = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=False))
+    assert res2["status"] == "available"
+    assert fetch_calls == 0
+
+    # Call with a DIFFERENT version ("0.2.1"): cache bypassed, fetch_calls should increase
+    res3 = asyncio.run(plugin.check_for_plugin_update("0.2.1", force=False))
+    assert res3["status"] == "current"  # because target release is v0.2.1
+    assert fetch_calls > 0
+    assert service._update_check_cache.get("last_checked_version") == "0.2.1"
+
+    # 2. Invalidation tests
+    # Reset to available cache
+    monkeypatch.setattr(
+        updater_mod,
+        "fetch_json",
+        lambda url, **kwargs: (
+            JsonResponse(status=200, headers={}, body=manifest)
+            if "manifest" in url or "manifest.json" in url
+            else JsonResponse(status=200, headers={}, body="a" * 64)
+            if "sha256" in url
+            else JsonResponse(status=200, headers={}, body=releases)
+        ),
+    )
+    res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
+    assert service._update_check_cache.get("last_result") is not None
+    assert service._update_check_cache.get("last_available_tag") == "v0.2.1"
+    assert service._update_check_cache.get("last_checked_version") == "0.2.0"
+
+    # Test invalidation on record_update_install_requested
+    service.record_update_install_requested(res["candidate"])
+    assert service._update_check_cache.get("last_result") is None
+    assert service._update_check_cache.get("last_available_tag") is None
+    assert service._update_check_cache.get("last_checked_version") is None
+
+    # Reset cache again
+    res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
+    assert service._update_check_cache.get("last_result") is not None
+
+    # Test invalidation on confirm_update_install_handoff
+    service.confirm_update_install_handoff("0.2.1")
+    assert service._update_check_cache.get("last_result") is None
+    assert service._update_check_cache.get("last_available_tag") is None
+    assert service._update_check_cache.get("last_checked_version") is None
+
+    # Reset cache again
+    res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
+    assert service._update_check_cache.get("last_result") is not None
+
+    # Test invalidation on clear_pending_update_install
+    service.clear_pending_update_install("0.2.1")
+    assert service._update_check_cache.get("last_result") is None
+    assert service._update_check_cache.get("last_available_tag") is None
+    assert service._update_check_cache.get("last_checked_version") is None
+
+    # Reset cache again and set pending update
+    res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
+    service.record_update_install_requested(res["candidate"])
+    # Put some values in cache to test reconcile promotion invalidation
+    service._update_check_cache["last_result"] = res
+    service._update_check_cache["last_available_tag"] = "v0.2.1"
+    service._update_check_cache["last_checked_version"] = "0.2.0"
+
+    # Reconcile pending update with promotion (version matches pending)
+    service.reconcile_pending_update_install("0.2.1")
+    assert service._update_check_cache.get("last_result") is None
+    assert service._update_check_cache.get("last_available_tag") is None
+    assert service._update_check_cache.get("last_checked_version") is None
+    assert service._update_check_cache.get("installed_release_tag") == "v0.2.1"
+
+    # Reset cache again and record install request
+    res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
+    service.record_update_install_requested(res["candidate"])
+    service._update_check_cache["last_result"] = res
+    service._update_check_cache["last_available_tag"] = "v0.2.1"
+    service._update_check_cache["last_checked_version"] = "0.2.0"
+
+    # Reconcile pending update with version mismatch clearing
+    # Let's override requested_at to make it stale
+    service._update_check_cache["pending_update_install"]["requested_at"] = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=30)
+    ).isoformat()
+    service.reconcile_pending_update_install("0.2.2")
+    assert service._update_check_cache.get("last_result") is None
+    assert service._update_check_cache.get("last_available_tag") is None
+    assert service._update_check_cache.get("last_checked_version") is None
+    assert service._update_check_cache.get("pending_update_install") is None

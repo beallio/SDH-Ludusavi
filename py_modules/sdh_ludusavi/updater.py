@@ -604,18 +604,29 @@ def get_update_check_context(service: Any) -> dict[str, Any]:
         }
 
 
+def clear_stale_update_check_cache(service: Any) -> None:
+    service._update_check_cache.pop("last_result", None)
+    service._update_check_cache.pop("last_available_tag", None)
+    service._update_check_cache.pop("last_checked_version", None)
+
+
 def record_update_check_result(service: Any, result: dict[str, Any]) -> None:
     with service._state_lock:
         status = result.get("status")
         checked_at = result.get("checked_at")
+        checked_version = result.get("checked_version")
         if status == "available":
             candidate = result.get("candidate", {})
             service._update_check_cache["last_checked_at"] = checked_at
             service._update_check_cache["last_checked_channel"] = service._update_channel
             service._update_check_cache["last_available_tag"] = candidate.get("tag")
+            if checked_version:
+                service._update_check_cache["last_checked_version"] = checked_version
         elif status == "current":
             service._update_check_cache["last_checked_at"] = checked_at
             service._update_check_cache["last_checked_channel"] = service._update_channel
+            if checked_version:
+                service._update_check_cache["last_checked_version"] = checked_version
         elif status == "failed":
             message = result.get("message")
             service.log("error", f"Update check failed: {message}")
@@ -647,6 +658,7 @@ def record_update_install_requested(service: Any, candidate: dict[str, Any]) -> 
             "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "update_trace_id": trace_id,
         }
+        clear_stale_update_check_cache(service)
         service._save_state()
         service.log(
             "info",
@@ -664,6 +676,7 @@ def confirm_update_install_handoff(service: Any, version: str) -> dict[str, Any]
             pending["handoff_confirmed_at"] = datetime.datetime.now(
                 datetime.timezone.utc
             ).isoformat()
+            clear_stale_update_check_cache(service)
             service._save_state()
             service.log("info", f"Pending install handoff confirmed: version={version}")
         else:
@@ -680,6 +693,7 @@ def clear_pending_update_install(service: Any, version: str | None = None) -> di
         pending_version = pending.get("version") if isinstance(pending, dict) else None
         if pending and (version is None or pending_version == version):
             service._update_check_cache.pop("pending_update_install", None)
+            clear_stale_update_check_cache(service)
             service._save_state()
             service.log("info", f"Pending install cleared: version={pending_version}")
         return get_update_check_context(service)
@@ -701,6 +715,7 @@ def reconcile_pending_update_install(service: Any, current_version: str) -> None
                     f"Startup reconciliation: Pending update promoted (version={pending_version}, tag={pending_tag})",
                 )
                 service._update_check_cache.pop("pending_update_install", None)
+                clear_stale_update_check_cache(service)
                 service._save_state()
             elif _is_fresh_pending_install(pending) and _is_confirmed_pending_install(pending):
                 service.log(
@@ -715,6 +730,7 @@ def reconcile_pending_update_install(service: Any, current_version: str) -> None
                     f"(pending={pending_version}, loaded={current_version})",
                 )
                 service._update_check_cache.pop("pending_update_install", None)
+                clear_stale_update_check_cache(service)
                 service._save_state()
         else:
             service.log("info", "Startup reconciliation: No pending update found")

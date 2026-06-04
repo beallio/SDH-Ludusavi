@@ -146,28 +146,47 @@ class Plugin:
             if not force:
                 last_checked_at_str = service._update_check_cache.get("last_checked_at")
                 last_checked_channel = service._update_check_cache.get("last_checked_channel")
-                if last_checked_at_str and last_checked_channel == service._update_channel:
-                    # Intentionally broad
+                last_checked_version = service._update_check_cache.get("last_checked_version")
+                if last_checked_at_str:
                     try:
                         last_checked_at = datetime.datetime.fromisoformat(last_checked_at_str)
-                        if datetime.datetime.now(
+                        age_ok = datetime.datetime.now(
                             datetime.timezone.utc
-                        ) - last_checked_at < datetime.timedelta(hours=24):
+                        ) - last_checked_at < datetime.timedelta(hours=24)
+                        channel_ok = last_checked_channel == service._update_channel
+                        version_ok = last_checked_version == current_version
+                        if age_ok and channel_ok and version_ok:
                             last_result = service._update_check_cache.get("last_result")
                             if last_result:
                                 elapsed_ms = round((time.monotonic() - t0) * 1000)
                                 service.log(
                                     "info",
-                                    f"Update check cache hit (within 24h), elapsed_ms={elapsed_ms}",
+                                    f"Update check cache hit (within 24h, channel={last_checked_channel}, version={last_checked_version}), elapsed_ms={elapsed_ms}",
                                 )
                                 return last_result
-                    # Intentionally broad
-                    except Exception:
-                        pass
+
+                        bypassed_reasons = []
+                        if not age_ok:
+                            bypassed_reasons.append("expired")
+                        if not channel_ok:
+                            bypassed_reasons.append(
+                                f"channel mismatch (requested={service._update_channel}, cached={last_checked_channel})"
+                            )
+                        if not version_ok:
+                            bypassed_reasons.append(
+                                f"version mismatch (requested={current_version}, cached={last_checked_version})"
+                            )
+                        service.log(
+                            "info", f"Update check cache bypassed: {', '.join(bypassed_reasons)}"
+                        )
+                    except Exception as e:
+                        service.log("warning", f"Failed to parse or validate update cache: {e}")
 
             from sdh_ludusavi.updater import check_for_update
 
             res = check_for_update(current_version, service._update_channel, service=service)
+            if res.get("status") in ("available", "current"):
+                res["checked_version"] = current_version
             service.record_update_check_result(res)
             if res.get("status") in ("available", "current"):
                 service._update_check_cache["last_result"] = res

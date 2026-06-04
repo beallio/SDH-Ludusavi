@@ -132,7 +132,7 @@ export function PluginUpdateSection({
 
   const checkForUpdates = useCallback(
     async (opts: { force: boolean; notify: boolean }) => {
-      if (!currentVersion || currentVersion === "Loading...") {
+      if (!effectiveCurrentVersion || effectiveCurrentVersion === "Loading...") {
         return;
       }
       if (inFlightCheck.current) {

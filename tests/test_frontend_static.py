@@ -2653,3 +2653,19 @@ def test_frontend_updater_stuck_check_state_handling() -> None:
         re.search(r"if\s*\(\s*active\s*\)\s*\{\s*setContextHydrated\(\s*true\s*\)\s*;?\s*\}", comp)
         is not None
     )
+
+
+def test_frontend_updater_check_for_updates_guard_and_hydration_skip() -> None:
+    comp_path = Path("src/components/PluginUpdateSection.tsx")
+    assert comp_path.exists()
+    comp = comp_path.read_text(encoding="utf-8")
+
+    # 1. checkForUpdates early return guard uses effectiveCurrentVersion
+    assert 'if (!effectiveCurrentVersion || effectiveCurrentVersion === "Loading...")' in comp, (
+        "checkForUpdates early guard must use effectiveCurrentVersion instead of currentVersion"
+    )
+
+    # 2. skipInitialCheck.current is set to true on pending hydration reload
+    assert "skipInitialCheck.current = true;" in comp, (
+        "skipInitialCheck.current must be set to true during pending install hydration reload"
+    )
