@@ -61,7 +61,7 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
     assert "SDH-Ludusavi/plugin.json" in names
 
     # Version should start with the current stable release and may include a git hash
-    assert plugin_metadata["version"].startswith("0.2.3")
+    assert plugin_metadata["version"].startswith("0.2.4")
     assert package_metadata["version"] == plugin_metadata["version"]
     assert "SDH-Ludusavi/dist/index.js" in names
     assert "SDH-Ludusavi/dist/index.js.map" in names
@@ -112,11 +112,11 @@ def test_package_metadata_versions_match_release_version() -> None:
     plugin_metadata = json.loads(Path("plugin.json").read_text())
     package_metadata = json.loads(Path("package.json").read_text())
 
-    assert plugin_metadata["version"] == "0.2.3"
-    assert package_metadata["version"] == "0.2.3"
+    assert plugin_metadata["version"] == "0.2.4"
+    assert package_metadata["version"] == "0.2.4"
     assert "_root" not in plugin_metadata.get("flags", [])
     assert "root" not in plugin_metadata["publish"]["tags"]
-    assert module.validate_package_versions(Path.cwd()) == "0.2.3"
+    assert module.validate_package_versions(Path.cwd()) == "0.2.4"
 
 
 def test_package_validation_rejects_mismatched_metadata(tmp_path: Path) -> None:
@@ -154,9 +154,9 @@ def test_package_script_supports_release_arguments(tmp_path: Path) -> None:
             "scripts/package_plugin.py",
             "--release",
             "--release-version",
-            "0.2.3",
+            "0.2.4",
             "--release-tag",
-            "v0.2.3",
+            "v0.2.4",
             "--versioned-output",
             "--emit-release-metadata",
             "--output-dir",
@@ -169,9 +169,9 @@ def test_package_script_supports_release_arguments(tmp_path: Path) -> None:
     assert Path("plugin.json").read_text(encoding="utf-8") == plugin_src
     assert Path("package.json").read_text(encoding="utf-8") == package_src
 
-    zip_path = tmp_path / "SDH-Ludusavi-v0.2.3.zip"
-    sha_path = tmp_path / "SDH-Ludusavi-v0.2.3.zip.sha256"
-    manifest_path = tmp_path / "SDH-Ludusavi-v0.2.3.manifest.json"
+    zip_path = tmp_path / "SDH-Ludusavi-v0.2.4.zip"
+    sha_path = tmp_path / "SDH-Ludusavi-v0.2.4.zip.sha256"
+    manifest_path = tmp_path / "SDH-Ludusavi-v0.2.4.manifest.json"
 
     assert zip_path.exists()
     assert sha_path.exists()
@@ -181,7 +181,7 @@ def test_package_script_supports_release_arguments(tmp_path: Path) -> None:
     zip_bytes = zip_path.read_bytes()
     expected_sha = hashlib.sha256(zip_bytes).hexdigest()
     assert (
-        sha_path.read_text(encoding="utf-8").strip() == f"{expected_sha}  SDH-Ludusavi-v0.2.3.zip"
+        sha_path.read_text(encoding="utf-8").strip() == f"{expected_sha}  SDH-Ludusavi-v0.2.4.zip"
     )
 
     # Verify manifest
@@ -189,11 +189,11 @@ def test_package_script_supports_release_arguments(tmp_path: Path) -> None:
     assert manifest_data["schemaVersion"] == 1
     assert manifest_data["pluginName"] == "SDH-Ludusavi"
     assert manifest_data["packageName"] == "sdh-ludusavi"
-    assert manifest_data["version"] == "0.2.3"
-    assert manifest_data["sourceVersion"] == "0.2.3"
-    assert manifest_data["tag"] == "v0.2.3"
+    assert manifest_data["version"] == "0.2.4"
+    assert manifest_data["sourceVersion"] == "0.2.4"
+    assert manifest_data["tag"] == "v0.2.4"
     assert manifest_data["channel"] == "stable"
-    assert manifest_data["assetName"] == "SDH-Ludusavi-v0.2.3.zip"
+    assert manifest_data["assetName"] == "SDH-Ludusavi-v0.2.4.zip"
     assert manifest_data["sha256"] == expected_sha
     assert "generatedAt" in manifest_data
 
@@ -202,12 +202,12 @@ def test_package_script_supports_release_arguments(tmp_path: Path) -> None:
         zip_plugin = json.loads(archive.read("SDH-Ludusavi/plugin.json"))
         zip_package = json.loads(archive.read("SDH-Ludusavi/package.json"))
         # Staged files must have the release version
-        assert zip_plugin["version"] == "0.2.3"
-        assert zip_package["version"] == "0.2.3"
+        assert zip_plugin["version"] == "0.2.4"
+        assert zip_package["version"] == "0.2.4"
         # Staged plugin.json must have the tag-stable Raw GitHub URL for the publish image
         assert (
             zip_plugin["publish"]["image"]
-            == "https://raw.githubusercontent.com/beallio/SDH-Ludusavi/v0.2.3/assets/icon.png"
+            == "https://raw.githubusercontent.com/beallio/SDH-Ludusavi/v0.2.4/assets/icon.png"
         )
 
 
