@@ -108,6 +108,7 @@ export function PluginUpdateSection({
   const checkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [contextHydrated, setContextHydrated] = useState(false);
   const skipInitialCheck = useRef(false);
+  const automaticCheckToggleHydrated = useRef(false);
 
   // Effective version used for display and RPC calls.
   // After a successful handoff, shows the installed target version until the
@@ -379,6 +380,10 @@ export function PluginUpdateSection({
   // Handle automatic check toggle changes
   useEffect(() => {
     if (!contextHydrated) {
+      return;
+    }
+    if (!automaticCheckToggleHydrated.current) {
+      automaticCheckToggleHydrated.current = true;
       return;
     }
     if (!automaticUpdateChecks || !currentVersion || currentVersion === "Loading...") {

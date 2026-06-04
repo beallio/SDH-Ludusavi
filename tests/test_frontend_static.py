@@ -2642,3 +2642,6 @@ def test_frontend_updater_stuck_check_state_handling() -> None:
 
     # 9. Pending install hydration skips the initial automatic background check while preserving manual Check now
     assert "skipInitialCheck" in comp
+
+    # 10. The toggle effect uses a hydration guard to prevent redundant check on mount
+    assert "automaticCheckToggleHydrated" in comp
