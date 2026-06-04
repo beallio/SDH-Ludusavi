@@ -124,6 +124,28 @@ class Plugin:
             t0 = time.monotonic()
             service.log("info", f"Update check started (version={current_version}, force={force})")
 
+            # Pending-install fast path
+            ctx = service.get_update_check_context()
+            pending_update = ctx.get("pending_update_install")
+            effective_installed = ctx.get("effective_installed_version")
+            from sdh_ludusavi.updater import _is_fresh_pending_install
+
+            if (
+                pending_update
+                and _is_fresh_pending_install(pending_update)
+                and effective_installed == current_version
+            ):
+                elapsed_ms = round((time.monotonic() - t0) * 1000)
+                service.log(
+                    "info",
+                    f"Update check pending-install fast path: pending={pending_update.get('version')}, current={current_version}, effective={effective_installed}, channel={service._update_channel}, force={force}, elapsed_ms={elapsed_ms}",
+                )
+                return {
+                    "status": "current",
+                    "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "channel": service._update_channel,
+                }
+
             if service._update_rate_limited_until:
                 if (
                     datetime.datetime.now(datetime.timezone.utc)

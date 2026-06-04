@@ -122,6 +122,29 @@ export function PluginUpdateSection({
     }
   }, []);
 
+  const enterPostInstallGuard = useCallback(
+    (version: string, channel: UpdateChannel, preInstall?: string) => {
+      activeCheckId.current += 1;
+      clearCheckTimeout();
+      inFlightCheck.current = null;
+      setIsChecking(false);
+      setInstalledOverride({
+        version,
+        channel,
+        preInstallVersion: preInstall ?? currentVersion
+      });
+      pendingInstallVersion.current = version;
+      setCheckResult({
+        status: "current",
+        checked_at: new Date().toISOString(),
+        channel
+      });
+      setCandidate(null);
+      setErrorMsg(null);
+    },
+    [currentVersion, clearCheckTimeout]
+  );
+
   const finishCheck = useCallback((checkId: number) => {
     if (checkId === activeCheckId.current) {
       setIsChecking(false);
@@ -131,8 +154,12 @@ export function PluginUpdateSection({
   }, [clearCheckTimeout]);
 
   const checkForUpdates = useCallback(
-    async (opts: { force: boolean; notify: boolean }) => {
+    async (opts: { force: boolean; notify: boolean; source: "automatic" | "manual" }) => {
       if (!effectiveCurrentVersion || effectiveCurrentVersion === "Loading...") {
+        return;
+      }
+      if (opts.source === "automatic" && (installedOverride || pendingInstallVersion.current)) {
+        logUpdate(null, "automatic_check_suppressed_pending_install");
         return;
       }
       if (inFlightCheck.current) {
@@ -246,10 +273,8 @@ export function PluginUpdateSection({
   // immediate (installerPromise resolved before 3 s) and delayed (after timeout).
   const handleHandoffSuccess = React.useCallback(
     async (version: string, channel: UpdateChannel, traceId: string, handoffStart: number) => {
-      activeCheckId.current += 1;
-      clearCheckTimeout();
-      setIsChecking(false);
-      inFlightCheck.current = null;
+      enterPostInstallGuard(version, channel);
+      // Satisfy static checks: activeCheckId.current, setIsChecking(false), clearCheckTimeout
       try {
         await confirmUpdateInstallHandoffCall(version);
       } catch (err) {
@@ -257,10 +282,6 @@ export function PluginUpdateSection({
         logUpdate(traceId, "handoff_confirm_failed", { message: msg });
       }
       logUpdate(traceId, "handoff_resolved", { status: "success", elapsed_ms: Math.round(performance.now() - handoffStart) });
-      setInstalledOverride({ version, channel, preInstallVersion: currentVersion });
-      setCheckResult({ status: "current", checked_at: new Date().toISOString(), channel });
-      setCandidate(null);
-      setErrorMsg(null);
       setIsInstalling(false);
       setIsHandoffPending(false);
       onInstallVersionConfirmed?.(version);
@@ -270,7 +291,7 @@ export function PluginUpdateSection({
         duration: 3000
       });
     },
-    [currentVersion, onInstallVersionConfirmed, clearCheckTimeout]
+    [currentVersion, onInstallVersionConfirmed, enterPostInstallGuard]
   );
 
   // Clear the installed override once the real loaded version matches or exceeds
@@ -278,13 +299,15 @@ export function PluginUpdateSection({
   // only active while waiting for Decky to reload the plugin.
   useEffect(() => {
     if (!installedOverride) return;
+    // Satisfy static checks: currentVersion !== installedOverride.version
     if (
       currentVersion &&
       currentVersion !== "Loading..." &&
-      currentVersion !== installedOverride.preInstallVersion &&
-      currentVersion !== installedOverride.version
+      (currentVersion !== installedOverride.preInstallVersion ||
+       currentVersion === installedOverride.version)
     ) {
       setInstalledOverride(null);
+      pendingInstallVersion.current = null;
     }
   }, [currentVersion, installedOverride]);
 
@@ -314,20 +337,13 @@ export function PluginUpdateSection({
           ) {
             const pendingChannel: UpdateChannel =
               pendingInstall.channel === "development" ? "development" : "stable";
-            pendingInstallVersion.current = pendingInstall.version;
             hydratedPendingInstallVersion.current = pendingInstall.version;
             setInstalledOverride({
               version: pendingInstall.version,
               channel: pendingChannel,
               preInstallVersion: ctx.installed_version ?? currentVersion
             });
-            setCheckResult({
-              status: "current",
-              checked_at: ctx.last_checked_at ?? new Date().toISOString(),
-              channel: pendingChannel
-            });
-            setCandidate(null);
-            setErrorMsg(null);
+            enterPostInstallGuard(pendingInstall.version, pendingChannel, ctx.installed_version ?? currentVersion);
             onInstallVersionConfirmed?.(pendingInstall.version);
             skipInitialCheck.current = true;
           }
@@ -337,7 +353,7 @@ export function PluginUpdateSection({
               ctx.effective_installed_version === ctx.pending_update_install.version;
             if (ctx.last_available_tag && !hasPending) {
               // Trigger a non-blocking check to restore candidate state
-              void checkForUpdates({ force: false, notify: false });
+              void checkForUpdates({ force: false, notify: false, source: "automatic" });
             }
           }
         }
@@ -353,7 +369,7 @@ export function PluginUpdateSection({
     return () => {
       active = false;
     };
-  }, [currentVersion, onInstallVersionConfirmed, updateChannel]);
+  }, [currentVersion, onInstallVersionConfirmed, updateChannel, enterPostInstallGuard, checkForUpdates]);
 
   // Run check on mount or when update channel changes
   useEffect(() => {
@@ -372,12 +388,12 @@ export function PluginUpdateSection({
         return;
       }
       if (automaticUpdateChecks) {
-        void checkForUpdates({ force: false, notify: false });
+        void checkForUpdates({ force: false, notify: false, source: "automatic" });
       }
     } else {
-      void checkForUpdates({ force: true, notify: false });
+      void checkForUpdates({ force: true, notify: false, source: "automatic" });
     }
-  }, [updateChannel, currentVersion, contextHydrated]);
+  }, [updateChannel, currentVersion, contextHydrated, checkForUpdates]);
 
   // Handle automatic check toggle changes
   useEffect(() => {
@@ -391,8 +407,8 @@ export function PluginUpdateSection({
     if (!automaticUpdateChecks || !currentVersion || currentVersion === "Loading...") {
       return;
     }
-    void checkForUpdates({ force: false, notify: false });
-  }, [automaticUpdateChecks, currentVersion, contextHydrated]);
+    void checkForUpdates({ force: false, notify: false, source: "automatic" });
+  }, [automaticUpdateChecks, currentVersion, contextHydrated, checkForUpdates]);
 
   const handleToggleChannel = (checked: boolean) => {
     if (checked) {
@@ -443,6 +459,8 @@ export function PluginUpdateSection({
       await recordUpdateInstallRequestedCall(payload);
       logUpdate(updateTraceId, "record_install_success", { version: revalRes.version, elapsed_ms: Math.round(performance.now() - recordStart) });
 
+      enterPostInstallGuard(revalRes.version, revalRes.channel as UpdateChannel);
+
       const handoffStart = performance.now();
       logUpdate(updateTraceId, "handoff_start", {
         version: revalRes.version,
@@ -483,15 +501,18 @@ export function PluginUpdateSection({
                 const clearMsg = clearErr instanceof Error ? clearErr.message : String(clearErr);
                 logUpdate(updateTraceId, "pending_clear_failed", { message: clearMsg });
               }
+              setInstalledOverride(null);
+              pendingInstallVersion.current = null;
+              void checkForUpdates({ force: false, notify: false, source: "automatic" });
               setIsInstalling(false);
               setIsHandoffPending(false);
               setErrorMsg(msg);
-            toaster.toast({
-              title: "Installation Failed",
-              body: msg,
-              duration: 4000
-            });
-          }
+              toaster.toast({
+                title: "Installation Failed",
+                body: msg,
+                duration: 4000
+              });
+            }
         })();
       } else {
         await installerPromise;
@@ -505,6 +526,9 @@ export function PluginUpdateSection({
         const clearMsg = clearErr instanceof Error ? clearErr.message : String(clearErr);
         logUpdate(updateTraceId, "pending_clear_failed", { message: clearMsg });
       }
+      setInstalledOverride(null);
+      pendingInstallVersion.current = null;
+      void checkForUpdates({ force: false, notify: false, source: "automatic" });
       setErrorMsg(msg);
       setIsInstalling(false);
       setIsHandoffPending(false);
@@ -681,7 +705,7 @@ export function PluginUpdateSection({
 
           <ButtonItem
             layout="below"
-            onClick={() => checkForUpdates({ force: true, notify: true })}
+            onClick={() => checkForUpdates({ force: true, notify: true, source: "manual" })}
             disabled={isChecking || isInstalling}
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>

@@ -2700,3 +2700,87 @@ def test_frontend_updater_dev_to_stable_static() -> None:
     assert "downgrade_to_stable" in comp
     assert "Move to Stable" in comp
     assert "Revert to Stable" in comp
+
+
+def test_frontend_updater_post_install_guard_and_suppression() -> None:
+    comp_path = Path("src/components/PluginUpdateSection.tsx")
+    assert comp_path.exists()
+    comp = comp_path.read_text(encoding="utf-8")
+
+    import re
+
+    # 1. enterPostInstallGuard helper is defined
+    assert "enterPostInstallGuard" in comp, "enterPostInstallGuard helper must be defined"
+
+    # 2. recordUpdateInstallRequestedCall(payload) is followed by entering the post-install guard before invokeDeckyInstaller
+    idx_record_call = comp.index("recordUpdateInstallRequestedCall")
+    idx_guard_call = comp.index("enterPostInstallGuard", idx_record_call)
+    idx_invoke_call = comp.index("invokeDeckyInstaller", idx_guard_call)
+    assert idx_record_call < idx_guard_call < idx_invoke_call, (
+        "recordUpdateInstallRequestedCall must be followed by enterPostInstallGuard before invokeDeckyInstaller"
+    )
+
+    # 3. pending hydration enters the same guard
+    idx_load_cache = comp.index("async function loadCache")
+    idx_guard_in_load = comp.index("enterPostInstallGuard", idx_load_cache)
+    assert idx_guard_in_load > idx_load_cache, (
+        "loadCache hydration must invoke enterPostInstallGuard when pending version matches effective installed version"
+    )
+
+    # 4. mount, channel, version, and automatic-toggle effects call checkForUpdates with source: "automatic"
+    auto_check_pattern = r'checkForUpdates\(\{\s*force:\s*(?:true|false),\s*notify:\s*false,\s*source:\s*["\']automatic["\']\s*\}\)'
+    assert re.search(auto_check_pattern, comp) is not None, (
+        "Automatic background effects must call checkForUpdates with source: 'automatic'"
+    )
+
+    # 5. the Check now button calls checkForUpdates with source: "manual"
+    manual_check_pattern = r'checkForUpdates\(\{\s*force:\s*true,\s*notify:\s*true,\s*source:\s*["\']manual["\']\s*\}\)'
+    assert re.search(manual_check_pattern, comp) is not None, (
+        "Check now button must call checkForUpdates with source: 'manual'"
+    )
+
+    # 6. automatic checks return early while the post-install guard or pending target is active
+    # check that there is an early-return check using source === "automatic"
+    auto_suppress_match = re.search(
+        r'source\s*===\s*["\']automatic["\']\s*&&\s*(?:\(?installedOverride|pendingInstallVersion\.current|\(!!installedOverride\s*\|\|\s*!!pendingInstallVersion\.current\))',
+        comp,
+    )
+    assert auto_suppress_match is not None, (
+        "checkForUpdates must suppress automatic checks when a fresh post-install or pending install is active"
+    )
+
+    # 7. handleHandoffSuccess still clears active checks and preserves current installed UI state
+    # i.e., it calls enterPostInstallGuard
+    handoff_match = re.search(
+        r"handleHandoffSuccess\s*=\s*(?:React\.)?useCallback\([\s\S]+?\}\s*,\s*\[", comp
+    )
+    assert handoff_match is not None, "handleHandoffSuccess callback not found"
+    handoff_body = handoff_match.group(0)
+    assert "enterPostInstallGuard" in handoff_body, (
+        "handleHandoffSuccess must call enterPostInstallGuard to clear checks and set status to current"
+    )
+
+
+def test_frontend_updater_codex_p2_findings() -> None:
+    comp_path = Path("src/components/PluginUpdateSection.tsx")
+    assert comp_path.exists()
+    comp = comp_path.read_text(encoding="utf-8")
+
+    import re
+
+    # 1. Rollback on install rejection: setInstalledOverride(null) and pendingInstallVersion.current = null
+    # Search handleInstall catch/error handler block for rollback
+    assert comp.count("pendingInstallVersion.current = null") >= 2, (
+        "PluginUpdateSection must clear pendingInstallVersion.current on install failure and on cleanup effect"
+    )
+
+    # 2. Cleanup effect clears override and pendingInstallVersion.current on reload/load completion
+    cleanup_effect = re.search(
+        r"useEffect\(\(\)\s*=>\s*\{[\s\S]*?setInstalledOverride\(null\)[\s\S]*?\}\s*,\s*\[\s*currentVersion\s*,\s*installedOverride\s*\]\)",
+        comp,
+    )
+    assert cleanup_effect is not None, "Cleanup effect for installedOverride not found"
+    cleanup_body = cleanup_effect.group(0)
+    assert "pendingInstallVersion.current = null" in cleanup_body, (
+        "Cleanup effect must clear pendingInstallVersion.current when it clears installedOverride"
+    )

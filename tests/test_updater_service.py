@@ -1140,3 +1140,114 @@ def test_reconcile_promotion_stable_equivalents(monkeypatch, tmp_path: Path) -> 
     service.reconcile_pending_update_install("0.2.3-dev.gabcdef")
     assert service._update_check_cache.get("installed_release_tag") is None
     assert service._update_check_cache.get("pending_update_install") is not None
+
+
+def test_check_for_plugin_update_pending_fast_path(monkeypatch, tmp_path: Path) -> None:
+    import sys
+    import types
+    import asyncio
+
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+
+    store = JsonSettingsStore(settings_file)
+    service = SDHLudusaviService(settings_store=store, cache_path=cache_file)
+
+    dummy_decky = types.SimpleNamespace(
+        DECKY_USER_HOME=str(tmp_path),
+        DECKY_HOME=str(tmp_path),
+        DECKY_PLUGIN_SETTINGS_DIR=str(tmp_path / "settings"),
+        DECKY_PLUGIN_RUNTIME_DIR=str(tmp_path / "data"),
+        logger=types.SimpleNamespace(
+            info=lambda *a, **k: None,
+            warning=lambda *a, **k: None,
+            exception=lambda *a, **k: None,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "decky", dummy_decky)
+    monkeypatch.setitem(
+        sys.modules, "settings", types.SimpleNamespace(SettingsManager=lambda *args, **kwargs: None)
+    )
+
+    sys.modules.pop("main", None)
+    import main
+
+    plugin = main.Plugin()
+    plugin._backend = service
+
+    # Mock sdh_ludusavi.updater.check_for_update to fail or raise if called, to prove the fast path does NOT call it.
+    check_for_update_calls = 0
+
+    def mock_check_for_update(current_version, channel, service):
+        nonlocal check_for_update_calls
+        check_for_update_calls += 1
+        return {"status": "current"}
+
+    monkeypatch.setattr("sdh_ludusavi.updater.check_for_update", mock_check_for_update)
+
+    # 1. Fresh pending install: stable-to-dev (from stable 0.2.0 to dev 0.2.1-dev.g123)
+    # Target version is dev: "0.2.1-dev.g123"
+    candidate = {
+        "version": "0.2.1-dev.g123",
+        "tag": "v0.2.1-dev.g123",
+        "channel": "development",
+        "published_at": "2026-06-04T12:00:00Z",
+        "action": "install",
+    }
+    # Current version is "0.2.0"
+    monkeypatch.setattr("sdh_ludusavi.updater.resolve_version", lambda: "0.2.0")
+    service.record_update_install_requested(candidate)
+
+    # If we check for update on the TARGET version ("0.2.1-dev.g123"), it should hit the fast path
+    # since effective_installed_version === target_version (i.e. "0.2.1-dev.g123")
+    res = asyncio.run(plugin.check_for_plugin_update("0.2.1-dev.g123", force=True))
+    assert res["status"] == "current"
+    assert check_for_update_calls == 0
+
+    # 2. Fresh pending install: dev-to-dev (from dev 0.2.1-dev.g123 to dev 0.2.1-dev.g456)
+    monkeypatch.setattr("sdh_ludusavi.updater.resolve_version", lambda: "0.2.1-dev.g123")
+    service.clear_pending_update_install()
+    candidate2 = {
+        "version": "0.2.1-dev.g456",
+        "tag": "v0.2.1-dev.g456",
+        "channel": "development",
+        "published_at": "2026-06-04T12:00:00Z",
+        "action": "install",
+    }
+    service.record_update_install_requested(candidate2)
+    res2 = asyncio.run(plugin.check_for_plugin_update("0.2.1-dev.g456", force=True))
+    assert res2["status"] == "current"
+    assert check_for_update_calls == 0
+
+    # 3. Fresh pending install: dev-to-stable (from dev 0.2.1-dev.g123 to stable 0.2.1)
+    monkeypatch.setattr("sdh_ludusavi.updater.resolve_version", lambda: "0.2.1-dev.g123")
+    service.clear_pending_update_install()
+    candidate3 = {
+        "version": "0.2.1",
+        "tag": "v0.2.1",
+        "channel": "stable",
+        "published_at": "2026-06-04T12:00:00Z",
+        "action": "move_to_stable",
+    }
+    service.record_update_install_requested(candidate3)
+    res3 = asyncio.run(plugin.check_for_plugin_update("0.2.1", force=True))
+    assert res3["status"] == "current"
+    assert check_for_update_calls == 0
+
+    # 4. Stale pending metadata: should bypass fast path and fall through to check_for_update
+    service.clear_pending_update_install()
+    candidate4 = {
+        "version": "0.2.1",
+        "tag": "v0.2.1",
+        "channel": "stable",
+        "published_at": "2026-06-04T12:00:00Z",
+        "action": "move_to_stable",
+    }
+    service.record_update_install_requested(candidate4)
+    # mock time to make it stale (exceeding grace limit of 15 minutes)
+    stale_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=20)
+    service._update_check_cache["pending_update_install"]["requested_at"] = stale_time.isoformat()
+
+    asyncio.run(plugin.check_for_plugin_update("0.2.1", force=True))
+    # It should call check_for_update, so check_for_update_calls should be 1
+    assert check_for_update_calls == 1
