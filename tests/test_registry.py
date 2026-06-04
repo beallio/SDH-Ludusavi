@@ -115,3 +115,131 @@ def test_registry_dependency_error_fallback() -> None:
     res = registry.refresh_games(force=True)
     assert len(res["games"]) == 1
     assert res["dependency_error"] == "Ludusavi binary missing"
+
+
+def test_targeted_refresh_merges_single_game() -> None:
+    gateway = MagicMock()
+    run_locked = MagicMock(side_effect=lambda op, game, cb: cb())
+    log = MagicMock()
+    save = MagicMock()
+    get_history = MagicMock(return_value={})
+
+    registry = GameRegistry(gateway, run_locked, log, save, get_history)
+    registry._games = {
+        "Hades": GameStatus("Hades", True, True, False, "1145360"),
+        "Portal": GameStatus("Portal", True, True, False, "400"),
+    }
+    registry._ids = {"1145360": "Hades", "400": "Portal"}
+
+    adapter = MagicMock()
+    gateway.get_adapter.return_value = adapter
+    adapter.refresh_statuses.return_value = [
+        {
+            "name": "Hades",
+            "configured": True,
+            "has_backup": False,
+            "needs_first_backup": True,
+            "steam_id": "99999",
+            "error": None,
+        }
+    ]
+
+    registry.refresh_after_operation(game_name="Hades")
+
+    assert "Portal" in registry._games
+    assert registry._games["Portal"].has_backup is True
+    assert "Hades" in registry._games
+    assert registry._games["Hades"].has_backup is False
+    assert len(registry._games) == 2
+    assert registry._ids == {"99999": "Hades", "400": "Portal"}
+    save.assert_called_once()
+
+
+def test_targeted_refresh_empty_result_logs_warning() -> None:
+    gateway = MagicMock()
+    run_locked = MagicMock(side_effect=lambda op, game, cb: cb())
+    log = MagicMock()
+    save = MagicMock()
+    get_history = MagicMock(return_value={})
+
+    registry = GameRegistry(gateway, run_locked, log, save, get_history)
+    registry._games = {
+        "Hades": GameStatus("Hades", True, True, False, "1145360"),
+    }
+    registry._ids = {"1145360": "Hades"}
+
+    adapter = MagicMock()
+    gateway.get_adapter.return_value = adapter
+    adapter.refresh_statuses.return_value = []
+
+    registry.refresh_after_operation(game_name="Hades")
+
+    log.assert_any_call(
+        "warning", "Targeted refresh for 'Hades' returned no results; cache unchanged", "refresh"
+    )
+    assert registry._games == {"Hades": GameStatus("Hades", True, True, False, "1145360")}
+    assert registry._ids == {"1145360": "Hades"}
+
+
+def test_refresh_after_operation_null_game_name_does_full_refresh() -> None:
+    gateway = MagicMock()
+    run_locked = MagicMock(side_effect=lambda op, game, cb: cb())
+    log = MagicMock()
+    save = MagicMock()
+    get_history = MagicMock(return_value={})
+
+    registry = GameRegistry(gateway, run_locked, log, save, get_history)
+    registry._games = {
+        "Portal": GameStatus("Portal", True, True, False, "400"),
+    }
+    registry._ids = {"400": "Portal"}
+
+    adapter = MagicMock()
+    gateway.get_adapter.return_value = adapter
+    adapter.refresh_statuses.return_value = [
+        {
+            "name": "Hades",
+            "configured": True,
+            "has_backup": True,
+            "needs_first_backup": False,
+            "steam_id": "1145360",
+            "error": None,
+        }
+    ]
+
+    registry.refresh_after_operation(game_name=None)
+
+    assert "Portal" not in registry._games
+    assert "Hades" in registry._games
+
+
+def test_targeted_refresh_skips_alias_rebuild_when_config_stale() -> None:
+    gateway = MagicMock()
+    run_locked = MagicMock(side_effect=lambda op, game, cb: cb())
+    log = MagicMock()
+    save = MagicMock()
+    get_history = MagicMock(return_value={})
+
+    registry = GameRegistry(gateway, run_locked, log, save, get_history)
+    registry._ludusavi_config_mtime_ns = 12345
+    registry._games = {"Hades": GameStatus("Hades", True, True, False)}
+
+    adapter = MagicMock()
+    gateway.get_adapter.return_value = adapter
+    adapter.refresh_statuses.return_value = [
+        {
+            "name": "Hades",
+            "configured": True,
+            "has_backup": True,
+            "needs_first_backup": False,
+            "steam_id": None,
+            "error": None,
+        }
+    ]
+
+    registry.refresh_after_operation(game_name="Hades")
+    adapter.get_aliases.assert_not_called()
+
+    registry._ludusavi_config_mtime_ns = None
+    registry.refresh_after_operation(game_name="Hades")
+    adapter.get_aliases.assert_not_called()

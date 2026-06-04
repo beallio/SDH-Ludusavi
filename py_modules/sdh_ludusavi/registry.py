@@ -179,10 +179,10 @@ class GameRegistry:
                 ),
             )
 
-    def refresh_after_operation(self) -> None:
+    def refresh_after_operation(self, game_name: str | None = None) -> None:
         """Best-effort status refresh after a successful backup or restore."""
         try:
-            self._refresh_statuses_unlocked()
+            self._refresh_statuses_unlocked(game_name=game_name)
         # Intentionally broad: catch any post-operation status refresh failure safely
         except Exception as exc:
             self.log("warning", f"Post-backup status refresh failed: {exc}", "refresh")
@@ -191,8 +191,12 @@ class GameRegistry:
         self,
         installed_app_ids: str | None | object = CACHE_MARKER_UNCHANGED,
         ludusavi_config_mtime_ns: int | None | object = CACHE_MARKER_UNCHANGED,
+        game_name: str | None = None,
     ) -> list[GameStatus]:
-        raw_statuses = self._gateway.get_adapter().refresh_statuses()
+        if game_name:
+            raw_statuses = self._gateway.get_adapter().refresh_statuses(game_names=[game_name])
+        else:
+            raw_statuses = self._gateway.get_adapter().refresh_statuses()
         self.log(
             "debug", f"Retrieved {len(raw_statuses)} raw game statuses from Ludusavi", "refresh"
         )
@@ -211,7 +215,7 @@ class GameRegistry:
                 self.log("error", f"Failed to parse status for game {raw_name}: {exc}", "refresh")
 
         with self._state_lock:
-            if not (
+            if not game_name and not (
                 isinstance(ludusavi_config_mtime_ns, int)
                 and self._ludusavi_config_mtime_ns == ludusavi_config_mtime_ns
             ):
@@ -220,16 +224,36 @@ class GameRegistry:
                 self._aliases.clear()
                 self._aliases.update(new_aliases)
 
-            self._games.clear()
-            self._games.update({game.name: game for game in games})
+            if game_name:
+                # --- Targeted Merge Mode ---
+                if not games:
+                    self.log(
+                        "warning",
+                        f"Targeted refresh for '{game_name}' returned no results; cache unchanged",
+                        "refresh",
+                    )
+                else:
+                    for game in games:
+                        # Remove old steam ID association before inserting new one
+                        old_game = self._games.get(game.name)
+                        if old_game and old_game.steam_id and old_game.steam_id in self._ids:
+                            del self._ids[old_game.steam_id]
 
-            self._ids.clear()
-            self._ids.update({game.steam_id: game.name for game in games if game.steam_id})
+                        self._games[game.name] = game
+                        if game.steam_id:
+                            self._ids[game.steam_id] = game.name
+            else:
+                # --- Bulk Replacement Mode ---
+                self._games.clear()
+                self._games.update({game.name: game for game in games})
 
-            if installed_app_ids is not CACHE_MARKER_UNCHANGED:
-                self._installed_app_ids = cast(str | None, installed_app_ids)
-            if ludusavi_config_mtime_ns is not CACHE_MARKER_UNCHANGED:
-                self._ludusavi_config_mtime_ns = cast(int | None, ludusavi_config_mtime_ns)
+                self._ids.clear()
+                self._ids.update({game.steam_id: game.name for game in games if game.steam_id})
+
+                if installed_app_ids is not CACHE_MARKER_UNCHANGED:
+                    self._installed_app_ids = cast(str | None, installed_app_ids)
+                if ludusavi_config_mtime_ns is not CACHE_MARKER_UNCHANGED:
+                    self._ludusavi_config_mtime_ns = cast(int | None, ludusavi_config_mtime_ns)
 
         self.log("info", f"Refreshed {len(games)} Ludusavi games", "refresh")
         self._save_state()

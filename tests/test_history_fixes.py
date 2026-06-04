@@ -12,11 +12,11 @@ def test_force_backup_records_history_even_if_refresh_fails(tmp_path: Path) -> N
             super().__init__()
             self.refresh_calls = 0
 
-        def refresh_statuses(self):
+        def refresh_statuses(self, game_names=None):
             self.refresh_calls += 1
             if self.refresh_calls > 1:
                 raise RuntimeError("Refresh failed after backup")
-            return super().refresh_statuses()
+            return super().refresh_statuses(game_names=game_names)
 
     service = service_with_state(tmp_path, adapter=RefreshFailingAdapter())
     service.refresh_games()  # First refresh succeeds
@@ -36,11 +36,11 @@ def test_auto_exit_records_history_even_if_refresh_fails(tmp_path: Path) -> None
             super().__init__()
             self.refresh_calls = 0
 
-        def refresh_statuses(self):
+        def refresh_statuses(self, game_names=None):
             self.refresh_calls += 1
             if self.refresh_calls > 1:
                 raise RuntimeError("Refresh failed after backup")
-            return super().refresh_statuses()
+            return super().refresh_statuses(game_names=game_names)
 
         def backup(self, game_name: str, preview: bool = False) -> dict[str, object]:
             if not preview:

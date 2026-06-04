@@ -249,3 +249,23 @@ def test_conflict_metadata_local_modified_at_is_timezone_aware_utc(tmp_path):
     assert metadata["backupPath"] == "/backup/Hades"
     assert str(metadata["localModifiedAt"]).endswith("+00:00")
     assert datetime.fromisoformat(str(metadata["localModifiedAt"])).tzinfo is not None
+
+
+def test_refresh_statuses_forwards_game_names_to_client() -> None:
+    calls = []
+
+    class MockClient:
+        def backup(self, games: list[str] | None = None, preview: bool = False) -> FakeResponse:
+            calls.append(("backup", games, preview))
+            return FakeResponse({"games": {}})
+
+        def backups_list(self, games: list[str] | None = None) -> FakeResponse:
+            calls.append(("backups_list", games))
+            return FakeResponse({"games": {}})
+
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    adapter._client = MockClient()
+
+    adapter.refresh_statuses(game_names=["Hades"])
+    assert ("backup", ["Hades"], True) in calls
+    assert ("backups_list", ["Hades"]) in calls

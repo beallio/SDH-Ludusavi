@@ -54,10 +54,12 @@ class FakeAdapter:
         self.aliases: dict[str, str] = {}
         self.alias_call_count = 0
 
-    def refresh_statuses(self) -> list[dict[str, object]]:
+    def refresh_statuses(self, game_names: list[str] | None = None) -> list[dict[str, object]]:
         self.refresh_count += 1
         if self.refresh_error:
             raise self.refresh_error
+        if game_names is not None:
+            return [dict(game) for game in self.games if game["name"] in game_names]
         return [dict(game) for game in self.games]
 
     def compare_recency(self, game_name: str) -> str:
@@ -1191,10 +1193,17 @@ def test_backup_game_on_exit_performs_backup_and_refreshes_history(tmp_path: Pat
     service.refresh_games()
     service.set_auto_sync_enabled(True)
 
+    from unittest.mock import MagicMock
+
+    original_refresh = service._lifecycle.dependencies.registry.refresh_after_operation
+    mock_refresh = MagicMock(side_effect=original_refresh)
+    service._lifecycle.dependencies.registry.refresh_after_operation = mock_refresh
+
     result = service.backup_game_on_exit("Hades")
 
     assert result["status"] == "backed_up"
     assert adapter.backups == ["Hades"]
+    mock_refresh.assert_called_once_with("Hades")
     refresh = service.refresh_games()
     assert refresh["history"]["Hades"]["last_backup"]["trigger"] == "auto_exit"
 
@@ -1246,6 +1255,13 @@ def test_force_operations_work_when_auto_sync_disabled(tmp_path: Path) -> None:
     service = service_with_state(tmp_path, adapter)
     service.refresh_games()
 
+    from unittest.mock import MagicMock
+    import unittest.mock
+
+    original_refresh = service._lifecycle.dependencies.registry.refresh_after_operation
+    mock_refresh = MagicMock(side_effect=original_refresh)
+    service._lifecycle.dependencies.registry.refresh_after_operation = mock_refresh
+
     backup = service.force_backup("Hades")
     restore = service.force_restore("Hades")
 
@@ -1254,6 +1270,29 @@ def test_force_operations_work_when_auto_sync_disabled(tmp_path: Path) -> None:
     assert restore["status"] == "restored"
     assert adapter.backups == ["Hades"]
     assert adapter.restores == ["Hades"]
+
+    assert mock_refresh.call_count == 2
+    mock_refresh.assert_has_calls(
+        [
+            unittest.mock.call("Hades"),
+            unittest.mock.call("Hades"),
+        ]
+    )
+
+
+def test_force_restore_calls_refresh_after_operation(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+
+    from unittest.mock import MagicMock
+
+    mock_refresh = MagicMock()
+    service._lifecycle.dependencies.registry.refresh_after_operation = mock_refresh
+
+    result = service.force_restore("Hades")
+    assert result["status"] == "restored"
+    mock_refresh.assert_called_once_with("Hades")
 
 
 def test_global_operation_lock_blocks_new_operations(tmp_path: Path) -> None:

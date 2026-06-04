@@ -62,10 +62,16 @@ class PyludusaviAdapter:
         self._cached_aliases_mtime_ns: int | None = None
         self._aliases_lock = threading.Lock()
 
-    def refresh_statuses(self) -> list[dict[str, object]]:
+    def refresh_statuses(self, game_names: list[str] | None = None) -> list[dict[str, object]]:
         with ThreadPoolExecutor(max_workers=2) as executor:
-            preview_future = executor.submit(self._client.backup, preview=True)
-            backups_future = executor.submit(self._client.backups_list)
+            if game_names:
+                preview_future = executor.submit(
+                    self._client.backup, games=game_names, preview=True
+                )
+                backups_future = executor.submit(self._client.backups_list, games=game_names)
+            else:
+                preview_future = executor.submit(self._client.backup, preview=True)
+                backups_future = executor.submit(self._client.backups_list)
             preview = preview_future.result().data
             backups = backups_future.result().data
 

@@ -269,7 +269,7 @@ class GameLifecycleManager:
             )
             raise
 
-        self.dependencies.registry.refresh_after_operation()
+        self.dependencies.registry.refresh_after_operation(game.name)
         self.dependencies.log("info", f"Backed up {game.name} after exit", "backup", game.name)
         return {"status": "backed_up", "game": game.name, "result": result}
 
@@ -303,7 +303,7 @@ class GameLifecycleManager:
             )
             raise
 
-        self.dependencies.registry.refresh_after_operation()
+        self.dependencies.registry.refresh_after_operation(game.name)
         self.dependencies.log("info", f"Backed up {game.name}", "backup", game.name)
         return {"status": "backed_up", "game": game.name, "result": result}
 
@@ -330,6 +330,7 @@ class GameLifecycleManager:
             raise
         self.dependencies.log("info", f"Restored {game.name}", "restore", game.name)
         self.dependencies.history.record_history(game.name, "restore", "manual_restore", "restored")
+        self.dependencies.registry.refresh_after_operation(game.name)
         return {"status": "restored", "game": game.name, "result": result}
 
 
