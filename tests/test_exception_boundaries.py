@@ -271,7 +271,7 @@ def test_refresh_games_logs_and_drops_malformed_entries(tmp_path):
     assert games_list[0]["name"] == "Hades"
 
 
-def test_post_backup_refresh_failure_logs_warning_and_returns_backup_result(tmp_path):
+def test_post_operation_refresh_failure_logs_warning_and_returns_backup_result(tmp_path):
     settings_file = tmp_path / "settings.json"
     cache_file = tmp_path / "cache.json"
 
@@ -306,12 +306,13 @@ def test_post_backup_refresh_failure_logs_warning_and_returns_backup_result(tmp_
     assert result["status"] == "backed_up"
     assert result["result"] == {"ok": True}
 
-    # Assert that the post-backup warning log was generated and recorded
+    # Assert that the post-operation warning log was generated and recorded
     logs = service.get_recent_logs()
     warning_logs = [
         entry
         for entry in logs
-        if entry["level"] == "warning" and "Post-backup status refresh failed" in entry["message"]
+        if entry["level"] == "warning"
+        and "Post-operation status refresh failed" in entry["message"]
     ]
     assert len(warning_logs) == 1
     assert "refresh failed" in warning_logs[0]["message"]

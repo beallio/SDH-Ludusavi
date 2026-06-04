@@ -185,7 +185,7 @@ class GameRegistry:
             self._refresh_statuses_unlocked(game_name=game_name)
         # Intentionally broad: catch any post-operation status refresh failure safely
         except Exception as exc:
-            self.log("warning", f"Post-backup status refresh failed: {exc}", "refresh")
+            self.log("warning", f"Post-operation status refresh failed: {exc}", "refresh")
 
     def _refresh_statuses_unlocked(
         self,
