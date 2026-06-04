@@ -9,7 +9,8 @@
     "tests/test_history_fixes.py",
     "tests/test_ludusavi.py",
     "tests/test_registry.py",
-    "tests/test_service.py"
+    "tests/test_service.py",
+    "tests/test_backup_decision.py"
   ],
   "tests_added": [
     "test_refresh_statuses_forwards_game_names_to_client",

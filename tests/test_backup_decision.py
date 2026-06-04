@@ -17,7 +17,7 @@ class FakeAdapter:
         self.backups = []
         self.preview_data = {}
 
-    def refresh_statuses(self):
+    def refresh_statuses(self, game_names=None):
         return [{"name": "Hades", "has_backup": True, "error": None}]
 
     def backup(self, game_name, preview=False):
