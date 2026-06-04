@@ -2598,3 +2598,47 @@ def test_frontend_updater_hydrates_pending_install_version_after_reload() -> Non
     assert "clearPendingUpdateInstallCall" in comp, (
         "failed installer handoff must clear pending install metadata"
     )
+
+
+def test_frontend_updater_stuck_check_state_handling() -> None:
+    comp_path = Path("src/components/PluginUpdateSection.tsx")
+    assert comp_path.exists()
+    comp = comp_path.read_text(encoding="utf-8")
+
+    # 1. UPDATE_CHECK_UI_TIMEOUT_MS exists
+    assert "UPDATE_CHECK_UI_TIMEOUT_MS" in comp
+
+    # 2. Active check ownership is tracked by a ref/generation counter
+    assert "activeCheckId" in comp
+
+    # 3. Timeout clears setIsChecking(false)
+    assert "setIsChecking(false)" in comp
+
+    # 4. Timeout clears inFlightCheck.current = null
+    assert "inFlightCheck.current = null" in comp
+
+    # 5. Timeout uses check-interrupted/retry wording, not install-failure wording
+    assert "interrupted" in comp.lower()
+    assert "check again" in comp.lower()
+
+    # 6. Late check responses are guarded before mutating UI state
+    assert "activeCheckId.current" in comp
+    assert "checkId" in comp
+
+    # 7. handleHandoffSuccess invalidates active checks and clears isChecking
+    import re
+
+    handoff_match = re.search(
+        r"handleHandoffSuccess\s*=\s*(?:React\.)?useCallback\([\s\S]+?\}\s*,\s*\[", comp
+    )
+    assert handoff_match is not None, "handleHandoffSuccess callback not found"
+    handoff_body = handoff_match.group(0)
+    assert "activeCheckId.current" in handoff_body
+    assert "setIsChecking(false)" in handoff_body
+    assert "clearCheckTimeout" in handoff_body
+
+    # 8. Context hydration completes before automatic checks run
+    assert "contextHydrated" in comp
+
+    # 9. Pending install hydration skips the initial automatic background check while preserving manual Check now
+    assert "skipInitialCheck" in comp

@@ -66,6 +66,8 @@ const spinnerSlotStyle: React.CSSProperties = {
   justifyContent: "center",
 };
 
+export const UPDATE_CHECK_UI_TIMEOUT_MS = 60000;
+
 export interface PluginUpdateSectionProps {
   currentVersion: string;
   updateChannel: UpdateChannel;
@@ -102,10 +104,30 @@ export function PluginUpdateSection({
   const pendingInstallVersion = useRef<string | null>(null);
   const hydratedPendingInstallVersion = useRef<string | null>(null);
 
+  const activeCheckId = useRef(0);
+  const checkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [contextHydrated, setContextHydrated] = useState(false);
+  const skipInitialCheck = useRef(false);
+
   // Effective version used for display and RPC calls.
   // After a successful handoff, shows the installed target version until the
   // real currentVersion prop updates (which clears the override).
   const effectiveCurrentVersion = installedOverride?.version ?? currentVersion;
+
+  const clearCheckTimeout = useCallback(() => {
+    if (checkTimeoutRef.current !== null) {
+      clearTimeout(checkTimeoutRef.current);
+      checkTimeoutRef.current = null;
+    }
+  }, []);
+
+  const finishCheck = useCallback((checkId: number) => {
+    if (checkId === activeCheckId.current) {
+      setIsChecking(false);
+      inFlightCheck.current = null;
+      clearCheckTimeout();
+    }
+  }, [clearCheckTimeout]);
 
   const checkForUpdates = useCallback(
     async (opts: { force: boolean; notify: boolean }) => {
@@ -117,13 +139,38 @@ export function PluginUpdateSection({
         return inFlightCheck.current;
       }
 
+      activeCheckId.current += 1;
+      const checkId = activeCheckId.current;
+
       const promise = (async () => {
         const checkStart = performance.now();
         setIsChecking(true);
         setErrorMsg(null);
         logUpdate(null, "check_start", { channel: updateChannel });
+
+        clearCheckTimeout();
+        checkTimeoutRef.current = setTimeout(() => {
+          if (activeCheckId.current === checkId) {
+            activeCheckId.current += 1;
+            setIsChecking(false);
+            inFlightCheck.current = null;
+            setErrorMsg("Update check interrupted. Check again.");
+            setCheckResult({
+              status: "failed",
+              checked_at: new Date().toISOString(),
+              message: "Update check interrupted. Check again."
+            });
+            logUpdate(null, "check_timeout", { checkId });
+          }
+        }, UPDATE_CHECK_UI_TIMEOUT_MS);
+
         try {
           const res = await checkForPluginUpdateCall(effectiveCurrentVersion, opts.force);
+
+          if (activeCheckId.current !== checkId) {
+            return { status: "failed", message: "stale" } as any;
+          }
+
           const elapsed_ms = Math.round(performance.now() - checkStart);
           setCheckResult(res);
           if (res.status === "failed") {
@@ -161,6 +208,10 @@ export function PluginUpdateSection({
           }
           return res;
         } catch (err) {
+          if (activeCheckId.current !== checkId) {
+            return { status: "failed", message: "stale" } as any;
+          }
+
           const elapsed_ms = Math.round(performance.now() - checkStart);
           const msg = err instanceof Error ? err.message : String(err);
           logUpdate(null, "check_failed", { message: msg, elapsed_ms });
@@ -180,21 +231,24 @@ export function PluginUpdateSection({
           setCheckResult(failedRes);
           return failedRes;
         } finally {
-          setIsChecking(false);
-          inFlightCheck.current = null;
+          finishCheck(checkId);
         }
       })();
 
       inFlightCheck.current = promise;
       return promise;
     },
-    [currentVersion, updateChannel, installedOverride, effectiveCurrentVersion]
+    [currentVersion, updateChannel, installedOverride, effectiveCurrentVersion, clearCheckTimeout, finishCheck]
   );
 
   // Shared post-install success helper. Called from both handoff success paths:
   // immediate (installerPromise resolved before 3 s) and delayed (after timeout).
   const handleHandoffSuccess = React.useCallback(
     async (version: string, channel: UpdateChannel, traceId: string, handoffStart: number) => {
+      activeCheckId.current += 1;
+      clearCheckTimeout();
+      setIsChecking(false);
+      inFlightCheck.current = null;
       try {
         await confirmUpdateInstallHandoffCall(version);
       } catch (err) {
@@ -215,7 +269,7 @@ export function PluginUpdateSection({
         duration: 3000
       });
     },
-    [currentVersion, onInstallVersionConfirmed]
+    [currentVersion, onInstallVersionConfirmed, clearCheckTimeout]
   );
 
   // Clear the installed override once the real loaded version matches or exceeds
@@ -232,6 +286,13 @@ export function PluginUpdateSection({
       setInstalledOverride(null);
     }
   }, [currentVersion, installedOverride]);
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      clearCheckTimeout();
+    };
+  }, [clearCheckTimeout]);
 
   // Reconcile and load cache on mount
   useEffect(() => {
@@ -267,6 +328,7 @@ export function PluginUpdateSection({
             setCandidate(null);
             setErrorMsg(null);
             onInstallVersionConfirmed?.(pendingInstall.version);
+            skipInitialCheck.current = true;
           }
           if (ctx.last_checked_at && ctx.last_checked_channel === updateChannel) {
             const hasPending =
@@ -280,6 +342,8 @@ export function PluginUpdateSection({
         }
       } catch (err) {
         // Quiet failure on context check
+      } finally {
+        setContextHydrated(true);
       }
     }
     void loadCache();
@@ -290,6 +354,9 @@ export function PluginUpdateSection({
 
   // Run check on mount or when update channel changes
   useEffect(() => {
+    if (!contextHydrated) {
+      return;
+    }
     if (!currentVersion || currentVersion === "Loading...") {
       return;
     }
@@ -297,21 +364,28 @@ export function PluginUpdateSection({
     hasChecked.current = true;
 
     if (isFirstMount) {
+      if (skipInitialCheck.current) {
+        logUpdate(null, "initial_check_skipped_hydration");
+        return;
+      }
       if (automaticUpdateChecks) {
         void checkForUpdates({ force: false, notify: false });
       }
     } else {
       void checkForUpdates({ force: true, notify: false });
     }
-  }, [updateChannel, currentVersion]);
+  }, [updateChannel, currentVersion, contextHydrated]);
 
   // Handle automatic check toggle changes
   useEffect(() => {
+    if (!contextHydrated) {
+      return;
+    }
     if (!automaticUpdateChecks || !currentVersion || currentVersion === "Loading...") {
       return;
     }
     void checkForUpdates({ force: false, notify: false });
-  }, [automaticUpdateChecks, currentVersion]);
+  }, [automaticUpdateChecks, currentVersion, contextHydrated]);
 
   const handleToggleChannel = (checked: boolean) => {
     if (checked) {
@@ -515,7 +589,9 @@ export function PluginUpdateSection({
               </>
             )}
             {!isChecking && errorMsg && (
-              <span style={{ color: "#f87171" }}>Failed to check</span>
+              <span style={{ color: "#f87171" }}>
+                {errorMsg.includes("interrupted") ? "Check interrupted" : "Failed to check"}
+              </span>
             )}
             {!isChecking && !errorMsg && checkResult?.status === "current" && (
               <span style={{ color: "#4ade80" }}>Up to date</span>
