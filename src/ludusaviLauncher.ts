@@ -1,3 +1,4 @@
+import { isRpcStatus } from "./utils/rpc";
 import { call } from "@decky/api";
 import { SteamClientGlobal, AppStoreGlobal, SteamGameId } from "./types/steam-globals";
 import { applyLudusaviArtworkToShortcut, ArtworkLogger } from "./shortcutArtwork";
@@ -76,14 +77,6 @@ type RpcStatus = {
 
 type RpcResult<T> = T | RpcStatus;
 
-function isRpcStatus<T>(result: RpcResult<T>): result is RpcStatus {
-  return (
-    typeof result === "object" &&
-    result !== null &&
-    "status" in result &&
-    ((result as RpcStatus).status === "skipped" || (result as RpcStatus).status === "failed")
-  );
-}
 
 async function getSavedShortcutAppId(): Promise<number> {
   try {

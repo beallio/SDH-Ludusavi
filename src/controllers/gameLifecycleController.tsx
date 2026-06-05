@@ -11,15 +11,17 @@ import type {
   RunningSession,
   AutoSyncStatusKind,
   SyncthingWatchStartResult,
-  SyncthingPollResult
+  SyncthingPollResult,
 } from "../types";
 import type { LudusaviStateStore } from "../state/ludusaviState";
 import { summarizeOperationResult } from "../formatting/operationText";
 import { log } from "../utils/logging";
+import { isRpcStatus } from "../utils/rpc";
 import {
   getMainRunningSession,
-  sessionFromAppOverview
+  sessionFromAppOverview,
 } from "../utils/steam";
+import { SyncthingMonitor, type SyncthingRpc } from "./syncthingMonitor";
 
 type AutoSyncStatusSurface = {
   publish: (
@@ -30,7 +32,7 @@ type AutoSyncStatusSurface = {
       appID?: string;
       tracked?: boolean;
       resultStatus?: OperationResult["status"] | LifecycleCheckResult["status"] | RpcStatus["status"];
-    }
+    },
   ) => void;
   hide: (options?: {
     source?: "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";
@@ -45,38 +47,38 @@ type AutoSyncStatusSurface = {
       gameName?: string;
       appID?: string;
       tracked?: boolean;
-    }
+    },
   ) => void;
 };
 
 type LifecycleRpc = {
   checkGameStart: (
     gameName: string,
-    appID?: string
+    appID?: string,
   ) => Promise<RpcResult<LifecycleCheckResult>>;
   restoreGameOnStart: (
     gameName: string,
-    appID?: string
+    appID?: string,
   ) => Promise<RpcResult<OperationResult>>;
   resolveGameStartConflict: (
     gameName: string,
     appID: string | undefined,
-    resolution: ConflictResolution
+    resolution: ConflictResolution,
   ) => Promise<RpcResult<OperationResult>>;
   checkGameExit: (
     gameName: string,
-    appID?: string
+    appID?: string,
   ) => Promise<RpcResult<LifecycleCheckResult>>;
   backupGameOnExit: (
     gameName: string,
-    appID?: string
+    appID?: string,
   ) => Promise<RpcResult<OperationResult>>;
   pauseGameProcess: (pid: number) => Promise<RpcResult<ProcessSignalResult>>;
   resumeGameProcess: (pid: number) => Promise<RpcResult<ProcessSignalResult>>;
   startSyncthingActivityWatch: (
     phase: string,
     gameName?: string,
-    appID?: string
+    appID?: string,
   ) => Promise<RpcResult<SyncthingWatchStartResult>>;
   getSyncthingActivity: (watchID: string) => Promise<RpcResult<SyncthingPollResult>>;
   stopSyncthingActivityWatch: (watchID: string) => Promise<RpcResult<SyncthingPollResult>>;
@@ -91,17 +93,8 @@ type GameLifecycleControllerDependencies = {
   syncGlobalHistory: () => Promise<void>;
 };
 
-function isRpcStatus<T>(result: RpcResult<T>): result is RpcStatus {
-  return (
-    typeof result === "object" &&
-    result !== null &&
-    "status" in result &&
-    ((result as RpcStatus).status === "skipped" || (result as RpcStatus).status === "failed")
-  );
-}
-
 export function createGameLifecycleController(
-  dependencies: GameLifecycleControllerDependencies
+  dependencies: GameLifecycleControllerDependencies,
 ) {
   const {
     store,
@@ -109,7 +102,7 @@ export function createGameLifecycleController(
     statusSurface,
     resolveConflict,
     notifyFailure,
-    syncGlobalHistory
+    syncGlobalHistory,
   } = dependencies;
   const ludusaviStore = store;
   const {
@@ -122,12 +115,12 @@ export function createGameLifecycleController(
     checkGameExit: checkGameExitCall,
     backupGameOnExit: backupGameOnExitCall,
     pauseGameProcess: pauseGameProcessCall,
-    resumeGameProcess: resumeGameProcessCall
+    resumeGameProcess: resumeGameProcessCall,
   } = rpc;
   const {
     publish: publishAutoSyncStatus,
     hide: hideAutoSyncStatus,
-    complete: completeAutoSyncStatus
+    complete: completeAutoSyncStatus,
   } = statusSurface;
   const activeSessions = new Map<number, RunningSession>();
   let fallbackIntervalID: number | null = null;
@@ -135,203 +128,20 @@ export function createGameLifecycleController(
   let fallbackPreviousAppName: string | null = null;
   let lifecycleRegistration: unknown = null;
 
-  let activeWatchID: string | null = null;
-  let activePollInterval: number | null = null;
-  let currentMonitorSessionToken = 0;
-
-  const stopSpecificWatch = async (wId: string) => {
-    try {
-      await stopSyncthingActivityWatchCall(wId);
-    } catch (err) {
-      log("error", `Failed to stop Syncthing watch ${wId}: ${err}`);
-    }
+  const syncthingRpc: SyncthingRpc = {
+    startWatch: startSyncthingActivityWatchCall,
+    pollWatch: getSyncthingActivityCall,
+    stopWatch: stopSyncthingActivityWatchCall,
   };
 
-  const stopSyncthingMonitorWithoutTokenIncrement = async () => {
-    if (activePollInterval !== null) {
-      window.clearInterval(activePollInterval);
-      activePollInterval = null;
-    }
-    if (activeWatchID !== null) {
-      const wId = activeWatchID;
-      activeWatchID = null;
-      await stopSpecificWatch(wId);
-    }
-  };
-
-  const stopSyncthingMonitor = async () => {
-    currentMonitorSessionToken += 1;
-    await stopSyncthingMonitorWithoutTokenIncrement();
-  };
-
-  const startSyncthingMonitor = async (phase: "pre_game" | "post_game", name: string, appID: string, tracked: boolean) => {
-    const autoSyncEnabled = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
-    if (!autoSyncEnabled || !tracked) return;
-
-    currentMonitorSessionToken += 1;
-    const sessionToken = currentMonitorSessionToken;
-
-    await stopSyncthingMonitorWithoutTokenIncrement();
-
-    try {
-      const startRes = await startSyncthingActivityWatchCall(phase, name, appID);
-      if (sessionToken !== currentMonitorSessionToken) {
-        if (!isRpcStatus(startRes) && startRes.status === "watching") {
-          await stopSpecificWatch(startRes.watch_id);
-        }
-        return;
-      }
-
-      if (isRpcStatus(startRes)) {
-        log("debug", `Syncthing watch start skipped/failed: ${startRes.reason} - ${startRes.message}`);
-        return;
-      }
-
-      const watchID = startRes.watch_id;
-      activeWatchID = watchID;
-
-      let elapsedSeconds = 0;
-      let activityObserved = false;
-      let settledCount = 0;
-      let intervalID: number | null = null;
-
-      intervalID = window.setInterval(async () => {
-        if (watchID !== activeWatchID) {
-          if (intervalID !== null) {
-            window.clearInterval(intervalID);
-          }
-          return;
-        }
-
-        elapsedSeconds += 1;
-        if (elapsedSeconds > 120) {
-          log("info", `Syncthing watch ${watchID} hit 120s timeout, stopping.`);
-          if (intervalID !== null) {
-            window.clearInterval(intervalID);
-          }
-          if (activeWatchID === watchID) {
-            activePollInterval = null;
-            activeWatchID = null;
-          }
-          await stopSpecificWatch(watchID);
-          return;
-        }
-
-        try {
-          const pollRes = await getSyncthingActivityCall(watchID);
-          if (watchID !== activeWatchID) {
-            if (intervalID !== null) {
-              window.clearInterval(intervalID);
-            }
-            return;
-          }
-
-          if (isRpcStatus(pollRes)) {
-            log("error", `Syncthing poll failed: ${pollRes.reason} - ${pollRes.message}`);
-            if (intervalID !== null) {
-              window.clearInterval(intervalID);
-            }
-            if (activeWatchID === watchID) {
-              activePollInterval = null;
-              activeWatchID = null;
-            }
-            await stopSpecificWatch(watchID);
-            return;
-          }
-
-          if (pollRes.status === "stopped") {
-            log("info", `Syncthing watch ${watchID} stopped by backend.`);
-            if (intervalID !== null) {
-              window.clearInterval(intervalID);
-            }
-            if (activeWatchID === watchID) {
-              activePollInterval = null;
-              activeWatchID = null;
-            }
-            return;
-          }
-
-          const sample = pollRes.sample;
-          if (!sample) return;
-
-          const hasActivity =
-            sample.downloading ||
-            sample.uploading ||
-            sample.update_in_progress ||
-            sample.status === "ACTIVE_TRANSFER" ||
-            sample.status === "SCANNING" ||
-            sample.status === "UPDATE_NEEDED" ||
-            sample.status === "PREPARING" ||
-            sample.status === "INDEXING_OR_SEQUENCE_UPDATE";
-
-          if (hasActivity) {
-            activityObserved = true;
-          }
-
-          if (sample.downloading) {
-            publishAutoSyncStatus("syncthing_downloading", {
-              source: phase === "pre_game" ? "lifecycle_start" : "lifecycle_exit",
-              gameName: name,
-              appID,
-              tracked: true
-            });
-          } else if (sample.uploading) {
-            publishAutoSyncStatus("syncthing_uploading", {
-              source: phase === "pre_game" ? "lifecycle_start" : "lifecycle_exit",
-              gameName: name,
-              appID,
-              tracked: true
-            });
-          } else if (sample.update_in_progress) {
-            publishAutoSyncStatus(
-              phase === "pre_game" ? "syncthing_downloading" : "syncthing_uploading",
-              {
-                source: phase === "pre_game" ? "lifecycle_start" : "lifecycle_exit",
-                gameName: name,
-                appID,
-                tracked: true
-              }
-            );
-          } else if (activityObserved && sample.settled) {
-            settledCount += 1;
-            if (settledCount >= 3) {
-              publishAutoSyncStatus("syncthing_complete", {
-                source: phase === "pre_game" ? "lifecycle_start" : "lifecycle_exit",
-                gameName: name,
-                appID,
-                tracked: true
-              });
-              if (intervalID !== null) {
-                window.clearInterval(intervalID);
-              }
-              if (activeWatchID === watchID) {
-                activePollInterval = null;
-                activeWatchID = null;
-              }
-              await stopSpecificWatch(watchID);
-            }
-          } else {
-            settledCount = 0;
-          }
-
-        } catch (err) {
-          log("error", `Error polling Syncthing watch ${watchID}: ${err}`);
-          if (intervalID !== null) {
-            window.clearInterval(intervalID);
-          }
-          if (activeWatchID === watchID) {
-            activePollInterval = null;
-            activeWatchID = null;
-          }
-          await stopSpecificWatch(watchID);
-        }
-      }, 1000) as any;
-      activePollInterval = intervalID;
-
-    } catch (err) {
-      log("error", `Failed to start Syncthing monitor: ${err}`);
-    }
-  };
+  const syncthingMonitor = new SyncthingMonitor(syncthingRpc, (status, options) => {
+    publishAutoSyncStatus(status, {
+      source: options.source,
+      gameName: options.gameName,
+      appID: options.appID,
+      tracked: true,
+    });
+  });
 
   const isTracked = (name: string, appID: string) => {
     return ludusaviStore.isTracked(
@@ -348,7 +158,7 @@ export function createGameLifecycleController(
       },
       (normalizedInput) => {
         log("debug", `No match for ${name} (${appID}) [normalized: ${normalizedInput}]`);
-      }
+      },
     );
   };
 
@@ -366,7 +176,7 @@ export function createGameLifecycleController(
         source: "lifecycle_start",
         gameName: name,
         appID,
-        tracked
+        tracked,
       });
     }
 
@@ -385,7 +195,9 @@ export function createGameLifecycleController(
         }
       }
 
-      startSyncthingMonitor("pre_game", name, appID, tracked);
+      if (autoSyncEnabled && tracked) {
+        void syncthingMonitor.start("pre_game", name, appID);
+      }
       log("info", `Calling check_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
       const checkResult = await checkGameStartCall(name, appID);
       log("info", `check_game_start result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
@@ -396,9 +208,9 @@ export function createGameLifecycleController(
           gameName: name,
           appID,
           tracked,
-          resultStatus: checkResult.status
+          resultStatus: checkResult.status,
         });
-        await stopSyncthingMonitor();
+        await syncthingMonitor.stop();
         return;
       }
 
@@ -407,18 +219,18 @@ export function createGameLifecycleController(
           const result: OperationResult = {
             status: "failed",
             game: name,
-            message: "Launch gate unavailable; restore skipped while game is loading."
+            message: "Launch gate unavailable; restore skipped while game is loading.",
           };
           completeAutoSyncStatus(result, { gameName: name, appID, tracked });
           notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
-          await stopSyncthingMonitor();
+          await syncthingMonitor.stop();
           return;
         }
         publishAutoSyncStatus("restoring", {
           source: "lifecycle_start",
           gameName: name,
           appID,
-          tracked
+          tracked,
         });
         log("info", `Calling restore_game_on_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
         const result = await restoreGameOnStartCall(name, appID);
@@ -426,7 +238,7 @@ export function createGameLifecycleController(
         completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
           notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
-          await stopSyncthingMonitor();
+          await syncthingMonitor.stop();
         }
         return;
       }
@@ -437,13 +249,13 @@ export function createGameLifecycleController(
           gameName: name,
           appID,
           tracked,
-          resultStatus: checkResult.status
+          resultStatus: checkResult.status,
         });
-        await stopSyncthingMonitor();
+        await syncthingMonitor.stop();
         if (!paused) {
           notifyFailure(
             "SDH-Ludusavi Auto-sync",
-            "Launch gate unavailable; conflict resolution skipped while game is loading."
+            "Launch gate unavailable; conflict resolution skipped while game is loading.",
           );
           return;
         }
@@ -451,20 +263,22 @@ export function createGameLifecycleController(
         if (!resolution) {
           completeAutoSyncStatus(
             { status: "skipped", game: name, reason: "conflict_unresolved" },
-            { gameName: name, appID, tracked }
+            { gameName: name, appID, tracked },
           );
           return;
         }
-        startSyncthingMonitor("pre_game", name, appID, tracked);
+        if (autoSyncEnabled && tracked) {
+        void syncthingMonitor.start("pre_game", name, appID);
+      }
         const result = await resolveGameStartConflictCall(
           checkResult.game ?? name,
           appID,
-          resolution
+          resolution,
         );
         completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
           notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
-          await stopSyncthingMonitor();
+          await syncthingMonitor.stop();
         }
         return;
       }
@@ -472,7 +286,7 @@ export function createGameLifecycleController(
       completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
       if (checkResult.status === "failed") {
         notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"));
-        await stopSyncthingMonitor();
+        await syncthingMonitor.stop();
       }
     } catch (err) {
       log("error", `App start handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
@@ -481,9 +295,9 @@ export function createGameLifecycleController(
         gameName: name,
         appID,
         tracked,
-        resultStatus: "failed"
+        resultStatus: "failed",
       });
-      await stopSyncthingMonitor();
+      await syncthingMonitor.stop();
     } finally {
       if (paused && typeof instanceID === "number") {
         try {
@@ -505,12 +319,15 @@ export function createGameLifecycleController(
         source: "lifecycle_exit",
         gameName: name,
         appID,
-        tracked
+        tracked,
       });
     }
 
     try {
-      startSyncthingMonitor("post_game", name, appID, tracked);
+      const autoSyncEnabledExit = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
+      if (autoSyncEnabledExit && tracked) {
+        void syncthingMonitor.start("post_game", name, appID);
+      }
       log("info", `Calling check_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
       const checkResult = await checkGameExitCall(name, appID);
       log("info", `check_game_exit result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
@@ -521,9 +338,9 @@ export function createGameLifecycleController(
           gameName: name,
           appID,
           tracked,
-          resultStatus: checkResult.status
+          resultStatus: checkResult.status,
         });
-        await stopSyncthingMonitor();
+        await syncthingMonitor.stop();
         return;
       }
 
@@ -532,7 +349,7 @@ export function createGameLifecycleController(
           source: "lifecycle_exit",
           gameName: name,
           appID,
-          tracked
+          tracked,
         });
         log("info", `Calling backup_game_on_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
         const result = await backupGameOnExitCall(name, appID);
@@ -540,7 +357,7 @@ export function createGameLifecycleController(
         completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
           notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
-          await stopSyncthingMonitor();
+          await syncthingMonitor.stop();
         }
         return;
       }
@@ -548,7 +365,7 @@ export function createGameLifecycleController(
       completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
       if (checkResult.status === "failed") {
         notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"));
-        await stopSyncthingMonitor();
+        await syncthingMonitor.stop();
       }
     } catch (err) {
       log("error", `App exit handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
@@ -557,9 +374,9 @@ export function createGameLifecycleController(
         gameName: name,
         appID,
         tracked,
-        resultStatus: "failed"
+        resultStatus: "failed",
       });
-      await stopSyncthingMonitor();
+      await syncthingMonitor.stop();
     } finally {
       await syncGlobalHistory();
     }
@@ -628,7 +445,7 @@ export function createGameLifecycleController(
         log(
           "warning",
           `Could not resolve app lifetime notification: ${JSON.stringify(notification)}`,
-          "lifecycle"
+          "lifecycle",
         );
         return;
       }
@@ -642,7 +459,7 @@ export function createGameLifecycleController(
             "debug",
             `Promoted startup session for ${session.name} (${session.appID})`,
             "lifecycle",
-            session.name
+            session.name,
           );
           return;
         }
@@ -652,7 +469,7 @@ export function createGameLifecycleController(
             "debug",
             `Duplicate app start ignored for ${session.name} (${session.appID})`,
             "lifecycle",
-            session.name
+            session.name,
           );
           return;
         }
@@ -749,11 +566,11 @@ export function createGameLifecycleController(
       fallbackIntervalID = null;
     }
     activeSessions.clear();
-    void stopSyncthingMonitor();
+    syncthingMonitor.dispose();
   }
 
   return {
     start,
-    dispose
+    dispose,
   };
 }

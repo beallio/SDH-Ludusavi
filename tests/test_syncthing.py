@@ -204,8 +204,8 @@ def test_compute_activity_status() -> None:
     assert status.settled is False
 
 
-@patch("sdh_ludusavi.syncthing.resolve_api_credentials")
-@patch("sdh_ludusavi.syncthing.resolve_folder_by_path")
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+@patch("sdh_ludusavi.syncthing.watcher.resolve_folder_by_path")
 def test_watch_manager(mock_resolve_path, mock_resolve_creds) -> None:
     # Setup mock SyncthingAPI and credentials
     mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
@@ -218,11 +218,11 @@ def test_watch_manager(mock_resolve_path, mock_resolve_creds) -> None:
 
     # Mock get_initial_folder_state_and_runtime, get_event_cursor, get_connection_totals
     with (
-        patch("sdh_ludusavi.syncthing.get_initial_folder_state_and_runtime") as mock_init,
-        patch("sdh_ludusavi.syncthing.get_event_cursor") as mock_cursor,
-        patch("sdh_ludusavi.syncthing.get_connection_totals") as mock_totals,
-        patch("sdh_ludusavi.syncthing.get_folder_status") as mock_status,
-        patch("sdh_ludusavi.syncthing.get_events") as mock_events,
+        patch("sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime") as mock_init,
+        patch("sdh_ludusavi.syncthing.watcher.get_event_cursor") as mock_cursor,
+        patch("sdh_ludusavi.syncthing.watcher.get_connection_totals") as mock_totals,
+        patch("sdh_ludusavi.syncthing.watcher.get_folder_status") as mock_status,
+        patch("sdh_ludusavi.syncthing.watcher.get_events") as mock_events,
     ):
         mock_init.return_value = ("idle", FolderRuntime(sequence=5))
         mock_cursor.return_value = 100

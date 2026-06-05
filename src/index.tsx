@@ -21,7 +21,6 @@ import {
   ConflictResolution,
   LifecycleCheckResult,
   RpcStatus,
-  RpcResult
 } from "./types";
 import { ConflictResolutionModal } from "./components/modals/ConflictResolutionModal";
 import {
@@ -29,6 +28,7 @@ import {
   resetLudusaviContentLoadState
 } from "./components/qam/LudusaviContent";
 import { createGameLifecycleController } from "./controllers/gameLifecycleController";
+import { isRpcStatus } from "./utils/rpc";
 import { log } from "./utils/logging";
 import {
   LudusaviStateProvider,
@@ -136,14 +136,6 @@ function notify(
   }
 }
 
-function isRpcStatus<T>(result: RpcResult<T>): result is RpcStatus {
-  return (
-    typeof result === "object" &&
-    result !== null &&
-    "status" in result &&
-    ((result as RpcStatus).status === "skipped" || (result as RpcStatus).status === "failed")
-  );
-}
 
 function logRpcStatus(result: RpcStatus, operation: string) {
   const level = result.status === "failed" ? "error" : "warning";

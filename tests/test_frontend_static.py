@@ -25,7 +25,9 @@ class ConcatenatedFrontendPath:
             Path("src/utils/steam.ts"),
             Path("src/settings/settingsMutationController.tsx"),
             Path("src/surfaces/autoSyncStatusSurface.tsx"),
+            Path("src/utils/rpc.ts"),
             Path("src/controllers/gameLifecycleController.tsx"),
+            Path("src/controllers/syncthingMonitor.ts"),
             Path("src/index.tsx"),
         ]
         contents = []
