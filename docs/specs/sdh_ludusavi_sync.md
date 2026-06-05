@@ -73,6 +73,14 @@ On game exit, the backend skips when automatic sync is disabled, the game is unm
 or an operation is running. Otherwise it backs up the matched game and refreshes the
 cached status.
 
+### Syncthing Activity Monitoring
+
+To track synchronization of backup data to other devices, the plugin monitors Syncthing activity in the background.
+
+- **Non-blocking Behavior**: Monitoring is advisory and display-only. Syncthing connection/API issues or slow sync will never block game launch or game exit.
+- **Path Resolution**: The watched folder is resolved dynamically by matching Syncthing configured folders against Ludusavi's backup path.
+- **Conflict Handling**: The monitor is stopped when a conflict is detected and is restarted only after a resolution operation is chosen, preventing the conflict screen from being overridden by temporary Syncthing statuses.
+
 ## Manual Sync
 
 `force_backup(game_name)` and `force_restore(game_name)` operate on the selected game.

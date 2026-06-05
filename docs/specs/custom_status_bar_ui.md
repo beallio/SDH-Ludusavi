@@ -56,8 +56,7 @@ deselected Ludusavi game.
 
 ## Core Data Structures
 
-- `AutoSyncStatusKind`: `backing_up`, `restoring`, `has_backup`, `needs_backup`, or
-  `error`.
+- `AutoSyncStatusKind`: `checking`, `backing_up`, `restoring`, `conflict`, `has_backup`, `unknown`, `error`, `syncthing_downloading`, `syncthing_uploading`, or `syncthing_complete`.
 - `AutoSyncStatusSource`: lifecycle, RPC result, timeout, or hide provenance.
 - `AutoSyncStatusState`: current strip status, visibility, and provenance.
 - `AutoSyncStatusBrowserViewOwner`: wrapper shape used to normalize the BrowserView
@@ -103,6 +102,9 @@ Autosync status strip behavior:
   keeping the local save and restoring the Ludusavi backup save.
 - Successful autosync result or current save state: show `GAME SAVE UP TO DATE` for
   2 seconds.
+- Syncthing downloading activity: show `SYNCTHING DOWNLOADING` with cloud-down icon.
+- Syncthing uploading activity: show `SYNCTHING UPLOADING` with cloud-up icon.
+- Syncthing completion: show `SYNCTHING COMPLETE` with cloud-checkmark icon.
 - Unknown/non-actionable save state: show `UNKNOWN` for 2 seconds.
 - Failed or unsafe-to-sync state: show `UNABLE TO SYNC` and emit one Decky failure
   toast.
