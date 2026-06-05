@@ -1936,3 +1936,35 @@ def test_watchdog_does_not_resume_during_active_operation(
     assert (123, signal.SIGCONT) in signals
 
     service.stop()
+
+
+def test_service_syncthing_watch(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    service = service_with_state(tmp_path)
+    service._gateway.get_diagnostics = lambda: {"backupPath": "/home/deck/Sync"}
+
+    service._syncthing_watch_manager = MagicMock()
+    service._syncthing_watch_manager.start_watch.return_value = {
+        "status": "watching",
+        "watch_id": "test-id",
+    }
+    service._syncthing_watch_manager.poll_watch.return_value = {"status": "activity"}
+    service._syncthing_watch_manager.stop_watch.return_value = {"status": "stopped"}
+
+    res = service.start_syncthing_activity_watch("pre_game", "Hades", "1145300")
+    assert res["status"] == "watching"
+    service._syncthing_watch_manager.start_watch.assert_called_once_with(
+        "pre_game", "Hades", "1145300", "/home/deck/Sync"
+    )
+
+    poll_res = service.get_syncthing_activity("test-id")
+    assert poll_res["status"] == "activity"
+    service._syncthing_watch_manager.poll_watch.assert_called_once_with("test-id")
+
+    stop_res = service.stop_syncthing_activity_watch("test-id")
+    assert stop_res["status"] == "stopped"
+    service._syncthing_watch_manager.stop_watch.assert_called_once_with("test-id")
+
+    service.stop()
+    service._syncthing_watch_manager.stop_all.assert_called_once()

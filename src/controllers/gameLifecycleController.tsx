@@ -8,7 +8,10 @@ import type {
   ProcessSignalResult,
   RpcResult,
   RpcStatus,
-  RunningSession
+  RunningSession,
+  AutoSyncStatusKind,
+  SyncthingWatchStartResult,
+  SyncthingPollResult
 } from "../types";
 import type { LudusaviStateStore } from "../state/ludusaviState";
 import { summarizeOperationResult } from "../formatting/operationText";
@@ -20,7 +23,7 @@ import {
 
 type AutoSyncStatusSurface = {
   publish: (
-    status: "checking" | "backing_up" | "restoring" | "conflict" | "has_backup" | "unknown" | "error",
+    status: AutoSyncStatusKind,
     options: {
       source: "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";
       gameName?: string;
@@ -70,6 +73,13 @@ type LifecycleRpc = {
   ) => Promise<RpcResult<OperationResult>>;
   pauseGameProcess: (pid: number) => Promise<RpcResult<ProcessSignalResult>>;
   resumeGameProcess: (pid: number) => Promise<RpcResult<ProcessSignalResult>>;
+  startSyncthingActivityWatch: (
+    phase: string,
+    gameName?: string,
+    appID?: string
+  ) => Promise<RpcResult<SyncthingWatchStartResult>>;
+  getSyncthingActivity: (watchID: string) => Promise<RpcResult<SyncthingPollResult>>;
+  stopSyncthingActivityWatch: (watchID: string) => Promise<RpcResult<SyncthingPollResult>>;
 };
 
 type GameLifecycleControllerDependencies = {
@@ -103,6 +113,9 @@ export function createGameLifecycleController(
   } = dependencies;
   const ludusaviStore = store;
   const {
+    startSyncthingActivityWatch: startSyncthingActivityWatchCall,
+    getSyncthingActivity: getSyncthingActivityCall,
+    stopSyncthingActivityWatch: stopSyncthingActivityWatchCall,
     checkGameStart: checkGameStartCall,
     restoreGameOnStart: restoreGameOnStartCall,
     resolveGameStartConflict: resolveGameStartConflictCall,
@@ -121,6 +134,204 @@ export function createGameLifecycleController(
   let fallbackPreviousAppID: string | null = null;
   let fallbackPreviousAppName: string | null = null;
   let lifecycleRegistration: unknown = null;
+
+  let activeWatchID: string | null = null;
+  let activePollInterval: number | null = null;
+  let currentMonitorSessionToken = 0;
+
+  const stopSpecificWatch = async (wId: string) => {
+    try {
+      await stopSyncthingActivityWatchCall(wId);
+    } catch (err) {
+      log("error", `Failed to stop Syncthing watch ${wId}: ${err}`);
+    }
+  };
+
+  const stopSyncthingMonitorWithoutTokenIncrement = async () => {
+    if (activePollInterval !== null) {
+      window.clearInterval(activePollInterval);
+      activePollInterval = null;
+    }
+    if (activeWatchID !== null) {
+      const wId = activeWatchID;
+      activeWatchID = null;
+      await stopSpecificWatch(wId);
+    }
+  };
+
+  const stopSyncthingMonitor = async () => {
+    currentMonitorSessionToken += 1;
+    await stopSyncthingMonitorWithoutTokenIncrement();
+  };
+
+  const startSyncthingMonitor = async (phase: "pre_game" | "post_game", name: string, appID: string, tracked: boolean) => {
+    const autoSyncEnabled = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
+    if (!autoSyncEnabled || !tracked) return;
+
+    currentMonitorSessionToken += 1;
+    const sessionToken = currentMonitorSessionToken;
+
+    await stopSyncthingMonitorWithoutTokenIncrement();
+
+    try {
+      const startRes = await startSyncthingActivityWatchCall(phase, name, appID);
+      if (sessionToken !== currentMonitorSessionToken) {
+        if (!isRpcStatus(startRes) && startRes.status === "watching") {
+          await stopSpecificWatch(startRes.watch_id);
+        }
+        return;
+      }
+
+      if (isRpcStatus(startRes)) {
+        log("debug", `Syncthing watch start skipped/failed: ${startRes.reason} - ${startRes.message}`);
+        return;
+      }
+
+      const watchID = startRes.watch_id;
+      activeWatchID = watchID;
+
+      let elapsedSeconds = 0;
+      let activityObserved = false;
+      let settledCount = 0;
+      let intervalID: number | null = null;
+
+      intervalID = window.setInterval(async () => {
+        if (watchID !== activeWatchID) {
+          if (intervalID !== null) {
+            window.clearInterval(intervalID);
+          }
+          return;
+        }
+
+        elapsedSeconds += 1;
+        if (elapsedSeconds > 120) {
+          log("info", `Syncthing watch ${watchID} hit 120s timeout, stopping.`);
+          if (intervalID !== null) {
+            window.clearInterval(intervalID);
+          }
+          if (activeWatchID === watchID) {
+            activePollInterval = null;
+            activeWatchID = null;
+          }
+          await stopSpecificWatch(watchID);
+          return;
+        }
+
+        try {
+          const pollRes = await getSyncthingActivityCall(watchID);
+          if (watchID !== activeWatchID) {
+            if (intervalID !== null) {
+              window.clearInterval(intervalID);
+            }
+            return;
+          }
+
+          if (isRpcStatus(pollRes)) {
+            log("error", `Syncthing poll failed: ${pollRes.reason} - ${pollRes.message}`);
+            if (intervalID !== null) {
+              window.clearInterval(intervalID);
+            }
+            if (activeWatchID === watchID) {
+              activePollInterval = null;
+              activeWatchID = null;
+            }
+            await stopSpecificWatch(watchID);
+            return;
+          }
+
+          if (pollRes.status === "stopped") {
+            log("info", `Syncthing watch ${watchID} stopped by backend.`);
+            if (intervalID !== null) {
+              window.clearInterval(intervalID);
+            }
+            if (activeWatchID === watchID) {
+              activePollInterval = null;
+              activeWatchID = null;
+            }
+            return;
+          }
+
+          const sample = pollRes.sample;
+          if (!sample) return;
+
+          const hasActivity =
+            sample.downloading ||
+            sample.uploading ||
+            sample.update_in_progress ||
+            sample.status === "ACTIVE_TRANSFER" ||
+            sample.status === "SCANNING" ||
+            sample.status === "UPDATE_NEEDED" ||
+            sample.status === "PREPARING" ||
+            sample.status === "INDEXING_OR_SEQUENCE_UPDATE";
+
+          if (hasActivity) {
+            activityObserved = true;
+          }
+
+          if (sample.downloading) {
+            publishAutoSyncStatus("syncthing_downloading", {
+              source: phase === "pre_game" ? "lifecycle_start" : "lifecycle_exit",
+              gameName: name,
+              appID,
+              tracked: true
+            });
+          } else if (sample.uploading) {
+            publishAutoSyncStatus("syncthing_uploading", {
+              source: phase === "pre_game" ? "lifecycle_start" : "lifecycle_exit",
+              gameName: name,
+              appID,
+              tracked: true
+            });
+          } else if (sample.update_in_progress) {
+            publishAutoSyncStatus(
+              phase === "pre_game" ? "syncthing_downloading" : "syncthing_uploading",
+              {
+                source: phase === "pre_game" ? "lifecycle_start" : "lifecycle_exit",
+                gameName: name,
+                appID,
+                tracked: true
+              }
+            );
+          } else if (activityObserved && sample.settled) {
+            settledCount += 1;
+            if (settledCount >= 3) {
+              publishAutoSyncStatus("syncthing_complete", {
+                source: phase === "pre_game" ? "lifecycle_start" : "lifecycle_exit",
+                gameName: name,
+                appID,
+                tracked: true
+              });
+              if (intervalID !== null) {
+                window.clearInterval(intervalID);
+              }
+              if (activeWatchID === watchID) {
+                activePollInterval = null;
+                activeWatchID = null;
+              }
+              await stopSpecificWatch(watchID);
+            }
+          } else {
+            settledCount = 0;
+          }
+
+        } catch (err) {
+          log("error", `Error polling Syncthing watch ${watchID}: ${err}`);
+          if (intervalID !== null) {
+            window.clearInterval(intervalID);
+          }
+          if (activeWatchID === watchID) {
+            activePollInterval = null;
+            activeWatchID = null;
+          }
+          await stopSpecificWatch(watchID);
+        }
+      }, 1000) as any;
+      activePollInterval = intervalID;
+
+    } catch (err) {
+      log("error", `Failed to start Syncthing monitor: ${err}`);
+    }
+  };
 
   const isTracked = (name: string, appID: string) => {
     return ludusaviStore.isTracked(
@@ -174,6 +385,7 @@ export function createGameLifecycleController(
         }
       }
 
+      startSyncthingMonitor("pre_game", name, appID, tracked);
       log("info", `Calling check_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
       const checkResult = await checkGameStartCall(name, appID);
       log("info", `check_game_start result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
@@ -186,6 +398,7 @@ export function createGameLifecycleController(
           tracked,
           resultStatus: checkResult.status
         });
+        await stopSyncthingMonitor();
         return;
       }
 
@@ -198,6 +411,7 @@ export function createGameLifecycleController(
           };
           completeAutoSyncStatus(result, { gameName: name, appID, tracked });
           notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
+          await stopSyncthingMonitor();
           return;
         }
         publishAutoSyncStatus("restoring", {
@@ -212,6 +426,7 @@ export function createGameLifecycleController(
         completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
           notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
+          await stopSyncthingMonitor();
         }
         return;
       }
@@ -224,6 +439,7 @@ export function createGameLifecycleController(
           tracked,
           resultStatus: checkResult.status
         });
+        await stopSyncthingMonitor();
         if (!paused) {
           notifyFailure(
             "SDH-Ludusavi Auto-sync",
@@ -239,6 +455,7 @@ export function createGameLifecycleController(
           );
           return;
         }
+        startSyncthingMonitor("pre_game", name, appID, tracked);
         const result = await resolveGameStartConflictCall(
           checkResult.game ?? name,
           appID,
@@ -247,6 +464,7 @@ export function createGameLifecycleController(
         completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
           notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
+          await stopSyncthingMonitor();
         }
         return;
       }
@@ -254,6 +472,7 @@ export function createGameLifecycleController(
       completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
       if (checkResult.status === "failed") {
         notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"));
+        await stopSyncthingMonitor();
       }
     } catch (err) {
       log("error", `App start handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
@@ -264,6 +483,7 @@ export function createGameLifecycleController(
         tracked,
         resultStatus: "failed"
       });
+      await stopSyncthingMonitor();
     } finally {
       if (paused && typeof instanceID === "number") {
         try {
@@ -290,6 +510,7 @@ export function createGameLifecycleController(
     }
 
     try {
+      startSyncthingMonitor("post_game", name, appID, tracked);
       log("info", `Calling check_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
       const checkResult = await checkGameExitCall(name, appID);
       log("info", `check_game_exit result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
@@ -302,6 +523,7 @@ export function createGameLifecycleController(
           tracked,
           resultStatus: checkResult.status
         });
+        await stopSyncthingMonitor();
         return;
       }
 
@@ -318,6 +540,7 @@ export function createGameLifecycleController(
         completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
           notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
+          await stopSyncthingMonitor();
         }
         return;
       }
@@ -325,6 +548,7 @@ export function createGameLifecycleController(
       completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
       if (checkResult.status === "failed") {
         notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"));
+        await stopSyncthingMonitor();
       }
     } catch (err) {
       log("error", `App exit handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
@@ -335,6 +559,7 @@ export function createGameLifecycleController(
         tracked,
         resultStatus: "failed"
       });
+      await stopSyncthingMonitor();
     } finally {
       await syncGlobalHistory();
     }
@@ -524,6 +749,7 @@ export function createGameLifecycleController(
       fallbackIntervalID = null;
     }
     activeSessions.clear();
+    void stopSyncthingMonitor();
   }
 
   return {

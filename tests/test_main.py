@@ -662,3 +662,32 @@ def test_plugin_main_triggers_reconciliation(tmp_path: Path, monkeypatch) -> Non
     asyncio.run(plugin._main())
 
     assert reconciled_version is not None
+
+
+def test_plugin_syncthing_rpc(tmp_path: Path, monkeypatch) -> None:
+    from tests.test_main import fake_decky_module, import_main, FakeSettingsManager
+    from unittest.mock import MagicMock
+
+    decky, _ = fake_decky_module(tmp_path)
+    module = import_main(monkeypatch, decky, settings_manager=FakeSettingsManager)
+
+    plugin = module.Plugin()
+    service = plugin._service()
+
+    service.start_syncthing_activity_watch = MagicMock(
+        return_value={"status": "watching", "watch_id": "test-id"}
+    )
+    service.get_syncthing_activity = MagicMock(return_value={"status": "activity"})
+    service.stop_syncthing_activity_watch = MagicMock(return_value={"status": "stopped"})
+
+    res = asyncio.run(plugin.start_syncthing_activity_watch("pre_game", "Hades", "1145300"))
+    assert res["status"] == "watching"
+    service.start_syncthing_activity_watch.assert_called_once_with("pre_game", "Hades", "1145300")
+
+    poll_res = asyncio.run(plugin.get_syncthing_activity("test-id"))
+    assert poll_res["status"] == "activity"
+    service.get_syncthing_activity.assert_called_once_with("test-id")
+
+    stop_res = asyncio.run(plugin.stop_syncthing_activity_watch("test-id"))
+    assert stop_res["status"] == "stopped"
+    service.stop_syncthing_activity_watch.assert_called_once_with("test-id")

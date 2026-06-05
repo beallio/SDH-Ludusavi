@@ -10,7 +10,10 @@ import {
   pauseGameProcessCall,
   resolveGameStartConflictCall,
   restoreGameOnStartCall,
-  resumeGameProcessCall
+  resumeGameProcessCall,
+  startSyncthingActivityWatchCall,
+  getSyncthingActivityCall,
+  stopSyncthingActivityWatchCall
 } from "./api/ludusaviRpc";
 
 import {
@@ -227,7 +230,10 @@ export default definePlugin(() => {
       checkGameExit: checkGameExitCall,
       backupGameOnExit: backupGameOnExitCall,
       pauseGameProcess: pauseGameProcessCall,
-      resumeGameProcess: resumeGameProcessCall
+      resumeGameProcess: resumeGameProcessCall,
+      startSyncthingActivityWatch: startSyncthingActivityWatchCall,
+      getSyncthingActivity: getSyncthingActivityCall,
+      stopSyncthingActivityWatch: stopSyncthingActivityWatchCall
     },
     statusSurface: {
       publish: publishAutoSyncStatus,

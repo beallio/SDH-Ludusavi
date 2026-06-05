@@ -25,6 +25,7 @@ from .constants import (
     CONFIG_MARKER_READ_FAILED,
     CACHE_MARKER_UNCHANGED,
 )
+from . import updater
 from .types import LudusaviAdapter, GameStatus
 
 LOGGER = logging.getLogger(__name__)
@@ -162,6 +163,11 @@ class SDHLudusaviService:
             )
         )
 
+        # 8. Syncthing Watch Manager
+        from .syncthing import SyncthingWatchManager
+
+        self._syncthing_watch_manager = SyncthingWatchManager()
+
         # Configure unified logging
         self._log_buffer.setup_logging()
         self.log("info", "SDH-ludusavi service initialized", "init")
@@ -194,6 +200,21 @@ class SDHLudusaviService:
     def stop(self) -> None:
         """Shut down the watchdog thread and resume all paused processes."""
         self._watchdog.stop()
+        self._syncthing_watch_manager.stop_all()
+
+    def start_syncthing_activity_watch(
+        self, phase: str, game_name: str | None, app_id: str | None
+    ) -> dict[str, Any]:
+        backup_path = self._gateway.get_diagnostics().get("backupPath")
+        if not isinstance(backup_path, str) or backup_path == "unknown" or not backup_path.strip():
+            backup_path = None
+        return self._syncthing_watch_manager.start_watch(phase, game_name, app_id, backup_path)
+
+    def get_syncthing_activity(self, watch_id: str) -> dict[str, Any]:
+        return self._syncthing_watch_manager.poll_watch(watch_id)
+
+    def stop_syncthing_activity_watch(self, watch_id: str) -> dict[str, Any]:
+        return self._syncthing_watch_manager.stop_watch(watch_id)
 
     def log(
         self, level: str, message: str, operation: str | None = None, game_name: str | None = None
@@ -413,49 +434,31 @@ class SDHLudusaviService:
     # Updater helper methods
     def set_update_channel(self, channel: str) -> dict[str, Any]:
         """Update the update channel setting and persist it to disk."""
-        from . import updater
-
         return updater.set_update_channel(self, channel)
 
     def set_automatic_update_checks(self, enabled: bool) -> dict[str, Any]:
         """Update the automatic update checks setting and persist it to disk."""
-        from . import updater
-
         return updater.set_automatic_update_checks(self, enabled)
 
     def get_update_check_context(self) -> dict[str, Any]:
-        from . import updater
-
         return updater.get_update_check_context(self)
 
     def record_update_check_result(self, result: dict[str, Any]) -> None:
-        from . import updater
-
         updater.record_update_check_result(self, result)
 
     def record_update_install_requested(self, candidate: dict[str, Any]) -> dict[str, Any]:
-        from . import updater
-
         return updater.record_update_install_requested(self, candidate)
 
     def confirm_update_install_handoff(self, version: str) -> dict[str, Any]:
-        from . import updater
-
         return updater.confirm_update_install_handoff(self, version)
 
     def clear_pending_update_install(self, version: str | None = None) -> dict[str, Any]:
-        from . import updater
-
         return updater.clear_pending_update_install(self, version)
 
     def reconcile_pending_update_install(self, current_version: str) -> None:
-        from . import updater
-
         updater.reconcile_pending_update_install(self, current_version)
 
     def revalidate_plugin_update(self, candidate: dict[str, Any]) -> dict[str, Any]:
-        from . import updater
-
         return updater.revalidate_plugin_update(self, candidate)
 
 

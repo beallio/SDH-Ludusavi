@@ -107,6 +107,26 @@ class Plugin:
             lambda: self._service().confirm_update_install_handoff(version),
         )
 
+    async def start_syncthing_activity_watch(
+        self, phase: str, game_name: str | None = None, app_id: str | None = None
+    ) -> dict[str, Any]:
+        return await self._call(
+            "start_syncthing_activity_watch",
+            lambda: self._service().start_syncthing_activity_watch(phase, game_name, app_id),
+        )
+
+    async def get_syncthing_activity(self, watch_id: str) -> dict[str, Any]:
+        return await self._call(
+            "get_syncthing_activity",
+            lambda: self._service().get_syncthing_activity(watch_id),
+        )
+
+    async def stop_syncthing_activity_watch(self, watch_id: str) -> dict[str, Any]:
+        return await self._call(
+            "stop_syncthing_activity_watch",
+            lambda: self._service().stop_syncthing_activity_watch(watch_id),
+        )
+
     async def clear_pending_update_install(self, version: str | None = None) -> dict[str, Any]:
         return await self._call(
             "clear_pending_update_install",

@@ -190,7 +190,7 @@ def test_frontend_uses_browserview_only_autosync_status_strip() -> None:
     source = FRONTEND.read_text()
 
     for required_text in [
-        'type AutoSyncStatusKind = "checking" | "backing_up" | "restoring" | "conflict" | "has_backup" | "unknown" | "error";',
+        "export type AutoSyncStatusKind =",
         "let currentAutoSyncStatusState: AutoSyncStatusState",
         "currentAutoSyncStatusState = {",
         "function hideAutoSyncStatus(",
@@ -2783,4 +2783,46 @@ def test_frontend_updater_codex_p2_findings() -> None:
     cleanup_body = cleanup_effect.group(0)
     assert "pendingInstallVersion.current = null" in cleanup_body, (
         "Cleanup effect must clear pendingInstallVersion.current when it clears installedOverride"
+    )
+
+
+def test_frontend_syncthing_static() -> None:
+    source = FRONTEND.read_text()
+
+    for callable_name in [
+        "startSyncthingActivityWatchCall",
+        "getSyncthingActivityCall",
+        "stopSyncthingActivityWatchCall",
+    ]:
+        assert callable_name in source
+
+    for type_text in [
+        '"syncthing_downloading"',
+        '"syncthing_uploading"',
+        '"syncthing_complete"',
+    ]:
+        assert type_text in source
+
+    surface_source = Path("src/surfaces/autoSyncStatusSurface.tsx").read_text(encoding="utf-8")
+    for status_text in [
+        "SYNCTHING DOWNLOADING",
+        "SYNCTHING UPLOADING",
+        "SYNCTHING COMPLETE",
+    ]:
+        assert status_text in surface_source
+
+    assert "svg" in surface_source.lower()
+
+    controller_source = Path("src/controllers/gameLifecycleController.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert "startSyncthingActivityWatchCall" in controller_source
+    assert "getSyncthingActivityCall" in controller_source
+    assert "stopSyncthingActivityWatchCall" in controller_source
+
+    assert controller_source.index("startSyncthingActivityWatchCall") < controller_source.index(
+        "checkGameStartCall"
+    )
+    assert controller_source.index("startSyncthingActivityWatchCall") < controller_source.index(
+        "checkGameExitCall"
     )

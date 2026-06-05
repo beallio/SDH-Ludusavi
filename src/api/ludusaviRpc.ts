@@ -13,7 +13,9 @@ import type {
   RefreshResult,
   RpcResult,
   Settings,
-  Versions
+  Versions,
+  SyncthingWatchStartResult,
+  SyncthingPollResult
 } from "../types";
 
 export const getSettings = callable<[], RpcResult<Settings>>("get_settings");
@@ -59,3 +61,13 @@ export const restoreGameOnStartCall = callable<[gameName: string, app_id?: strin
 export const resolveGameStartConflictCall = callable<[gameName: string, app_id: string | undefined, resolution: ConflictResolution], RpcResult<OperationResult>>("resolve_game_start_conflict");
 export const checkGameExitCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_exit");
 export const backupGameOnExitCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("backup_game_on_exit");
+export const startSyncthingActivityWatchCall = callable<
+  [phase: string, gameName?: string, appID?: string],
+  RpcResult<SyncthingWatchStartResult>
+>("start_syncthing_activity_watch");
+export const getSyncthingActivityCall = callable<[watchID: string], RpcResult<SyncthingPollResult>>(
+  "get_syncthing_activity"
+);
+export const stopSyncthingActivityWatchCall = callable<[watchID: string], RpcResult<SyncthingPollResult>>(
+  "stop_syncthing_activity_watch"
+);

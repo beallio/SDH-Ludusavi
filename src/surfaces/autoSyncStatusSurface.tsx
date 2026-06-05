@@ -20,7 +20,10 @@ const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
   conflict: "SAVE CONFLICT",
   has_backup: "GAME SAVE UP TO DATE",
   unknown: "UNKNOWN",
-  error: "UNABLE TO SYNC"
+  error: "UNABLE TO SYNC",
+  syncthing_downloading: "SYNCTHING DOWNLOADING",
+  syncthing_uploading: "SYNCTHING UPLOADING",
+  syncthing_complete: "SYNCTHING COMPLETE"
 };
 
 let currentAutoSyncStatusState: AutoSyncStatusState = {
@@ -193,6 +196,27 @@ function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind) {
   }
   if (status === "checking") {
     return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="3" opacity="0.8"/><path d="M10 2a8 8 0 0 1 8 8" fill="none" stroke="#0b151f" stroke-width="3" stroke-linecap="round"/></svg>';
+  }
+  if (status === "syncthing_downloading") {
+    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">' +
+      '<circle cx="10" cy="10" r="9" fill="currentColor"/>' +
+      '<path d="M6 12a2.5 2.5 0 0 1 2.5-2.5 3.5 3.5 0 0 1 6.3-1A2 2 0 0 1 14 13H6.5A2.5 2.5 0 0 1 6 12z" fill="#0b151f"/>' +
+      '<path d="M10 7.5v3.5M8.5 9.8l1.5 1.5 1.5-1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '</svg>';
+  }
+  if (status === "syncthing_uploading") {
+    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">' +
+      '<circle cx="10" cy="10" r="9" fill="currentColor"/>' +
+      '<path d="M6 12a2.5 2.5 0 0 1 2.5-2.5 3.5 3.5 0 0 1 6.3-1A2 2 0 0 1 14 13H6.5A2.5 2.5 0 0 1 6 12z" fill="#0b151f"/>' +
+      '<path d="M10 11.5V8M8.5 9.2l1.5-1.5 1.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '</svg>';
+  }
+  if (status === "syncthing_complete") {
+    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">' +
+      '<circle cx="10" cy="10" r="9" fill="currentColor"/>' +
+      '<path d="M6 12a2.5 2.5 0 0 1 2.5-2.5 3.5 3.5 0 0 1 6.3-1A2 2 0 0 1 14 13H6.5A2.5 2.5 0 0 1 6 12z" fill="#0b151f"/>' +
+      '<path d="M8 9.5l1.5 1.5 2.5-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '</svg>';
   }
 
   const rotation = status === "restoring" ? ' style="transform: rotate(180deg); transform-origin: 50% 50%;"' : "";
