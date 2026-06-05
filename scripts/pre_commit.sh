@@ -42,4 +42,11 @@ pnpm run verify || {
   exit 1
 }
 
+echo "Running Codex review..."
+npx @openai/codex review --uncommitted || {
+  echo "Codex review failed! Please fix blocking findings."
+  exit 1
+}
+
 echo "Protocol checks passed. Committing..."
+
