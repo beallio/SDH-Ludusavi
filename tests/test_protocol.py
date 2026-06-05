@@ -55,3 +55,9 @@ def test_tracked_pre_commit_hook_uses_current_project_checks():
     assert "./run.sh uv run pytest" in hook
     assert "./run.sh bash scripts/check_tdd.sh" in hook
     assert "npx @openai/codex review --uncommitted" in hook
+
+    assert (
+        "awk '/^exec$/ { in_block=1; next } /^(codex|user|assistant|system)$/ { in_block=0; next } !in_block { print }'"
+        in hook
+    )
+    assert 'grep -qE "Review comment:|\\[P[0-9]\\]"' in hook

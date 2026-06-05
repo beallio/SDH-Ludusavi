@@ -13,7 +13,9 @@
   "design_decisions": [
     "Add Codex review validation step to the tracked scripts/pre_commit.sh hook file.",
     "Refactor local .git/hooks/pre-commit to delegate immediately to the tracked scripts/pre_commit.sh, preventing future hook divergence and missing frontend/TDD check gaps.",
-    "Update test_protocol.py assertions to enforce that the tracked hook performs Codex review on uncommitted changes."
+    "Update test_protocol.py assertions to enforce that the tracked hook performs Codex review on uncommitted changes.",
+    "Implement a role-independent awk-based filter on the Codex review log to discard command execution and git diff blocks (exec blocks) by recognizing standard agent roles (codex, user, assistant, system) as boundaries, ensuring robust detection of actual review findings without self-matching false positives.",
+    "Perform the findings grep check using a bash here-string (<<<) instead of a piped echo command to prevent the pipeline from exiting with a non-zero status under set -o pipefail when grep exits early on a match."
   ],
   "results": [
     "All pytest test suites passed successfully.",

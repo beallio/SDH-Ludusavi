@@ -6,8 +6,8 @@ Although the local untracked `.git/hooks/pre-commit` file already contains this 
 
 ## Architecture Overview
 - Update the repository-tracked script `scripts/pre_commit.sh` to execute the Codex review check (`npx @openai/codex review --uncommitted`) as part of the validation flow.
-- Update the live pre-commit hook `.git/hooks/pre-commit` to align with the tracked script or ensure it performs the exact same checks.
-- Keep the python environment wrapper `./run.sh` prefix or standard npx call matching the user requirements.
+- Capture Codex review output and fail the hook/commit if any findings (such as "Review comment:" or "[P1]", "[P2]") are detected, ensuring a success status if no findings are found.
+- Update the live pre-commit hook `.git/hooks/pre-commit` to delegate to the tracked script.
 
 ## Core Data Structures
 No runtime data structures are affected.
@@ -19,5 +19,6 @@ No public plugin APIs or RPC signatures are affected.
 No new dependencies are required. `npx` and `@openai/codex` must be available on the user system.
 
 ## Testing Strategy
-- Update `tests/test_protocol.py` to assert that the tracked pre-commit hook `scripts/pre_commit.sh` contains the Codex review step.
+- Update `tests/test_protocol.py` to assert that the tracked pre-commit hook `scripts/pre_commit.sh` contains the Codex review step and its findings check.
 - Verify the test suite passes locally by running `./run.sh uv run pytest`.
+
