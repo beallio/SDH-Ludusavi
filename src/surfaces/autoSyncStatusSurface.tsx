@@ -469,6 +469,7 @@ export function destroyAutoSyncStatusBrowserView() {
   } finally {
     autoSyncStatusBrowserView = null;
     autoSyncStatusBrowserViewOwner = null;
+    loadedAutoSyncStatus = null;
   }
 }
 
