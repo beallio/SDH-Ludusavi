@@ -181,10 +181,18 @@ def parse_syncthing_config(path: Path) -> SyncthingConfig | None:
                     address = gui.findtext("address")
                     tls = bool_from_xml_attr(gui.attrib.get("tls"), default=False)
                     api_url = api_url_from_gui_address(address, tls)
+                    logger.info("Parsed Syncthing config using ElementTree XML parser")
                     return SyncthingConfig(path=path, api_key=api_key.strip(), api_url=api_url)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "Failed to parse Syncthing config using ElementTree: %s. Falling back to regex.",
+                exc,
+            )
 
+    logger.info(
+        "Parsing Syncthing config using fallback regex XML parser (ElementTree available: %s)",
+        HAS_XML_ETREE,
+    )
     return _parse_syncthing_config_regex(path)
 
 
