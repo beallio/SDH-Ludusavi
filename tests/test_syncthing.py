@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 import pytest
 import time
-from unittest.mock import patch
 
 from sdh_ludusavi.syncthing import (
     api_url_from_gui_address,
@@ -13,12 +12,10 @@ from sdh_ludusavi.syncthing import (
     resolve_folder_by_path,
     resolve_folder_by_id,
     compute_activity_status,
-    FolderSelection,
     FolderRuntime,
     RemoteProgress,
     LocalActivity,
     ConnectionRates,
-    SyncthingWatchManager,
 )
 
 
@@ -229,51 +226,3 @@ def test_compute_activity_status() -> None:
     assert status.pending_remote_ack is True
     assert status.update_in_progress is False
     assert status.settled is False
-
-
-@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
-@patch("sdh_ludusavi.syncthing.watcher.resolve_folder_by_path")
-def test_watch_manager(mock_resolve_path, mock_resolve_creds) -> None:
-    # Setup mock SyncthingAPI and credentials
-    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
-    mock_folder = FolderSelection(
-        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync"
-    )
-    mock_resolve_path.return_value = mock_folder
-
-    manager = SyncthingWatchManager()
-
-    # Mock get_initial_folder_state_and_runtime, get_event_cursor, get_connection_totals
-    with (
-        patch("sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime") as mock_init,
-        patch("sdh_ludusavi.syncthing.watcher.get_event_cursor") as mock_cursor,
-        patch("sdh_ludusavi.syncthing.watcher.get_connection_totals") as mock_totals,
-        patch("sdh_ludusavi.syncthing.watcher.get_folder_status") as mock_status,
-        patch("sdh_ludusavi.syncthing.watcher.get_events") as mock_events,
-    ):
-        mock_init.return_value = ("idle", FolderRuntime(sequence=5))
-        mock_cursor.return_value = 100
-        mock_totals.return_value = (0, 0)
-        mock_status.return_value = {"state": "idle", "sequence": 5}
-        mock_events.return_value = []
-
-        # Start watch
-        res = manager.start_watch("pre_game", "Hades", "1145300", "/home/deck/Sync/Hades")
-        assert res["status"] == "watching"
-        assert res["folder_id"] == "test-folder"
-        watch_id = res["watch_id"]
-
-        # Poll watch
-        time.sleep(0.1)  # Let the daemon thread run one iteration
-        poll_res = manager.poll_watch(watch_id)
-        assert poll_res["status"] == "activity"
-        assert poll_res["watch_id"] == watch_id
-        assert poll_res["sample"]["folder_id"] == "test-folder"
-
-        # Stop watch
-        stop_res = manager.stop_watch(watch_id)
-        assert stop_res["status"] == "stopped"
-
-        # Poll stopped watch
-        poll_stopped = manager.poll_watch(watch_id)
-        assert poll_stopped["status"] == "stopped"

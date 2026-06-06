@@ -76,10 +76,13 @@ class SyncthingWatch:
             folder_state, runtime = get_initial_folder_state_and_runtime(
                 self.api, self.folder.folder_id
             )
-            cursor = get_event_cursor(self.api)
-        # Intentionally broad
         except Exception as exc:
             logger.warning("Failed to initialize watch thread: %s", exc)
+            self.latest_sample = {
+                "status": "failed",
+                "reason": "watch_initialization_failed",
+                "message": str(exc),
+            }
             return
 
         previous_totals: tuple[int, int] | None = None
@@ -93,6 +96,29 @@ class SyncthingWatch:
         event_timeout = DEFAULT_EVENT_TIMEOUT_SECONDS
         active_window = DEFAULT_ACTIVE_WINDOW_SECONDS
         min_rate = DEFAULT_MIN_RATE_BYTES_PER_SECOND
+
+        # Compute and publish a baseline sample immediately
+        self._tick_sample(
+            now=time.monotonic(),
+            folder_state=folder_state,
+            runtime=runtime,
+            remote_progress=remote_progress,
+            local_activity=local_activity,
+            rates=rates,
+            active_window=active_window,
+            min_rate=min_rate,
+        )
+
+        try:
+            cursor = get_event_cursor(self.api)
+        except Exception as exc:
+            logger.warning("Failed to initialize watch thread cursor: %s", exc)
+            self.latest_sample = {
+                "status": "failed",
+                "reason": "watch_initialization_failed",
+                "message": str(exc),
+            }
+            return
 
         while not self.stop_event.is_set():
             (
@@ -145,31 +171,20 @@ class SyncthingWatch:
         FolderRuntime,
         int,
     ]:
-        # Poll connection totals and compute rates
+        # 1. Capture a monotonic timestamp for connection and folder polling.
+        now_pre = time.monotonic()
+
+        # 2. Poll connection totals and compute rates.
         previous_totals, previous_totals_time, rates = self._tick_connections(
-            now, previous_totals, previous_totals_time
+            now_pre, previous_totals, previous_totals_time
         )
 
-        # Poll folder status
-        folder_state, runtime = self._tick_folder_status(now, folder_state, runtime, local_activity)
-
-        # Prune stale data
-        remote_progress = prune_remote_progress(remote_progress, active_window, now)
-        prune_local_activity(local_activity, active_window, now)
-
-        # Compute and cache activity status
-        self._tick_sample(
-            now,
-            folder_state,
-            runtime,
-            remote_progress,
-            local_activity,
-            rates,
-            active_window,
-            min_rate,
+        # 3. Poll current folder status and detect sequence changes.
+        folder_state, runtime = self._tick_folder_status(
+            now_pre, folder_state, runtime, local_activity
         )
 
-        # Poll events stream
+        # 4. Poll/process events.
         cursor, folder_state, runtime = self._tick_events(
             cursor,
             folder_state,
@@ -179,6 +194,26 @@ class SyncthingWatch:
             event_timeout,
         )
 
+        # 5. Capture a new monotonic timestamp after the event request returns.
+        now_post = time.monotonic()
+
+        # 6. Prune remote and local activity using the post-event timestamp.
+        remote_progress = prune_remote_progress(remote_progress, active_window, now_post)
+        prune_local_activity(local_activity, active_window, now_post)
+
+        # 7. Compute and atomically assign the latest sample using the post-event state.
+        self._tick_sample(
+            now_post,
+            folder_state,
+            runtime,
+            remote_progress,
+            local_activity,
+            rates,
+            active_window,
+            min_rate,
+        )
+
+        # 8. Return updated calculation state.
         return (
             previous_totals,
             previous_totals_time,
@@ -364,13 +399,16 @@ class SyncthingWatchManager:
             }
 
     def poll_watch(self, watch_id: str) -> dict[str, Any]:
+        import copy
+
         with self.lock:
             watch = self.watches.get(watch_id)
             if not watch:
                 return {"status": "stopped", "watch_id": watch_id}
-            return dict(
-                watch.latest_sample or {"status": "activity", "watch_id": watch_id, "sample": {}}
-            )
+            sample = watch.latest_sample
+            if sample:
+                return copy.deepcopy(sample)
+            return {"status": "activity", "watch_id": watch_id, "sample": {}}
 
     def stop_watch(self, watch_id: str) -> dict[str, Any]:
         with self.lock:
