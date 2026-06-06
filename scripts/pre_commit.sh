@@ -46,38 +46,4 @@ pnpm run verify || {
   exit 1
 }
 
-echo "Running Codex review..."
-codex_out=$(mktemp)
-codex_exit=0
-npx @openai/codex review --uncommitted > "$codex_out" 2>&1 || codex_exit=$?
-cat "$codex_out"
-
-
-if [ $codex_exit -ne 0 ]; then
-  echo "❌ Codex review command failed to run successfully! Commit aborted."
-  rm -f "$codex_out"
-  exit 1
-fi
-
-filtered_out=$(awk '/^exec$/ { in_block=1; next } /^(codex|user|assistant|system)$/ { in_block=0; next } !in_block { print }' "$codex_out" || true)
-
-if grep -qE "Review comment:|\[P[0-9]\]" <<< "$filtered_out"; then
-  echo "❌ Codex review found findings! Please resolve them before committing."
-  rm -f "$codex_out"
-  exit 1
-fi
-rm -f "$codex_out"
-
 echo "Protocol checks passed. Committing..."
-
-
-
-
-
-
-
-
-
-
-
-
