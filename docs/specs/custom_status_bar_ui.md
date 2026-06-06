@@ -28,14 +28,10 @@ viewport, and toggles BrowserView visibility with the autosync state. The Browse
 owner is normalized through known Decky/Steam wrapper shapes, including `m_browserView`,
 before required methods are used.
 
-Module-level timers own status expiry. Running states hide after 10 seconds, result
-states hide after 2 seconds, hide events clear pending timers, and plugin dismount
-clears pending timers before destroying the BrowserView.
+Module-level timers own status expiry. Running states and active Syncthing statuses hide after a 10-second watchdog, result states hide after 2 seconds, hide events clear pending timers, and plugin dismount clears pending timers before destroying the BrowserView.
 
 BrowserView updates hide the reused BrowserView before loading each new visible
-`data:text/html` document. The view is revealed only after a short guarded delay so
-the previous status document, such as `GAME SAVE UP TO DATE`, cannot flash before a
-new `VERIFYING GAME SAVE` document finishes navigating. The reveal callback is
+`data:text/html` document. Identical visible statuses are deduplicated and do not navigate, hide, or replay the reveal delay. For genuine status transitions, the view is revealed only after a short guarded delay so the previous status document, such as `GAME SAVE UP TO DATE`, cannot flash before a new `VERIFYING GAME SAVE` document finishes navigating. The reveal callback is
 invalidated by a generation counter on every sync, hide, destroy, and dismount path.
 Lifecycle verification states also reset the BrowserView surface before publishing
 `VERIFYING GAME SAVE` so game start and game exit never reuse a surface that can
@@ -63,7 +59,7 @@ deselected Ludusavi game.
   returned by Decky or Steam APIs.
 
 The BrowserView document uses inline SVG icons. The restore icon is the backup arrow
-rotated 180 degrees. No additional icon dependencies are required.
+rotated 180 degrees. Syncthing status icons are serialized and cached from `react-icons/io` (`IoMdCloudDownload`, `IoMdCloudUpload`, and `IoMdCloudDone`).
 
 The visual contract is a compact bottom strip positioned directly above the Steam
 bottom menu bar. BrowserView bounds use screen-height ratios instead of absolute
