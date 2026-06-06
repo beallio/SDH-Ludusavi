@@ -51,6 +51,33 @@ def test_parse_syncthing_config(tmp_path: Path) -> None:
     assert cfg.api_url == "https://127.0.0.1:8384"
 
 
+def test_parse_syncthing_config_fallback_regex(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import py_modules.sdh_ludusavi.syncthing.config as syncthing_config
+
+    monkeypatch.setattr(syncthing_config, "HAS_XML_ETREE", False)
+
+    config_xml = tmp_path / "config.xml"
+    assert parse_syncthing_config(config_xml) is None
+
+    config_xml.write_text("invalid")
+    assert parse_syncthing_config(config_xml) is None
+
+    config_xml.write_text(
+        "<configuration><gui><address>127.0.0.1:8384</address></gui></configuration>"
+    )
+    assert parse_syncthing_config(config_xml) is None
+
+    config_xml.write_text(
+        '<configuration><gui tls="true"><address>127.0.0.1:8384</address><apikey>testkey</apikey></gui></configuration>'
+    )
+    cfg = parse_syncthing_config(config_xml)
+    assert cfg is not None
+    assert cfg.api_key == "testkey"
+    assert cfg.api_url == "https://127.0.0.1:8384"
+
+
 class MockAPI:
     def __init__(self, folders: list[dict] = None) -> None:
         self.folders = folders or []

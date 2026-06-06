@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Iterable
+
+try:
+    import xml.etree.ElementTree as ET
+
+    HAS_XML_ETREE = True
+except (ImportError, ModuleNotFoundError):
+    ET = None  # type: ignore
+    HAS_XML_ETREE = False
+
 
 from ._types import (
     SyncthingConfig,
@@ -124,28 +133,59 @@ def candidate_config_files(extra_flatpak_ids: Iterable[str] | None = None) -> li
     return deduped_paths
 
 
-def parse_syncthing_config(path: Path) -> SyncthingConfig | None:
-    if not path.exists() or not path.is_file():
-        return None
+def _parse_syncthing_config_regex(path: Path) -> SyncthingConfig | None:
     try:
-        root = ET.parse(path).getroot()
-    # Intentionally broad
+        content = path.read_text(encoding="utf-8")
     except Exception:
         return None
 
-    gui = root.find("gui")
-    if gui is None:
+    # Find <gui ...> ... </gui> block
+    gui_match = re.search(r"<gui\b([^>]*)>(.*?)</gui>", content, re.DOTALL)
+    if not gui_match:
         return None
 
-    api_key = gui.findtext("apikey")
-    if not api_key or not api_key.strip():
+    gui_attrs_str = gui_match.group(1)
+    gui_inner = gui_match.group(2)
+
+    # Extract tls attribute
+    tls_match = re.search(r'\btls=["\'](true|1|yes|on)["\']', gui_attrs_str, re.IGNORECASE)
+    tls = bool(tls_match)
+
+    # Extract apikey
+    apikey_match = re.search(r"<apikey\b[^>]*>(.*?)</apikey>", gui_inner, re.DOTALL)
+    if not apikey_match:
+        return None
+    api_key = apikey_match.group(1).strip()
+    if not api_key:
         return None
 
-    address = gui.findtext("address")
-    tls = bool_from_xml_attr(gui.attrib.get("tls"), default=False)
+    # Extract address
+    address_match = re.search(r"<address\b[^>]*>(.*?)</address>", gui_inner, re.DOTALL)
+    address = address_match.group(1).strip() if address_match else None
+
     api_url = api_url_from_gui_address(address, tls)
+    return SyncthingConfig(path=path, api_key=api_key, api_url=api_url)
 
-    return SyncthingConfig(path=path, api_key=api_key.strip(), api_url=api_url)
+
+def parse_syncthing_config(path: Path) -> SyncthingConfig | None:
+    if not path.exists() or not path.is_file():
+        return None
+
+    if HAS_XML_ETREE and ET is not None:
+        try:
+            root = ET.parse(path).getroot()
+            gui = root.find("gui")
+            if gui is not None:
+                api_key = gui.findtext("apikey")
+                if api_key and api_key.strip():
+                    address = gui.findtext("address")
+                    tls = bool_from_xml_attr(gui.attrib.get("tls"), default=False)
+                    api_url = api_url_from_gui_address(address, tls)
+                    return SyncthingConfig(path=path, api_key=api_key.strip(), api_url=api_url)
+        except Exception:
+            pass
+
+    return _parse_syncthing_config_regex(path)
 
 
 def discover_syncthing_config(
