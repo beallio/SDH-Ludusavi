@@ -1,4 +1,5 @@
 import { Router } from "@decky/ui";
+import { IoMdCloudDownload, IoMdCloudUpload, IoMdCloudDone } from "react-icons/io";
 
 import type {
   AutoSyncStatusBrowserView,
@@ -32,6 +33,7 @@ let currentAutoSyncStatusState: AutoSyncStatusState = {
   source: "hide"
 };
 let autoSyncStatusTimedOut = false;
+let loadedAutoSyncStatus: AutoSyncStatusKind | null = null;
 let autoSyncStatusHideTimeoutID: number | null = null;
 let autoSyncStatusShowTimeoutID: number | null = null;
 let autoSyncStatusSyncTimeoutID: number | null = null;
@@ -184,7 +186,125 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
   }
 }
 
-function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind) {
+function isLudusaviRunningStatus(status: AutoSyncStatusKind): boolean {
+  return status === "checking" || status === "backing_up" || status === "restoring";
+}
+
+function isSyncthingActiveStatus(status: AutoSyncStatusKind): boolean {
+  return status === "syncthing_downloading" || status === "syncthing_uploading";
+}
+
+const svgAttributeMapping: Record<string, string> = {
+  fillRule: "fill-rule",
+  clipRule: "clip-rule",
+  strokeWidth: "stroke-width",
+  strokeLinecap: "stroke-linecap",
+  strokeLinejoin: "stroke-linejoin",
+};
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function serializeSvgNode(node: any): string {
+  if (!node || typeof node !== "object") {
+    return "";
+  }
+  const tag = node.type;
+  if (tag !== "path" && tag !== "g") {
+    log("warning", `Unsupported SVG tag: ${tag}`, "autosync_status");
+    return "";
+  }
+
+  const props = node.props || {};
+  let attributes = "";
+  const allowedAttributes = [
+    "d",
+    "fill",
+    "fillRule",
+    "clipRule",
+    "stroke",
+    "strokeWidth",
+    "strokeLinecap",
+    "strokeLinejoin",
+    "opacity",
+    "transform",
+  ];
+
+  for (const attr of allowedAttributes) {
+    if (props[attr] !== undefined && props[attr] !== null) {
+      const svgAttr = svgAttributeMapping[attr] || attr;
+      attributes += ` ${svgAttr}="${escapeHtml(String(props[attr]))}"`;
+    }
+  }
+
+  let childrenMarkup = "";
+  if (props.children) {
+    if (Array.isArray(props.children)) {
+      childrenMarkup = props.children.map(serializeSvgNode).join("");
+    } else {
+      childrenMarkup = serializeSvgNode(props.children);
+    }
+  }
+
+  return `<${tag}${attributes}>${childrenMarkup}</${tag}>`;
+}
+
+function serializeIcon(Icon: any): string {
+  try {
+    const element = Icon({
+      size: 18,
+      "aria-hidden": true,
+      focusable: false,
+    });
+    if (!element || typeof element !== "object" || !element.props) {
+      return "";
+    }
+    const viewBox = element.props.attr?.viewBox || "0 0 512 512";
+    let childrenMarkup = "";
+    const children = element.props.children;
+    if (children) {
+      if (Array.isArray(children)) {
+        childrenMarkup = children.map(serializeSvgNode).join("");
+      } else {
+        childrenMarkup = serializeSvgNode(children);
+      }
+    }
+    return `<svg viewBox="${escapeHtml(viewBox)}" width="18" height="18" fill="currentColor" aria-hidden="true" focusable="false">${childrenMarkup}</svg>`;
+  } catch (err) {
+    log("warning", `Failed to serialize icon: ${err}`, "autosync_status");
+    return '<svg viewBox="0 0 512 512" width="18" height="18" fill="currentColor" aria-hidden="true" focusable="false"></svg>';
+  }
+}
+
+const serializedIconsCache: Record<string, string> = {};
+
+function getSerializedIcon(status: AutoSyncStatusKind): string {
+  if (serializedIconsCache[status]) {
+    return serializedIconsCache[status];
+  }
+
+  let icon: any;
+  if (status === "syncthing_downloading") {
+    icon = IoMdCloudDownload;
+  } else if (status === "syncthing_uploading") {
+    icon = IoMdCloudUpload;
+  } else if (status === "syncthing_complete") {
+    icon = IoMdCloudDone;
+  } else {
+    return "";
+  }
+
+  const serialized = serializeIcon(icon);
+  serializedIconsCache[status] = serialized;
+  return serialized;
+}
+
+function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
   if (status === "has_backup") {
     return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 10.2 8.5 12.7 14.2 7" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   }
@@ -197,26 +317,8 @@ function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind) {
   if (status === "checking") {
     return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="3" opacity="0.8"/><path d="M10 2a8 8 0 0 1 8 8" fill="none" stroke="#0b151f" stroke-width="3" stroke-linecap="round"/></svg>';
   }
-  if (status === "syncthing_downloading") {
-    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">' +
-      '<circle cx="10" cy="10" r="9" fill="currentColor"/>' +
-      '<path d="M6 12a2.5 2.5 0 0 1 2.5-2.5 3.5 3.5 0 0 1 6.3-1A2 2 0 0 1 14 13H6.5A2.5 2.5 0 0 1 6 12z" fill="#0b151f"/>' +
-      '<path d="M10 7.5v3.5M8.5 9.8l1.5 1.5 1.5-1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>' +
-      '</svg>';
-  }
-  if (status === "syncthing_uploading") {
-    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">' +
-      '<circle cx="10" cy="10" r="9" fill="currentColor"/>' +
-      '<path d="M6 12a2.5 2.5 0 0 1 2.5-2.5 3.5 3.5 0 0 1 6.3-1A2 2 0 0 1 14 13H6.5A2.5 2.5 0 0 1 6 12z" fill="#0b151f"/>' +
-      '<path d="M10 11.5V8M8.5 9.2l1.5-1.5 1.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>' +
-      '</svg>';
-  }
-  if (status === "syncthing_complete") {
-    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">' +
-      '<circle cx="10" cy="10" r="9" fill="currentColor"/>' +
-      '<path d="M6 12a2.5 2.5 0 0 1 2.5-2.5 3.5 3.5 0 0 1 6.3-1A2 2 0 0 1 14 13H6.5A2.5 2.5 0 0 1 6 12z" fill="#0b151f"/>' +
-      '<path d="M8 9.5l1.5 1.5 2.5-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>' +
-      '</svg>';
+  if (status === "syncthing_downloading" || status === "syncthing_uploading" || status === "syncthing_complete") {
+    return getSerializedIcon(status);
   }
 
   const rotation = status === "restoring" ? ' style="transform: rotate(180deg); transform-origin: 50% 50%;"' : "";
@@ -270,8 +372,6 @@ body {
 }
 
 function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
-  clearAutoSyncStatusShowTimeout();
-  const showGeneration = ++autoSyncStatusShowGeneration;
   const browserView = ensureAutoSyncStatusBrowserView();
   if (!browserView) {
     return;
@@ -281,36 +381,60 @@ function syncAutoSyncStatusBrowserView(state: AutoSyncStatusState) {
     return;
   }
 
+  const bounds = getAutoSyncStatusBounds();
+
+  if (!state.visible) {
+    clearAutoSyncStatusShowTimeout();
+    browserView.SetVisible(false);
+    try {
+      browserView.LoadURL?.("about:blank");
+    } catch (err) {
+      log("debug", `Could not navigate BrowserView to blank: ${err}`, "autosync_status");
+    }
+    loadedAutoSyncStatus = null;
+    return;
+  }
+
+  if (state.status === loadedAutoSyncStatus) {
+    try {
+      browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);
+      browserView.SetWindowStackingOrder?.(50);
+      browserView.SetFocus?.(false);
+      if (autoSyncStatusShowTimeoutID === null) {
+        browserView.SetVisible(true);
+      }
+    } catch (err) {
+      log("warning", `Could not update bounds for existing BrowserView: ${err}`, "autosync_status");
+    }
+    return;
+  }
+
+  // Changed status or initially unloaded
+  clearAutoSyncStatusShowTimeout();
+  const showGeneration = ++autoSyncStatusShowGeneration;
+
   try {
-    const bounds = getAutoSyncStatusBounds();
     const html = renderAutoSyncStatusHtml(state);
     const url = "data:text/html;charset=utf-8," + encodeURIComponent(html);
 
-    log("debug", `Syncing BrowserView: visible=${state.visible}, bounds=${JSON.stringify(bounds)}`, "autosync_status");
+    log("debug", `Syncing BrowserView (changed status): bounds=${JSON.stringify(bounds)}`, "autosync_status");
 
-    if (state.visible) {
-      browserView.SetVisible(false);
-      browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);
-      browserView.LoadURL(url);
+    browserView.SetVisible(false);
+    browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);
+    browserView.LoadURL(url);
+    loadedAutoSyncStatus = state.status;
 
-      autoSyncStatusShowTimeoutID = window.setTimeout(() => {
-        autoSyncStatusShowTimeoutID = null;
-        if (showGeneration !== autoSyncStatusShowGeneration || !currentAutoSyncStatusState.visible) {
-          return;
-        }
-        browserView.SetVisible?.(true);
-        browserView.SetWindowStackingOrder?.(50);
-        browserView.SetFocus?.(false);
-      }, AUTO_SYNC_STATUS_SHOW_DELAY);
-    } else {
-      browserView.SetVisible(false);
-      try {
-        browserView.LoadURL?.("about:blank");
-      } catch (err) {
-        log("debug", `Could not navigate BrowserView to blank: ${err}`, "autosync_status");
+    autoSyncStatusShowTimeoutID = window.setTimeout(() => {
+      autoSyncStatusShowTimeoutID = null;
+      if (showGeneration !== autoSyncStatusShowGeneration || !currentAutoSyncStatusState.visible) {
+        return;
       }
-    }
+      browserView.SetVisible?.(true);
+      browserView.SetWindowStackingOrder?.(50);
+      browserView.SetFocus?.(false);
+    }, AUTO_SYNC_STATUS_SHOW_DELAY);
   } catch (err) {
+    loadedAutoSyncStatus = null;
     log("warning", `Could not update status strip BrowserView: ${err}`, "autosync_status");
   }
 }
@@ -409,7 +533,10 @@ function scheduleAutoSyncStatusHide(state: AutoSyncStatusState) {
     return;
   }
 
-  const isRunning = state.status === "checking" || state.status === "backing_up" || state.status === "restoring";
+  const isRunning = isLudusaviRunningStatus(state.status);
+  const isSyncthingActive = isSyncthingActiveStatus(state.status);
+  const useTenSecondWatchdog = isRunning || isSyncthingActive;
+
   autoSyncStatusHideTimeoutID = window.setTimeout(() => {
     if (isRunning) {
       autoSyncStatusTimedOut = true;
@@ -421,7 +548,7 @@ function scheduleAutoSyncStatusHide(state: AutoSyncStatusState) {
       tracked: currentAutoSyncStatusState.tracked,
       resultStatus: currentAutoSyncStatusState.resultStatus
     });
-  }, isRunning ? 10000 : 2000);
+  }, useTenSecondWatchdog ? 10000 : 2000);
 }
 
 function syncAutoSyncStatusBrowserViewDeferred(state: AutoSyncStatusState) {
@@ -550,6 +677,7 @@ export function resetAutoSyncStatusSurface() {
     visible: false,
     source: "hide"
   };
+  loadedAutoSyncStatus = null;
   clearAutoSyncStatusHideTimeout();
   clearAutoSyncStatusSyncTimeout();
   clearAutoSyncStatusShowTimeout();

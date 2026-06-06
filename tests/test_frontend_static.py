@@ -2828,3 +2828,39 @@ def test_frontend_syncthing_static() -> None:
     assert controller_source.index("startSyncthingActivityWatchCall") < controller_source.index(
         "checkGameExitCall"
     )
+
+
+def test_frontend_syncthing_stability_and_icons() -> None:
+    surface_source = Path("src/surfaces/autoSyncStatusSurface.tsx").read_text(encoding="utf-8")
+    monitor_source = Path("src/controllers/syncthingMonitor.ts").read_text(encoding="utf-8")
+
+    # 1. Exact imports for IoMdCloudDownload, IoMdCloudUpload, IoMdCloudDone
+    assert "IoMdCloudDownload" in surface_source
+    assert "IoMdCloudUpload" in surface_source
+    assert "IoMdCloudDone" in surface_source
+
+    # 2. Existence of loaded-status state
+    assert "loadedAutoSyncStatus" in surface_source
+
+    # 3. Same-status fast path (checks for loadedAutoSyncStatus comparison and avoiding LoadURL)
+    assert "state.status === loadedAutoSyncStatus" in surface_source
+
+    # 4. Same-status path does not clear a still-needed reveal timeout
+    assert "clearTimeout" in surface_source
+
+    # 5. Syncthing active states and watchdog
+    assert "isSyncthingActiveStatus" in surface_source
+    assert "isLudusaviRunningStatus" in surface_source
+
+    # 6. Monitor polling uses recursive setTimeout, not setInterval
+    assert "setTimeout" in monitor_source
+    assert "setInterval" not in monitor_source
+
+    # 7. First polling is invoked immediately
+    assert "pollOnce" in monitor_source
+
+    # 8. Duplicate timestamps are ignored
+    assert "lastProcessedTimestamp" in monitor_source
+
+    # 9. Pending poll timeout is cleared on stop/dispose
+    assert "clearPollTimeout" in monitor_source
