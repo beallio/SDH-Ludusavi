@@ -2799,6 +2799,7 @@ def test_frontend_syncthing_static() -> None:
         assert callable_name in source
 
     for type_text in [
+        '"syncthing_pending_upload"',
         '"syncthing_downloading"',
         '"syncthing_uploading"',
         '"syncthing_complete"',
@@ -2807,6 +2808,7 @@ def test_frontend_syncthing_static() -> None:
 
     surface_source = Path("src/surfaces/autoSyncStatusSurface.tsx").read_text(encoding="utf-8")
     for status_text in [
+        "SYNCTHING PREPARING",
         "SYNCTHING DOWNLOADING",
         "SYNCTHING UPLOADING",
         "SYNCTHING COMPLETE",
