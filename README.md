@@ -90,6 +90,10 @@ Using Syncthing allows for near-instant local backups that sync in the backgroun
 - **Syncthing Downloading**: Syncthing is downloading/applying backup folder data.
 - **Syncthing Uploading**: Syncthing is uploading/serving backup folder data to a remote peer.
 - **Syncthing Complete**: Syncthing synchronization has settled.
+- **Local Backup Saved - Syncthing Unavailable**: The backup succeeded, but configured Syncthing API access failed.
+- **Local Backup Saved - Path Not Shared**: The backup succeeded, but its directory is not in a Syncthing shared folder.
+
+When Syncthing is not configured, the plugin silently reports the normal local-backup result without a Syncthing warning.
 
 ## License
 
