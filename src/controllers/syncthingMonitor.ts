@@ -30,34 +30,32 @@ export type StatusCallback = (
 
 export type SyncthingMonitorGeneration = number;
 
-export type SyncthingMonitorStartHandle = Readonly<{
-  generation: SyncthingMonitorGeneration;
+export type SyncthingWatchSession = Readonly<{
   phase: "pre_game" | "post_game";
   gameName: string;
   appID: string;
+  cancel: (reason: string) => Promise<void>;
+  activatePostGameHandoff: (
+    confirmationTimeoutMs: number,
+  ) => Promise<PostGameHandoffResult>;
 }>;
 
 export type PostGameHandoffResult =
   | {
       status: "pending";
-      generation: SyncthingMonitorGeneration;
     }
   | {
       status: "uploading";
-      generation: SyncthingMonitorGeneration;
     }
   | {
       status: "complete";
-      generation: SyncthingMonitorGeneration;
     }
   | {
       status: "unavailable";
-      generation: SyncthingMonitorGeneration;
       reason: string;
     }
   | {
       status: "stale";
-      generation: SyncthingMonitorGeneration;
     };
 
 interface WatchContext {
@@ -117,7 +115,7 @@ export class SyncthingMonitor {
     phase: "pre_game" | "post_game",
     gameName: string,
     appID: string,
-  ): SyncthingMonitorStartHandle {
+  ): SyncthingWatchSession {
     this.currentGeneration++;
     const gen = this.currentGeneration;
 
@@ -166,28 +164,29 @@ export class SyncthingMonitor {
     void this.allocateWatchBackground(context);
 
     return {
-      generation: gen,
       phase,
       gameName,
       appID,
+      cancel: (reason: string) => this.cancelGeneration(gen, reason),
+      activatePostGameHandoff: (confirmationTimeoutMs: number) =>
+        this.activatePostGameHandoff(gen, confirmationTimeoutMs),
     };
   }
 
-  async activatePostGameHandoff(
+  private async activatePostGameHandoff(
     generation: SyncthingMonitorGeneration,
     confirmationTimeoutMs: number,
-    _pendingActivityTimeoutMs?: number,
   ): Promise<PostGameHandoffResult> {
     const context = this.contexts.get(generation);
     if (!context || context.phase !== "post_game" || context.generation !== this.currentGeneration) {
-      return { status: "stale", generation };
+      return { status: "stale" };
     }
     context.handoffActivatedAt = Date.now();
 
     if (context.cancelled) {
       context.handoffActivated = true;
       this.maybeCleanupContext(context);
-      return { status: "unavailable", generation, reason: context.unavailableReason };
+      return { status: "unavailable", reason: context.unavailableReason };
     }
 
     let timeoutID: any = null;
@@ -206,23 +205,22 @@ export class SyncthingMonitor {
       window.clearTimeout(timeoutID);
 
       if (context.generation !== this.currentGeneration) {
-        return finish({ status: "stale", generation });
+        return finish({ status: "stale" });
       }
 
       if (context.cancelled && result !== "unavailable") {
-        return finish({ status: "unavailable", generation, reason: context.unavailableReason });
+        return finish({ status: "unavailable", reason: context.unavailableReason });
       }
 
       if (result === "timeout") {
         log("info", `Syncthing handoff confirmation timed out: generation=${generation} elapsed_ms=${Date.now() - context.startedAt}`);
         await this.cancelContext(context, "confirmation_timeout");
-        return finish({ status: "unavailable", generation, reason: "confirmation_timeout" });
+        return finish({ status: "unavailable", reason: "confirmation_timeout" });
       }
 
       if (result === "unavailable") {
         return finish({
           status: "unavailable",
-          generation,
           reason: context.unavailableReason,
         });
       }
@@ -232,16 +230,16 @@ export class SyncthingMonitor {
       log("info", `Syncthing handoff activated: generation=${generation} state=${context.latestStatus === "complete" ? "complete" : context.activityObserved ? "uploading" : "pending"}`);
 
       if (context.latestStatus === "complete") {
-        return finish({ status: "complete", generation });
+        return finish({ status: "complete" });
       } else if (context.activityObserved) {
-        return finish({ status: "uploading", generation });
+        return finish({ status: "uploading" });
       } else {
         this.schedulePendingActivityTimeout(context, context.detectionGraceMs);
-        return finish({ status: "pending", generation });
+        return finish({ status: "pending" });
       }
     } catch (err) {
       window.clearTimeout(timeoutID);
-      return finish({ status: "unavailable", generation, reason: String(err) });
+      return finish({ status: "unavailable", reason: String(err) });
     }
   }
 
@@ -255,7 +253,7 @@ export class SyncthingMonitor {
     }
   }
 
-  async cancelGeneration(
+  private async cancelGeneration(
     generation: SyncthingMonitorGeneration,
     reason: string,
   ): Promise<void> {

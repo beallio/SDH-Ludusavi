@@ -28,13 +28,25 @@ describe("SyncthingMonitor", () => {
     monitor = new SyncthingMonitor(mockRpc as unknown as SyncthingRpc, mockOnStatus);
   });
 
+  it("returns an opaque watch session", () => {
+    const session = monitor.start("post_game", "Hades", "1145300");
+
+    expect(session).toEqual(
+      expect.objectContaining({
+        cancel: expect.any(Function),
+        activatePostGameHandoff: expect.any(Function),
+      }),
+    );
+    expect(session).not.toHaveProperty("generation");
+  });
+
   afterEach(() => {
     monitor.dispose();
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
-  it("start() synchronously returns a generation handle without confirming readiness", async () => {
+  it("start() synchronously returns a session without confirming readiness", async () => {
     let resolveStart: any;
     const startPromise = new Promise<RpcResult<SyncthingWatchStartResult>>((resolve) => {
       resolveStart = resolve;
@@ -43,13 +55,13 @@ describe("SyncthingMonitor", () => {
 
     const handle = monitor.start("post_game", "Hades", "1145300");
     expect(handle).toBeDefined();
-    expect(handle.generation).toBe(1);
+    expect(monitor.getSnapshotForTest().generation).toBe(1);
     expect(handle.phase).toBe("post_game");
     expect(handle.gameName).toBe("Hades");
     expect(handle.appID).toBe("1145300");
 
     // The backend hasn't resolved watch ID yet, so monitor shouldn't be ready
-    void monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    void handle.activatePostGameHandoff(750);
     
     // Resolve start watch RPC
     resolveStart({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
@@ -64,7 +76,7 @@ describe("SyncthingMonitor", () => {
     const handle = monitor.start("post_game", "Hades", "1145300");
     
     // Start confirmation with 750ms timeout
-    const handoffPromise = monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffPromise = handle.activatePostGameHandoff(750);
 
     // Run timers to allow polling
     await vi.advanceTimersByTimeAsync(250);
@@ -107,7 +119,7 @@ describe("SyncthingMonitor", () => {
       });
 
     const handle = monitor.start("post_game", "Hades", "1145300");
-    const handoffPromise = monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffPromise = handle.activatePostGameHandoff(750);
 
     // Fast-forward timers for polling
     await vi.advanceTimersByTimeAsync(250); // first poll (empty)
@@ -115,14 +127,13 @@ describe("SyncthingMonitor", () => {
 
     const handoffResult = await handoffPromise;
     expect(handoffResult.status).toBe("pending");
-    expect(handoffResult.generation).toBe(handle.generation);
   });
 
   it("initialization failure resolves handoff unavailable", async () => {
     mockRpc.startWatch.mockResolvedValue({ status: "failed", reason: "watch_initialization_failed", message: "failed cursor" });
     
     const handle = monitor.start("post_game", "Hades", "1145300");
-    const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffResult = await handle.activatePostGameHandoff(750);
 
     expect(handoffResult.status).toBe("unavailable");
     if (handoffResult.status === "unavailable") {
@@ -180,7 +191,7 @@ describe("SyncthingMonitor", () => {
     const handle = monitor.start("post_game", "Hades", "1145300");
     await vi.advanceTimersByTimeAsync(100);
 
-    const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffResult = await handle.activatePostGameHandoff(750);
     expect(handoffResult.status).toBe("uploading");
     
     // Status callback should still not be called by the activation process itself (the controller will do the initial print synchronously)
@@ -213,7 +224,7 @@ describe("SyncthingMonitor", () => {
     // Run enough polls to complete the watch (1 upload + 3 settled)
     await vi.advanceTimersByTimeAsync(2000);
 
-    const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffResult = await handle.activatePostGameHandoff(750);
     expect(handoffResult.status).toBe("complete");
     expect(mockOnStatus).not.toHaveBeenCalled();
   });
@@ -240,7 +251,7 @@ describe("SyncthingMonitor", () => {
     });
 
     const handle = monitor.start("post_game", "Hades", "1145300");
-    const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffResult = await handle.activatePostGameHandoff(750);
     expect(handoffResult.status).toBe("pending");
 
     // Advance timer for the second poll (with uploading activity)
@@ -261,7 +272,7 @@ describe("SyncthingMonitor", () => {
     mockRpc.startWatch.mockReturnValue(startPromise);
 
     const handle = monitor.start("post_game", "Hades", "1145300");
-    const handoffPromise = monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffPromise = handle.activatePostGameHandoff(750);
 
     // Resolve watch start RPC so it's a known watch
     resolveStart({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
@@ -288,7 +299,7 @@ describe("SyncthingMonitor", () => {
     mockRpc.startWatch.mockReturnValue(startPromise);
 
     const handle = monitor.start("post_game", "Hades", "1145300");
-    const handoffPromise = monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffPromise = handle.activatePostGameHandoff(750);
 
     // Advance past 750ms confirmation timeout before start resolves
     await vi.advanceTimersByTimeAsync(800);
@@ -307,13 +318,16 @@ describe("SyncthingMonitor", () => {
     mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
 
     const handle1 = monitor.start("post_game", "Hades", "1145300");
+    const generation1 = monitor.getSnapshotForTest().generation;
     
     // Start second generation
-    const handle2 = monitor.start("post_game", "Hades", "1145300");
-    expect(handle2.generation).toBeGreaterThan(handle1.generation);
+    monitor.start("post_game", "Hades", "1145300");
+    const generation2 = monitor.getSnapshotForTest().generation;
+    expect(generation2).not.toBeNull();
+    expect(generation2).toBeGreaterThan(generation1 ?? 0);
 
     // First handoff should resolve stale
-    const handoffResult1 = await monitor.activatePostGameHandoff(handle1.generation, 750, 8000);
+    const handoffResult1 = await handle1.activatePostGameHandoff(750);
     expect(handoffResult1.status).toBe("stale");
   });
 
@@ -321,11 +335,11 @@ describe("SyncthingMonitor", () => {
     mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
     const handle = monitor.start("post_game", "Hades", "1145300");
 
-    await monitor.cancelGeneration(handle.generation, "manual");
+    await handle.cancel("manual");
     expect(mockRpc.stopWatch).toHaveBeenCalledTimes(1);
 
     // Call it again
-    await monitor.cancelGeneration(handle.generation, "manual again");
+    await handle.cancel("manual again");
     expect(mockRpc.stopWatch).toHaveBeenCalledTimes(1);
   });
 
@@ -345,7 +359,7 @@ describe("SyncthingMonitor", () => {
       });
 
     const handle = monitor.start("post_game", "Hades", "1145300");
-    const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffResult = await handle.activatePostGameHandoff(750);
     expect(handoffResult.status).toBe("pending");
 
     // Advance timer for the second failing poll
@@ -379,7 +393,7 @@ describe("SyncthingMonitor", () => {
       });
 
     const handle = monitor.start("post_game", "Hades", "1145300");
-    const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffResult = await handle.activatePostGameHandoff(750);
     expect(handoffResult.status).toBe("pending");
 
     // Run first poll (ready but idle) and second poll (activity observed)
@@ -466,7 +480,7 @@ describe("SyncthingMonitor", () => {
     });
 
     const handle = monitor.start("post_game", "Hades", "1145300");
-    await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    await handle.activatePostGameHandoff(750);
     
     // Poll the watch once
     await vi.advanceTimersByTimeAsync(250);
@@ -498,10 +512,10 @@ describe("SyncthingMonitor", () => {
     });
 
     const handle = monitor.start("pre_game", "Hades", "1145300");
-    expect(monitor.getSnapshotForTest().generation).toBe(handle.generation);
+    expect(monitor.getSnapshotForTest().generation).not.toBeNull();
 
     // Cancel the pre_game watch
-    await monitor.cancelGeneration(handle.generation, "test-cancel");
+    await handle.cancel("test-cancel");
     
     // The context should be deleted
     expect(monitor.getSnapshotForTest().generation).toBeNull();
@@ -527,7 +541,7 @@ describe("SyncthingMonitor", () => {
     });
 
     const handle = monitor.start("post_game", "Hades", "1145300");
-    await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    await handle.activatePostGameHandoff(750);
     
     // Poll the watch once
     await vi.advanceTimersByTimeAsync(250);
@@ -566,7 +580,7 @@ describe("SyncthingMonitor", () => {
     });
 
     const handle = monitor.start("post_game", "Hades", "1145300");
-    const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffResult = await handle.activatePostGameHandoff(750);
 
     expect(handoffResult.status).toBe("pending");
     expect(monitor.getSnapshotForTest().activityObserved).toBe(false);
@@ -601,14 +615,15 @@ describe("SyncthingMonitor", () => {
     });
 
     const handle = monitor.start("post_game", "Hades", "1145300");
-    const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const generation = monitor.getSnapshotForTest().generation;
+    const handoffResult = await handle.activatePostGameHandoff(750);
     expect(handoffResult.status).toBe("pending");
 
     // Initially context is present
-    expect(monitor.getSnapshotForTest().generation).toBe(handle.generation);
+    expect(monitor.getSnapshotForTest().generation).toBe(generation);
 
     await vi.advanceTimersByTimeAsync(10_500);
-    expect(monitor.getSnapshotForTest().generation).toBe(handle.generation);
+    expect(monitor.getSnapshotForTest().generation).toBe(generation);
 
     await vi.advanceTimersByTimeAsync(20_000);
     expect(monitor.getSnapshotForTest().generation).toBeNull();
@@ -637,7 +652,7 @@ describe("SyncthingMonitor", () => {
     const handle = monitor.start("post_game", "Hades", "1145300");
     await vi.advanceTimersByTimeAsync(121_000);
 
-    const handoff = await monitor.activatePostGameHandoff(handle.generation, 750);
+    const handoff = await handle.activatePostGameHandoff(750);
 
     expect(handoff.status).toBe("pending");
     expect(mockRpc.stopWatch).not.toHaveBeenCalled();
@@ -653,11 +668,10 @@ describe("SyncthingMonitor", () => {
       });
 
       const handle = monitor.start("post_game", "Hades", "1145300");
-      const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+      const handoffResult = await handle.activatePostGameHandoff(750);
 
       expect(handoffResult).toEqual({
         status: "unavailable",
-        generation: handle.generation,
         reason,
       });
     },
@@ -703,7 +717,7 @@ describe("SyncthingMonitor", () => {
       });
 
     const handle = monitor.start("post_game", "Hades", "1145300");
-    const handoffPromise = monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffPromise = handle.activatePostGameHandoff(750);
 
     // Watch should NOT be initialized yet (first poll returned unknown synchronously)
     expect(monitor.getSnapshotForTest().initialized).toBe(false);
@@ -738,7 +752,7 @@ describe("SyncthingMonitor", () => {
     });
 
     const handle = monitor.start("post_game", "Hades", "1145300");
-    const handoffPromise = monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffPromise = handle.activatePostGameHandoff(750);
     
     // Poll the watch once
     await vi.advanceTimersByTimeAsync(250);
@@ -756,9 +770,10 @@ describe("SyncthingMonitor", () => {
 
     const handle = monitor.start("post_game", "Hades", "1145300");
     const contextsMap = (monitor as any).contexts;
-    expect(contextsMap.has(handle.generation)).toBe(true);
+    const generation = monitor.getSnapshotForTest().generation;
+    expect(contextsMap.has(generation)).toBe(true);
 
-    const handoffPromise = monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffPromise = handle.activatePostGameHandoff(750);
 
     // Let background watch allocation run
     await vi.advanceTimersByTimeAsync(0);
@@ -769,7 +784,7 @@ describe("SyncthingMonitor", () => {
       expect(handoffResult.reason).toBe("initialization_failed");
     }
 
-    expect(contextsMap.has(handle.generation)).toBe(false);
+    expect(contextsMap.has(generation)).toBe(false);
   });
 
   it("post-game watch allocation failure (rejection) does not leak context", async () => {
@@ -777,9 +792,10 @@ describe("SyncthingMonitor", () => {
 
     const handle = monitor.start("post_game", "Hades", "1145300");
     const contextsMap = (monitor as any).contexts;
-    expect(contextsMap.has(handle.generation)).toBe(true);
+    const generation = monitor.getSnapshotForTest().generation;
+    expect(contextsMap.has(generation)).toBe(true);
 
-    const handoffPromise = monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffPromise = handle.activatePostGameHandoff(750);
 
     // Let background watch allocation run
     await vi.advanceTimersByTimeAsync(0);
@@ -790,7 +806,7 @@ describe("SyncthingMonitor", () => {
       expect(handoffResult.reason).toBe("initialization_failed");
     }
 
-    expect(contextsMap.has(handle.generation)).toBe(false);
+    expect(contextsMap.has(generation)).toBe(false);
   });
 
   it("polling failure before handoff activation does not leak context", async () => {
@@ -799,16 +815,17 @@ describe("SyncthingMonitor", () => {
 
     const handle = monitor.start("post_game", "Hades", "1145300");
     const contextsMap = (monitor as any).contexts;
-    expect(contextsMap.has(handle.generation)).toBe(true);
+    const generation = monitor.getSnapshotForTest().generation;
+    expect(contextsMap.has(generation)).toBe(true);
 
     // Run timers so watch allocation runs and performs the first poll
     await vi.advanceTimersByTimeAsync(250);
 
-    expect((monitor as any).contexts.get(handle.generation).cancelled).toBe(true);
+    expect((monitor as any).contexts.get(generation).cancelled).toBe(true);
 
-    const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    const handoffResult = await handle.activatePostGameHandoff(750);
     expect(handoffResult.status).toBe("unavailable");
 
-    expect(contextsMap.has(handle.generation)).toBe(false);
+    expect(contextsMap.has(generation)).toBe(false);
   });
 });

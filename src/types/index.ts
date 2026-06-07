@@ -167,21 +167,11 @@ export type SyncthingWatchStartResult =
 
 export type SyncthingActivitySample = {
   status: string;
-  folder_id: string;
-  label: string;
   folder_state: string;
-  active_transfer: boolean;
   update_in_progress: boolean;
   settled: boolean;
   downloading: boolean;
   uploading: boolean;
-  receive_needed: boolean;
-  need_bytes: number;
-  need_items: number;
-  need_deletes: number;
-  sequence: number;
-  pending_remote_ack: boolean;
-  lagging_remote_devices: number;
   timestamp_unix: number;
 };
 
