@@ -14,7 +14,7 @@ import type {
 import { getAutoSyncStatusBounds, objectKeys } from "../utils/steam";
 import { log } from "../utils/logging";
 
-const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
+export const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
   checking: "VERIFYING GAME SAVE",
   backing_up: "BACKING UP LOCAL SAVE",
   restoring: "RESTORING BACKUP SAVE",
@@ -191,8 +191,12 @@ function isLudusaviRunningStatus(status: AutoSyncStatusKind): boolean {
   return status === "checking" || status === "backing_up" || status === "restoring";
 }
 
-function isSyncthingActiveStatus(status: AutoSyncStatusKind): boolean {
-  return status === "syncthing_downloading" || status === "syncthing_uploading";
+export function isSyncthingActiveStatus(status: AutoSyncStatusKind): boolean {
+  return (
+    status === "syncthing_pending_upload" ||
+    status === "syncthing_downloading" ||
+    status === "syncthing_uploading"
+  );
 }
 
 const svgAttributeMapping: Record<string, string> = {
@@ -292,7 +296,7 @@ function getSerializedIcon(status: AutoSyncStatusKind): string {
   let icon: any;
   if (status === "syncthing_downloading") {
     icon = IoMdCloudDownload;
-  } else if (status === "syncthing_uploading") {
+  } else if (status === "syncthing_uploading" || status === "syncthing_pending_upload") {
     icon = IoMdCloudUpload;
   } else if (status === "syncthing_complete") {
     icon = IoMdCloudDone;
@@ -305,7 +309,7 @@ function getSerializedIcon(status: AutoSyncStatusKind): string {
   return serialized;
 }
 
-function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
+export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
   if (status === "has_backup") {
     return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 10.2 8.5 12.7 14.2 7" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   }
@@ -318,7 +322,12 @@ function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
   if (status === "checking") {
     return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="3" opacity="0.8"/><path d="M10 2a8 8 0 0 1 8 8" fill="none" stroke="#0b151f" stroke-width="3" stroke-linecap="round"/></svg>';
   }
-  if (status === "syncthing_downloading" || status === "syncthing_uploading" || status === "syncthing_complete") {
+  if (
+    status === "syncthing_downloading" ||
+    status === "syncthing_uploading" ||
+    status === "syncthing_pending_upload" ||
+    status === "syncthing_complete"
+  ) {
     return getSerializedIcon(status);
   }
 
