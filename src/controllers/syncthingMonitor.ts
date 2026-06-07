@@ -172,6 +172,8 @@ export class SyncthingMonitor {
     }
 
     if (context.cancelled) {
+      context.handoffActivated = true;
+      this.maybeCleanupContext(context);
       return { status: "unavailable", generation, reason: "cancelled" };
     }
 
@@ -190,8 +192,12 @@ export class SyncthingMonitor {
       const result = await Promise.race([context.readinessPromise, timeoutPromise]);
       window.clearTimeout(timeoutID);
 
-      if (context.generation !== this.currentGeneration || context.cancelled) {
+      if (context.generation !== this.currentGeneration) {
         return finish({ status: "stale", generation });
+      }
+
+      if (context.cancelled && result !== "unavailable") {
+        return finish({ status: "unavailable", generation, reason: "cancelled" });
       }
 
       if (result === "timeout") {
@@ -305,7 +311,9 @@ export class SyncthingMonitor {
 
       if (isRpcStatus(startRes)) {
         log("debug", `Syncthing watch start skipped/failed: ${startRes.reason} - ${startRes.message}`);
+        context.cancelled = true;
         context.resolveReadiness("unavailable");
+        this.maybeCleanupContext(context);
         return;
       }
 
@@ -319,7 +327,9 @@ export class SyncthingMonitor {
       await this.pollOnce(context);
     } catch (err) {
       log("error", `Failed to allocate Syncthing watch: ${err}`);
+      context.cancelled = true;
       context.resolveReadiness("unavailable");
+      this.maybeCleanupContext(context);
     }
   }
 
@@ -506,13 +516,13 @@ export class SyncthingMonitor {
     context.lastProcessedTimestamp = timestamp;
 
     const hasActivity = context.phase === "post_game"
-      ? (sample.uploading ||
-         sample.update_in_progress ||
-         sample.status === "ACTIVE_TRANSFER" ||
-         sample.status === "SCANNING" ||
-         sample.status === "UPDATE_NEEDED" ||
-         sample.status === "PREPARING" ||
-         sample.status === "INDEXING_OR_SEQUENCE_UPDATE") && !sample.downloading
+      ? sample.uploading ||
+        ((sample.update_in_progress ||
+          sample.status === "ACTIVE_TRANSFER" ||
+          sample.status === "SCANNING" ||
+          sample.status === "UPDATE_NEEDED" ||
+          sample.status === "PREPARING" ||
+          sample.status === "INDEXING_OR_SEQUENCE_UPDATE") && !sample.downloading)
       : (sample.downloading ||
          sample.uploading ||
          sample.update_in_progress ||

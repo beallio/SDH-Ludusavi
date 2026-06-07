@@ -627,5 +627,99 @@ describe("SyncthingMonitor", () => {
     const handoffResult = await handoffPromise;
     expect(handoffResult.status).toBe("pending");
   });
+
+  it("post-game upload with concurrent download confirms activity and publishes uploading", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
+    mockRpc.pollWatch.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: {
+        status: "idle",
+        folder_id: "f1",
+        folder_state: "syncing",
+        active_transfer: true,
+        update_in_progress: true,
+        settled: false,
+        downloading: true,
+        uploading: true,
+        sequence: 1,
+        timestamp_unix: 1234567890,
+      }
+    });
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+    const handoffPromise = monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    
+    // Poll the watch once
+    await vi.advanceTimersByTimeAsync(250);
+
+    const snapshot = monitor.getSnapshotForTest();
+    expect(snapshot.activityObserved).toBe(true);
+    expect(snapshot.latestStatus).toBe("uploading");
+
+    const handoffResult = await handoffPromise;
+    expect(handoffResult.status).toBe("uploading");
+  });
+
+  it("post-game watch allocation failure (failed status) does not leak context", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "failed", reason: "watch_initialization_failed", message: "Failed to allocate watch" });
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+    const contextsMap = (monitor as any).contexts;
+    expect(contextsMap.has(handle.generation)).toBe(true);
+
+    const handoffPromise = monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+
+    // Let background watch allocation run
+    await vi.advanceTimersByTimeAsync(0);
+
+    const handoffResult = await handoffPromise;
+    expect(handoffResult.status).toBe("unavailable");
+    if (handoffResult.status === "unavailable") {
+      expect(handoffResult.reason).toBe("initialization_failed");
+    }
+
+    expect(contextsMap.has(handle.generation)).toBe(false);
+  });
+
+  it("post-game watch allocation failure (rejection) does not leak context", async () => {
+    mockRpc.startWatch.mockRejectedValue(new Error("RPC failed"));
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+    const contextsMap = (monitor as any).contexts;
+    expect(contextsMap.has(handle.generation)).toBe(true);
+
+    const handoffPromise = monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+
+    // Let background watch allocation run
+    await vi.advanceTimersByTimeAsync(0);
+
+    const handoffResult = await handoffPromise;
+    expect(handoffResult.status).toBe("unavailable");
+    if (handoffResult.status === "unavailable") {
+      expect(handoffResult.reason).toBe("initialization_failed");
+    }
+
+    expect(contextsMap.has(handle.generation)).toBe(false);
+  });
+
+  it("polling failure before handoff activation does not leak context", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
+    mockRpc.pollWatch.mockResolvedValue({ status: "error", reason: "error", message: "polling failed" });
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+    const contextsMap = (monitor as any).contexts;
+    expect(contextsMap.has(handle.generation)).toBe(true);
+
+    // Run timers so watch allocation runs and performs the first poll
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect((monitor as any).contexts.get(handle.generation).cancelled).toBe(true);
+
+    const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    expect(handoffResult.status).toBe("unavailable");
+
+    expect(contextsMap.has(handle.generation)).toBe(false);
+  });
 });
 
