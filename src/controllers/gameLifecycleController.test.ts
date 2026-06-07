@@ -135,7 +135,6 @@ describe("GameLifecycleController", () => {
 
     triggerStart(1145300);
     await vi.advanceTimersByTimeAsync(100);
-
     triggerExit(1145300);
     await vi.runAllTimersAsync();
 
@@ -169,6 +168,7 @@ describe("GameLifecycleController", () => {
 
     triggerStart(1145300);
     await vi.advanceTimersByTimeAsync(100);
+    mockStatusSurface.complete.mockClear();
 
     triggerExit(1145300);
     await vi.runAllTimersAsync();
@@ -220,7 +220,7 @@ describe("GameLifecycleController", () => {
     expect(mockStatusSurface.publish).toHaveBeenCalledWith("syncthing_complete", expect.any(Object));
   });
 
-  it("unavailable or timed-out handoff completes as has_backup", async () => {
+  it("configured but unavailable Syncthing preserves backup and publishes warning", async () => {
     const controller = createGameLifecycleController({
       store: mockStore,
       rpc: mockRpc,
@@ -235,14 +235,100 @@ describe("GameLifecycleController", () => {
 
     triggerStart(1145300);
     await vi.advanceTimersByTimeAsync(100);
+    mockStatusSurface.complete.mockClear();
 
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.publish).toHaveBeenCalledWith(
+      "syncthing_unavailable",
+      expect.objectContaining({ source: "rpc_result" }),
+    );
+    expect(mockStatusSurface.complete).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed" }),
+      expect.any(Object),
+    );
+  });
+
+  it("missing Syncthing configuration silently completes local backup", async () => {
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+    mockRpc.startSyncthingActivityWatch.mockResolvedValue({
+      status: "skipped",
+      reason: "not_configured",
+      message: "not configured",
+    });
+
+    triggerStart(1145300);
+    await vi.advanceTimersByTimeAsync(100);
     triggerExit(1145300);
     await vi.runAllTimersAsync();
 
     expect(mockStatusSurface.complete).toHaveBeenCalledWith(
       expect.objectContaining({ status: "backed_up" }),
-      expect.any(Object)
+      expect.any(Object),
     );
+    expect(mockStatusSurface.publish).not.toHaveBeenCalledWith(
+      "syncthing_unavailable",
+      expect.any(Object),
+    );
+  });
+
+  it("unshared Ludusavi backup path publishes a distinct warning", async () => {
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+    mockRpc.startSyncthingActivityWatch.mockResolvedValue({
+      status: "skipped",
+      reason: "folder_not_found",
+      message: "path not shared",
+    });
+
+    triggerStart(1145300);
+    await vi.advanceTimersByTimeAsync(100);
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.publish).toHaveBeenCalledWith(
+      "syncthing_folder_not_found",
+      expect.objectContaining({ source: "rpc_result" }),
+    );
+  });
+
+  it("never pauses or resumes a process during exit handling", async () => {
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    triggerStart(1145300);
+    await vi.advanceTimersByTimeAsync(100);
+    mockRpc.pauseGameProcess.mockClear();
+    mockRpc.resumeGameProcess.mockClear();
+
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockRpc.pauseGameProcess).not.toHaveBeenCalled();
+    expect(mockRpc.resumeGameProcess).not.toHaveBeenCalled();
   });
 
   it("backup failure cancels the generation and publishes error", async () => {

@@ -3,6 +3,7 @@ import {
   autoSyncStatusText,
   isSyncthingActiveStatus,
   iconSvgForAutoSyncStatus,
+  shouldAutoHideStatus,
 } from "./autoSyncStatusSurface";
 
 vi.mock("@decky/api", () => ({
@@ -30,5 +31,21 @@ describe("AutoSyncStatusSurface Status Pending Upload", () => {
     const uploadingIcon = iconSvgForAutoSyncStatus("syncthing_uploading");
     expect(pendingIcon).toBe(uploadingIcon);
     expect(pendingIcon).toContain("<svg");
+  });
+
+  it("keeps active Syncthing states visible until the monitor replaces them", () => {
+    expect(shouldAutoHideStatus("syncthing_pending_upload")).toBe(false);
+    expect(shouldAutoHideStatus("syncthing_uploading")).toBe(false);
+    expect(shouldAutoHideStatus("syncthing_downloading")).toBe(false);
+    expect(shouldAutoHideStatus("syncthing_complete")).toBe(true);
+  });
+
+  it("defines distinct local-backup warnings", () => {
+    expect(autoSyncStatusText.syncthing_unavailable).toBe(
+      "LOCAL BACKUP SAVED - SYNCTHING UNAVAILABLE",
+    );
+    expect(autoSyncStatusText.syncthing_folder_not_found).toBe(
+      "LOCAL BACKUP SAVED - PATH NOT SHARED",
+    );
   });
 });

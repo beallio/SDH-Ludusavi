@@ -329,7 +329,7 @@ describe("SyncthingMonitor", () => {
     expect(mockRpc.stopWatch).toHaveBeenCalledTimes(1);
   });
 
-  it("activated failure before activity publishes one has_backup", async () => {
+  it("activated failure before activity publishes Syncthing unavailable", async () => {
     mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
     // First sample is valid (ready), second sample fails
     mockRpc.pollWatch
@@ -351,8 +351,7 @@ describe("SyncthingMonitor", () => {
     // Advance timer for the second failing poll
     await vi.advanceTimersByTimeAsync(500);
 
-    // Should publish has_backup on poll failure
-    expect(mockOnStatus).toHaveBeenCalledWith("has_backup", {
+    expect(mockOnStatus).toHaveBeenCalledWith("syncthing_unavailable", {
       source: "rpc_result",
       gameName: "Hades",
       appID: "1145300",
@@ -540,8 +539,50 @@ describe("SyncthingMonitor", () => {
     expect(snapshot.latestStatus).toBe("idle");
   });
 
-  it("post-game watch pending activity timeout removes context", async () => {
-    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
+  it("post-game local indexing remains pending without upload evidence", async () => {
+    mockRpc.startWatch.mockResolvedValue({
+      status: "watching",
+      watch_id: "w1",
+      folder_id: "f1",
+      label: "Folder",
+      path: "/path",
+      detection_grace_ms: 30_000,
+    });
+    mockRpc.pollWatch.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: {
+        status: "INDEXING_OR_SEQUENCE_UPDATE",
+        folder_id: "f1",
+        folder_state: "scanning",
+        active_transfer: false,
+        update_in_progress: true,
+        settled: false,
+        downloading: false,
+        uploading: false,
+        sequence: 2,
+        timestamp_unix: 1234567890,
+      },
+    });
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+    const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+
+    expect(handoffResult.status).toBe("pending");
+    expect(monitor.getSnapshotForTest().activityObserved).toBe(false);
+    expect(monitor.getSnapshotForTest().latestStatus).toBe("idle");
+    expect(mockOnStatus).not.toHaveBeenCalledWith("syncthing_uploading", expect.anything());
+  });
+
+  it("post-game watch uses backend detection grace instead of the legacy eight seconds", async () => {
+    mockRpc.startWatch.mockResolvedValue({
+      status: "watching",
+      watch_id: "w1",
+      folder_id: "f1",
+      label: "Folder",
+      path: "/path",
+      detection_grace_ms: 30_000,
+    });
     mockRpc.pollWatch.mockResolvedValue({
       status: "activity",
       watch_id: "w1",
@@ -566,12 +607,61 @@ describe("SyncthingMonitor", () => {
     // Initially context is present
     expect(monitor.getSnapshotForTest().generation).toBe(handle.generation);
 
-    // Advance past the 8000ms pending activity timeout
-    await vi.advanceTimersByTimeAsync(8500);
+    await vi.advanceTimersByTimeAsync(10_500);
+    expect(monitor.getSnapshotForTest().generation).toBe(handle.generation);
 
-    // The context should be cleaned up
+    await vi.advanceTimersByTimeAsync(20_000);
     expect(monitor.getSnapshotForTest().generation).toBeNull();
   });
+
+  it("keeps a passive post-game watch alive until the backup handoff", async () => {
+    mockRpc.startWatch.mockResolvedValue({
+      status: "watching",
+      watch_id: "w1",
+      folder_id: "f1",
+      label: "Folder",
+      path: "/path",
+      detection_grace_ms: 30_000,
+    });
+    mockRpc.pollWatch.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: {
+        status: "idle",
+        uploading: false,
+        settled: true,
+        timestamp_unix: 1000,
+      },
+    });
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+    await vi.advanceTimersByTimeAsync(121_000);
+
+    const handoff = await monitor.activatePostGameHandoff(handle.generation, 750);
+
+    expect(handoff.status).toBe("pending");
+    expect(mockRpc.stopWatch).not.toHaveBeenCalled();
+  });
+
+  it.each(["not_configured", "api_unavailable", "folder_not_found"])(
+    "preserves actionable watch allocation reason %s",
+    async (reason) => {
+      mockRpc.startWatch.mockResolvedValue({
+        status: "skipped",
+        reason,
+        message: reason,
+      });
+
+      const handle = monitor.start("post_game", "Hades", "1145300");
+      const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+
+      expect(handoffResult).toEqual({
+        status: "unavailable",
+        generation: handle.generation,
+        reason,
+      });
+    },
+  );
 
   it("initialization requires a valid folder_state (not unknown)", async () => {
     mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
@@ -722,4 +812,3 @@ describe("SyncthingMonitor", () => {
     expect(contextsMap.has(handle.generation)).toBe(false);
   });
 });
-

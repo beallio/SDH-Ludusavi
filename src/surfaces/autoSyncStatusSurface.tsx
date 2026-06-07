@@ -25,7 +25,9 @@ export const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
   syncthing_pending_upload: "SYNCTHING PREPARING",
   syncthing_downloading: "SYNCTHING DOWNLOADING",
   syncthing_uploading: "SYNCTHING UPLOADING",
-  syncthing_complete: "SYNCTHING COMPLETE"
+  syncthing_complete: "SYNCTHING COMPLETE",
+  syncthing_unavailable: "LOCAL BACKUP SAVED - SYNCTHING UNAVAILABLE",
+  syncthing_folder_not_found: "LOCAL BACKUP SAVED - PATH NOT SHARED"
 };
 
 let currentAutoSyncStatusState: AutoSyncStatusState = {
@@ -199,6 +201,10 @@ export function isSyncthingActiveStatus(status: AutoSyncStatusKind): boolean {
   );
 }
 
+export function shouldAutoHideStatus(status: AutoSyncStatusKind): boolean {
+  return !isSyncthingActiveStatus(status);
+}
+
 const svgAttributeMapping: Record<string, string> = {
   fillRule: "fill-rule",
   clipRule: "clip-rule",
@@ -362,7 +368,7 @@ body {
   box-sizing: border-box;
 }
 .text { display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; min-width: 245px; }
-.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" ? "#f59e0b" : "#1a9fff"}; }
+.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" ? "#f59e0b" : state.status === "syncthing_unavailable" || state.status === "syncthing_folder_not_found" ? "#f59e0b" : "#1a9fff"}; }
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
@@ -545,8 +551,9 @@ function scheduleAutoSyncStatusHide(state: AutoSyncStatusState) {
   }
 
   const isRunning = isLudusaviRunningStatus(state.status);
-  const isSyncthingActive = isSyncthingActiveStatus(state.status);
-  const useTenSecondWatchdog = isRunning || isSyncthingActive;
+  if (!shouldAutoHideStatus(state.status)) {
+    return;
+  }
 
   autoSyncStatusHideTimeoutID = window.setTimeout(() => {
     if (isRunning) {
@@ -559,7 +566,7 @@ function scheduleAutoSyncStatusHide(state: AutoSyncStatusState) {
       tracked: currentAutoSyncStatusState.tracked,
       resultStatus: currentAutoSyncStatusState.resultStatus
     });
-  }, useTenSecondWatchdog ? 10000 : 2000);
+  }, isRunning ? 10000 : 2000);
 }
 
 function syncAutoSyncStatusBrowserViewDeferred(state: AutoSyncStatusState) {

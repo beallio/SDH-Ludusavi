@@ -150,10 +150,19 @@ export type AutoSyncStatusKind =
   | "syncthing_pending_upload"
   | "syncthing_downloading"
   | "syncthing_uploading"
-  | "syncthing_complete";
+  | "syncthing_complete"
+  | "syncthing_unavailable"
+  | "syncthing_folder_not_found";
 
 export type SyncthingWatchStartResult =
-  | { status: "watching"; watch_id: string; folder_id: string; label: string; path: string }
+  | {
+      status: "watching";
+      watch_id: string;
+      folder_id: string;
+      label: string;
+      path: string;
+      detection_grace_ms: number;
+    }
   | { status: "skipped" | "failed"; reason: string; message: string };
 
 export type SyncthingActivitySample = {

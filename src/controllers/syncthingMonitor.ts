@@ -79,11 +79,20 @@ interface WatchContext {
   resolveReadiness: (result: "ready" | "unavailable") => void;
   readinessPromise: Promise<"ready" | "unavailable">;
   handoffActivated: boolean;
+  handoffActivatedAt: number | null;
+  detectionGraceMs: number;
+  unavailableReason: string;
 }
 
 const EMPTY_SAMPLE_RETRY_MS = 250;
 const ACTIVE_POLL_INTERVAL_MS = 500;
 const MAX_WATCH_DURATION_MS = 120_000;
+const DEFAULT_DETECTION_GRACE_MS = 30_000;
+const ACTIONABLE_UNAVAILABLE_REASONS = new Set([
+  "not_configured",
+  "api_unavailable",
+  "folder_not_found",
+]);
 
 function getStatusRank(status: "idle" | "uploading" | "downloading" | "complete"): number {
   if (status === "complete") return 2;
@@ -145,6 +154,9 @@ export class SyncthingMonitor {
       resolveReadiness,
       readinessPromise,
       handoffActivated: false,
+      handoffActivatedAt: null,
+      detectionGraceMs: DEFAULT_DETECTION_GRACE_MS,
+      unavailableReason: "initialization_failed",
     };
 
     this.contexts.set(gen, context);
@@ -164,17 +176,18 @@ export class SyncthingMonitor {
   async activatePostGameHandoff(
     generation: SyncthingMonitorGeneration,
     confirmationTimeoutMs: number,
-    pendingActivityTimeoutMs: number,
+    _pendingActivityTimeoutMs?: number,
   ): Promise<PostGameHandoffResult> {
     const context = this.contexts.get(generation);
     if (!context || context.phase !== "post_game" || context.generation !== this.currentGeneration) {
       return { status: "stale", generation };
     }
+    context.handoffActivatedAt = Date.now();
 
     if (context.cancelled) {
       context.handoffActivated = true;
       this.maybeCleanupContext(context);
-      return { status: "unavailable", generation, reason: "cancelled" };
+      return { status: "unavailable", generation, reason: context.unavailableReason };
     }
 
     let timeoutID: any = null;
@@ -197,7 +210,7 @@ export class SyncthingMonitor {
       }
 
       if (context.cancelled && result !== "unavailable") {
-        return finish({ status: "unavailable", generation, reason: "cancelled" });
+        return finish({ status: "unavailable", generation, reason: context.unavailableReason });
       }
 
       if (result === "timeout") {
@@ -207,7 +220,11 @@ export class SyncthingMonitor {
       }
 
       if (result === "unavailable") {
-        return finish({ status: "unavailable", generation, reason: "initialization_failed" });
+        return finish({
+          status: "unavailable",
+          generation,
+          reason: context.unavailableReason,
+        });
       }
 
       // Confirmed! Synchronously enable publication and return buffered state
@@ -219,7 +236,7 @@ export class SyncthingMonitor {
       } else if (context.activityObserved) {
         return finish({ status: "uploading", generation });
       } else {
-        this.schedulePendingActivityTimeout(context, pendingActivityTimeoutMs);
+        this.schedulePendingActivityTimeout(context, context.detectionGraceMs);
         return finish({ status: "pending", generation });
       }
     } catch (err) {
@@ -311,6 +328,10 @@ export class SyncthingMonitor {
 
       if (isRpcStatus(startRes)) {
         log("debug", `Syncthing watch start skipped/failed: ${startRes.reason} - ${startRes.message}`);
+        context.unavailableReason =
+          startRes.reason && ACTIONABLE_UNAVAILABLE_REASONS.has(startRes.reason)
+            ? startRes.reason
+            : "initialization_failed";
         context.cancelled = true;
         context.resolveReadiness("unavailable");
         this.maybeCleanupContext(context);
@@ -318,7 +339,14 @@ export class SyncthingMonitor {
       }
 
       context.watchID = startRes.watch_id;
-      log("info", `Syncthing watch allocated: generation=${context.generation} watch_id=${startRes.watch_id} game=${context.gameName} app_id=${context.appID}`);
+      context.detectionGraceMs =
+        Number.isFinite(startRes.detection_grace_ms) && startRes.detection_grace_ms > 0
+          ? startRes.detection_grace_ms
+          : DEFAULT_DETECTION_GRACE_MS;
+      log(
+        "info",
+        `Syncthing watch allocated: generation=${context.generation} watch_id=${startRes.watch_id} game=${context.gameName} app_id=${context.appID} detection_grace_ms=${context.detectionGraceMs}`,
+      );
 
       if (context.phase === "pre_game") {
         context.publicationEnabled = true;
@@ -416,9 +444,13 @@ export class SyncthingMonitor {
       return;
     }
 
-    const elapsed = Date.now() - context.startedAt;
-    if (elapsed > MAX_WATCH_DURATION_MS) {
-      log("info", `Syncthing watch ${context.watchID} hit 120s timeout, stopping.`);
+    const timeoutStartedAt =
+      context.phase === "pre_game" ? context.startedAt : context.handoffActivatedAt;
+    if (
+      timeoutStartedAt !== null &&
+      Date.now() - timeoutStartedAt > MAX_WATCH_DURATION_MS
+    ) {
+      log("info", `Syncthing watch ${context.watchID} hit the active 120s timeout, stopping.`);
       this.handlePollFailure(context, "watch_duration_timeout");
       return;
     }
@@ -492,7 +524,7 @@ export class SyncthingMonitor {
     }
 
     if (wasEnabled && !context.activityObserved && context.phase === "post_game") {
-      this.onStatus("has_backup", {
+      this.onStatus("syncthing_unavailable", {
         source: "rpc_result",
         gameName: context.gameName,
         appID: context.appID,
@@ -516,13 +548,7 @@ export class SyncthingMonitor {
     context.lastProcessedTimestamp = timestamp;
 
     const hasActivity = context.phase === "post_game"
-      ? sample.uploading ||
-        ((sample.update_in_progress ||
-          sample.status === "ACTIVE_TRANSFER" ||
-          sample.status === "SCANNING" ||
-          sample.status === "UPDATE_NEEDED" ||
-          sample.status === "PREPARING" ||
-          sample.status === "INDEXING_OR_SEQUENCE_UPDATE") && !sample.downloading)
+      ? sample.uploading
       : (sample.downloading ||
          sample.uploading ||
          sample.update_in_progress ||
@@ -547,8 +573,8 @@ export class SyncthingMonitor {
     } else if (sample.uploading) {
       newStatus = "uploading";
       context.settledCount = 0;
-    } else if (sample.update_in_progress && (!sample.downloading || context.phase !== "post_game")) {
-      newStatus = context.phase === "pre_game" ? "downloading" : "uploading";
+    } else if (sample.update_in_progress && context.phase !== "post_game") {
+      newStatus = "downloading";
       context.settledCount = 0;
     } else if (context.activityObserved && sample.settled) {
       context.settledCount++;

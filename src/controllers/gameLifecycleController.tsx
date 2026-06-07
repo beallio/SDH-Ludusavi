@@ -447,7 +447,6 @@ export function createGameLifecycleController(
             : await syncthingMonitor.activatePostGameHandoff(
                 generation,
                 750, // SYNCTHING_HANDOFF_CONFIRMATION_MS
-                8000, // SYNCTHING_PENDING_ACTIVITY_MS
               );
 
           if (epoch !== lifecycleEpoch) {
@@ -480,6 +479,28 @@ export function createGameLifecycleController(
               });
               return;
             case "unavailable":
+              if (handoff.reason === "api_unavailable") {
+                publishAutoSyncStatus("syncthing_unavailable", {
+                  source: "rpc_result",
+                  gameName: name,
+                  appID,
+                  tracked,
+                  resultStatus: result.status,
+                });
+                return;
+              }
+              if (handoff.reason === "folder_not_found") {
+                publishAutoSyncStatus("syncthing_folder_not_found", {
+                  source: "rpc_result",
+                  gameName: name,
+                  appID,
+                  tracked,
+                  resultStatus: result.status,
+                });
+                return;
+              }
+              completeAutoSyncStatus(result, { gameName: name, appID, tracked });
+              return;
             case "stale":
               completeAutoSyncStatus(result, { gameName: name, appID, tracked });
               return;
