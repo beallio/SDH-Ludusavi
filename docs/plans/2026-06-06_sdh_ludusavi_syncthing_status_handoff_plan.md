@@ -1,5 +1,59 @@
 # Implementation Plan: Race-Safe Post-Backup Syncthing Status Handoff
 
+## 2026-06-07 Maintainability Review Addendum
+
+### Problem Definition
+
+The passive handoff behavior is correct, but the implementation leaves mutable Python
+watch state threaded through a 14-argument `_tick()` method, exposes frontend generation
+IDs to the lifecycle controller, duplicates epoch-guarded surface closures, scatters
+watch cancellation across terminal branches, and serializes diagnostic fields that no
+frontend consumer reads.
+
+### Architecture Overview
+
+- Make `SyncthingWatch` own its cursor, folder runtime, activity, rate, and previous-total
+  state. `_tick()` accepts only the current monotonic timestamp and mutates that state.
+- Limit the activity RPC sample to the canonical frontend inputs: `status`,
+  `folder_state`, `update_in_progress`, `settled`, `downloading`, `uploading`, and
+  `timestamp_unix`.
+- Return an opaque `SyncthingWatchSession` from `SyncthingMonitor.start()`. Consumers
+  cancel or activate that session without receiving the monitor's generation key.
+- Create one epoch-guarded status-surface adapter per lifecycle callback.
+- Treat a started watch as cleanup-owned by the lifecycle handler until a successful
+  pre-game retention or post-game handoff transfers ownership to the monitor.
+
+### Core Data Structures
+
+- `SyncthingWatch` instance fields hold all mutable backend polling state.
+- `SyncthingWatchSession` exposes `cancel(reason)` and, for post-game sessions,
+  `activatePostGameHandoff(timeoutMs)`.
+- Lifecycle handlers track a single nullable session plus an ownership flag; `finally`
+  cancels any session whose ownership was not transferred.
+
+### Public Interfaces
+
+- The Decky RPC method names and top-level watch start/poll/stop response shapes remain
+  unchanged.
+- `SyncthingActivitySample` drops unused diagnostic fields.
+- Generation identifiers remain internal to `SyncthingMonitor`; tests may inspect
+  snapshots but production consumers cannot key monitor operations directly.
+
+### Dependency Requirements
+
+No new dependencies.
+
+### Testing Strategy
+
+- Add an architecture test proving `SyncthingWatch._tick` accepts only `self` and `now`.
+- Assert the exact reduced activity-sample wire keys.
+- Add a frontend test proving `start()` returns session methods rather than a generation
+  handle.
+- Preserve existing race, stale-session, cancellation, timeout, lifecycle, and status
+  publication tests.
+- Run all Python and frontend gates through `./run.sh`, then package and publish a new
+  `0.3.0` development prerelease.
+
 ## 2026-06-07 Implementation Addendum
 
 ### Problem Definition
