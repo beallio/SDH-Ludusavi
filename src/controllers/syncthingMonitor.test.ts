@@ -507,5 +507,70 @@ describe("SyncthingMonitor", () => {
     // The context should be deleted
     expect(monitor.getSnapshotForTest().generation).toBeNull();
   });
+
+  it("post-game download with update_in_progress: true, downloading: true does not set status to uploading", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
+    mockRpc.pollWatch.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: {
+        status: "idle",
+        folder_id: "f1",
+        folder_state: "syncing",
+        active_transfer: true,
+        update_in_progress: true,
+        settled: false,
+        downloading: true,
+        uploading: false,
+        sequence: 1,
+        timestamp_unix: 1234567890,
+      }
+    });
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+    await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    
+    // Poll the watch once
+    await vi.advanceTimersByTimeAsync(250);
+
+    // Should not trigger status publication
+    expect(mockOnStatus).not.toHaveBeenCalled();
+
+    const snapshot = monitor.getSnapshotForTest();
+    expect(snapshot.latestStatus).toBe("idle");
+  });
+
+  it("post-game watch pending activity timeout removes context", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
+    mockRpc.pollWatch.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: {
+        status: "idle",
+        folder_id: "f1",
+        folder_state: "idle",
+        active_transfer: false,
+        update_in_progress: false,
+        settled: true,
+        downloading: false,
+        uploading: false,
+        sequence: 1,
+        timestamp_unix: 1234567890,
+      }
+    });
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+    const handoffResult = await monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+    expect(handoffResult.status).toBe("pending");
+
+    // Initially context is present
+    expect(monitor.getSnapshotForTest().generation).toBe(handle.generation);
+
+    // Advance past the 8000ms pending activity timeout
+    await vi.advanceTimersByTimeAsync(8500);
+
+    // The context should be cleaned up
+    expect(monitor.getSnapshotForTest().generation).toBeNull();
+  });
 });
 

@@ -388,6 +388,8 @@ export class SyncthingMonitor {
           gameName: context.gameName,
           appID: context.appID,
         });
+
+        this.maybeCleanupContext(context);
       }
     }, timeoutMs);
   }
@@ -535,7 +537,7 @@ export class SyncthingMonitor {
     } else if (sample.uploading) {
       newStatus = "uploading";
       context.settledCount = 0;
-    } else if (sample.update_in_progress) {
+    } else if (sample.update_in_progress && (!sample.downloading || context.phase !== "post_game")) {
       newStatus = context.phase === "pre_game" ? "downloading" : "uploading";
       context.settledCount = 0;
     } else if (context.activityObserved && sample.settled) {
