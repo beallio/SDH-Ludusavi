@@ -234,3 +234,48 @@ def test_poll_watch_returns_copied_dict() -> None:
 
     assert watch.latest_sample["status"] == "activity"
     assert watch.latest_sample["sample"]["folder_state"] == "idle"
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+@patch("sdh_ludusavi.syncthing.watcher.resolve_folder_by_path")
+def test_strict_folder_status_initialization_failure(mock_resolve_path, mock_resolve_creds) -> None:
+    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
+    mock_folder = FolderSelection(
+        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync"
+    )
+    mock_resolve_path.return_value = mock_folder
+
+    manager = SyncthingWatchManager()
+    init_failed = threading.Event()
+
+    def mock_get_initial_folder_state_and_runtime_fail(api, folder_id, strict=False):
+        init_failed.set()
+        raise RuntimeError("initial status failed")
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime",
+            side_effect=mock_get_initial_folder_state_and_runtime_fail,
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.get_event_cursor") as mock_cursor,
+        patch("sdh_ludusavi.syncthing.watcher.get_connection_totals") as mock_totals,
+        patch("sdh_ludusavi.syncthing.watcher.get_folder_status") as mock_status,
+        patch("sdh_ludusavi.syncthing.watcher.get_events") as mock_events,
+    ):
+        mock_cursor.return_value = 100
+        mock_totals.return_value = (0, 0)
+        mock_status.return_value = {"state": "idle", "sequence": 5}
+        mock_events.return_value = []
+
+        res = manager.start_watch("pre_game", "Hades", "1145300", "/home/deck/Sync/Hades")
+        assert res["status"] == "watching"
+        watch_id = res["watch_id"]
+
+        assert init_failed.wait(timeout=2.0)
+        time.sleep(0.1)
+        poll_res = manager.poll_watch(watch_id)
+        assert poll_res["status"] == "failed"
+        assert poll_res["reason"] == "watch_initialization_failed"
+        assert "initial status failed" in poll_res["message"]
+
+        manager.stop_watch(watch_id)

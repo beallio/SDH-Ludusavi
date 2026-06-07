@@ -33,14 +33,18 @@ def get_folder_status(api: SyncthingAPI, folder_id: str) -> dict[str, Any]:
 
 
 def get_initial_folder_state_and_runtime(
-    api: SyncthingAPI, folder_id: str
+    api: SyncthingAPI, folder_id: str, strict: bool = False
 ) -> tuple[str, FolderRuntime]:
     try:
         status = get_folder_status(api, folder_id)
         state = status.get("state")
+        if strict and (not state or state == "unknown"):
+            raise RuntimeError(f"Invalid initial folder state: {state}")
         return (str(state) if state else "unknown"), parse_folder_runtime(status)
     # Intentionally broad
     except Exception:
+        if strict:
+            raise
         return "unknown", FolderRuntime()
 
 
@@ -49,7 +53,7 @@ def get_event_cursor(api: SyncthingAPI) -> int:
         "/rest/events", params={"since": 0, "limit": 1000, "timeout": 1}, timeout=5
     )
     if not isinstance(events, list):
-        return 0
+        raise RuntimeError(f"Unexpected events response: {events}")
     return max((int(event.get("id", 0)) for event in events), default=0)
 
 

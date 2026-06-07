@@ -74,7 +74,7 @@ class SyncthingWatch:
     def _run(self) -> None:
         try:
             folder_state, runtime = get_initial_folder_state_and_runtime(
-                self.api, self.folder.folder_id
+                self.api, self.folder.folder_id, strict=True
             )
             cursor = get_event_cursor(self.api)
         except Exception as exc:
