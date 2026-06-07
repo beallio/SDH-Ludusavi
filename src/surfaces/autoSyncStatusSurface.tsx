@@ -22,6 +22,7 @@ const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
   has_backup: "GAME SAVE UP TO DATE",
   unknown: "UNKNOWN",
   error: "UNABLE TO SYNC",
+  syncthing_pending_upload: "SYNCTHING PREPARING",
   syncthing_downloading: "SYNCTHING DOWNLOADING",
   syncthing_uploading: "SYNCTHING UPLOADING",
   syncthing_complete: "SYNCTHING COMPLETE"

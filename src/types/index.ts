@@ -147,6 +147,7 @@ export type AutoSyncStatusKind =
   | "has_backup"
   | "unknown"
   | "error"
+  | "syncthing_pending_upload"
   | "syncthing_downloading"
   | "syncthing_uploading"
   | "syncthing_complete";
