@@ -301,6 +301,7 @@ export function createGameLifecycleController(
           );
           return;
         }
+        await cancelWatch("conflict_resolution_pending");
         const resolution = await resolveConflict(checkResult);
         if (!resolution) {
           await cancelWatch("conflict_unresolved");

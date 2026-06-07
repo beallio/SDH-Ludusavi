@@ -379,4 +379,31 @@ describe("GameLifecycleController", () => {
 
     expect(mockRpc.stopSyncthingActivityWatch).toHaveBeenCalled();
   });
+
+  it("conflict start cancels the pre-game watch while resolving conflict", async () => {
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
+
+    let resolveFlow: any;
+    mockResolveConflict.mockReturnValue(new Promise((resolve) => {
+      resolveFlow = resolve;
+    }));
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(mockRpc.stopSyncthingActivityWatch).toHaveBeenCalled();
+
+    resolveFlow("keep_local");
+    await vi.runAllTimersAsync();
+  });
 });
