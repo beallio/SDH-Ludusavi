@@ -49,7 +49,7 @@ def test_package_json_exposes_frontend_supply_chain_scripts() -> None:
     assert isinstance(scripts, dict)
     assert scripts["typecheck"] == "tsc --noEmit"
     assert scripts["audit"] == "pnpm audit --audit-level moderate"
-    assert scripts["test"] == "pnpm run typecheck"
+    assert scripts["test"] == "pnpm run test:unit && pnpm run typecheck"
     assert scripts["verify"] == "bash scripts/check_frontend_supply_chain.sh"
 
 
