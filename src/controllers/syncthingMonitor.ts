@@ -78,6 +78,7 @@ interface WatchContext {
   latestStatus: "idle" | "uploading" | "downloading" | "complete";
   resolveReadiness: (result: "ready" | "unavailable") => void;
   readinessPromise: Promise<"ready" | "unavailable">;
+  handoffActivated: boolean;
 }
 
 const EMPTY_SAMPLE_RETRY_MS = 250;
@@ -143,6 +144,7 @@ export class SyncthingMonitor {
       latestStatus: "idle",
       resolveReadiness,
       readinessPromise,
+      handoffActivated: false,
     };
 
     this.contexts.set(gen, context);
@@ -178,22 +180,28 @@ export class SyncthingMonitor {
       timeoutID = window.setTimeout(() => resolve("timeout"), confirmationTimeoutMs);
     });
 
+    const finish = (res: PostGameHandoffResult) => {
+      context.handoffActivated = true;
+      this.maybeCleanupContext(context);
+      return res;
+    };
+
     try {
       const result = await Promise.race([context.readinessPromise, timeoutPromise]);
       window.clearTimeout(timeoutID);
 
       if (context.generation !== this.currentGeneration || context.cancelled) {
-        return { status: "stale", generation };
+        return finish({ status: "stale", generation });
       }
 
       if (result === "timeout") {
         log("info", `Syncthing handoff confirmation timed out: generation=${generation} elapsed_ms=${Date.now() - context.startedAt}`);
         await this.cancelContext(context, "confirmation_timeout");
-        return { status: "unavailable", generation, reason: "confirmation_timeout" };
+        return finish({ status: "unavailable", generation, reason: "confirmation_timeout" });
       }
 
       if (result === "unavailable") {
-        return { status: "unavailable", generation, reason: "initialization_failed" };
+        return finish({ status: "unavailable", generation, reason: "initialization_failed" });
       }
 
       // Confirmed! Synchronously enable publication and return buffered state
@@ -201,16 +209,26 @@ export class SyncthingMonitor {
       log("info", `Syncthing handoff activated: generation=${generation} state=${context.latestStatus === "complete" ? "complete" : context.activityObserved ? "uploading" : "pending"}`);
 
       if (context.latestStatus === "complete") {
-        return { status: "complete", generation };
+        return finish({ status: "complete", generation });
       } else if (context.activityObserved) {
-        return { status: "uploading", generation };
+        return finish({ status: "uploading", generation });
       } else {
         this.schedulePendingActivityTimeout(context, pendingActivityTimeoutMs);
-        return { status: "pending", generation };
+        return finish({ status: "pending", generation });
       }
     } catch (err) {
       window.clearTimeout(timeoutID);
-      return { status: "unavailable", generation, reason: String(err) };
+      return finish({ status: "unavailable", generation, reason: String(err) });
+    }
+  }
+
+  private maybeCleanupContext(context: WatchContext): void {
+    const isTerminal = context.cancelled || context.completionObserved;
+    const isPostGame = context.phase === "post_game";
+    const canClean = !isPostGame || context.handoffActivated || context.generation !== this.currentGeneration;
+
+    if (isTerminal && canClean) {
+      this.contexts.delete(context.generation);
     }
   }
 
@@ -324,6 +342,7 @@ export class SyncthingMonitor {
     if (wID !== null) {
       await this.stopWatchSafe(wID);
     }
+    this.maybeCleanupContext(context);
   }
 
   private schedulePoll(delayMs: number, context: WatchContext): void {
@@ -467,6 +486,8 @@ export class SyncthingMonitor {
         appID: context.appID,
       });
     }
+
+    this.maybeCleanupContext(context);
   }
 
   private processSample(context: WatchContext, sample: SyncthingActivitySample): boolean {
@@ -549,6 +570,7 @@ export class SyncthingMonitor {
         if (context.watchID !== null) {
           this.clearPollStateAndStop(context.watchID);
         }
+        this.maybeCleanupContext(context);
         return false;
       }
     }
@@ -557,6 +579,7 @@ export class SyncthingMonitor {
       if (context.watchID !== null) {
         this.clearPollStateAndStop(context.watchID);
       }
+      this.maybeCleanupContext(context);
       return false;
     }
 

@@ -478,5 +478,34 @@ describe("SyncthingMonitor", () => {
     const snapshot = monitor.getSnapshotForTest();
     expect(snapshot.latestStatus).toBe("idle");
   });
+
+  it("terminated contexts are removed from the generation map", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
+    mockRpc.pollWatch.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: {
+        status: "idle",
+        folder_id: "f1",
+        folder_state: "syncing",
+        active_transfer: false,
+        update_in_progress: false,
+        settled: true,
+        downloading: false,
+        uploading: false,
+        sequence: 1,
+        timestamp_unix: 1234567890,
+      }
+    });
+
+    const handle = monitor.start("pre_game", "Hades", "1145300");
+    expect(monitor.getSnapshotForTest().generation).toBe(handle.generation);
+
+    // Cancel the pre_game watch
+    await monitor.cancelGeneration(handle.generation, "test-cancel");
+    
+    // The context should be deleted
+    expect(monitor.getSnapshotForTest().generation).toBeNull();
+  });
 });
 
