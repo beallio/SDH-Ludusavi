@@ -485,7 +485,9 @@ export function createGameLifecycleController(
         } else {
           await cancelWatch("backup_failed");
           completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-          notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
+          if (result.status === "failed") {
+            notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
+          }
           return;
         }
       }

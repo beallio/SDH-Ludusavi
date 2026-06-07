@@ -406,4 +406,31 @@ describe("GameLifecycleController", () => {
     resolveFlow("keep_local");
     await vi.runAllTimersAsync();
   });
+
+  it("skipped backup result on exit does not notify failure", async () => {
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    mockRpc.backupGameOnExit.mockResolvedValue({ status: "skipped", reason: "unmatched_game" });
+
+    triggerStart(1145300);
+    await vi.advanceTimersByTimeAsync(100);
+    mockNotifyFailure.mockClear();
+
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "skipped", reason: "unmatched_game" }),
+      expect.any(Object)
+    );
+    expect(mockNotifyFailure).not.toHaveBeenCalled();
+  });
 });

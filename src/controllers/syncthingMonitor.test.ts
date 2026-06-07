@@ -418,5 +418,33 @@ describe("SyncthingMonitor", () => {
     // Should NOT publish has_backup
     expect(mockOnStatus).not.toHaveBeenCalled();
   });
+
+  it("post-game download activity is ignored and does not confirm activity", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
+    mockRpc.pollWatch.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: {
+        status: "idle",
+        folder_id: "f1",
+        folder_state: "syncing",
+        active_transfer: true,
+        update_in_progress: false,
+        settled: false,
+        downloading: true,
+        uploading: false,
+        sequence: 1,
+        timestamp_unix: 1234567890,
+      }
+    });
+
+    monitor.start("post_game", "Hades", "1145300");
+    
+    // Poll the watch once
+    await vi.advanceTimersByTimeAsync(250);
+
+    const snapshot = monitor.getSnapshotForTest();
+    expect(snapshot.activityObserved).toBe(false);
+  });
 });
 

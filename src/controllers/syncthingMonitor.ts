@@ -479,15 +479,22 @@ export class SyncthingMonitor {
 
     context.lastProcessedTimestamp = timestamp;
 
-    const hasActivity =
-      sample.downloading ||
-      sample.uploading ||
-      sample.update_in_progress ||
-      sample.status === "ACTIVE_TRANSFER" ||
-      sample.status === "SCANNING" ||
-      sample.status === "UPDATE_NEEDED" ||
-      sample.status === "PREPARING" ||
-      sample.status === "INDEXING_OR_SEQUENCE_UPDATE";
+    const hasActivity = context.phase === "post_game"
+      ? (sample.uploading ||
+         sample.update_in_progress ||
+         sample.status === "ACTIVE_TRANSFER" ||
+         sample.status === "SCANNING" ||
+         sample.status === "UPDATE_NEEDED" ||
+         sample.status === "PREPARING" ||
+         sample.status === "INDEXING_OR_SEQUENCE_UPDATE") && !sample.downloading
+      : (sample.downloading ||
+         sample.uploading ||
+         sample.update_in_progress ||
+         sample.status === "ACTIVE_TRANSFER" ||
+         sample.status === "SCANNING" ||
+         sample.status === "UPDATE_NEEDED" ||
+         sample.status === "PREPARING" ||
+         sample.status === "INDEXING_OR_SEQUENCE_UPDATE");
 
     if (hasActivity) {
       if (!context.activityObserved) {
