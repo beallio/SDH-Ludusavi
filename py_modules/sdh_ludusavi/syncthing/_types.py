@@ -85,6 +85,7 @@ class FolderSelection:
     folder_type: str | None = None
     paused: bool = False
     fs_watcher_enabled: bool | None = None
+    fs_watcher_delay_seconds: int | None = None
     rescan_interval_seconds: int | None = None
     shared_device_ids: tuple[str, ...] = ()
 

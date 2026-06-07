@@ -54,6 +54,11 @@ def folder_selection_from_config(
         watcher = fs_watcher_enabled
     else:
         watcher = None
+    fs_watcher_delay = folder.get("fsWatcherDelayS")
+    try:
+        fs_watcher_delay_seconds = int(fs_watcher_delay) if fs_watcher_delay is not None else None
+    except (TypeError, ValueError):
+        fs_watcher_delay_seconds = None
     rescan_interval = folder.get("rescanIntervalS")
     try:
         rescan_interval_seconds = int(rescan_interval) if rescan_interval is not None else None
@@ -68,6 +73,7 @@ def folder_selection_from_config(
         folder_type=str(folder.get("type") or "") or None,
         paused=bool(folder.get("paused")),
         fs_watcher_enabled=watcher,
+        fs_watcher_delay_seconds=fs_watcher_delay_seconds,
         rescan_interval_seconds=rescan_interval_seconds,
         shared_device_ids=folder_shared_device_ids(folder),
     )

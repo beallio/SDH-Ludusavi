@@ -7,7 +7,7 @@ import threading
 from typing import Any
 
 from .api import SyncthingAPI
-from .config import resolve_api_credentials
+from .config import SyncthingNotConfiguredError, resolve_api_credentials
 from .folders import resolve_folder_by_path
 from ._types import (
     FolderSelection,
@@ -37,6 +37,24 @@ from .activity import (
 )
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_FS_WATCHER_DELAY_SECONDS = 10
+DEFAULT_RESCAN_INTERVAL_SECONDS = 3600
+MIN_DETECTION_GRACE_SECONDS = 30
+MAX_DETECTION_GRACE_SECONDS = 120
+DETECTION_GRACE_MARGIN_SECONDS = 20
+
+
+def detection_grace_ms(folder: FolderSelection) -> int:
+    if folder.fs_watcher_enabled is False:
+        base_seconds = folder.rescan_interval_seconds or DEFAULT_RESCAN_INTERVAL_SECONDS
+    else:
+        base_seconds = folder.fs_watcher_delay_seconds or DEFAULT_FS_WATCHER_DELAY_SECONDS
+    grace_seconds = max(
+        MIN_DETECTION_GRACE_SECONDS,
+        min(MAX_DETECTION_GRACE_SECONDS, base_seconds + DETECTION_GRACE_MARGIN_SECONDS),
+    )
+    return grace_seconds * 1000
 
 
 class SyncthingWatch:
@@ -361,6 +379,8 @@ class SyncthingWatchManager:
             try:
                 api_url, api_key, _ = resolve_api_credentials()
                 api = SyncthingAPI(api_url, api_key)
+            except SyncthingNotConfiguredError as exc:
+                return {"status": "skipped", "reason": "not_configured", "message": str(exc)}
             # Intentionally broad
             except Exception as exc:
                 return {"status": "skipped", "reason": "api_unavailable", "message": str(exc)}
@@ -386,6 +406,7 @@ class SyncthingWatchManager:
                 "folder_id": folder.folder_id,
                 "label": folder.label,
                 "path": folder.path,
+                "detection_grace_ms": detection_grace_ms(folder),
             }
 
     def poll_watch(self, watch_id: str) -> dict[str, Any]:

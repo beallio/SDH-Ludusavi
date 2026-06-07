@@ -26,6 +26,18 @@ from ._types import (
 logger = logging.getLogger(__name__)
 
 
+class SyncthingNotConfiguredError(RuntimeError):
+    """Raised when no explicit credentials or local Syncthing config exists."""
+
+
+def has_syncthing_configuration(explicit_config: Path | None = None) -> bool:
+    if os.environ.get("SYNCTHING_API_KEY") or os.environ.get("SYNCTHING_API_URL"):
+        return True
+    if explicit_config is not None:
+        return explicit_config.expanduser().is_file()
+    return any(path.is_file() for path in candidate_config_files())
+
+
 def api_url_from_gui_address(address: str | None, tls: bool) -> str | None:
     if address is None:
         return None
@@ -225,6 +237,8 @@ def resolve_api_credentials(
         api_key = parsed_config.api_key
 
     if not api_key:
+        if not has_syncthing_configuration(explicit_config):
+            raise SyncthingNotConfiguredError("No Syncthing configuration found.")
         raise RuntimeError("No Syncthing API key found.")
 
     api_url = explicit_url or os.environ.get("SYNCTHING_API_URL")

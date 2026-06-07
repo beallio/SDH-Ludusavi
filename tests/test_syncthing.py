@@ -8,6 +8,7 @@ import time
 
 from sdh_ludusavi.syncthing import (
     api_url_from_gui_address,
+    folder_selection_from_config,
     parse_syncthing_config,
     resolve_folder_by_path,
     resolve_folder_by_id,
@@ -122,6 +123,23 @@ def test_resolve_folder_by_id() -> None:
 
     with pytest.raises(RuntimeError, match="Unknown Syncthing folder ID"):
         resolve_folder_by_id(api, "nonexistent")
+
+
+def test_folder_selection_parses_filesystem_watcher_delay() -> None:
+    selection = folder_selection_from_config(
+        {
+            "id": "folder1",
+            "label": "Folder 1",
+            "path": "/home/deck/Sync",
+            "fsWatcherEnabled": True,
+            "fsWatcherDelayS": 12,
+            "rescanIntervalS": 3600,
+        }
+    )
+
+    assert selection.fs_watcher_enabled is True
+    assert selection.fs_watcher_delay_seconds == 12
+    assert selection.rescan_interval_seconds == 3600
 
 
 def test_compute_activity_status() -> None:

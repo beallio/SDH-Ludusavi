@@ -5,6 +5,7 @@ import threading
 from unittest.mock import patch
 
 from sdh_ludusavi.syncthing.watcher import SyncthingWatch, SyncthingWatchManager
+from sdh_ludusavi.syncthing.config import SyncthingNotConfiguredError
 from sdh_ludusavi.syncthing import (
     FolderSelection,
     FolderRuntime,
@@ -59,6 +60,111 @@ def test_watch_manager(mock_resolve_path, mock_resolve_creds) -> None:
         # Poll stopped watch
         poll_stopped = manager.poll_watch(watch_id)
         assert poll_stopped["status"] == "stopped"
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+def test_watch_manager_silently_classifies_missing_syncthing_config(mock_resolve_creds) -> None:
+    mock_resolve_creds.side_effect = SyncthingNotConfiguredError(
+        "No Syncthing configuration found."
+    )
+
+    result = SyncthingWatchManager().start_watch(
+        "post_game",
+        "Hades",
+        "1145300",
+        "/home/deck/ludusavi-backup",
+    )
+
+    assert result == {
+        "status": "skipped",
+        "reason": "not_configured",
+        "message": "No Syncthing configuration found.",
+    }
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+def test_watch_manager_classifies_configured_but_unreachable_api(mock_resolve_creds) -> None:
+    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
+
+    with patch(
+        "sdh_ludusavi.syncthing.watcher.resolve_folder_by_path",
+        side_effect=RuntimeError("Cannot reach Syncthing API"),
+    ):
+        result = SyncthingWatchManager().start_watch(
+            "post_game",
+            "Hades",
+            "1145300",
+            "/home/deck/ludusavi-backup",
+        )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "api_unavailable"
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+@patch("sdh_ludusavi.syncthing.watcher.resolve_folder_by_path")
+def test_watch_start_returns_bounded_detection_grace(mock_resolve_path, mock_resolve_creds) -> None:
+    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
+    mock_resolve_path.return_value = FolderSelection(
+        folder_id="test-folder",
+        label="Test Folder",
+        path="/home/deck/Sync",
+        fs_watcher_enabled=True,
+        fs_watcher_delay_seconds=45,
+        rescan_interval_seconds=3600,
+    )
+
+    manager = SyncthingWatchManager()
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime") as mock_init,
+        patch("sdh_ludusavi.syncthing.watcher.get_event_cursor") as mock_cursor,
+        patch("sdh_ludusavi.syncthing.watcher.get_connection_totals") as mock_totals,
+        patch("sdh_ludusavi.syncthing.watcher.get_folder_status") as mock_status,
+        patch("sdh_ludusavi.syncthing.watcher.get_events") as mock_events,
+    ):
+        mock_init.return_value = ("idle", FolderRuntime(sequence=5))
+        mock_cursor.return_value = 100
+        mock_totals.return_value = (0, 0)
+        mock_status.return_value = {"state": "idle", "sequence": 5}
+        mock_events.return_value = []
+
+        result = manager.start_watch(
+            "post_game",
+            "Hades",
+            "1145300",
+            "/home/deck/ludusavi-backup",
+        )
+
+        assert result["status"] == "watching"
+        assert result["detection_grace_ms"] == 65_000
+        manager.stop_watch(result["watch_id"])
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+@patch("sdh_ludusavi.syncthing.watcher.resolve_folder_by_path")
+def test_watch_start_clamps_rescan_detection_grace(mock_resolve_path, mock_resolve_creds) -> None:
+    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
+    mock_resolve_path.return_value = FolderSelection(
+        folder_id="test-folder",
+        label="Test Folder",
+        path="/home/deck/Sync",
+        fs_watcher_enabled=False,
+        fs_watcher_delay_seconds=10,
+        rescan_interval_seconds=300,
+    )
+
+    manager = SyncthingWatchManager()
+    with patch.object(SyncthingWatch, "start"):
+        result = manager.start_watch(
+            "post_game",
+            "Hades",
+            "1145300",
+            "/home/deck/ludusavi-backup",
+        )
+
+    assert result["status"] == "watching"
+    assert result["detection_grace_ms"] == 120_000
+    manager.stop_watch(result["watch_id"])
 
 
 @patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")

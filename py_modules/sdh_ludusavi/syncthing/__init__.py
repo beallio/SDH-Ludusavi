@@ -31,6 +31,7 @@ from ._types import (
 )
 from .api import SyncthingAPI
 from .config import (
+    SyncthingNotConfiguredError,
     api_url_from_gui_address,
     candidate_config_files,
     discover_syncthing_config,
@@ -85,6 +86,7 @@ __all__ = [
     "int_field",
     "parse_folder_runtime",
     "SyncthingAPI",
+    "SyncthingNotConfiguredError",
     "api_url_from_gui_address",
     "candidate_config_files",
     "discover_syncthing_config",
