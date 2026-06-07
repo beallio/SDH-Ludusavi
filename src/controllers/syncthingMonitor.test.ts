@@ -572,5 +572,60 @@ describe("SyncthingMonitor", () => {
     // The context should be cleaned up
     expect(monitor.getSnapshotForTest().generation).toBeNull();
   });
+
+  it("initialization requires a valid folder_state (not unknown)", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
+    
+    // First poll returns unknown folder_state
+    // Second poll returns syncing folder_state
+    mockRpc.pollWatch
+      .mockResolvedValueOnce({
+        status: "activity",
+        watch_id: "w1",
+        sample: {
+          status: "idle",
+          folder_id: "f1",
+          folder_state: "unknown",
+          active_transfer: false,
+          update_in_progress: false,
+          settled: true,
+          downloading: false,
+          uploading: false,
+          sequence: 1,
+          timestamp_unix: 1234567890,
+        }
+      })
+      .mockResolvedValueOnce({
+        status: "activity",
+        watch_id: "w1",
+        sample: {
+          status: "idle",
+          folder_id: "f1",
+          folder_state: "syncing",
+          active_transfer: false,
+          update_in_progress: false,
+          settled: true,
+          downloading: false,
+          uploading: false,
+          sequence: 1,
+          timestamp_unix: 1234567891,
+        }
+      });
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+    const handoffPromise = monitor.activatePostGameHandoff(handle.generation, 750, 8000);
+
+    // Watch should NOT be initialized yet (first poll returned unknown synchronously)
+    expect(monitor.getSnapshotForTest().initialized).toBe(false);
+
+    // Second poll runs on next 250ms (returns syncing)
+    await vi.advanceTimersByTimeAsync(250);
+
+    // Watch should be initialized now
+    expect(monitor.getSnapshotForTest().initialized).toBe(true);
+
+    const handoffResult = await handoffPromise;
+    expect(handoffResult.status).toBe("pending");
+  });
 });
 

@@ -432,7 +432,7 @@ export class SyncthingMonitor {
         }
 
         if (!context.initialized) {
-          const isValidSample = Number.isFinite(sample.timestamp_unix);
+          const isValidSample = Number.isFinite(sample.timestamp_unix) && sample.folder_state !== "unknown";
           if (isValidSample) {
             context.initialized = true;
             log("info", `Syncthing watch initialized: generation=${context.generation} elapsed_ms=${Date.now() - context.startedAt}`);
