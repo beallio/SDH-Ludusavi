@@ -149,7 +149,6 @@ def has_pending_remote_ack(
 
 def _serialize_sample(
     watch_id: str,
-    folder: FolderSelection,
     status: ActivityStatus,
 ) -> dict[str, Any]:
     return {
@@ -157,21 +156,11 @@ def _serialize_sample(
         "watch_id": watch_id,
         "sample": {
             "status": status.status,
-            "folder_id": folder.folder_id,
-            "label": folder.label,
             "folder_state": status.folder_state,
-            "active_transfer": status.active_transfer,
             "update_in_progress": status.update_in_progress,
             "settled": status.settled,
             "downloading": status.downloading,
             "uploading": status.uploading,
-            "receive_needed": status.receive_needed,
-            "need_bytes": status.runtime.need_bytes,
-            "need_items": status.runtime.need_total_items,
-            "need_deletes": status.runtime.need_deletes,
-            "sequence": status.runtime.sequence,
-            "pending_remote_ack": status.pending_remote_ack,
-            "lagging_remote_devices": status.lagging_remote_devices,
             "timestamp_unix": time.time(),
         },
     }

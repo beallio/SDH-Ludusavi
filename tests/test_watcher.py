@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import time
 import threading
 from unittest.mock import patch
@@ -12,6 +13,10 @@ from sdh_ludusavi.syncthing import (
     LocalActivity,
     ConnectionRates,
 )
+
+
+def test_watch_tick_owns_runtime_state() -> None:
+    assert list(inspect.signature(SyncthingWatch._tick).parameters) == ["self", "now"]
 
 
 @patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
@@ -51,7 +56,15 @@ def test_watch_manager(mock_resolve_path, mock_resolve_creds) -> None:
         poll_res = manager.poll_watch(watch_id)
         assert poll_res["status"] == "activity"
         assert poll_res["watch_id"] == watch_id
-        assert poll_res["sample"]["folder_id"] == "test-folder"
+        assert set(poll_res["sample"]) == {
+            "status",
+            "folder_state",
+            "update_in_progress",
+            "settled",
+            "downloading",
+            "uploading",
+            "timestamp_unix",
+        }
 
         # Stop watch
         stop_res = manager.stop_watch(watch_id)
@@ -305,23 +318,13 @@ def test_event_processing_before_sample_serialization(
         watch = manager.watches[watch_id]
         watch.stop_event.set()
         watch.thread.join()
-
-        watch._tick(
-            now=time.monotonic(),
-            cursor=100,
-            folder_state="idle",
-            runtime=FolderRuntime(sequence=5),
-            remote_progress={},
-            local_activity=LocalActivity(active_items={}),
-            rates=ConnectionRates(0.0, 0.0),
-            previous_totals=None,
-            previous_totals_time=None,
-            poll_interval=1.0,
-            status_poll_interval=1.0,
-            event_timeout=1.0,
-            active_window=10.0,
-            min_rate=1000.0,
-        )
+        watch.cursor = 100
+        watch.folder_state = "idle"
+        watch.runtime = FolderRuntime(sequence=5)
+        watch.remote_progress = {}
+        watch.local_activity = LocalActivity(active_items={})
+        watch.rates = ConnectionRates(0.0, 0.0)
+        watch._tick(time.monotonic())
 
         assert watch.latest_sample["sample"]["folder_state"] == "syncing"
 

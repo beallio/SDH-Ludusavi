@@ -15,8 +15,6 @@ from ._types import (
     RemoteProgress,
     LocalActivity,
     ConnectionRates,
-    DEFAULT_POLL_INTERVAL_SECONDS,
-    DEFAULT_STATUS_POLL_INTERVAL_SECONDS,
     DEFAULT_EVENT_TIMEOUT_SECONDS,
     DEFAULT_ACTIVE_WINDOW_SECONDS,
     DEFAULT_MIN_RATE_BYTES_PER_SECOND,
@@ -77,6 +75,14 @@ class SyncthingWatch:
         self.stop_event = threading.Event()
         self.latest_sample: dict[str, Any] = {}
         self.thread: threading.Thread | None = None
+        self.cursor = 0
+        self.folder_state = "unknown"
+        self.runtime = FolderRuntime()
+        self.remote_progress: dict[str, RemoteProgress] = {}
+        self.local_activity = LocalActivity(active_items={})
+        self.rates = ConnectionRates(0.0, 0.0)
+        self.previous_totals: tuple[int, int] | None = None
+        self.previous_totals_time: float | None = None
 
     def start(self) -> None:
         self.thread = threading.Thread(
@@ -91,10 +97,10 @@ class SyncthingWatch:
 
     def _run(self) -> None:
         try:
-            folder_state, runtime = get_initial_folder_state_and_runtime(
+            self.folder_state, self.runtime = get_initial_folder_state_and_runtime(
                 self.api, self.folder.folder_id, strict=True
             )
-            cursor = get_event_cursor(self.api)
+            self.cursor = get_event_cursor(self.api)
         except Exception as exc:
             logger.warning("Failed to initialize watch thread: %s", exc)
             self.latest_sample = {
@@ -104,197 +110,88 @@ class SyncthingWatch:
             }
             return
 
-        previous_totals: tuple[int, int] | None = None
-        previous_totals_time: float | None = None
-        rates = ConnectionRates(in_bytes_per_second=0.0, out_bytes_per_second=0.0)
-        remote_progress: dict[str, RemoteProgress] = {}
-        local_activity = LocalActivity(active_items={})
-
-        poll_interval = DEFAULT_POLL_INTERVAL_SECONDS
-        status_poll_interval = DEFAULT_STATUS_POLL_INTERVAL_SECONDS
-        event_timeout = DEFAULT_EVENT_TIMEOUT_SECONDS
-        active_window = DEFAULT_ACTIVE_WINDOW_SECONDS
-        min_rate = DEFAULT_MIN_RATE_BYTES_PER_SECOND
-
         # Compute and publish a baseline sample immediately
-        self._tick_sample(
-            now=time.monotonic(),
-            folder_state=folder_state,
-            runtime=runtime,
-            remote_progress=remote_progress,
-            local_activity=local_activity,
-            rates=rates,
-            active_window=active_window,
-            min_rate=min_rate,
-        )
+        self._tick_sample(time.monotonic())
 
         while not self.stop_event.is_set():
-            (
-                previous_totals,
-                previous_totals_time,
-                rates,
-                remote_progress,
-                folder_state,
-                runtime,
-                cursor,
-            ) = self._tick(
-                now=time.monotonic(),
-                cursor=cursor,
-                folder_state=folder_state,
-                runtime=runtime,
-                remote_progress=remote_progress,
-                local_activity=local_activity,
-                rates=rates,
-                previous_totals=previous_totals,
-                previous_totals_time=previous_totals_time,
-                poll_interval=poll_interval,
-                status_poll_interval=status_poll_interval,
-                event_timeout=event_timeout,
-                active_window=active_window,
-                min_rate=min_rate,
-            )
+            self._tick(time.monotonic())
 
-    def _tick(
-        self,
-        now: float,
-        cursor: int,
-        folder_state: str,
-        runtime: FolderRuntime,
-        remote_progress: dict[str, RemoteProgress],
-        local_activity: LocalActivity,
-        rates: ConnectionRates,
-        previous_totals: tuple[int, int] | None,
-        previous_totals_time: float | None,
-        poll_interval: float,
-        status_poll_interval: float,
-        event_timeout: float,
-        active_window: float,
-        min_rate: float,
-    ) -> tuple[
-        tuple[int, int] | None,
-        float | None,
-        ConnectionRates,
-        dict[str, RemoteProgress],
-        str,
-        FolderRuntime,
-        int,
-    ]:
+    def _tick(self, now: float) -> None:
         # 1. Capture a monotonic timestamp for connection and folder polling.
-        now_pre = time.monotonic()
+        now_pre = now
 
         # 2. Poll connection totals and compute rates.
-        previous_totals, previous_totals_time, rates = self._tick_connections(
-            now_pre, previous_totals, previous_totals_time
-        )
+        self._tick_connections(now_pre)
 
         # 3. Poll current folder status and detect sequence changes.
-        folder_state, runtime = self._tick_folder_status(
-            now_pre, folder_state, runtime, local_activity
-        )
+        self._tick_folder_status(now_pre)
 
         # 4. Poll/process events.
-        cursor, folder_state, runtime = self._tick_events(
-            cursor,
-            folder_state,
-            runtime,
-            remote_progress,
-            local_activity,
-            event_timeout,
-        )
+        self._tick_events()
 
         # 5. Capture a new monotonic timestamp after the event request returns.
         now_post = time.monotonic()
 
         # 6. Prune remote and local activity using the post-event timestamp.
-        remote_progress = prune_remote_progress(remote_progress, active_window, now_post)
-        prune_local_activity(local_activity, active_window, now_post)
+        self.remote_progress = prune_remote_progress(
+            self.remote_progress,
+            DEFAULT_ACTIVE_WINDOW_SECONDS,
+            now_post,
+        )
+        prune_local_activity(self.local_activity, DEFAULT_ACTIVE_WINDOW_SECONDS, now_post)
 
         # 7. Compute and atomically assign the latest sample using the post-event state.
-        self._tick_sample(
-            now_post,
-            folder_state,
-            runtime,
-            remote_progress,
-            local_activity,
-            rates,
-            active_window,
-            min_rate,
-        )
+        self._tick_sample(now_post)
 
-        # 8. Return updated calculation state.
-        return (
-            previous_totals,
-            previous_totals_time,
-            rates,
-            remote_progress,
-            folder_state,
-            runtime,
-            cursor,
-        )
-
-    def _tick_connections(
-        self,
-        now: float,
-        previous_totals: tuple[int, int] | None,
-        previous_totals_time: float | None,
-    ) -> tuple[tuple[int, int] | None, float | None, ConnectionRates]:
+    def _tick_connections(self, now: float) -> None:
         try:
             current_totals = get_connection_totals(self.api)
-            new_rates = compute_rates(previous_totals, previous_totals_time, current_totals, now)
-            return current_totals, now, new_rates
+            self.rates = compute_rates(
+                self.previous_totals,
+                self.previous_totals_time,
+                current_totals,
+                now,
+            )
+            self.previous_totals = current_totals
+            self.previous_totals_time = now
         # Intentionally broad
         except Exception:
-            return previous_totals, previous_totals_time, ConnectionRates(0.0, 0.0)
+            self.rates = ConnectionRates(0.0, 0.0)
 
-    def _tick_folder_status(
-        self,
-        now: float,
-        folder_state: str,
-        runtime: FolderRuntime,
-        local_activity: LocalActivity,
-    ) -> tuple[str, FolderRuntime]:
+    def _tick_folder_status(self, now: float) -> None:
         try:
             current_status = get_folder_status(self.api, self.folder.folder_id)
-            new_state = str(current_status.get("state") or folder_state)
+            new_state = str(current_status.get("state") or self.folder_state)
             new_runtime = parse_folder_runtime(current_status)
             if (
-                runtime.sequence
+                self.runtime.sequence
                 and new_runtime.sequence
-                and new_runtime.sequence != runtime.sequence
+                and new_runtime.sequence != self.runtime.sequence
             ):
-                local_activity.last_sequence_change_monotonic = now
-                local_activity.sequence_change_from = runtime.sequence
-                local_activity.sequence_change_to = new_runtime.sequence
-                local_activity.last_local_index_monotonic = now
-            return new_state, new_runtime
+                self.local_activity.last_sequence_change_monotonic = now
+                self.local_activity.sequence_change_from = self.runtime.sequence
+                self.local_activity.sequence_change_to = new_runtime.sequence
+                self.local_activity.last_local_index_monotonic = now
+            self.folder_state = new_state
+            self.runtime = new_runtime
         # Intentionally broad
         except Exception:
-            return folder_state, runtime
+            return
 
-    def _tick_sample(
-        self,
-        now: float,
-        folder_state: str,
-        runtime: FolderRuntime,
-        remote_progress: dict[str, RemoteProgress],
-        local_activity: LocalActivity,
-        rates: ConnectionRates,
-        active_window: float,
-        min_rate: float,
-    ) -> None:
+    def _tick_sample(self, now: float) -> None:
         try:
             status = compute_activity_status(
-                folder_state=folder_state,
-                remote_progress=remote_progress,
-                local_activity=local_activity,
-                runtime=runtime,
-                rates=rates,
-                min_rate_bytes_per_second=min_rate,
+                folder_state=self.folder_state,
+                remote_progress=self.remote_progress,
+                local_activity=self.local_activity,
+                runtime=self.runtime,
+                rates=self.rates,
+                min_rate_bytes_per_second=DEFAULT_MIN_RATE_BYTES_PER_SECOND,
                 shared_device_ids=self.folder.shared_device_ids,
-                active_window_seconds=active_window,
+                active_window_seconds=DEFAULT_ACTIVE_WINDOW_SECONDS,
                 now=now,
             )
-            self.latest_sample = _serialize_sample(self.watch_id, self.folder, status)
+            self.latest_sample = _serialize_sample(self.watch_id, status)
         # Intentionally broad
         except Exception as exc:
             self.latest_sample = {
@@ -303,46 +200,36 @@ class SyncthingWatch:
                 "message": str(exc),
             }
 
-    def _tick_events(
-        self,
-        cursor: int,
-        folder_state: str,
-        runtime: FolderRuntime,
-        remote_progress: dict[str, RemoteProgress],
-        local_activity: LocalActivity,
-        event_timeout: float,
-    ) -> tuple[int, str, FolderRuntime]:
+    def _tick_events(self) -> None:
         try:
-            events = get_events(self.api, cursor, event_timeout)
+            events = get_events(self.api, self.cursor, DEFAULT_EVENT_TIMEOUT_SECONDS)
             if events:
                 config_changed = False
                 for event in events:
-                    cursor = max(cursor, int(event.get("id", cursor)))
+                    self.cursor = max(self.cursor, int(event.get("id", self.cursor)))
                     (
-                        folder_state,
-                        runtime,
-                        _remote_progress,
-                        _local_activity,
+                        self.folder_state,
+                        self.runtime,
+                        self.remote_progress,
+                        self.local_activity,
                         event_config_changed,
                     ) = process_event(
                         event=event,
                         folder=self.folder,
-                        folder_state=folder_state,
-                        runtime=runtime,
-                        remote_progress=remote_progress,
-                        local_activity=local_activity,
+                        folder_state=self.folder_state,
+                        runtime=self.runtime,
+                        remote_progress=self.remote_progress,
+                        local_activity=self.local_activity,
                         now=time.monotonic(),
                     )
                     config_changed = config_changed or event_config_changed
                 if config_changed:
-                    folder_state, runtime = get_initial_folder_state_and_runtime(
+                    self.folder_state, self.runtime = get_initial_folder_state_and_runtime(
                         self.api, self.folder.folder_id
                     )
-            return cursor, folder_state, runtime
         # Intentionally broad
         except Exception:
             time.sleep(0.5)
-            return cursor, folder_state, runtime
 
 
 class SyncthingWatchManager:
