@@ -247,6 +247,7 @@ export class SyncthingMonitor {
     publicationEnabled: boolean;
     activityObserved: boolean;
     completionObserved: boolean;
+    latestStatus: "idle" | "uploading" | "downloading" | "complete" | null;
   }> {
     const context = this.contexts.get(this.currentGeneration);
     if (!context) {
@@ -257,6 +258,7 @@ export class SyncthingMonitor {
         publicationEnabled: false,
         activityObserved: false,
         completionObserved: false,
+        latestStatus: null,
       };
     }
     return {
@@ -266,6 +268,7 @@ export class SyncthingMonitor {
       publicationEnabled: context.publicationEnabled,
       activityObserved: context.activityObserved,
       completionObserved: context.completionObserved,
+      latestStatus: context.latestStatus,
     };
   }
 
@@ -505,7 +508,7 @@ export class SyncthingMonitor {
 
     let newStatus: "idle" | "uploading" | "downloading" | "complete" = "idle";
 
-    if (sample.downloading) {
+    if (sample.downloading && context.phase !== "post_game") {
       newStatus = "downloading";
       context.settledCount = 0;
     } else if (sample.uploading) {
