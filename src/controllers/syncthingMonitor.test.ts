@@ -394,4 +394,29 @@ describe("SyncthingMonitor", () => {
     // Should NOT publish has_backup, syncthing_complete, or anything else
     expect(mockOnStatus).not.toHaveBeenCalled();
   });
+
+  it("pre-game watch failure before activity does not publish has_backup", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
+    mockRpc.pollWatch
+      .mockResolvedValueOnce({
+        status: "activity",
+        watch_id: "w1",
+        sample: { status: "idle", timestamp_unix: 1000 }
+      })
+      .mockResolvedValueOnce({
+        status: "failed",
+        reason: "connection_lost",
+        message: "lost"
+      });
+
+    monitor.start("pre_game", "Hades", "1145300");
+
+    // Advance timer to trigger polling
+    await vi.advanceTimersByTimeAsync(500); // first poll (ready)
+    await vi.advanceTimersByTimeAsync(500); // second poll (failing)
+
+    // Should NOT publish has_backup
+    expect(mockOnStatus).not.toHaveBeenCalled();
+  });
 });
+

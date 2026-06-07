@@ -111,10 +111,17 @@ def test_watcher_sample_timing_and_failures(mock_resolve_path, mock_resolve_cred
         assert baseline_checked["sample"] == {}
 
         cursor_proceed.set()
-        time.sleep(0.1)
 
-        # Verify we now have a populated sample after cursor initialization succeeds
-        poll_res = manager.poll_watch(watch_id)
+        # Poll deterministically with a bounded deadline instead of relying on fixed sleep timing
+        start_time = time.time()
+        poll_res = None
+        while time.time() - start_time < 2.0:
+            poll_res = manager.poll_watch(watch_id)
+            if poll_res and poll_res.get("status") == "activity" and poll_res.get("sample"):
+                break
+            time.sleep(0.01)
+
+        assert poll_res is not None
         assert poll_res["status"] == "activity"
         assert "sample" in poll_res
         assert poll_res["sample"]["folder_state"] == "idle"

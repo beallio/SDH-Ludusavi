@@ -457,7 +457,7 @@ export class SyncthingMonitor {
       void this.stopWatchSafe(wID);
     }
 
-    if (wasEnabled && !context.activityObserved) {
+    if (wasEnabled && !context.activityObserved && context.phase === "post_game") {
       this.onStatus("has_backup", {
         source: "rpc_result",
         gameName: context.gameName,

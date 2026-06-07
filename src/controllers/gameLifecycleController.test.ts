@@ -360,4 +360,23 @@ describe("GameLifecycleController", () => {
     const backedUpCalls = mockStatusSurface.complete.mock.calls.filter((call: any) => call[0]?.status === "backed_up");
     expect(backedUpCalls.length).toBe(1);
   });
+
+  it("early start silent skip cancels the pre-game watch", async () => {
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    mockRpc.checkGameStart.mockResolvedValue({ status: "skipped", reason: "auto_sync_disabled" });
+
+    triggerStart(1145300);
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(mockRpc.stopSyncthingActivityWatch).toHaveBeenCalled();
+  });
 });

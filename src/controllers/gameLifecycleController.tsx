@@ -213,8 +213,16 @@ export function createGameLifecycleController(
       });
     }
 
+    const autoSyncEnabled = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
+    let preGameWatch: any = null;
+
+    const cancelWatch = async (reason: string) => {
+      if (preGameWatch) {
+        await syncthingMonitor.cancelGeneration(preGameWatch.generation, reason);
+      }
+    };
+
     try {
-      const autoSyncEnabled = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
       const shouldPauseLaunch =
         autoSyncEnabled &&
         tracked &&
@@ -230,13 +238,14 @@ export function createGameLifecycleController(
 
       if (autoSyncEnabled && tracked) {
         activeMonitorEpoch = epoch;
-        void syncthingMonitor.start("pre_game", name, appID);
+        preGameWatch = syncthingMonitor.start("pre_game", name, appID);
       }
       log("info", `Calling check_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
       const checkResult = await checkGameStartCall(name, appID);
       log("info", `check_game_start result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
       const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
       if (checkResult.status === "skipped" && silentReasons.includes(checkResult.reason ?? "")) {
+        await cancelWatch("start_silent_skip");
         hideAutoSyncStatus({
           source: "hide",
           gameName: name,
@@ -254,6 +263,7 @@ export function createGameLifecycleController(
             game: name,
             message: "Launch gate unavailable; restore skipped while game is loading.",
           };
+          await cancelWatch("restore_failed_unpaused");
           completeAutoSyncStatus(result, { gameName: name, appID, tracked });
           notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
           return;
@@ -269,6 +279,7 @@ export function createGameLifecycleController(
         log("info", `restore_game_on_start result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
         completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
+          await cancelWatch("restore_failed");
           notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
         }
         return;
@@ -283,6 +294,7 @@ export function createGameLifecycleController(
           resultStatus: checkResult.status,
         });
         if (!paused) {
+          await cancelWatch("conflict_unpaused");
           notifyFailure(
             "SDH-Ludusavi Auto-sync",
             "Launch gate unavailable; conflict resolution skipped while game is loading.",
@@ -291,6 +303,7 @@ export function createGameLifecycleController(
         }
         const resolution = await resolveConflict(checkResult);
         if (!resolution) {
+          await cancelWatch("conflict_unresolved");
           completeAutoSyncStatus(
             { status: "skipped", game: name, reason: "conflict_unresolved" },
             { gameName: name, appID, tracked },
@@ -299,7 +312,7 @@ export function createGameLifecycleController(
         }
         if (autoSyncEnabled && tracked) {
           activeMonitorEpoch = epoch;
-          void syncthingMonitor.start("pre_game", name, appID);
+          preGameWatch = syncthingMonitor.start("pre_game", name, appID);
         }
         const result = await resolveGameStartConflictCall(
           checkResult.game ?? name,
@@ -308,6 +321,7 @@ export function createGameLifecycleController(
         );
         completeAutoSyncStatus(result, { gameName: name, appID, tracked });
         if (result.status === "failed") {
+          await cancelWatch("conflict_resolution_failed");
           notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
         }
         return;
@@ -315,10 +329,12 @@ export function createGameLifecycleController(
 
       completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
       if (checkResult.status === "failed") {
+        await cancelWatch("start_check_failed");
         notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"));
       }
     } catch (err) {
       log("error", `App start handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
+      await cancelWatch("start_exception");
       hideAutoSyncStatus({
         source: "hide",
         gameName: name,
