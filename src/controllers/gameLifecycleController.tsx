@@ -311,7 +311,7 @@ export function createGameLifecycleController(
   };
 
   const handleAppExit = async (name: string, appID: string) => {
-    const tracked = isTracked(name, appID);
+    let tracked = isTracked(name, appID);
     log("info", `App exited: ${name} (${appID}) tracked=${tracked}`);
 
     if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
@@ -325,9 +325,6 @@ export function createGameLifecycleController(
 
     try {
       const autoSyncEnabledExit = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
-      if (autoSyncEnabledExit && tracked) {
-        void syncthingMonitor.start("post_game", name, appID);
-      }
       log("info", `Calling check_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
       const checkResult = await checkGameExitCall(name, appID);
       log("info", `check_game_exit result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
@@ -345,6 +342,17 @@ export function createGameLifecycleController(
       }
 
       if (checkResult.status === "needed" && checkResult.operation === "backup") {
+        // Promote tracked when the backend confirms a match. The frontend isTracked()
+        // check can race with Ludusavi state hydration, returning false for games whose
+        // appID is absent from the registry (e.g. Heroic/non-Steam titles). The backend
+        // returning "needed" is authoritative evidence that Ludusavi owns this game.
+        if (!tracked) {
+          tracked = true;
+          log("info", `tracked promoted via backend match: ${name} (${appID})`);
+        }
+        if (autoSyncEnabledExit) {
+          void syncthingMonitor.start("post_game", name, appID);
+        }
         publishAutoSyncStatus("backing_up", {
           source: "lifecycle_exit",
           gameName: name,
