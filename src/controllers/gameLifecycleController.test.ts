@@ -115,6 +115,41 @@ describe("GameLifecycleController", () => {
     expect(mockStatusSurface.publish).toHaveBeenCalledWith("syncthing_pending_upload", expect.any(Object));
   });
 
+  it("starts the buffered post-game watch when the frontend tracking cache is stale", async () => {
+    mockStore.isTracked.mockReturnValue(false);
+    mockRpc.getSyncthingActivity.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: { status: "idle", timestamp_unix: 1000 },
+    });
+
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    triggerStart(1145300);
+    await vi.advanceTimersByTimeAsync(100);
+
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockRpc.startSyncthingActivityWatch).toHaveBeenCalledWith(
+      "post_game",
+      "Hades",
+      "1145300",
+    );
+    expect(mockStatusSurface.publish).toHaveBeenCalledWith(
+      "syncthing_pending_upload",
+      expect.objectContaining({ tracked: false }),
+    );
+  });
+
   it("successful backup plus buffered activity publishes uploading directly", async () => {
     const controller = createGameLifecycleController({
       store: mockStore,

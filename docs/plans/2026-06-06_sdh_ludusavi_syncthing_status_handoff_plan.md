@@ -39,6 +39,32 @@ activity, but it cannot publish user-facing Syncthing states until the lifecycle
 controller successfully completes the backup and activates that exact watch
 generation.
 
+### Regression follow-up: stale frontend tracking cache
+
+Runtime logs from June 6, 2026 exposed a missing boundary in the implemented design:
+`check_game_exit` and `backup_game_on_exit` can authoritatively match and back up a
+game while the frontend's cached `isTracked()` lookup returns `false`. The controller
+currently gates post-game watch creation on that advisory cache value, so the backup
+succeeds but no Syncthing generation exists for the handoff. The surface consequently
+falls back to `GAME SAVE UP TO DATE` and never displays Syncthing activity.
+
+Correct the post-game policy as follows:
+
+1. when auto-sync is enabled, start the buffered post-game watch before
+   `check_game_exit` regardless of the frontend `tracked` cache value;
+2. keep all publication buffered until the authoritative backend check returns that a
+   backup is needed and the backup succeeds;
+3. cancel the speculative generation for `unmatched_game`, disabled, no-change,
+   failed, and all other non-backup paths;
+4. preserve the existing `tracked` metadata in logs and status events for diagnostics;
+5. do not change the pre-game watch guard, because pre-game monitoring publishes
+   immediately and must not display activity for a game the frontend considers
+   untracked.
+
+Add an executable controller regression test where `isTracked()` is false, the backend
+returns `needed/backup` then `backed_up`, and an initialized watch sample exists. The
+test must prove that the post-game watch starts and the Syncthing handoff publishes.
+
 ## Product Decisions
 
 ### What counts as a confirmed watch?

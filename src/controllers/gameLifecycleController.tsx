@@ -390,7 +390,9 @@ export function createGameLifecycleController(
 
     const autoSyncEnabledExit = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
     let postGameWatch: any = null;
-    if (autoSyncEnabledExit && tracked) {
+    // The backend check is authoritative; the frontend tracking cache can be stale.
+    // Post-game publication stays buffered until a successful backup activates it.
+    if (autoSyncEnabledExit) {
       activeMonitorEpoch = epoch;
       postGameWatch = syncthingMonitor.start("post_game", name, appID);
     }
