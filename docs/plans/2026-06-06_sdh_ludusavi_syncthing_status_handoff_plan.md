@@ -1,5 +1,63 @@
 # Implementation Plan: Race-Safe Post-Backup Syncthing Status Handoff
 
+## 2026-06-07 Implementation Addendum
+
+### Problem Definition
+
+The deployed `v0.3.0-dev.g4253914` promotes stale frontend tracking after the backend
+confirms a backup, but it starts the Syncthing watcher concurrently with the backup and
+immediately replaces `backing_up` with `has_backup`. The runtime log therefore contains
+no Syncthing status transition even when Syncthing uploads the changed backup.
+
+### Architecture Overview
+
+- Fork implementation from `fix/syncthing-status-handoff`.
+- Arm a generation-scoped, publication-buffered watcher before Ludusavi preview/backup.
+- Keep monitoring passive: the plugin must not request a Syncthing scan.
+- Activate publication only after a successful Ludusavi backup.
+- Keep `SYNCTHING PREPARING` through scanning/indexing and publish
+  `SYNCTHING UPLOADING` only when backend peer-upload evidence sets `uploading=true`.
+- Complete only after upload evidence followed by three settled samples.
+- Exit handling must never pause or resume a process.
+
+### Core Data Structures
+
+- Extend `FolderSelection` with `fs_watcher_delay_seconds`.
+- Extend successful watch-start results with `detection_grace_ms`, clamped to
+  30-120 seconds:
+  - filesystem watcher enabled or unknown: `fsWatcherDelayS + 20 seconds`;
+  - filesystem watcher disabled: `rescanIntervalS + 20 seconds`.
+- Preserve distinct start failures:
+  - `not_configured`: no Syncthing config or explicit credentials; silent fallback;
+  - `api_unavailable`: configuration exists but API access fails;
+  - `folder_not_found`: API works but Ludusavi backup path is not shared.
+
+### Public Interfaces
+
+- Add `syncthing_unavailable` with text
+  `LOCAL BACKUP SAVED - SYNCTHING UNAVAILABLE`.
+- Add `syncthing_folder_not_found` with text
+  `LOCAL BACKUP SAVED - PATH NOT SHARED`.
+- `not_configured` completes with the normal local-backup success state.
+- Syncthing failures never change a successful Ludusavi backup into a failed operation.
+- Active Syncthing states are monitor-owned and have no generic status-surface timeout.
+
+### Dependency Requirements
+
+No new dependencies. Continue using the existing Syncthing REST client and frontend
+monitor.
+
+### Testing Strategy
+
+- Backend: distinguish absent configuration, unreachable API, and unshared paths; parse
+  watcher delay and calculate the bounded detection grace.
+- Monitor: indexing remains pending, only `uploading=true` promotes upload, delayed
+  activity survives beyond ten seconds, and completion requires three settled samples.
+- Lifecycle: unavailable and unshared warnings preserve backup success; absent
+  Syncthing is silent; exit never calls pause/resume.
+- Surface: active Syncthing states remain visible until explicitly replaced or hidden.
+- Run all repository quality gates through `./run.sh`. No Codex review gate is required.
+
 ## Problem Definition
 
 On the current `0.3.0` development branch, a successful post-game Ludusavi backup can
