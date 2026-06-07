@@ -107,10 +107,18 @@ def test_watcher_sample_timing_and_failures(mock_resolve_path, mock_resolve_cred
         watch_id = res["watch_id"]
 
         assert cursor_called.wait(timeout=2.0)
-        assert "sample" in baseline_checked["sample"]
-        assert baseline_checked["sample"]["sample"]["folder_state"] == "idle"
+        # Verify no populated sample is exposed before cursor initialization completes
+        assert baseline_checked["sample"] == {}
 
         cursor_proceed.set()
+        time.sleep(0.1)
+
+        # Verify we now have a populated sample after cursor initialization succeeds
+        poll_res = manager.poll_watch(watch_id)
+        assert poll_res["status"] == "activity"
+        assert "sample" in poll_res
+        assert poll_res["sample"]["folder_state"] == "idle"
+
         manager.stop_watch(watch_id)
 
     with (

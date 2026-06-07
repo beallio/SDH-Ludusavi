@@ -76,6 +76,7 @@ class SyncthingWatch:
             folder_state, runtime = get_initial_folder_state_and_runtime(
                 self.api, self.folder.folder_id
             )
+            cursor = get_event_cursor(self.api)
         except Exception as exc:
             logger.warning("Failed to initialize watch thread: %s", exc)
             self.latest_sample = {
@@ -108,17 +109,6 @@ class SyncthingWatch:
             active_window=active_window,
             min_rate=min_rate,
         )
-
-        try:
-            cursor = get_event_cursor(self.api)
-        except Exception as exc:
-            logger.warning("Failed to initialize watch thread cursor: %s", exc)
-            self.latest_sample = {
-                "status": "failed",
-                "reason": "watch_initialization_failed",
-                "message": str(exc),
-            }
-            return
 
         while not self.stop_event.is_set():
             (
