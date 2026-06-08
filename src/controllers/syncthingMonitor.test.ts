@@ -372,7 +372,7 @@ describe("SyncthingMonitor", () => {
     });
   });
 
-  it("activated failure after activity publishes no replacement state or completion", async () => {
+  it("activated failure after activity publishes unavailable state", async () => {
     mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
     // Valid ready, uploading activity, then failed poll
     mockRpc.pollWatch
@@ -404,8 +404,11 @@ describe("SyncthingMonitor", () => {
     // Run third poll (fails)
     await vi.advanceTimersByTimeAsync(500);
 
-    // Should NOT publish has_backup, syncthing_complete, or anything else
-    expect(mockOnStatus).not.toHaveBeenCalled();
+    expect(mockOnStatus).toHaveBeenCalledWith("syncthing_unavailable", {
+      source: "rpc_result",
+      gameName: "Hades",
+      appID: "1145300",
+    });
   });
 
   it("pre-game watch failure before activity does not publish has_backup", async () => {
