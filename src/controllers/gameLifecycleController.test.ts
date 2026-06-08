@@ -21,6 +21,7 @@ describe("GameLifecycleController", () => {
   let mockResolveConflict: any;
   let mockNotifyFailure: any;
   let mockSyncGlobalHistory: any;
+  let mockEnsureStateReady: any;
   let lifecycleCallback: (notification: AppLifetimeNotification) => void;
 
   beforeEach(() => {
@@ -59,6 +60,7 @@ describe("GameLifecycleController", () => {
     mockResolveConflict = vi.fn();
     mockNotifyFailure = vi.fn();
     mockSyncGlobalHistory = vi.fn();
+    mockEnsureStateReady = vi.fn().mockResolvedValue(undefined);
 
     const mockRegister = vi.fn((cb) => {
       lifecycleCallback = cb;
@@ -85,6 +87,48 @@ describe("GameLifecycleController", () => {
   const triggerExit = (appID: number) => {
     lifecycleCallback({ unAppID: appID, nInstanceID: 1, bRunning: false });
   };
+
+  it("hydrates persisted settings before deciding whether to start the post-game watch", async () => {
+    let snapshot: any = { settings: null };
+    mockStore.getSnapshot.mockImplementation(() => snapshot);
+    mockEnsureStateReady.mockImplementation(async () => {
+      snapshot = {
+        settings: {
+          auto_sync_enabled: true,
+        },
+      };
+    });
+    mockRpc.getSyncthingActivity.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: { status: "idle", folder_state: "idle", timestamp_unix: 1000 },
+    });
+
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+      ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockEnsureStateReady).toHaveBeenCalledOnce();
+    expect(mockRpc.startSyncthingActivityWatch).toHaveBeenCalledWith(
+      "post_game",
+      "Hades",
+      "1145300",
+    );
+    expect(mockStatusSurface.publish).toHaveBeenCalledWith(
+      "syncthing_pending_upload",
+      expect.any(Object),
+    );
+  });
 
   it("successful backup plus initialized idle watch publishes pending", async () => {
     const controller = createGameLifecycleController({

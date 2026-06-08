@@ -95,6 +95,7 @@ type GameLifecycleControllerDependencies = {
   resolveConflict: (conflict: LifecycleCheckResult) => Promise<ConflictResolution | null>;
   notifyFailure: (title: string, body: string) => void;
   syncGlobalHistory: () => Promise<void>;
+  ensureStateReady?: () => Promise<void>;
 };
 
 function createEpochGuardedSurface(
@@ -131,6 +132,7 @@ export function createGameLifecycleController(
     resolveConflict,
     notifyFailure,
     syncGlobalHistory,
+    ensureStateReady = async () => {},
   } = dependencies;
   const ludusaviStore = store;
   const {
@@ -195,6 +197,7 @@ export function createGameLifecycleController(
   }
 
   const handleAppStart = async (name: string, appID: string, instanceID?: number) => {
+    await ensureStateReady();
     const epoch = ++lifecycleEpoch;
     void syncthingMonitor.stop();
     const {
@@ -356,6 +359,7 @@ export function createGameLifecycleController(
   };
 
   const handleAppExit = async (name: string, appID: string) => {
+    await ensureStateReady();
     const epoch = ++lifecycleEpoch;
     void syncthingMonitor.stop();
     const {

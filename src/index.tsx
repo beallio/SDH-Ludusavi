@@ -7,6 +7,7 @@ import {
   checkGameExitCall,
   checkGameStartCall,
   getGameHistoryCall,
+  getSettings,
   pauseGameProcessCall,
   resolveGameStartConflictCall,
   restoreGameOnStartCall,
@@ -36,6 +37,7 @@ import {
   createLudusaviStateStore
 } from "./state/ludusaviState";
 import {
+  applySettingsGlobal,
   resetSettingsMutationController,
   setActiveSettingsStore
 } from "./settings/settingsMutationController";
@@ -213,6 +215,23 @@ export default definePlugin(() => {
   setActiveSettingsStore(ludusaviStore, (title, body) => {
     notify(ludusaviStore, "failures_errors", title, body, <FaExclamationTriangle />);
   });
+  const lifecycleStateReady = (async () => {
+    try {
+      const settings = await getSettings();
+      if (isRpcStatus(settings)) {
+        logRpcStatus(settings, "startup settings");
+        return;
+      }
+      if (ludusaviStore.getSnapshot().settings !== null) {
+        log("debug", "Startup settings hydration skipped because state is already populated");
+        return;
+      }
+      applySettingsGlobal(ludusaviStore, settings);
+      log("info", "Lifecycle settings hydrated at plugin startup");
+    } catch (err) {
+      log("error", `Failed to hydrate lifecycle settings at plugin startup: ${err}`);
+    }
+  })();
   const lifecycleController = createGameLifecycleController({
     store: ludusaviStore,
     rpc: {
@@ -236,7 +255,8 @@ export default definePlugin(() => {
     notifyFailure: (title, body) => {
       notify(ludusaviStore, "failures_errors", title, body, <FaExclamationTriangle />);
     },
-    syncGlobalHistory: () => syncGlobalHistory(ludusaviStore)
+    syncGlobalHistory: () => syncGlobalHistory(ludusaviStore),
+    ensureStateReady: () => lifecycleStateReady
   });
   lifecycleController.start();
 

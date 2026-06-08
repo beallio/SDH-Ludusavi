@@ -803,11 +803,19 @@ def test_frontend_lifecycle_orchestration_is_owned_by_controller() -> None:
         assert required_text in controller_source
 
     for required_text in [
+        "const lifecycleStateReady = (async () => {",
+        "const settings = await getSettings();",
+        "applySettingsGlobal(ludusaviStore, settings);",
         "const lifecycleController = createGameLifecycleController({",
+        "ensureStateReady: () => lifecycleStateReady",
         "lifecycleController.start();",
         "lifecycleController.dispose();",
     ]:
         assert required_text in root_source
+
+    assert root_source.index("const lifecycleStateReady = (async () => {") < root_source.index(
+        "lifecycleController.start();"
+    )
 
     for root_owned_algorithm in [
         "const handleAppStart = async",
