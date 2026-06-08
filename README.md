@@ -89,7 +89,7 @@ Using Syncthing allows for near-instant local backups that sync in the backgroun
 - **Skipped — recency is ambiguous**: The plugin couldn't determine which save is newer and will prompt you to choose.
 - **Syncthing Downloading**: Syncthing is downloading/applying backup folder data.
 - **Syncthing Uploading**: Syncthing is uploading/serving backup folder data to a remote peer.
-- **Syncthing Complete**: Syncthing synchronization has settled.
+- **Syncthing Complete**: Syncthing synchronization has settled locally. This confirms there is no longer active transfer or scanning on the Steam Deck, but it does NOT guarantee that remote devices have finished downloading the save.
 - **Local Backup Saved - Syncthing Unavailable**: The backup succeeded, but configured Syncthing API access failed.
 - **Local Backup Saved - Path Not Shared**: The backup succeeded, but its directory is not in a Syncthing shared folder.
 

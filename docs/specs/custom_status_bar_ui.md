@@ -100,7 +100,7 @@ Autosync status strip behavior:
   2 seconds.
 - Syncthing downloading activity: show `SYNCTHING DOWNLOADING` with cloud-down icon.
 - Syncthing uploading activity: show `SYNCTHING UPLOADING` with cloud-up icon.
-- Syncthing completion: show `SYNCTHING COMPLETE` with cloud-checkmark icon.
+- Syncthing completion: show `SYNCTHING COMPLETE` with cloud-checkmark icon. This reflects locally observed activity settling, not full remote sync validation.
 - Unknown/non-actionable save state: show `UNKNOWN` for 2 seconds.
 - Failed or unsafe-to-sync state: show `UNABLE TO SYNC` and emit one Decky failure
   toast.
