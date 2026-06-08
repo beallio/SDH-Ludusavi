@@ -25,7 +25,7 @@ def test_watch_manager(mock_resolve_path, mock_resolve_creds) -> None:
     # Setup mock SyncthingAPI and credentials
     mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
     mock_folder = FolderSelection(
-        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync"
+        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync", shared_device_ids=()
     )
     mock_resolve_path.return_value = mock_folder
 
@@ -185,7 +185,7 @@ def test_watch_start_clamps_rescan_detection_grace(mock_resolve_path, mock_resol
 def test_watcher_sample_timing_and_failures(mock_resolve_path, mock_resolve_creds) -> None:
     mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
     mock_folder = FolderSelection(
-        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync"
+        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync", shared_device_ids=()
     )
     mock_resolve_path.return_value = mock_folder
 
@@ -283,7 +283,7 @@ def test_event_processing_before_sample_serialization(
 ) -> None:
     mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
     mock_folder = FolderSelection(
-        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync"
+        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync", shared_device_ids=()
     )
     mock_resolve_path.return_value = mock_folder
 
@@ -331,7 +331,12 @@ def test_event_processing_before_sample_serialization(
 
 def test_poll_watch_returns_copied_dict() -> None:
     watch = SyncthingWatch(
-        "123", "pre_game", "Hades", "1145300", FolderSelection("test", "test", "/path", ()), None
+        "123",
+        "pre_game",
+        "Hades",
+        "1145300",
+        FolderSelection(folder_id="test", label="test", path="/path", shared_device_ids=()),
+        None,
     )
     watch.latest_sample = {"status": "activity", "sample": {"folder_state": "idle"}}
     manager = SyncthingWatchManager()
@@ -350,7 +355,7 @@ def test_poll_watch_returns_copied_dict() -> None:
 def test_strict_folder_status_initialization_failure(mock_resolve_path, mock_resolve_creds) -> None:
     mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
     mock_folder = FolderSelection(
-        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync"
+        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync", shared_device_ids=()
     )
     mock_resolve_path.return_value = mock_folder
 
