@@ -539,7 +539,7 @@ export class SyncthingMonitor {
       return true;
     }
 
-    if (timestamp === context.lastProcessedTimestamp) {
+    if (context.lastProcessedTimestamp !== null && timestamp <= context.lastProcessedTimestamp) {
       return true;
     }
 
