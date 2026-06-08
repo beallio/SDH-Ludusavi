@@ -545,12 +545,6 @@ export class SyncthingMonitor {
 
     context.lastProcessedTimestamp = timestamp;
 
-    if (sample.status === "ERROR") {
-      log("error", `Syncthing reported backend ERROR status during watch.`);
-      this.handlePollFailure(context, "backend_error_status");
-      return false;
-    }
-
     const hasActivity = context.phase === "post_game"
       ? sample.uploading
       : (sample.downloading ||
