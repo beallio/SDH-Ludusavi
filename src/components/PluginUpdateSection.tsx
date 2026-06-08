@@ -607,7 +607,7 @@ export function PluginUpdateSection({
           label="Status"
           description={
             checkResult?.checked_at
-              ? `Last checked: ${new Date(checkResult.checked_at).toLocaleString()}`
+              ? `Last checked: ${new Date(checkResult.checked_at).toLocaleDateString()} at ${new Date(checkResult.checked_at).toLocaleTimeString()}`
               : undefined
           }
           padding="standard"
