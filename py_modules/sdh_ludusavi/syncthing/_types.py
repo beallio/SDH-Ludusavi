@@ -87,13 +87,11 @@ class FolderSelection:
     fs_watcher_enabled: bool | None = None
     fs_watcher_delay_seconds: int | None = None
     rescan_interval_seconds: int | None = None
-    shared_device_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class FolderRuntime:
     sequence: int = 0
-    remote_sequence: dict[str, int] = field(default_factory=dict)
     need_bytes: int = 0
     need_total_items: int = 0
     need_deletes: int = 0
@@ -154,8 +152,6 @@ class ActivityStatus:
     local_index_recent: bool
     sequence_change_recent: bool
     scan_progress_recent: bool
-    pending_remote_ack: bool
-    lagging_remote_devices: int
     runtime: FolderRuntime
     rates: ConnectionRates
 
@@ -202,17 +198,8 @@ def int_field(data: dict[str, Any], key: str, default: int = 0) -> int:
 
 
 def parse_folder_runtime(data: dict[str, Any]) -> FolderRuntime:
-    raw_remote_sequence = data.get("remoteSequence")
-    remote_sequence: dict[str, int] = {}
-    if isinstance(raw_remote_sequence, dict):
-        for device_id, sequence in raw_remote_sequence.items():
-            try:
-                remote_sequence[str(device_id)] = int(sequence or 0)
-            except (TypeError, ValueError):
-                remote_sequence[str(device_id)] = 0
     return FolderRuntime(
         sequence=int_field(data, "sequence", int_field(data, "version", 0)),
-        remote_sequence=remote_sequence,
         need_bytes=int_field(data, "needBytes", 0),
         need_total_items=int_field(data, "needTotalItems", 0),
         need_deletes=int_field(data, "needDeletes", 0),

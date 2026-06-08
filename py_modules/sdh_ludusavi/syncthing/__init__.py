@@ -41,7 +41,6 @@ from .config import (
 from .folders import (
     get_folders,
     folder_label,
-    folder_shared_device_ids,
     folder_selection_from_config,
     resolve_folder_by_id,
     resolve_folder_by_path,
@@ -94,7 +93,6 @@ __all__ = [
     "resolve_api_credentials",
     "get_folders",
     "folder_label",
-    "folder_shared_device_ids",
     "folder_selection_from_config",
     "resolve_folder_by_id",
     "resolve_folder_by_path",

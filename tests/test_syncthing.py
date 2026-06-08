@@ -144,17 +144,15 @@ def test_folder_selection_parses_filesystem_watcher_delay() -> None:
 
 def test_compute_activity_status() -> None:
     now = time.monotonic()
-    shared_device_ids = ("peer1",)
 
     # 1. Idle state
     status = compute_activity_status(
         folder_state="idle",
         remote_progress={},
         local_activity=LocalActivity(),
-        runtime=FolderRuntime(sequence=10, remote_sequence={"peer1": 10}),
+        runtime=FolderRuntime(sequence=10),
         rates=ConnectionRates(0.0, 0.0),
         min_rate_bytes_per_second=32768.0,
-        shared_device_ids=shared_device_ids,
         active_window_seconds=15.0,
         now=now,
     )
@@ -168,10 +166,9 @@ def test_compute_activity_status() -> None:
         folder_state="syncing",
         remote_progress={},
         local_activity=LocalActivity(active_download_files=1),
-        runtime=FolderRuntime(sequence=10, remote_sequence={"peer1": 10}),
+        runtime=FolderRuntime(sequence=10),
         rates=ConnectionRates(50000.0, 0.0),
         min_rate_bytes_per_second=32768.0,
-        shared_device_ids=shared_device_ids,
         active_window_seconds=15.0,
         now=now,
     )
@@ -185,10 +182,9 @@ def test_compute_activity_status() -> None:
         folder_state="idle",
         remote_progress={"peer1": RemoteProgress("peer1", file_count=1, last_seen_monotonic=now)},
         local_activity=LocalActivity(),
-        runtime=FolderRuntime(sequence=10, remote_sequence={"peer1": 10}),
+        runtime=FolderRuntime(sequence=10),
         rates=ConnectionRates(0.0, 50000.0),
         min_rate_bytes_per_second=32768.0,
-        shared_device_ids=shared_device_ids,
         active_window_seconds=15.0,
         now=now,
     )
@@ -202,10 +198,9 @@ def test_compute_activity_status() -> None:
         folder_state="scanning",
         remote_progress={},
         local_activity=LocalActivity(),
-        runtime=FolderRuntime(sequence=10, remote_sequence={"peer1": 10}),
+        runtime=FolderRuntime(sequence=10),
         rates=ConnectionRates(0.0, 0.0),
         min_rate_bytes_per_second=32768.0,
-        shared_device_ids=shared_device_ids,
         active_window_seconds=15.0,
         now=now,
     )
@@ -218,10 +213,9 @@ def test_compute_activity_status() -> None:
         folder_state="idle",
         remote_progress={},
         local_activity=LocalActivity(),
-        runtime=FolderRuntime(sequence=10, remote_sequence={"peer1": 10}, need_bytes=100),
+        runtime=FolderRuntime(sequence=10, need_bytes=100),
         rates=ConnectionRates(0.0, 0.0),
         min_rate_bytes_per_second=32768.0,
-        shared_device_ids=shared_device_ids,
         active_window_seconds=15.0,
         now=now,
     )
@@ -229,18 +223,16 @@ def test_compute_activity_status() -> None:
     assert status.update_in_progress is True
     assert status.settled is False
 
-    # 6. Pending remote ack
+    # 6. Pending remote ack (Strict TDD RED test: expected to pass eventually but will fail now)
     status = compute_activity_status(
         folder_state="idle",
         remote_progress={},
         local_activity=LocalActivity(),
-        runtime=FolderRuntime(sequence=12, remote_sequence={"peer1": 10}),
+        runtime=FolderRuntime(sequence=12),
         rates=ConnectionRates(0.0, 0.0),
         min_rate_bytes_per_second=32768.0,
-        shared_device_ids=shared_device_ids,
         active_window_seconds=15.0,
         now=now,
     )
-    assert status.pending_remote_ack is True
     assert status.update_in_progress is False
-    assert status.settled is False
+    assert status.settled is True

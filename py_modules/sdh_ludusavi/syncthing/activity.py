@@ -131,22 +131,6 @@ def prune_local_activity(activity: LocalActivity, active_window: float, now: flo
         activity.active_download_files = 0
 
 
-def has_pending_remote_ack(
-    runtime: FolderRuntime, shared_device_ids: tuple[str, ...]
-) -> tuple[bool, int]:
-    if runtime.sequence <= 0 or not runtime.remote_sequence:
-        return False, 0
-    device_ids = shared_device_ids or tuple(runtime.remote_sequence.keys())
-    lagging = 0
-    for device_id in device_ids:
-        remote_seq = runtime.remote_sequence.get(device_id)
-        if remote_seq is None:
-            continue
-        if remote_seq < runtime.sequence:
-            lagging += 1
-    return lagging > 0, lagging
-
-
 def _serialize_sample(
     watch_id: str,
     status: ActivityStatus,
@@ -173,7 +157,6 @@ def compute_activity_status(
     runtime: FolderRuntime,
     rates: ConnectionRates,
     min_rate_bytes_per_second: float,
-    shared_device_ids: tuple[str, ...],
     active_window_seconds: float,
     now: float,
 ) -> ActivityStatus:
@@ -197,7 +180,6 @@ def compute_activity_status(
         and now - local_activity.last_scan_progress_monotonic <= active_window_seconds
     )
 
-    pending_remote_ack, lagging_remote_devices = has_pending_remote_ack(runtime, shared_device_ids)
     aggregate_downloading = rates.in_bytes_per_second >= min_rate_bytes_per_second
     aggregate_uploading = rates.out_bytes_per_second >= min_rate_bytes_per_second
 
@@ -246,7 +228,8 @@ def compute_activity_status(
         and not update_in_progress
         and not local_activity.active_download_files
         and not remote_progress
-        and not pending_remote_ack
+        and runtime.pull_errors == 0
+        and not runtime.watch_error
     )
 
     if active_transfer:
@@ -285,8 +268,6 @@ def compute_activity_status(
         local_index_recent=local_index_recent,
         sequence_change_recent=sequence_change_recent,
         scan_progress_recent=scan_progress_recent,
-        pending_remote_ack=pending_remote_ack,
-        lagging_remote_devices=lagging_remote_devices,
         runtime=runtime,
         rates=rates,
     )
@@ -365,7 +346,6 @@ def process_event(
             local_activity.sequence_change_to = sequence
         runtime = FolderRuntime(
             sequence=sequence or runtime.sequence,
-            remote_sequence=runtime.remote_sequence,
             need_bytes=runtime.need_bytes,
             need_total_items=runtime.need_total_items,
             need_deletes=runtime.need_deletes,

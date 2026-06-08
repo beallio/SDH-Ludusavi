@@ -187,7 +187,6 @@ class SyncthingWatch:
                 runtime=self.runtime,
                 rates=self.rates,
                 min_rate_bytes_per_second=DEFAULT_MIN_RATE_BYTES_PER_SECOND,
-                shared_device_ids=self.folder.shared_device_ids,
                 active_window_seconds=DEFAULT_ACTIVE_WINDOW_SECONDS,
                 now=now,
             )

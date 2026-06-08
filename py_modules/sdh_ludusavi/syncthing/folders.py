@@ -24,19 +24,6 @@ def folder_label(folder: dict[str, Any]) -> str:
     return str(folder_id) if folder_id else ""
 
 
-def folder_shared_device_ids(folder: dict[str, Any]) -> tuple[str, ...]:
-    devices = folder.get("devices")
-    if not isinstance(devices, list):
-        return ()
-    ids: list[str] = []
-    for device in devices:
-        if isinstance(device, dict):
-            device_id = device.get("deviceID")
-            if device_id:
-                ids.append(str(device_id))
-    return tuple(ids)
-
-
 def folder_selection_from_config(
     folder: dict[str, Any],
     *,
@@ -75,7 +62,6 @@ def folder_selection_from_config(
         fs_watcher_enabled=watcher,
         fs_watcher_delay_seconds=fs_watcher_delay_seconds,
         rescan_interval_seconds=rescan_interval_seconds,
-        shared_device_ids=folder_shared_device_ids(folder),
     )
 
 
