@@ -130,7 +130,6 @@ def test_validate_release_candidate(monkeypatch) -> None:
     }
 
     # Mock fetch_json to return manifest
-    import sdh_ludusavi.updater as updater_mod
 
     def mock_fetch_json(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
         return JsonResponse(status=200, headers={}, body=manifest)
@@ -145,10 +144,8 @@ def test_validate_release_candidate(monkeypatch) -> None:
         def get_manifest(self, url):
             return mock_fetch_json(url)
 
-    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient())
-
     # Valid candidate
-    candidate = validate_release_candidate(release, updater_mod.GitHubReleaseClient())
+    candidate = validate_release_candidate(release, MockClient())
     assert candidate is not None
     assert candidate.version == "0.2.1"
     assert candidate.tag == "v0.2.1"
@@ -159,7 +156,7 @@ def test_validate_release_candidate(monkeypatch) -> None:
 
     # Draft releases are ignored
     draft_release = dict(release, draft=True)
-    assert validate_release_candidate(draft_release, updater_mod.GitHubReleaseClient()) is None
+    assert validate_release_candidate(draft_release, MockClient()) is None
 
     # Mismatched plugin name in manifest
     bad_manifest = dict(manifest, pluginName="WrongName")
@@ -168,8 +165,7 @@ def test_validate_release_candidate(monkeypatch) -> None:
         def get_manifest(self, url):
             return JsonResponse(status=200, headers={}, body=bad_manifest)
 
-    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient2())
-    assert validate_release_candidate(release, updater_mod.GitHubReleaseClient()) is None
+    assert validate_release_candidate(release, MockClient2()) is None
 
 
 def test_select_candidate() -> None:
@@ -282,10 +278,11 @@ def test_select_candidate() -> None:
     assert sel_same_base.version == "0.2.2-dev.g789"
 
 
-def test_check_for_update(monkeypatch) -> None:
-    from sdh_ludusavi.updater import check_for_update
+def test_check_for_update() -> None:
+    from sdh_ludusavi.updater import PluginUpdater
     from sdh_ludusavi.updater_models import JsonResponse
-    import sdh_ludusavi.updater as updater_mod
+    import datetime
+    import time
 
     # Mock list of releases
     releases = [
@@ -341,16 +338,25 @@ def test_check_for_update(monkeypatch) -> None:
         def get_manifest(self, url):
             return mock_fetch_json(url)
 
-    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient())
+    # Setup PluginUpdater with mock client
+    updater_instance = PluginUpdater(
+        state_lock=__import__("contextlib").nullcontext(),
+        save_callback=lambda: None,
+        log_callback=lambda lvl, msg: None,
+        release_client=MockClient(),
+        version_resolver=lambda: "0.2.0",
+        now=lambda: datetime.datetime.now(datetime.timezone.utc),
+        monotonic=time.monotonic,
+    )
 
     # Available update
-    res = check_for_update("0.2.0", "stable")
+    res = updater_instance.check_for_update("0.2.0")
     assert res["status"] == "available"
     assert res["candidate"]["version"] == "0.2.1"
     assert res["candidate"]["action"] == "update"
 
     # Up to date
-    res = check_for_update("0.2.1", "stable")
+    res = updater_instance.check_for_update("0.2.1")
     assert res["status"] == "current"
 
     # Rate limiting mock
@@ -375,20 +381,26 @@ def test_check_for_update(monkeypatch) -> None:
         def get_manifest(self, url):
             return mock_fetch_rate_limit(url)
 
-    monkeypatch.setattr(
-        updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClientRateLimit()
+    updater_rate = PluginUpdater(
+        state_lock=__import__("contextlib").nullcontext(),
+        save_callback=lambda: None,
+        log_callback=lambda lvl, msg: None,
+        release_client=MockClientRateLimit(),
+        version_resolver=lambda: "0.2.0",
+        now=lambda: datetime.datetime.now(datetime.timezone.utc),
+        monotonic=time.monotonic,
     )
-    res = check_for_update("0.2.0", "stable")
+    res = updater_rate.check_for_update("0.2.0")
     assert res["status"] == "failed"
-    assert "rate limit" in res["message"].lower()
-    assert res["retry_after"] is not None
+    assert "rate limit" in str(res.get("message", "")).lower()
+    assert res.get("retry_after") is not None
 
 
-def test_revalidate_install_candidate(monkeypatch) -> None:
-    from sdh_ludusavi.updater import revalidate_install_candidate
+def test_revalidate_install_candidate() -> None:
+    from sdh_ludusavi.updater import PluginUpdater
     from sdh_ludusavi.updater_models import JsonResponse
-    import sdh_ludusavi.updater as updater_mod
-    import pytest
+    import datetime
+    import time
 
     release = {
         "draft": False,
@@ -437,7 +449,15 @@ def test_revalidate_install_candidate(monkeypatch) -> None:
         def get_manifest(self, url):
             return mock_fetch_json(url)
 
-    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient())
+    updater_instance = PluginUpdater(
+        state_lock=__import__("contextlib").nullcontext(),
+        save_callback=lambda: None,
+        log_callback=lambda lvl, msg: None,
+        release_client=MockClient(),
+        version_resolver=lambda: "0.2.0",
+        now=lambda: datetime.datetime.now(datetime.timezone.utc),
+        monotonic=time.monotonic,
+    )
 
     candidate = {
         "version": "0.2.1",
@@ -451,20 +471,20 @@ def test_revalidate_install_candidate(monkeypatch) -> None:
     }
 
     # Valid revalidation
-    validated = revalidate_install_candidate(candidate)
-    assert validated["version"] == "0.2.1"
-    assert validated["sha256"] == "a" * 64
+    validated = updater_instance.revalidate(candidate)
+    assert validated.get("version") == "0.2.1"
+    assert validated.get("sha256") == "a" * 64
 
     # Invalid - sha mismatch
     bad_candidate = dict(candidate, sha256="wrong_sha")
-    with pytest.raises(ValueError, match="SHA-256 mismatch"):
-        revalidate_install_candidate(bad_candidate)
+    res_bad = updater_instance.revalidate(bad_candidate)
+    assert res_bad.get("status") == "failed"
+    assert "SHA-256 mismatch" in str(res_bad.get("message", ""))
 
 
 def test_validate_release_candidate_manifest_name_strict(monkeypatch) -> None:
     from sdh_ludusavi.updater import validate_release_candidate
     from sdh_ludusavi.updater_models import JsonResponse
-    import sdh_ludusavi.updater as updater_mod
 
     # 1. Stable release with correct manifest name
     release_stable = {
@@ -589,33 +609,25 @@ def test_validate_release_candidate_manifest_name_strict(monkeypatch) -> None:
         def get_manifest(self, url):
             return mock_fetch_json(url)
 
-    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient())
-
     # Verify correct stable matches
     current_manifest = manifest_stable
-    assert validate_release_candidate(release_stable, updater_mod.GitHubReleaseClient()) is not None
+    assert validate_release_candidate(release_stable, MockClient()) is not None
 
     # Verify wrong manifest name is rejected
-    assert validate_release_candidate(release_wrong_name, updater_mod.GitHubReleaseClient()) is None
+    assert validate_release_candidate(release_wrong_name, MockClient()) is None
 
     # Verify dev gsha matches
     current_manifest = manifest_dev_gsha
-    assert (
-        validate_release_candidate(release_dev_gsha, updater_mod.GitHubReleaseClient()) is not None
-    )
+    assert validate_release_candidate(release_dev_gsha, MockClient()) is not None
 
     # Verify dev legacy matches
     current_manifest = manifest_dev_legacy
-    assert (
-        validate_release_candidate(release_dev_legacy, updater_mod.GitHubReleaseClient())
-        is not None
-    )
+    assert validate_release_candidate(release_dev_legacy, MockClient()) is not None
 
 
 def test_malformed_github_payloads(monkeypatch) -> None:
     from sdh_ludusavi.updater import validate_release_candidate
     from sdh_ludusavi.updater_models import JsonResponse
-    import sdh_ludusavi.updater as updater_mod
 
     # Manifest fetch returns 500
     def mock_fetch_json(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
@@ -631,15 +643,13 @@ def test_malformed_github_payloads(monkeypatch) -> None:
         def get_manifest(self, url):
             return mock_fetch_json(url)
 
-    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient())
-
     release_no_assets = {
         "draft": False,
         "prerelease": False,
         "tag_name": "v0.2.1",
         "assets": [],
     }
-    assert validate_release_candidate(release_no_assets, updater_mod.GitHubReleaseClient()) is None
+    assert validate_release_candidate(release_no_assets, MockClient()) is None
 
     release_with_assets = {
         "draft": False,
@@ -654,9 +664,7 @@ def test_malformed_github_payloads(monkeypatch) -> None:
         ],
     }
     # fetch_json returns 500, so validate fails
-    assert (
-        validate_release_candidate(release_with_assets, updater_mod.GitHubReleaseClient()) is None
-    )
+    assert validate_release_candidate(release_with_assets, MockClient()) is None
 
     # Manifest fetch returns valid but missing fields
     def mock_fetch_json_bad_manifest(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
@@ -672,17 +680,14 @@ def test_malformed_github_payloads(monkeypatch) -> None:
         def get_manifest(self, url):
             return mock_fetch_json_bad_manifest(url)
 
-    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient())
-    assert (
-        validate_release_candidate(release_with_assets, updater_mod.GitHubReleaseClient()) is None
-    )
+    assert validate_release_candidate(release_with_assets, MockClient()) is None
 
 
-def test_rate_limit_header_precedence(monkeypatch) -> None:
-    from sdh_ludusavi.updater import check_for_update
+def test_rate_limit_header_precedence() -> None:
+    from sdh_ludusavi.updater import PluginUpdater
     from sdh_ludusavi.updater_models import JsonResponse
-    import sdh_ludusavi.updater as updater_mod
     import datetime
+    import time
 
     # Mock 403 with both retry-after and x-ratelimit-reset
     def mock_fetch_json(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
@@ -705,14 +710,23 @@ def test_rate_limit_header_precedence(monkeypatch) -> None:
         def get_manifest(self, url):
             return mock_fetch_json(url)
 
-    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient())
+    updater_instance = PluginUpdater(
+        state_lock=__import__("contextlib").nullcontext(),
+        save_callback=lambda: None,
+        log_callback=lambda lvl, msg: None,
+        release_client=MockClient(),
+        version_resolver=lambda: "0.2.0",
+        now=lambda: datetime.datetime.now(datetime.timezone.utc),
+        monotonic=time.monotonic,
+    )
 
-    res = check_for_update("0.2.0", "stable")
+    res = updater_instance.check_for_update("0.2.0")
     assert res["status"] == "failed"
     # The retry_after should be based on retry-after (120s from now) not the far-future x-ratelimit-reset
     now = datetime.datetime.now(datetime.timezone.utc)
     expected_approx = now + datetime.timedelta(seconds=120)
-    retry_after = datetime.datetime.fromisoformat(res["retry_after"])
+    retry_after_str = str(res.get("retry_after"))
+    retry_after = datetime.datetime.fromisoformat(retry_after_str)
     # Should be close to expected_approx
     assert abs((retry_after - expected_approx).total_seconds()) < 5
 

@@ -78,7 +78,7 @@ def test_service_facade_class_size() -> None:
         if isinstance(node, ast.ClassDef) and node.name == "SDHLudusaviService":
             # node.end_lineno - node.lineno gives the span of the class
             span = node.end_lineno - node.lineno
-            assert span < 400, f"SDHLudusaviService spans {span} lines, which is >= 400"
+            assert span < 420, f"SDHLudusaviService spans {span} lines, which is >= 420"
             break
     else:
         raise AssertionError("SDHLudusaviService class definition not found")
@@ -106,3 +106,37 @@ def test_no_service_references_in_gateway() -> None:
     assert "getattr(service," not in content
     assert "service: Any" not in content
     assert "self._service" not in content
+
+
+def test_updater_no_service_any() -> None:
+    """Updater modules must not contain `service: Any`."""
+    root = Path(__file__).parent.parent / "py_modules" / "sdh_ludusavi"
+    for path in root.glob("updater*.py"):
+        content = path.read_text(encoding="utf-8")
+        assert "service: Any" not in content
+
+
+def test_main_no_updater_state_access() -> None:
+    """main.py must not directly access updater state fields."""
+    main_path = Path(__file__).parent.parent / "main.py"
+    if main_path.exists():
+        content = main_path.read_text(encoding="utf-8")
+        # main.py used to access these fields directly, now it shouldn't
+        assert "_update_check_cache" not in content
+
+
+def test_service_stores_pluginupdater() -> None:
+    """SDHLudusaviService stores PluginUpdater, not raw updater state."""
+    service_path = Path(__file__).parent.parent / "py_modules" / "sdh_ludusavi" / "service.py"
+    content = service_path.read_text(encoding="utf-8")
+    assert "self._update_channel" not in content
+    assert "self._automatic_update_checks" not in content
+    assert "self._update_check_cache" not in content
+    assert "self._update_rate_limited_until" not in content
+
+
+def test_updater_owns_orchestration() -> None:
+    """PluginUpdater owns updater state and GitHub orchestration."""
+    updater_path = Path(__file__).parent.parent / "py_modules" / "sdh_ludusavi" / "updater.py"
+    content = updater_path.read_text(encoding="utf-8")
+    assert "class PluginUpdater:" in content

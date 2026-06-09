@@ -25,7 +25,7 @@ from .constants import (
     CONFIG_MARKER_READ_FAILED,
     CACHE_MARKER_UNCHANGED,
 )
-from . import updater
+from .updater import PluginUpdater
 from .types import LudusaviAdapter, GameStatus
 
 LOGGER = logging.getLogger(__name__)
@@ -90,10 +90,20 @@ class SDHLudusaviService:
         self._state_lock = threading.RLock()
 
         # Update Settings
-        self._update_channel = "stable"
-        self._automatic_update_checks = True
-        self._update_check_cache: dict[str, Any] = {}
-        self._update_rate_limited_until: Any = None
+        import datetime
+        import time
+
+        from sdh_ludusavi.updater_client import GitHubReleaseClient
+
+        self._updater = PluginUpdater(
+            state_lock=self._state_lock,
+            save_callback=self._save_state,
+            log_callback=lambda level, message: self.log(level, message),
+            release_client=GitHubReleaseClient(),
+            version_resolver=resolve_version,
+            now=lambda: datetime.datetime.now(datetime.timezone.utc),
+            monotonic=time.monotonic,
+        )
 
         # 2. Sub-managers setup
         from .log_buffer import DiagnosticLogBuffer
@@ -228,8 +238,7 @@ class SDHLudusaviService:
             "auto_sync_enabled": self._auto_sync_enabled,
             "selected_game": self._selected_game,
             "notifications": dict(self._notification_settings),
-            "update_channel": self._update_channel,
-            "automatic_update_checks": self._automatic_update_checks,
+            **self._updater.settings_payload(),
         }
 
     def get_game_history(self) -> dict[str, dict[str, Any]]:
@@ -397,23 +406,16 @@ class SDHLudusaviService:
         self._game_history_raw = cache.get("game_history", {})
 
         # Load update properties
-        self._update_channel = settings.get("update_channel", "stable")
-        if self._update_channel not in ("stable", "development"):
-            self._update_channel = "stable"
-        self._automatic_update_checks = bool(settings.get("automatic_update_checks", True))
-        self._update_check_cache = cache.get("update_check_cache", {})
-        self._update_rate_limited_until = None
+        self._updater.load_state(settings, cache)
 
     def _save_state(self) -> None:
         """Persist current plugin settings and runtime cache."""
         with self._state_lock:
-            # Settings Payload
             settings_payload = {
                 "auto_sync_enabled": self._auto_sync_enabled,
                 "selected_game": self._selected_game,
                 "notifications": dict(self._notification_settings),
-                "update_channel": self._update_channel,
-                "automatic_update_checks": self._automatic_update_checks,
+                **self._updater.settings_payload(),
             }
             self._persistence.save_settings(settings_payload)
 
@@ -423,8 +425,8 @@ class SDHLudusaviService:
             cache_payload = {
                 "ludusaviLauncherShortcutAppId": self._ludusavi_launcher_shortcut_id,
                 "game_history": game_history,
-                "update_check_cache": self._update_check_cache,
                 **self._registry.cache_payload(),
+                **self._updater.cache_payload(),
             }
             self._persistence.save_cache(cache_payload)
 
@@ -434,32 +436,41 @@ class SDHLudusaviService:
     # Updater helper methods
     def set_update_channel(self, channel: str) -> dict[str, Any]:
         """Update the update channel setting and persist it to disk."""
-        return updater.set_update_channel(self, channel)
+        self._updater.set_channel(channel)
+        return self.get_settings()
 
     def set_automatic_update_checks(self, enabled: bool) -> dict[str, Any]:
         """Update the automatic update checks setting and persist it to disk."""
-        return updater.set_automatic_update_checks(self, enabled)
+        self._updater.set_automatic_checks(enabled)
+        return self.get_settings()
 
     def get_update_check_context(self) -> dict[str, Any]:
-        return updater.get_update_check_context(self)
+        return self._updater.get_context()
 
-    def record_update_check_result(self, result: dict[str, Any]) -> None:
-        updater.record_update_check_result(self, result)
+    def check_for_plugin_update(
+        self,
+        current_version: str,
+        force: bool = False,
+    ) -> dict[str, object]:
+        return self._updater.check_for_update(current_version, force)
 
     def record_update_install_requested(self, candidate: dict[str, Any]) -> dict[str, Any]:
-        return updater.record_update_install_requested(self, candidate)
+        return self._updater.record_install_requested(candidate)
 
     def confirm_update_install_handoff(self, version: str) -> dict[str, Any]:
-        return updater.confirm_update_install_handoff(self, version)
+        return self._updater.confirm_install_handoff(version)
 
     def clear_pending_update_install(self, version: str | None = None) -> dict[str, Any]:
-        return updater.clear_pending_update_install(self, version)
+        return self._updater.clear_pending_install(version)
 
     def reconcile_pending_update_install(self, current_version: str) -> None:
-        updater.reconcile_pending_update_install(self, current_version)
+        self._updater.reconcile_pending_install(current_version)
 
     def revalidate_plugin_update(self, candidate: dict[str, Any]) -> dict[str, Any]:
-        return updater.revalidate_plugin_update(self, candidate)
+        return self._updater.revalidate(candidate)
+
+    def has_pending_update_install(self) -> bool:
+        return self._updater.has_pending_install()
 
 
 # Keep fuzzy matching module-level functions mapped to GameRegistryMatcher
