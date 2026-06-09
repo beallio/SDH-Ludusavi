@@ -106,6 +106,80 @@ describe("SyncthingMonitor", () => {
     });
   });
 
+  it("backend no_connected_peers poll failure publishes the no-peers status", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
+    mockRpc.pollWatch
+      .mockResolvedValueOnce({
+        status: "activity",
+        watch_id: "w1",
+        sample: { status: "idle", timestamp_unix: 1000 }
+      })
+      .mockResolvedValueOnce({
+        status: "failed",
+        reason: "no_connected_peers",
+        message: "all peers disconnected"
+      });
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+    const handoffResult = await handle.activatePostGameHandoff(750);
+    expect(handoffResult.status).toBe("pending");
+
+    // Advance timer for the second failing poll
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(mockOnStatus).toHaveBeenCalledWith("syncthing_no_peers", {
+      source: "rpc_result",
+      gameName: "Hades",
+      appID: "1145300",
+    });
+    expect(mockOnStatus).not.toHaveBeenCalledWith("syncthing_unavailable", expect.any(Object));
+  });
+
+  it("allocation skip with no_connected_peers preserves the reason for handoff", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "skipped", reason: "no_connected_peers", message: "no peers" });
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+    const handoffResult = await handle.activatePostGameHandoff(750);
+
+    expect(handoffResult.status).toBe("unavailable");
+    if (handoffResult.status === "unavailable") {
+      expect(handoffResult.reason).toBe("no_connected_peers");
+    }
+    expect(mockOnStatus).not.toHaveBeenCalled();
+  });
+
+  it("poll failure before handoff activation preserves the no-peers reason", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
+    mockRpc.pollWatch.mockResolvedValue({
+      status: "failed",
+      reason: "no_connected_peers",
+      message: "all peers disconnected"
+    });
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+
+    // Run timers so watch allocation runs and performs the first poll
+    await vi.advanceTimersByTimeAsync(250);
+
+    const handoffResult = await handle.activatePostGameHandoff(750);
+    expect(handoffResult.status).toBe("unavailable");
+    if (handoffResult.status === "unavailable") {
+      expect(handoffResult.reason).toBe("no_connected_peers");
+    }
+    // Publication was never enabled, so nothing is published directly
+    expect(mockOnStatus).not.toHaveBeenCalled();
+  });
+
+  it("pre-game no_connected_peers skip stays silent", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "skipped", reason: "no_connected_peers", message: "no peers" });
+
+    monitor.start("pre_game", "Hades", "1145300");
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockOnStatus).not.toHaveBeenCalled();
+    expect(mockRpc.pollWatch).not.toHaveBeenCalled();
+  });
+
   it("pre-game watch failure before activity does not publish has_backup", async () => {
     mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
     mockRpc.pollWatch

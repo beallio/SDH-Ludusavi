@@ -18,6 +18,7 @@ import { log } from "../utils/logging";
 import { isRpcStatus } from "../utils/rpc";
 import {
   SyncthingMonitor,
+  mapSyncthingFailureReason,
   type SyncthingRpc,
   type SyncthingWatchSession,
 } from "./syncthingMonitor";
@@ -446,19 +447,10 @@ export function createGameLifecycleController(
                 tracked,
               });
               return;
-            case "unavailable":
-              if (handoff.reason === "api_unavailable") {
-                publishAutoSyncStatus("syncthing_unavailable", {
-                  source: "rpc_result",
-                  gameName: name,
-                  appID,
-                  tracked,
-                  resultStatus: result.status,
-                });
-                return;
-              }
-              if (handoff.reason === "folder_not_found") {
-                publishAutoSyncStatus("syncthing_folder_not_found", {
+            case "unavailable": {
+              const mappedStatus = mapSyncthingFailureReason(handoff.reason);
+              if (mappedStatus) {
+                publishAutoSyncStatus(mappedStatus, {
                   source: "rpc_result",
                   gameName: name,
                   appID,
@@ -469,6 +461,7 @@ export function createGameLifecycleController(
               }
               completeAutoSyncStatus(result, { gameName: name, appID, tracked });
               return;
+            }
             case "stale":
               completeAutoSyncStatus(result, { gameName: name, appID, tracked });
               return;
