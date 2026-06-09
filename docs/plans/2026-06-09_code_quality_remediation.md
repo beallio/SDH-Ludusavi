@@ -1102,3 +1102,11 @@ Implementation is complete when:
 - all local quality gates pass;
 - final review has no blocking findings;
 - the branch is committed but not pushed, merged, tagged, or released.
+
+### Baseline Record
+
+- **Branch**: `refactor/code-quality-boundaries`
+- **Commit**: `95a7aa3 docs(plan): define phased code quality remediation`
+- **Frontend Unit Tests**: 53 passed
+- **Backend Tests**: 488 passed
+- **Lines of Code**: 22,972 lines (backend + frontend combined source and tests)
