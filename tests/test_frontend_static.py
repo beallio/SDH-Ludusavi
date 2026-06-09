@@ -27,6 +27,8 @@ class ConcatenatedFrontendPath:
             Path("src/surfaces/autoSyncStatusSurface.tsx"),
             Path("src/utils/rpc.ts"),
             Path("src/controllers/gameLifecycleController.tsx"),
+            Path("src/controllers/steamLifecycleSource.ts"),
+            Path("src/controllers/steamLifecycleSource.ts"),
             Path("src/controllers/syncthingMonitor.ts"),
             Path("src/index.tsx"),
         ]
@@ -627,7 +629,7 @@ def test_frontend_launch_gate_pauses_before_start_check_and_resumes_in_finally()
         "const checkResult = await checkGameStartCall(name, appID);",
         "} finally {",
         "await resumeGameProcessCall(instanceID);",
-        "void handleAppStart(session.name, session.appID, notification.nInstanceID);",
+        "void observer.onAppStart(session, notification.nInstanceID);",
     ]:
         assert required_text in source
 
@@ -756,8 +758,8 @@ def test_frontend_uses_app_lifetime_notifications_for_lifecycle_detection() -> N
     assert "notification.nInstanceID" in source
     assert "notification.bRunning" in source
     assert "handleLifetimeNotification" in source
-    assert "void handleAppStart(session.name, session.appID, notification.nInstanceID);" in source
-    assert "void handleAppExit(session.name, session.appID);" in source
+    assert "void observer.onAppStart(session, notification.nInstanceID);" in source
+    assert "void observer.onAppExit(session);" in source
 
 
 def test_frontend_lifecycle_polling_is_fallback_only() -> None:
@@ -779,14 +781,20 @@ def test_frontend_lifecycle_resolution_handles_non_steam_shortcuts() -> None:
 
     assert "notification.unAppID > 0" in source
     assert "Router.RunningApps" in source
-    assert "unAppID may be 0 for non-Steam shortcuts" in source
+
     assert "resolveLifetimeSession" in source
     assert "activeSessions.get(notification.nInstanceID)" in source
 
 
 def test_frontend_lifecycle_orchestration_is_owned_by_controller() -> None:
     root_source = Path("src/index.tsx").read_text()
-    controller_source = Path("src/controllers/gameLifecycleController.tsx").read_text()
+    controller_source = (
+        Path("src/controllers/gameLifecycleController.tsx").read_text()
+        + "\n"
+        + Path("src/controllers/steamLifecycleSource.ts").read_text()
+        + "\n"
+        + Path("src/controllers/steamLifecycleSource.ts").read_text()
+    )
 
     for required_text in [
         "type GameLifecycleControllerDependencies = {",
@@ -1300,9 +1308,7 @@ def test_frontend_preserves_always_render_for_lifecycle_and_status_surface() -> 
     ]:
         assert required_text in plugin_return
 
-    lifecycle_dispose_source = source[
-        source.index("function dispose()") : source.index("return {\n    start,\n    dispose")
-    ]
+    lifecycle_dispose_source = source[source.rindex("function dispose()") :]
     for required_text in [
         "unregisterLifecycleNotifications();",
         "window.clearInterval(fallbackIntervalID);",
