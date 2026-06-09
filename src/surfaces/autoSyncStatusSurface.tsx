@@ -114,7 +114,6 @@ export function publishAutoSyncStatus(status: AutoSyncStatusKind, options: AutoS
     resetStatusStripSurfaceBeforeVerification();
   }
 
-  setBrowserViewSyncStateContext(currentAutoSyncStatusState);
   currentAutoSyncStatusState = {
     status,
     visible: true,
@@ -124,6 +123,7 @@ export function publishAutoSyncStatus(status: AutoSyncStatusKind, options: AutoS
     tracked: options.tracked,
     resultStatus: options.resultStatus
   };
+  setBrowserViewSyncStateContext(currentAutoSyncStatusState);
   logAutoSyncStatusChange(currentAutoSyncStatusState);
   if (shouldResetSurface) {
     syncAutoSyncStatusBrowserViewDeferred(currentAutoSyncStatusState);

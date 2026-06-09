@@ -389,6 +389,62 @@ class PluginUpdater:
         current_version: str,
         force: bool = False,
     ) -> dict[str, object]:
+        self._log("info", f"Update check started (version={current_version}, force={force})")
+        t0 = self._monotonic()
+
+        with self._state_lock:
+            if not force:
+                pending_install = self._cache.get("pending_update_install")
+                if pending_install:
+                    effective_installed = _effective_pending_install_version(
+                        pending_install, self._now
+                    )
+                    if effective_installed:
+                        elapsed_ms = round((self._monotonic() - t0) * 1000)
+                        self._log(
+                            "info",
+                            f"Update check pending-install fast path: pending={pending_install.get('version')}, current={current_version}, effective={effective_installed}, channel={self._channel}, force={force}, elapsed_ms={elapsed_ms}",
+                        )
+                        return {
+                            "status": "current",
+                            "checked_at": self._now().isoformat(),
+                        }
+
+                if self._rate_limited_until and self._now() < self._rate_limited_until:
+                    elapsed_ms = round((self._monotonic() - t0) * 1000)
+                    self._log(
+                        "warning",
+                        f"Update check blocked by rate-limit cooldown until {self._rate_limited_until.isoformat()}, elapsed_ms={elapsed_ms}",
+                    )
+                    return {
+                        "status": "failed",
+                        "checked_at": self._now().isoformat(),
+                        "message": "Update check skipped due to rate-limit cooldown",
+                        "retry_after": self._rate_limited_until.isoformat(),
+                    }
+
+                last_checked_at_str = self._cache.get("last_checked_at")
+                last_checked_channel = self._cache.get("last_checked_channel")
+                last_checked_version = self._cache.get("last_checked_version")
+                if isinstance(last_checked_at_str, str):
+                    try:
+                        last_checked_at = datetime.datetime.fromisoformat(last_checked_at_str)
+                        if (
+                            self._now() - last_checked_at < datetime.timedelta(hours=24)
+                            and last_checked_channel == self._channel
+                            and last_checked_version == current_version
+                        ):
+                            last_result = self._cache.get("last_result")
+                            if isinstance(last_result, dict):
+                                elapsed_ms = round((self._monotonic() - t0) * 1000)
+                                self._log(
+                                    "info",
+                                    f"Update check cache hit (within 24h, channel={last_checked_channel}, version={last_checked_version}), elapsed_ms={elapsed_ms}",
+                                )
+                                return last_result
+                    except ValueError:
+                        pass
+
         self._log("info", "Fetching GitHub releases")
         t0 = self._monotonic()
         resp = self._client.list_releases()

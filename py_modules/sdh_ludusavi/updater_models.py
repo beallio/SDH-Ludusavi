@@ -100,7 +100,7 @@ def parse_release_manifest(payload: object) -> ReleaseManifest | None:
     sha256 = record.get("sha256")
     generated_at = record.get("generatedAt")
 
-    if not isinstance(schema_version, int):
+    if not isinstance(schema_version, int) or schema_version != 1:
         return None
     if not isinstance(plugin_name, str):
         return None
