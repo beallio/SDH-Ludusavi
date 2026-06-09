@@ -15,7 +15,11 @@ import type {
   Settings,
   Versions,
   SyncthingWatchStartResult,
-  SyncthingPollResult
+  SyncthingPollResult,
+  PluginUpdateCandidate,
+  UpdateCheckContext,
+  UpdateCheckResult,
+  RevalidateResult
 } from "../types";
 
 export const getSettings = callable<[], RpcResult<Settings>>("get_settings");
@@ -71,3 +75,10 @@ export const getSyncthingActivityCall = callable<[watchID: string], RpcResult<Sy
 export const stopSyncthingActivityWatchCall = callable<[watchID: string], RpcResult<SyncthingPollResult>>(
   "stop_syncthing_activity_watch"
 );
+
+export const checkForPluginUpdateCall = callable<[currentVersion: string, force: boolean], UpdateCheckResult>("check_for_plugin_update");
+export const revalidatePluginUpdateCall = callable<[candidate: PluginUpdateCandidate], RevalidateResult>("revalidate_plugin_update");
+export const recordUpdateInstallRequestedCall = callable<[candidate: any], UpdateCheckContext>("record_update_install_requested");
+export const confirmUpdateInstallHandoffCall = callable<[version: string], UpdateCheckContext>("confirm_update_install_handoff");
+export const clearPendingUpdateInstallCall = callable<[version: string], UpdateCheckContext>("clear_pending_update_install");
+export const getUpdateCheckContextCall = callable<[], UpdateCheckContext>("get_update_check_context");

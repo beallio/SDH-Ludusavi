@@ -2,6 +2,7 @@ import { isRpcStatus } from "./utils/rpc";
 import { call } from "@decky/api";
 import { SteamClientGlobal, AppStoreGlobal, SteamGameId } from "./types/steam-globals";
 import { applyLudusaviArtworkToShortcut, ArtworkLogger } from "./shortcutArtwork";
+import { getSteamClientApps, getAppStore as getRuntimeAppStore } from "./utils/steamRuntime";
 
 export type LudusaviLaunchCommand = {
   commandPath: string;
@@ -25,20 +26,20 @@ const PLACEHOLDER_EXE = "/usr/bin/ifyouseethisyoufoundabug";
  * Runtime guard for SteamClient.
  */
 function getSteamClient(): SteamClientGlobal {
-  const client = (globalThis as any).SteamClient ?? (window as any).SteamClient;
-  if (!client?.Apps) {
+  const apps = getSteamClientApps();
+  if (!apps) {
     throw new Error("SteamClient.Apps is unavailable in this frontend context.");
   }
-  return client as SteamClientGlobal;
+  return { Apps: apps } as any;
 }
 
 /**
  * Runtime guard for appStore.
  */
 function getAppStore(): AppStoreGlobal {
-  const store = (globalThis as any).appStore ?? (window as any).appStore;
+  const store = getRuntimeAppStore();
   if (!store?.GetAppOverviewByAppID) {
-    throw new Error("appStore.GetAppOverviewByAppID is unavailable in this frontend context.");
+    throw new Error("appStore.GetAppOverviewByAppID is unavailable.");
   }
   return store as AppStoreGlobal;
 }

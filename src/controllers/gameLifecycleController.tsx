@@ -16,6 +16,7 @@ import type {
 import type { LudusaviStateStore } from "../state/ludusaviState";
 import { summarizeOperationResult } from "../formatting/operationText";
 import { log } from "../utils/logging";
+import { registerAppLifetimeNotification } from "../utils/steamRuntime";
 import { isRpcStatus } from "../utils/rpc";
 import {
   getMainRunningSession,
@@ -677,13 +678,11 @@ export function createGameLifecycleController(
   };
 
   function start() {
-    const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
-    const gameSessions = steamClient?.GameSessions;
-    const registerLifetime = gameSessions?.RegisterForAppLifetimeNotifications;
-    if (typeof registerLifetime === "function") {
-      lifecycleRegistration = registerLifetime.call(gameSessions, (notification: AppLifetimeNotification) => {
-        handleLifetimeNotification(notification);
-      });
+    const reg = registerAppLifetimeNotification((notification: AppLifetimeNotification) => {
+      handleLifetimeNotification(notification);
+    });
+    if (reg) {
+      lifecycleRegistration = reg;
       reconcileStartupSession();
     } else {
       startFallbackPolling();

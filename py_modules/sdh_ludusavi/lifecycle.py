@@ -8,6 +8,7 @@ from .coordinator import OperationLockedError
 from .gateway import LudusaviGateway
 from .history import HistoryManager
 from .registry import GameRegistry
+from sdh_ludusavi.game_names import sanitize_game_name
 
 LOGGER = logging.getLogger("sdh_ludusavi.service.lifecycle")
 
@@ -38,7 +39,7 @@ class GameLifecycleManager:
 
     def check_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Check whether a game launch needs a restore without changing local saves."""
-        game_name = _sanitize_name(game_name)
+        game_name = sanitize_game_name(game_name)
         self.dependencies.log(
             "info",
             f"check_game_start triggered for game='{game_name}', app_id='{app_id}'",
@@ -91,11 +92,13 @@ class GameLifecycleManager:
     ) -> dict[str, object]:
         """Apply the user's choice for an ambiguous launch recency conflict."""
         if resolution not in ("keep_local", "restore_backup"):
-            return self.dependencies.skip("start", _sanitize_name(game_name), "invalid_resolution")
+            return self.dependencies.skip(
+                "start", sanitize_game_name(game_name), "invalid_resolution"
+            )
         if not self.dependencies.is_auto_sync_enabled():
             return self.dependencies.skip("start", game_name, "auto_sync_disabled")
 
-        game_name = _sanitize_name(game_name)
+        game_name = sanitize_game_name(game_name)
         game = self.dependencies.registry.match_game(game_name, app_id=app_id)
         if game is None:
             return self.dependencies.skip("start", game_name, "unmatched_game")
@@ -141,7 +144,7 @@ class GameLifecycleManager:
 
     def restore_game_on_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Restore a game's backup during launch after a check reports it is needed."""
-        game_name = _sanitize_name(game_name)
+        game_name = sanitize_game_name(game_name)
         self.dependencies.log(
             "info",
             f"restore_game_on_start triggered for game='{game_name}', app_id='{app_id}'",
@@ -184,7 +187,7 @@ class GameLifecycleManager:
 
     def check_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Check whether a game exit needs a backup without writing backup data."""
-        game_name = _sanitize_name(game_name)
+        game_name = sanitize_game_name(game_name)
         self.dependencies.log(
             "info",
             f"check_game_exit triggered for game='{game_name}', app_id='{app_id}'",
@@ -239,7 +242,7 @@ class GameLifecycleManager:
 
     def backup_game_on_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Back up a game during exit after a check reports it is needed."""
-        game_name = _sanitize_name(game_name)
+        game_name = sanitize_game_name(game_name)
         self.dependencies.log(
             "info",
             f"backup_game_on_exit triggered for game='{game_name}', app_id='{app_id}'",
@@ -282,7 +285,7 @@ class GameLifecycleManager:
 
     def force_backup(self, game_name: str) -> dict[str, object]:
         """Trigger a manual backup for the specified game."""
-        game_name = _sanitize_name(game_name)
+        game_name = sanitize_game_name(game_name)
         game = self.dependencies.registry.match_game(game_name)
         if game is None:
             return self.dependencies.skip("backup", game_name, "unmatched_game")
@@ -309,7 +312,7 @@ class GameLifecycleManager:
 
     def force_restore(self, game_name: str) -> dict[str, object]:
         """Trigger a manual restore for the specified game."""
-        game_name = _sanitize_name(game_name)
+        game_name = sanitize_game_name(game_name)
         game = self.dependencies.registry.match_game(game_name)
         if game is None:
             return self.dependencies.skip("restore", game_name, "unmatched_game")
@@ -332,9 +335,3 @@ class GameLifecycleManager:
         self.dependencies.history.record_history(game.name, "restore", "manual_restore", "restored")
         self.dependencies.registry.refresh_after_operation(game.name)
         return {"status": "restored", "game": game.name, "result": result}
-
-
-def _sanitize_name(name: str | None) -> str:
-    if not name:
-        return ""
-    return " ".join(str(name).split())

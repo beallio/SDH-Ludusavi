@@ -140,3 +140,20 @@ def test_updater_owns_orchestration() -> None:
     updater_path = Path(__file__).parent.parent / "py_modules" / "sdh_ludusavi" / "updater.py"
     content = updater_path.read_text(encoding="utf-8")
     assert "class PluginUpdater:" in content
+
+
+def test_no_duplicate_sanitize_game_name() -> None:
+    """Game name sanitization must be centralized in game_names.py."""
+    definitions = 0
+    for path in _get_project_source_files():
+        content = path.read_text(encoding="utf-8")
+        tree = ast.parse(content, filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name in (
+                "_sanitize_name",
+                "sanitize_game_name",
+            ):
+                definitions += 1
+                assert path.name == "game_names.py", f"Duplicate sanitization found in {path.name}"
+
+    assert definitions == 1, f"Expected exactly 1 sanitization definition, found {definitions}"

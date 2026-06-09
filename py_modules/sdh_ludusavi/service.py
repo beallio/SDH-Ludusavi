@@ -27,6 +27,7 @@ from .constants import (
 )
 from .updater import PluginUpdater
 from .types import LudusaviAdapter, GameStatus
+from sdh_ludusavi.game_names import sanitize_game_name
 
 LOGGER = logging.getLogger(__name__)
 
@@ -254,7 +255,7 @@ class SDHLudusaviService:
 
     def set_selected_game(self, game_name: str) -> dict[str, Any]:
         """Update the currently selected game and persist it to disk."""
-        self._selected_game = _sanitize_name(game_name)
+        self._selected_game = sanitize_game_name(game_name)
         self._save_state()
         self.log("debug", f"Selected game changed to {self._selected_game}")
         return self.get_settings()
@@ -528,12 +529,6 @@ def _skip(
             trigger = "unknown"
         service._history.record_history(game_name, operation, trigger, "skipped", reason=reason)
     return {"status": "skipped", "game": game_name, "reason": reason}
-
-
-def _sanitize_name(name: str | None) -> str:
-    if not name:
-        return ""
-    return " ".join(str(name).split())
 
 
 def _coerce_notification_settings(settings: object) -> dict[str, bool]:

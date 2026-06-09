@@ -13,6 +13,7 @@ from .constants import (
 from .gateway import LudusaviGateway
 from .matcher import GameRegistryMatcher
 from .types import GameStatus
+from sdh_ludusavi.game_names import sanitize_game_name
 
 LOGGER = logging.getLogger("sdh_ludusavi.service.registry")
 
@@ -165,7 +166,7 @@ class GameRegistry:
 
     def match_game(self, game_name: str, app_id: str | None = None) -> GameStatus | None:
         """Find a game status matching the query using matching rules and lazy-refresh."""
-        game_name = _sanitize_name(game_name)
+        game_name = sanitize_game_name(game_name)
         with self._state_lock:
             return self._matcher.match_game(
                 game_name=game_name,
@@ -273,12 +274,6 @@ class GameRegistry:
 
     def _cached_games(self) -> list[dict[str, object]]:
         return [game.to_dict() for game in self._games.values()]
-
-
-def _sanitize_name(name: str | None) -> str:
-    if not name:
-        return ""
-    return " ".join(str(name).split())
 
 
 def _normalize_installed_app_ids(raw: str | None) -> str | None:

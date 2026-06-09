@@ -748,7 +748,7 @@ def test_frontend_has_no_status_strip_diagnostic_ui_or_modes() -> None:
 def test_frontend_uses_app_lifetime_notifications_for_lifecycle_detection() -> None:
     source = FRONTEND.read_text()
 
-    assert "RegisterForAppLifetimeNotifications" in source
+    assert "registerAppLifetimeNotification" in source
     assert "RegisterForGameActionEnd" not in source
     assert "type AppLifetimeNotification" in source
     assert "type RunningSession" in source
@@ -764,9 +764,9 @@ def test_frontend_lifecycle_polling_is_fallback_only() -> None:
     source = FRONTEND.read_text()
 
     assert "startFallbackPolling" in source
-    assert "RegisterForAppLifetimeNotifications" in source
-    assert "registerLifetime" in source
-    assert 'if (typeof registerLifetime === "function")' in source
+    assert "registerAppLifetimeNotification" in source
+    assert "const reg = registerAppLifetimeNotification" in source
+    assert "if (reg) {" in source
     assert "window.setInterval(checkMainApp, 1000)" in source
     assert source.index("window.setInterval(checkMainApp, 1000)") > source.index(
         "const startFallbackPolling = () => {"
@@ -795,7 +795,7 @@ def test_frontend_lifecycle_orchestration_is_owned_by_controller() -> None:
         "const handleAppExit = async",
         "function start()",
         "function dispose()",
-        "registerLifetime.call(gameSessions",
+        "const reg = registerAppLifetimeNotification",
         "window.setInterval(checkMainApp, 1000);",
         "window.clearInterval(fallbackIntervalID);",
         "activeSessions.clear();",

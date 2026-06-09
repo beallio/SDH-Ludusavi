@@ -1,4 +1,5 @@
 import { LUDUSAVI_ARTWORK, LudusaviArtworkAsset } from "./assets/ludusaviArtwork";
+import { getSteamClientApps } from "./utils/steamRuntime";
 import type {
   AppDetailsStoreGlobal,
   LogoPositionForApp,
@@ -43,11 +44,11 @@ const LUDUSAVI_LOGO_POSITIONING: LogoPositionForApp = {
 };
 
 function getSteamClient(): SteamClientGlobal {
-  const client = (globalThis as any).SteamClient ?? (window as any).SteamClient;
-  if (!client?.Apps) {
+  const apps = getSteamClientApps();
+  if (!apps) {
     throw new Error("SteamClient.Apps is unavailable in this frontend context.");
   }
-  return client as SteamClientGlobal;
+  return { Apps: apps } as any;
 }
 
 async function localAssetUrlToBase64(assetUrl: string): Promise<string> {

@@ -21,13 +21,15 @@ import {
   INSTALL_TYPE_UPDATE,
   INSTALL_TYPE_DOWNGRADE
 } from "../utils/deckyInstaller";
+import {
+  checkForPluginUpdateCall,
+  revalidatePluginUpdateCall,
+  recordUpdateInstallRequestedCall,
+  confirmUpdateInstallHandoffCall,
+  clearPendingUpdateInstallCall,
+  getUpdateCheckContextCall
+} from "../api/ludusaviRpc";
 
-const checkForPluginUpdateCall = callable<[currentVersion: string, force: boolean], UpdateCheckResult>("check_for_plugin_update");
-const revalidatePluginUpdateCall = callable<[candidate: any], any>("revalidate_plugin_update");
-const recordUpdateInstallRequestedCall = callable<[candidate: any], any>("record_update_install_requested");
-const confirmUpdateInstallHandoffCall = callable<[version: string], any>("confirm_update_install_handoff");
-const clearPendingUpdateInstallCall = callable<[version: string], any>("clear_pending_update_install");
-const getUpdateCheckContextCall = callable<[], any>("get_update_check_context");
 const logRpc = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
 
 function logUpdate(traceId: string | null, stage: string, details?: any) {
@@ -441,9 +443,10 @@ export function PluginUpdateSection({
       logUpdate(updateTraceId, "revalidate_start", { tag: targetCandidate.tag });
       const revalRes = await revalidatePluginUpdateCall(targetCandidate);
       const revalElapsed = Math.round(performance.now() - revalStart);
-      if (revalRes.status === "failed" || !revalRes.version) {
-        logUpdate(updateTraceId, "revalidate_failed", { message: revalRes.message || "unknown", elapsed_ms: revalElapsed });
-        throw new Error(revalRes.message || "Revalidation failed");
+      if ("status" in revalRes && revalRes.status === "failed" || !("version" in revalRes)) {
+        const msg = "message" in revalRes ? revalRes.message : "unknown";
+        logUpdate(updateTraceId, "revalidate_failed", { message: msg, elapsed_ms: revalElapsed });
+        throw new Error(msg || "Revalidation failed");
       }
       logUpdate(updateTraceId, "revalidate_success", { version: revalRes.version, elapsed_ms: revalElapsed });
 
