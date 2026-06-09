@@ -3,6 +3,7 @@ import type { AutoSyncStatusBrowserView, AutoSyncStatusBrowserViewOwner, AutoSyn
 import { getAutoSyncStatusBounds, objectKeys } from "../utils/steam";
 import { log } from "../utils/logging";
 import { renderAutoSyncStatusHtml } from "./autoSyncStatusRenderer";
+import { getSteamClient } from "../utils/steamRuntime";
 
 // Add state reference injection so it can access currentAutoSyncStatusState.visible
 let currentAutoSyncStatusState: AutoSyncStatusState = { status: "has_backup", visible: false, source: "hide" };
@@ -111,7 +112,7 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
   }
 
   try {
-    const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
+    const steamClient = getSteamClient();
     const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance;
 
     if (rootWindow?.CreateBrowserView) {
@@ -249,7 +250,7 @@ export function destroyAutoSyncStatusBrowserView() {
       needsSteamClientDestroy = false;
     }
     if (needsSteamClientDestroy && browserViewOwner) {
-      const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
+      const steamClient = getSteamClient();
       steamClient?.BrowserView?.Destroy?.(browserViewOwner);
     }
   } catch (err) {

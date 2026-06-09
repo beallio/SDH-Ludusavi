@@ -13,6 +13,14 @@ export function isSteamRuntimeAvailable(): boolean {
   }
 }
 
+export function getSteamClient(): any {
+  try {
+    return (globalThis as any).SteamClient ?? (window as any).SteamClient;
+  } catch {
+    return null;
+  }
+}
+
 export function getSteamLanguage(): string {
   try {
     const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
