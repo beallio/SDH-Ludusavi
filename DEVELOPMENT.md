@@ -145,36 +145,25 @@ The Steam Deck user interface (SteamOS Big Picture Mode / Overlay / QAM) runs in
 - **Case-Insensitive Class Selectors:** SteamOS frequently updates its UI stylesheets, including randomized class suffixes (e.g., `.dropdown_DropdownButton_12345` vs `.dropdown_DropdownButton_Label_abcde`). CSS selectors targeting these elements should use case-insensitive matches (e.g., `[class*="dropdown" i]`) to prevent breaking changes on client updates.
 - **Flex Shrink Propagation:** Interactive components (like `DropdownItem`) are nested inside several layers of flex containers. If a child element has `white-space: nowrap` (e.g., a long game title), it forces the flex items to expand to their maximum width unless `min-width: 0 !important` and `max-width: 100% !important` are recursively applied to all elements in the parent chain.
 
-## In-Plugin Updater Architecture
+## Code Quality Boundaries
 
-The updater architecture handles background update checking, version validation, and update installation without blocking the main event loops or unzipping files directly.
+### Backend: Updater Orchestration and State
+The updater architecture enforces strict boundaries between domain models, transport, and state orchestration:
+- **`PluginUpdater` Ownership**: The `PluginUpdater` class is the sole owner of updater settings, cache persistence, cooldown logic, update checks, and installer reconciliation.
+- **Model/Client/State Separation**:
+  - `updater_models.py` contains pure dataclasses for JSON definitions and candidate logic.
+  - `updater_client.py` isolates all network transport (`urllib.request`) and rate-limit parsing.
+  - `updater.py` orchestrates the logic using the client and models.
+- **Service Isolation**: The `SDHLudusaviService` acts merely as a facade. It holds an instance of `PluginUpdater` and delegates RPC methods to it. Updater modules never import the service or access private service fields.
+- **Unchanged Persistence**: While the logic is decomposed, the data schema in `cache.json` and `settings.json` remains entirely backward-compatible and unchanged. `main.py` simply acts as an async adapter passing calls to the facade.
 
-### 1. Discovery & Validation
-- **Path**: `py_modules/sdh_ludusavi/updater.py`
-- **JSON Fetch**: Uses only Python's standard library `urllib.request` to fetch GitHub Release assets (limiting timeouts to 10-15s).
-- **Candidate Validation**: Enforces strict verification of:
-  - Draft state (ignored).
-  - Single release manifest JSON (enforces name, package, version, tag, channel, and a 64-char hexadecimal SHA-256).
-  - Matches tag name exactly to the manifest tag.
-  - Matches the channel value (`stable` or `dev`) to the GitHub prerelease flag.
-  - Exactly one matching ZIP whose name is defined in `manifest.assetName`.
-
-### 2. Version Comparison & Selection
-- **Stable Channel**: Inspects only stable versions. Stable `X.Y.Z` wins over installed prerelease or local build of the same base.
-- **Development Channel**: Considers both stable and prereleases.
-- **Prerelease & Dev Suffixes**: Handles stable `X.Y.Z`, development `X.Y.Z-dev.g<sha>`, legacy dev `X.Y.Z-dev.<sha>`, and local build metadata `X.Y.Z+<metadata>`.
-- **Local Build Metadata**: `X.Y.Z+...` is treated as stable-equivalent to `X.Y.Z` (preventing same-base stable updates).
-- **Dev Ordering**: For dev releases with the same base (e.g. `0.2.0-dev.g123` vs `0.2.0-dev.g456`), they are ordered by validated GitHub `published_at` timestamp.
-
-### 3. Settings & Cache Persistence
-- **Settings**: Persistent preferences (`update_channel`, `automatic_update_checks`) are stored in Decky settings.
-- **Cache**: Operational metadata (`last_checked_at`, `pending_update_install`, etc.) are written to cache.
-- **Rate-limit interpretation**: On `403` or `429`, retry timelines are stored in-memory only. Successful checks cache findings for 24 hours.
-
-### 4. Revalidation & Installation Flow
-- **Direct Installer Adapter**: Exposes `src/utils/deckyInstaller.ts` to isolate `window.DeckyBackend` calls.
-- **Pre-install Revalidation**: The installer action first calls `revalidate_plugin_update(candidate)` to verify the release URL and SHA-256 immediately before installation.
-- **Decky Hand-off**: Determines the installation type (`UPDATE: 2` or `DOWNGRADE: 3`) and enqueues `record_update_install_requested` before invoking Decky Loader's `utilities/install_plugin` method.
+### Frontend: Steam Runtime and View Ownership
+The frontend strictly isolates untyped runtime access and splits massive components by responsibility:
+- **Steam Runtime Validation**: All direct accesses to private global objects like `(window as any).SteamClient` are banned outside `steamRuntime.ts`. This module safely guards, wraps, and exposes the required Steam runtime methods, preventing fatal crashes during render.
+- **Controller/Source/Surface Ownership**:
+  - **Controllers**: Modules like `gameLifecycleController.tsx` and `pluginUpdateController.tsx` handle business logic and state machine transitions.
+  - **Sources**: Modules like `steamLifecycleSource.ts` adapt Decky/Steam events (e.g. `onAppStart`) into standard observables for the controllers.
+  - **Surfaces**: React UI components (like `autoSyncStatusSurface.tsx`) act as thin adapters, delegating DOM operations to decoupled rendering modules (`autoSyncStatusRenderer.tsx`) and native view management (`autoSyncStatusBrowserView.ts`).
 
 ## Technical Reference: Status & Operations
 
