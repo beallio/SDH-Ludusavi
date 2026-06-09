@@ -1,8 +1,11 @@
 import pytest
 from unittest.mock import Mock
 from sdh_ludusavi.syncthing.activity import (
+    get_connection_snapshot,
+    get_connection_totals,
     get_event_cursor,
     get_initial_folder_state_and_runtime,
+    get_my_device_id,
 )
 from sdh_ludusavi.syncthing._types import FolderRuntime
 
@@ -33,3 +36,67 @@ def test_get_initial_folder_state_and_runtime_non_strict_fallback() -> None:
     state, runtime = get_initial_folder_state_and_runtime(api, "folder-id", strict=False)
     assert state == "unknown"
     assert isinstance(runtime, FolderRuntime)
+
+
+def _connections_payload() -> dict:
+    return {
+        "total": {"inBytesTotal": 100, "outBytesTotal": 200},
+        "connections": {
+            "DEV-A": {"connected": True},
+            "DEV-B": {"connected": False},
+            "DEV-C": {"connected": True},
+            "DEV-D": "garbage",
+        },
+    }
+
+
+def test_get_connection_snapshot_parses_totals_and_connected_devices() -> None:
+    api = Mock()
+    api.get_json.return_value = _connections_payload()
+
+    snapshot = get_connection_snapshot(api)
+
+    assert snapshot.in_bytes_total == 100
+    assert snapshot.out_bytes_total == 200
+    assert snapshot.connected_devices == frozenset({"DEV-A", "DEV-C"})
+
+
+def test_get_connection_snapshot_rejects_malformed_response() -> None:
+    api = Mock()
+    api.get_json.return_value = ["not", "a", "dict"]
+
+    with pytest.raises(RuntimeError, match="Unexpected system connections response"):
+        get_connection_snapshot(api)
+
+
+def test_get_connection_snapshot_tolerates_missing_sections() -> None:
+    api = Mock()
+    api.get_json.return_value = {}
+
+    snapshot = get_connection_snapshot(api)
+
+    assert snapshot.in_bytes_total == 0
+    assert snapshot.out_bytes_total == 0
+    assert snapshot.connected_devices == frozenset()
+
+
+def test_get_connection_totals_wraps_snapshot() -> None:
+    api = Mock()
+    api.get_json.return_value = _connections_payload()
+
+    assert get_connection_totals(api) == (100, 200)
+
+
+def test_get_my_device_id() -> None:
+    api = Mock()
+    api.get_json.return_value = {"myID": "LOCAL-DEVICE"}
+
+    assert get_my_device_id(api) == "LOCAL-DEVICE"
+
+
+def test_get_my_device_id_rejects_malformed_response() -> None:
+    api = Mock()
+    api.get_json.return_value = {"myID": ""}
+
+    with pytest.raises(RuntimeError, match="Unexpected system status response"):
+        get_my_device_id(api)

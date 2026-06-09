@@ -16,6 +16,7 @@ from ._types import (
     FolderRuntime,
     RemoteProgress,
     ConnectionRates,
+    ConnectionSnapshot,
     LocalActivity,
     ActivityStatus,
     int_field,
@@ -75,14 +76,40 @@ def get_events(api: SyncthingAPI, since: int, event_timeout_seconds: float) -> l
     return events
 
 
-def get_connection_totals(api: SyncthingAPI) -> tuple[int, int]:
+def get_connection_snapshot(api: SyncthingAPI) -> ConnectionSnapshot:
     data = api.get_json("/rest/system/connections", timeout=10)
     if not isinstance(data, dict):
         raise RuntimeError(f"Unexpected system connections response: {data}")
+    in_bytes_total = 0
+    out_bytes_total = 0
     total = data.get("total")
     if isinstance(total, dict):
-        return int(total.get("inBytesTotal", 0) or 0), int(total.get("outBytesTotal", 0) or 0)
-    return 0, 0
+        in_bytes_total = int(total.get("inBytesTotal", 0) or 0)
+        out_bytes_total = int(total.get("outBytesTotal", 0) or 0)
+    connections = data.get("connections")
+    connected_devices = frozenset(
+        device_id
+        for device_id, info in (connections.items() if isinstance(connections, dict) else ())
+        if isinstance(info, dict) and info.get("connected") is True
+    )
+    return ConnectionSnapshot(
+        in_bytes_total=in_bytes_total,
+        out_bytes_total=out_bytes_total,
+        connected_devices=connected_devices,
+    )
+
+
+def get_connection_totals(api: SyncthingAPI) -> tuple[int, int]:
+    snapshot = get_connection_snapshot(api)
+    return snapshot.in_bytes_total, snapshot.out_bytes_total
+
+
+def get_my_device_id(api: SyncthingAPI) -> str:
+    data = api.get_json("/rest/system/status", timeout=10)
+    my_id = data.get("myID") if isinstance(data, dict) else None
+    if not isinstance(my_id, str) or not my_id:
+        raise RuntimeError(f"Unexpected system status response: {data}")
+    return my_id
 
 
 def compute_rates(
