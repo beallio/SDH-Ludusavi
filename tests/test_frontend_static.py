@@ -2320,9 +2320,11 @@ def test_decky_installer_argument_order() -> None:
 
 
 def test_frontend_update_check_inflight_guard() -> None:
-    path = Path("src/components/PluginUpdateSection.tsx")
-    assert path.exists(), "src/components/PluginUpdateSection.tsx does not exist"
-    content = path.read_text(encoding="utf-8")
+    content = (
+        Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+    )
 
     # 1. Enforce that an in-flight check ref is defined
     assert "inFlightCheck = useRef" in content
@@ -2340,7 +2342,11 @@ def test_frontend_update_check_inflight_guard() -> None:
 def test_frontend_updater_static() -> None:
     comp_path = Path("src/components/PluginUpdateSection.tsx")
     assert comp_path.exists()
-    comp_content = comp_path.read_text(encoding="utf-8")
+    comp_content = (
+        Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+    )
 
     installer_path = Path("src/utils/deckyInstaller.ts")
     assert installer_path.exists()
@@ -2414,9 +2420,15 @@ def test_frontend_updater_post_install_ui_state() -> None:
     """
     import re
 
-    comp_path = Path("src/components/PluginUpdateSection.tsx")
-    assert comp_path.exists()
-    comp = comp_path.read_text(encoding="utf-8")
+    comp = (
+        Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+    )
 
     # 1. A shared post-install success helper must exist and be called from
     #    both handoff-success branches (immediate and delayed).
@@ -2513,9 +2525,15 @@ def test_frontend_updater_post_reload_stale_coercion() -> None:
     """
     import re
 
-    comp_path = Path("src/components/PluginUpdateSection.tsx")
-    assert comp_path.exists()
-    comp = comp_path.read_text(encoding="utf-8")
+    comp = (
+        Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+    )
 
     # The coercion guard must also fire when the candidate version equals
     # effectiveCurrentVersion, not only when it matches installedOverride.version.
@@ -2546,7 +2564,13 @@ def test_frontend_updater_success_updates_versions_section() -> None:
     """
     import re
 
-    comp = Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+    comp = (
+        Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+    )
     content = Path("src/components/qam/LudusaviContent.tsx").read_text(encoding="utf-8")
 
     assert "onInstallVersionConfirmed" in comp, (
@@ -2580,7 +2604,13 @@ def test_frontend_updater_hydrates_pending_install_version_after_reload() -> Non
     """
     import re
 
-    comp = Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+    comp = (
+        Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+    )
 
     assert "pending_update_install" in comp, (
         "PluginUpdateSection must inspect pending_update_install from get_update_check_context"
@@ -2611,9 +2641,15 @@ def test_frontend_updater_hydrates_pending_install_version_after_reload() -> Non
 
 
 def test_frontend_updater_stuck_check_state_handling() -> None:
-    comp_path = Path("src/components/PluginUpdateSection.tsx")
-    assert comp_path.exists()
-    comp = comp_path.read_text(encoding="utf-8")
+    comp = (
+        Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+    )
 
     # 1. UPDATE_CHECK_UI_TIMEOUT_MS exists
     assert "UPDATE_CHECK_UI_TIMEOUT_MS" in comp
@@ -2666,9 +2702,15 @@ def test_frontend_updater_stuck_check_state_handling() -> None:
 
 
 def test_frontend_updater_check_for_updates_guard_and_hydration_skip() -> None:
-    comp_path = Path("src/components/PluginUpdateSection.tsx")
-    assert comp_path.exists()
-    comp = comp_path.read_text(encoding="utf-8")
+    comp = (
+        Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+    )
 
     # 1. checkForUpdates early return guard uses effectiveCurrentVersion
     assert 'if (!effectiveCurrentVersion || effectiveCurrentVersion === "Loading...")' in comp, (
@@ -2682,9 +2724,15 @@ def test_frontend_updater_check_for_updates_guard_and_hydration_skip() -> None:
 
 
 def test_frontend_updater_dev_to_stable_static() -> None:
-    comp_path = Path("src/components/PluginUpdateSection.tsx")
-    assert comp_path.exists()
-    comp = comp_path.read_text(encoding="utf-8")
+    comp = (
+        Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+    )
 
     # 1. Status copy must not use raw currentVersion.includes("dev")
     assert 'currentVersion.includes("dev")' not in comp, (
@@ -2713,9 +2761,15 @@ def test_frontend_updater_dev_to_stable_static() -> None:
 
 
 def test_frontend_updater_post_install_guard_and_suppression() -> None:
-    comp_path = Path("src/components/PluginUpdateSection.tsx")
-    assert comp_path.exists()
-    comp = comp_path.read_text(encoding="utf-8")
+    comp = (
+        Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+    )
 
     import re
 
@@ -2772,9 +2826,15 @@ def test_frontend_updater_post_install_guard_and_suppression() -> None:
 
 
 def test_frontend_updater_codex_p2_findings() -> None:
-    comp_path = Path("src/components/PluginUpdateSection.tsx")
-    assert comp_path.exists()
-    comp = comp_path.read_text(encoding="utf-8")
+    comp = (
+        Path("src/components/PluginUpdateSection.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+        + "\n"
+        + Path("src/controllers/pluginUpdateController.tsx").read_text(encoding="utf-8")
+    )
 
     import re
 
