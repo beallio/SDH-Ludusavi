@@ -566,3 +566,126 @@ def test_ssl_context_loading(monkeypatch) -> None:
     monkeypatch.setattr(Path, "exists", lambda self: False)
     ctx = _get_ssl_context()
     assert isinstance(ctx, ssl.SSLContext)
+
+
+def test_malformed_github_payloads(monkeypatch) -> None:
+    from sdh_ludusavi.updater import validate_release_candidate, JsonResponse
+    import sdh_ludusavi.updater as updater_mod
+
+    # Manifest fetch returns 500
+    def mock_fetch_json(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
+        return JsonResponse(status=500, headers={}, body={})
+
+    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_json)
+
+    release_no_assets = {
+        "draft": False,
+        "prerelease": False,
+        "tag_name": "v0.2.1",
+        "assets": [],
+    }
+    assert validate_release_candidate(release_no_assets) is None
+
+    release_with_assets = {
+        "draft": False,
+        "prerelease": False,
+        "tag_name": "v0.2.1",
+        "assets": [
+            {
+                "name": "SDH-Ludusavi-v0.2.1.manifest.json",
+                "browser_download_url": "https://manifest",
+            },
+            {"name": "SDH-Ludusavi-v0.2.1.zip", "browser_download_url": "https://zip"},
+        ],
+    }
+    # fetch_json returns 500, so validate fails
+    assert validate_release_candidate(release_with_assets) is None
+
+    # Manifest fetch returns valid but missing fields
+    def mock_fetch_json_bad_manifest(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
+        return JsonResponse(status=200, headers={}, body={"schemaVersion": 1})
+
+    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_json_bad_manifest)
+    assert validate_release_candidate(release_with_assets) is None
+
+
+def test_rate_limit_header_precedence(monkeypatch) -> None:
+    from sdh_ludusavi.updater import check_for_update, JsonResponse
+    import sdh_ludusavi.updater as updater_mod
+    import datetime
+
+    # Mock 403 with both retry-after and x-ratelimit-reset
+    def mock_fetch_json(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
+        return JsonResponse(
+            status=403,
+            headers={
+                "retry-after": "120",
+                "x-ratelimit-reset": "2000000000",
+            },
+            body={"message": "rate limit"},
+        )
+
+    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_json)
+
+    res = check_for_update("0.2.0", "stable")
+    assert res["status"] == "failed"
+    # The retry_after should be based on retry-after (120s from now) not the far-future x-ratelimit-reset
+    now = datetime.datetime.now(datetime.timezone.utc)
+    expected_approx = now + datetime.timedelta(seconds=120)
+    retry_after = datetime.datetime.fromisoformat(res["retry_after"])
+    # Should be close to expected_approx
+    assert abs((retry_after - expected_approx).total_seconds()) < 5
+
+
+def test_network_and_malformed_json_failures(monkeypatch) -> None:
+    from sdh_ludusavi.updater import fetch_json
+    import urllib.request
+    from urllib.error import URLError
+
+    def mock_urlopen_error(*args, **kwargs):
+        raise URLError("Network unreachable")
+
+    monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen_error)
+    res = fetch_json("https://fake")
+    assert res.status == 500
+    assert "Network unreachable" in str(res.body.get("error", ""))
+
+    class MockResponse:
+        status = 200
+        headers = {}
+
+        def read(self):
+            return b"not valid json"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    def mock_urlopen_bad_json(*args, **kwargs):
+        return MockResponse()
+
+    monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen_bad_json)
+    res = fetch_json("https://fake")
+    assert res.status == 500
+    assert "error" in res.body
+
+
+def test_prohibition_on_logging_full_sha256() -> None:
+    from sdh_ludusavi.updater import format_candidate_log
+    from types import SimpleNamespace
+
+    full_sha = "a" * 64
+
+    # Dict candidate
+    cand_dict = {"version": "1.0", "tag": "v1.0", "channel": "stable", "sha256": full_sha}
+    log_str = format_candidate_log(cand_dict)
+    assert "aaaaaaaa" in log_str
+    assert full_sha not in log_str
+
+    # Object candidate
+    cand_obj = SimpleNamespace(version="1.0", tag="v1.0", channel="stable", sha256=full_sha)
+    log_str2 = format_candidate_log(cand_obj)
+    assert "aaaaaaaa" in log_str2
+    assert full_sha not in log_str2
