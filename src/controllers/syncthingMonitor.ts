@@ -90,7 +90,27 @@ const ACTIONABLE_UNAVAILABLE_REASONS = new Set([
   "not_configured",
   "api_unavailable",
   "folder_not_found",
+  "folder_not_shared",
+  "no_connected_peers",
 ]);
+
+// Shared reason-to-status mapper for watch allocation and poll failures.
+// Returns null for reasons that publish no Syncthing status (not_configured,
+// initialization failures, timeouts); callers decide their own fallback.
+export function mapSyncthingFailureReason(
+  reason: string | undefined,
+): AutoSyncStatusKind | null {
+  if (reason === "no_connected_peers") {
+    return "syncthing_no_peers";
+  }
+  if (reason === "folder_not_found" || reason === "folder_not_shared") {
+    return "syncthing_folder_not_found";
+  }
+  if (reason === "api_unavailable") {
+    return "syncthing_unavailable";
+  }
+  return null;
+}
 
 function getStatusRank(status: "idle" | "uploading" | "downloading" | "complete"): number {
   if (status === "complete") return 2;
@@ -460,7 +480,7 @@ export class SyncthingMonitor {
       }
 
       if (isRpcStatus(pollRes)) {
-        this.handlePollFailure(context, `${pollRes.reason} - ${pollRes.message}`);
+        this.handlePollFailure(context, `${pollRes.reason} - ${pollRes.message}`, pollRes.reason);
         return;
       }
 
@@ -496,11 +516,15 @@ export class SyncthingMonitor {
     }
   }
 
-  private handlePollFailure(context: WatchContext, message: string): void {
+  private handlePollFailure(context: WatchContext, message: string, reason?: string): void {
     if (context.cancelled) {
       return;
     }
     log("error", `Syncthing poll failure: generation=${context.generation} message=${message}`);
+
+    if (reason && ACTIONABLE_UNAVAILABLE_REASONS.has(reason)) {
+      context.unavailableReason = reason;
+    }
 
     if (!context.initialized) {
       context.resolveReadiness("unavailable");
@@ -522,7 +546,7 @@ export class SyncthingMonitor {
     }
 
     if (wasEnabled && context.phase === "post_game") {
-      this.onStatus("syncthing_unavailable", {
+      this.onStatus(mapSyncthingFailureReason(reason) ?? "syncthing_unavailable", {
         source: "rpc_result",
         gameName: context.gameName,
         appID: context.appID,
