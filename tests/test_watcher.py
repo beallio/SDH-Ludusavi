@@ -12,6 +12,7 @@ from sdh_ludusavi.syncthing import (
     FolderRuntime,
     LocalActivity,
     ConnectionRates,
+    ConnectionSnapshot,
 )
 
 
@@ -25,7 +26,10 @@ def test_watch_manager(mock_resolve_path, mock_resolve_creds) -> None:
     # Setup mock SyncthingAPI and credentials
     mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
     mock_folder = FolderSelection(
-        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync"
+        folder_id="test-folder",
+        label="Test Folder",
+        path="/home/deck/Sync",
+        device_ids=("DEV-A",),
     )
     mock_resolve_path.return_value = mock_folder
 
@@ -35,13 +39,15 @@ def test_watch_manager(mock_resolve_path, mock_resolve_creds) -> None:
     with (
         patch("sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime") as mock_init,
         patch("sdh_ludusavi.syncthing.watcher.get_event_cursor") as mock_cursor,
-        patch("sdh_ludusavi.syncthing.watcher.get_connection_totals") as mock_totals,
+        patch("sdh_ludusavi.syncthing.watcher.get_my_device_id") as mock_my_id,
+        patch("sdh_ludusavi.syncthing.watcher.get_connection_snapshot") as mock_snapshot,
         patch("sdh_ludusavi.syncthing.watcher.get_folder_status") as mock_status,
         patch("sdh_ludusavi.syncthing.watcher.get_events") as mock_events,
     ):
         mock_init.return_value = ("idle", FolderRuntime(sequence=5))
         mock_cursor.return_value = 100
-        mock_totals.return_value = (0, 0)
+        mock_my_id.return_value = "LOCAL-DEVICE"
+        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
         mock_status.return_value = {"state": "idle", "sequence": 5}
         mock_events.return_value = []
 
@@ -99,9 +105,12 @@ def test_watch_manager_silently_classifies_missing_syncthing_config(mock_resolve
 def test_watch_manager_classifies_configured_but_unreachable_api(mock_resolve_creds) -> None:
     mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
 
-    with patch(
-        "sdh_ludusavi.syncthing.watcher.resolve_folder_by_path",
-        side_effect=RuntimeError("Cannot reach Syncthing API"),
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.get_my_device_id", return_value="LOCAL-DEVICE"),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.resolve_folder_by_path",
+            side_effect=RuntimeError("Cannot reach Syncthing API"),
+        ),
     ):
         result = SyncthingWatchManager().start_watch(
             "post_game",
@@ -125,19 +134,22 @@ def test_watch_start_returns_bounded_detection_grace(mock_resolve_path, mock_res
         fs_watcher_enabled=True,
         fs_watcher_delay_seconds=45,
         rescan_interval_seconds=3600,
+        device_ids=("DEV-A",),
     )
 
     manager = SyncthingWatchManager()
     with (
         patch("sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime") as mock_init,
         patch("sdh_ludusavi.syncthing.watcher.get_event_cursor") as mock_cursor,
-        patch("sdh_ludusavi.syncthing.watcher.get_connection_totals") as mock_totals,
+        patch("sdh_ludusavi.syncthing.watcher.get_my_device_id") as mock_my_id,
+        patch("sdh_ludusavi.syncthing.watcher.get_connection_snapshot") as mock_snapshot,
         patch("sdh_ludusavi.syncthing.watcher.get_folder_status") as mock_status,
         patch("sdh_ludusavi.syncthing.watcher.get_events") as mock_events,
     ):
         mock_init.return_value = ("idle", FolderRuntime(sequence=5))
         mock_cursor.return_value = 100
-        mock_totals.return_value = (0, 0)
+        mock_my_id.return_value = "LOCAL-DEVICE"
+        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
         mock_status.return_value = {"state": "idle", "sequence": 5}
         mock_events.return_value = []
 
@@ -164,10 +176,18 @@ def test_watch_start_clamps_rescan_detection_grace(mock_resolve_path, mock_resol
         fs_watcher_enabled=False,
         fs_watcher_delay_seconds=10,
         rescan_interval_seconds=300,
+        device_ids=("DEV-A",),
     )
 
     manager = SyncthingWatchManager()
-    with patch.object(SyncthingWatch, "start"):
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.get_my_device_id", return_value="LOCAL-DEVICE"),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+            return_value=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+        ),
+        patch.object(SyncthingWatch, "start"),
+    ):
         result = manager.start_watch(
             "post_game",
             "Hades",
@@ -185,7 +205,10 @@ def test_watch_start_clamps_rescan_detection_grace(mock_resolve_path, mock_resol
 def test_watcher_sample_timing_and_failures(mock_resolve_path, mock_resolve_creds) -> None:
     mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
     mock_folder = FolderSelection(
-        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync"
+        folder_id="test-folder",
+        label="Test Folder",
+        path="/home/deck/Sync",
+        device_ids=("DEV-A",),
     )
     mock_resolve_path.return_value = mock_folder
 
@@ -212,12 +235,14 @@ def test_watcher_sample_timing_and_failures(mock_resolve_path, mock_resolve_cred
     with (
         patch("sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime") as mock_init,
         patch("sdh_ludusavi.syncthing.watcher.get_event_cursor", side_effect=mock_get_event_cursor),
-        patch("sdh_ludusavi.syncthing.watcher.get_connection_totals") as mock_totals,
+        patch("sdh_ludusavi.syncthing.watcher.get_my_device_id") as mock_my_id,
+        patch("sdh_ludusavi.syncthing.watcher.get_connection_snapshot") as mock_snapshot,
         patch("sdh_ludusavi.syncthing.watcher.get_folder_status") as mock_status,
         patch("sdh_ludusavi.syncthing.watcher.get_events") as mock_events,
     ):
         mock_init.return_value = ("idle", FolderRuntime(sequence=5))
-        mock_totals.return_value = (0, 0)
+        mock_my_id.return_value = "LOCAL-DEVICE"
+        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
         mock_status.return_value = {"state": "idle", "sequence": 5}
         mock_events.return_value = []
 
@@ -253,12 +278,14 @@ def test_watcher_sample_timing_and_failures(mock_resolve_path, mock_resolve_cred
             "sdh_ludusavi.syncthing.watcher.get_event_cursor",
             side_effect=mock_get_event_cursor_fail,
         ),
-        patch("sdh_ludusavi.syncthing.watcher.get_connection_totals") as mock_totals,
+        patch("sdh_ludusavi.syncthing.watcher.get_my_device_id") as mock_my_id,
+        patch("sdh_ludusavi.syncthing.watcher.get_connection_snapshot") as mock_snapshot,
         patch("sdh_ludusavi.syncthing.watcher.get_folder_status") as mock_status,
         patch("sdh_ludusavi.syncthing.watcher.get_events") as mock_events,
     ):
         mock_init.return_value = ("idle", FolderRuntime(sequence=5))
-        mock_totals.return_value = (0, 0)
+        mock_my_id.return_value = "LOCAL-DEVICE"
+        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
         mock_status.return_value = {"state": "idle", "sequence": 5}
         mock_events.return_value = []
 
@@ -283,7 +310,10 @@ def test_event_processing_before_sample_serialization(
 ) -> None:
     mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
     mock_folder = FolderSelection(
-        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync"
+        folder_id="test-folder",
+        label="Test Folder",
+        path="/home/deck/Sync",
+        device_ids=("DEV-A",),
     )
     mock_resolve_path.return_value = mock_folder
 
@@ -292,13 +322,15 @@ def test_event_processing_before_sample_serialization(
     with (
         patch("sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime") as mock_init,
         patch("sdh_ludusavi.syncthing.watcher.get_event_cursor") as mock_cursor,
-        patch("sdh_ludusavi.syncthing.watcher.get_connection_totals") as mock_totals,
+        patch("sdh_ludusavi.syncthing.watcher.get_my_device_id") as mock_my_id,
+        patch("sdh_ludusavi.syncthing.watcher.get_connection_snapshot") as mock_snapshot,
         patch("sdh_ludusavi.syncthing.watcher.get_folder_status") as mock_status,
         patch("sdh_ludusavi.syncthing.watcher.get_events") as mock_events,
     ):
         mock_init.return_value = ("idle", FolderRuntime(sequence=5))
         mock_cursor.return_value = 100
-        mock_totals.return_value = (0, 0)
+        mock_my_id.return_value = "LOCAL-DEVICE"
+        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
         mock_status.return_value = {"state": "idle", "sequence": 5}
         mock_events.return_value = [
             {
@@ -355,7 +387,10 @@ def test_poll_watch_returns_copied_dict() -> None:
 def test_strict_folder_status_initialization_failure(mock_resolve_path, mock_resolve_creds) -> None:
     mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
     mock_folder = FolderSelection(
-        folder_id="test-folder", label="Test Folder", path="/home/deck/Sync"
+        folder_id="test-folder",
+        label="Test Folder",
+        path="/home/deck/Sync",
+        device_ids=("DEV-A",),
     )
     mock_resolve_path.return_value = mock_folder
 
@@ -372,12 +407,14 @@ def test_strict_folder_status_initialization_failure(mock_resolve_path, mock_res
             side_effect=mock_get_initial_folder_state_and_runtime_fail,
         ),
         patch("sdh_ludusavi.syncthing.watcher.get_event_cursor") as mock_cursor,
-        patch("sdh_ludusavi.syncthing.watcher.get_connection_totals") as mock_totals,
+        patch("sdh_ludusavi.syncthing.watcher.get_my_device_id") as mock_my_id,
+        patch("sdh_ludusavi.syncthing.watcher.get_connection_snapshot") as mock_snapshot,
         patch("sdh_ludusavi.syncthing.watcher.get_folder_status") as mock_status,
         patch("sdh_ludusavi.syncthing.watcher.get_events") as mock_events,
     ):
         mock_cursor.return_value = 100
-        mock_totals.return_value = (0, 0)
+        mock_my_id.return_value = "LOCAL-DEVICE"
+        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
         mock_status.return_value = {"state": "idle", "sequence": 5}
         mock_events.return_value = []
 
@@ -393,3 +430,183 @@ def test_strict_folder_status_initialization_failure(mock_resolve_path, mock_res
         assert "initial status failed" in poll_res["message"]
 
         manager.stop_watch(watch_id)
+
+
+def _shared_folder(device_ids: tuple[str, ...]) -> FolderSelection:
+    return FolderSelection(
+        folder_id="test-folder",
+        label="Test Folder",
+        path="/home/deck/Sync",
+        device_ids=device_ids,
+    )
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+@patch("sdh_ludusavi.syncthing.watcher.get_my_device_id")
+@patch("sdh_ludusavi.syncthing.watcher.resolve_folder_by_path")
+def test_watch_manager_classifies_unshared_folder(
+    mock_resolve_path, mock_my_id, mock_resolve_creds
+) -> None:
+    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
+    mock_my_id.return_value = "LOCAL-DEVICE"
+    mock_resolve_path.return_value = _shared_folder(())
+
+    result = SyncthingWatchManager().start_watch(
+        "post_game", "Hades", "1145300", "/home/deck/Sync/Hades"
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "folder_not_shared"
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+@patch("sdh_ludusavi.syncthing.watcher.get_my_device_id")
+@patch("sdh_ludusavi.syncthing.watcher.resolve_folder_by_path")
+@patch("sdh_ludusavi.syncthing.watcher.get_connection_snapshot")
+def test_watch_manager_classifies_no_connected_peers(
+    mock_snapshot, mock_resolve_path, mock_my_id, mock_resolve_creds
+) -> None:
+    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
+    mock_my_id.return_value = "LOCAL-DEVICE"
+    mock_resolve_path.return_value = _shared_folder(("DEV-A", "DEV-B"))
+    mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset())
+
+    result = SyncthingWatchManager().start_watch(
+        "post_game", "Hades", "1145300", "/home/deck/Sync/Hades"
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "no_connected_peers"
+    # Device IDs are backend-only and must never leak through RPC.
+    assert "DEV-A" not in result["message"]
+    assert "DEV-B" not in result["message"]
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+@patch("sdh_ludusavi.syncthing.watcher.get_my_device_id")
+@patch("sdh_ludusavi.syncthing.watcher.resolve_folder_by_path")
+@patch("sdh_ludusavi.syncthing.watcher.get_connection_snapshot")
+def test_watch_manager_ignores_unrelated_connected_devices(
+    mock_snapshot, mock_resolve_path, mock_my_id, mock_resolve_creds
+) -> None:
+    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
+    mock_my_id.return_value = "LOCAL-DEVICE"
+    mock_resolve_path.return_value = _shared_folder(("DEV-A",))
+    mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"UNRELATED-DEVICE"}))
+
+    result = SyncthingWatchManager().start_watch(
+        "post_game", "Hades", "1145300", "/home/deck/Sync/Hades"
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "no_connected_peers"
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+@patch("sdh_ludusavi.syncthing.watcher.get_my_device_id")
+@patch("sdh_ludusavi.syncthing.watcher.resolve_folder_by_path")
+@patch("sdh_ludusavi.syncthing.watcher.get_connection_snapshot")
+def test_watch_manager_starts_with_one_relevant_peer_connected(
+    mock_snapshot, mock_resolve_path, mock_my_id, mock_resolve_creds
+) -> None:
+    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
+    mock_my_id.return_value = "LOCAL-DEVICE"
+    mock_resolve_path.return_value = _shared_folder(("DEV-A", "DEV-B"))
+    mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-B"}))
+
+    manager = SyncthingWatchManager()
+    with patch.object(SyncthingWatch, "start"):
+        result = manager.start_watch("post_game", "Hades", "1145300", "/home/deck/Sync/Hades")
+
+    assert result["status"] == "watching"
+    manager.stop_watch(result["watch_id"])
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+@patch("sdh_ludusavi.syncthing.watcher.get_my_device_id")
+@patch("sdh_ludusavi.syncthing.watcher.resolve_folder_by_path")
+@patch("sdh_ludusavi.syncthing.watcher.get_connection_snapshot")
+def test_watch_manager_classifies_connection_endpoint_failure(
+    mock_snapshot, mock_resolve_path, mock_my_id, mock_resolve_creds
+) -> None:
+    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
+    mock_my_id.return_value = "LOCAL-DEVICE"
+    mock_resolve_path.return_value = _shared_folder(("DEV-A",))
+    mock_snapshot.side_effect = RuntimeError("Cannot reach Syncthing API")
+
+    result = SyncthingWatchManager().start_watch(
+        "post_game", "Hades", "1145300", "/home/deck/Sync/Hades"
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "api_unavailable"
+
+
+def _stopped_watch_for_tick(device_ids: tuple[str, ...]) -> SyncthingWatch:
+    watch = SyncthingWatch(
+        "watch-1",
+        "post_game",
+        "Hades",
+        "1145300",
+        _shared_folder(device_ids),
+        None,
+        initial_snapshot=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+    )
+    watch.cursor = 100
+    watch.folder_state = "idle"
+    watch.runtime = FolderRuntime(sequence=5)
+    return watch
+
+
+def test_watch_stops_when_final_relevant_peer_disconnects() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+
+    with patch(
+        "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+        return_value=ConnectionSnapshot(0, 0, frozenset()),
+    ):
+        watch._tick(time.monotonic())
+
+    assert watch.latest_sample["status"] == "failed"
+    assert watch.latest_sample["reason"] == "no_connected_peers"
+    assert watch.stop_event.is_set()
+
+
+def test_watch_continues_while_relevant_peer_connected() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+            return_value=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_folder_status",
+            return_value={"state": "idle", "sequence": 5},
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.get_events", return_value=[]),
+    ):
+        watch._tick(time.monotonic())
+
+    assert watch.latest_sample["status"] == "activity"
+    assert not watch.stop_event.is_set()
+
+
+def test_watch_keeps_last_known_peers_when_connections_poll_fails() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+            side_effect=RuntimeError("connections endpoint down"),
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_folder_status",
+            return_value={"state": "idle", "sequence": 5},
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.get_events", return_value=[]),
+    ):
+        watch._tick(time.monotonic())
+
+    assert watch.latest_sample["status"] == "activity"
+    assert not watch.stop_event.is_set()
