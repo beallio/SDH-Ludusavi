@@ -176,7 +176,7 @@ export function usePluginUpdateController({
           const res = await checkForPluginUpdateCall(effectiveCurrentVersion, opts.force);
 
           if (activeCheckId.current !== checkId) {
-            return { status: "failed", message: "stale" } as any;
+            return { status: "failed", message: "stale", checked_at: new Date().toISOString() };
           }
 
           const elapsed_ms = Math.round(performance.now() - checkStart);
@@ -212,7 +212,7 @@ export function usePluginUpdateController({
           return res;
         } catch (err) {
           if (activeCheckId.current !== checkId) {
-            return { status: "failed", message: "stale" } as any;
+            return { status: "failed", message: "stale", checked_at: new Date().toISOString() };
           }
 
           const elapsed_ms = Math.round(performance.now() - checkStart);

@@ -27,10 +27,10 @@ const PLACEHOLDER_EXE = "/usr/bin/ifyouseethisyoufoundabug";
  */
 function getSteamClient(): SteamClientGlobal {
   const apps = getSteamClientApps();
-  if (!apps) {
+  if (!apps || typeof apps !== "object" || !("AddShortcut" in apps)) {
     throw new Error("SteamClient.Apps is unavailable in this frontend context.");
   }
-  return { Apps: apps } as any;
+  return { Apps: apps } as unknown as SteamClientGlobal;
 }
 
 /**
@@ -38,10 +38,10 @@ function getSteamClient(): SteamClientGlobal {
  */
 function getAppStore(): AppStoreGlobal {
   const store = getRuntimeAppStore();
-  if (!store?.GetAppOverviewByAppID) {
+  if (!store || typeof store !== "object" || !("GetAppOverviewByAppID" in store)) {
     throw new Error("appStore.GetAppOverviewByAppID is unavailable.");
   }
-  return store as AppStoreGlobal;
+  return store as unknown as AppStoreGlobal;
 }
 
 function sleep(ms: number): Promise<void> {

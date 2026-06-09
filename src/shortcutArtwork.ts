@@ -1,5 +1,5 @@
 import { LUDUSAVI_ARTWORK, LudusaviArtworkAsset } from "./assets/ludusaviArtwork";
-import { getSteamClientApps } from "./utils/steamRuntime";
+import { getSteamClientApps, getAppDetailsStore, asRecord } from "./utils/steamRuntime";
 import type {
   AppDetailsStoreGlobal,
   LogoPositionForApp,
@@ -45,10 +45,10 @@ const LUDUSAVI_LOGO_POSITIONING: LogoPositionForApp = {
 
 function getSteamClient(): SteamClientGlobal {
   const apps = getSteamClientApps();
-  if (!apps) {
+  if (!apps || typeof apps !== "object" || !("AddShortcut" in apps)) {
     throw new Error("SteamClient.Apps is unavailable in this frontend context.");
   }
-  return { Apps: apps } as any;
+  return { Apps: apps } as unknown as SteamClientGlobal;
 }
 
 async function localAssetUrlToBase64(assetUrl: string): Promise<string> {
@@ -104,7 +104,7 @@ async function saveLogoPosition(
     return;
   }
 
-  const appDetailsStore = (window as any).appDetailsStore as AppDetailsStoreGlobal | undefined;
+  const appDetailsStore = asRecord(getAppDetailsStore()) as unknown as AppDetailsStoreGlobal | undefined;
   await appDetailsStore?.SaveCustomLogoPosition(
     appOverview,
     LUDUSAVI_LOGO_POSITIONING.logoPosition

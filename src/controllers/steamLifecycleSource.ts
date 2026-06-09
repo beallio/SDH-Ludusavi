@@ -1,6 +1,5 @@
-import { Router } from "@decky/ui";
 import { log } from "../utils/logging";
-import { registerAppLifetimeNotification } from "../utils/steamRuntime";
+import { registerAppLifetimeNotification, getRouterRunningApps, getRouterMainRunningApp, asRecord } from "../utils/steamRuntime";
 import {
   getMainRunningSession,
   sessionFromAppOverview,
@@ -20,7 +19,7 @@ export function createSteamLifecycleSource(observer: SteamLifecycleObserver) {
   let lifecycleRegistration: unknown = null;
 
   const findRunningSessionByAppID = (appID: string): RunningSession | null => {
-    const runningApps = (Router as any).RunningApps; // Router.RunningApps
+    const runningApps = getRouterRunningApps();
     if (Array.isArray(runningApps)) {
       for (const app of runningApps) {
         const session = sessionFromAppOverview(app);
@@ -128,9 +127,9 @@ export function createSteamLifecycleSource(observer: SteamLifecycleObserver) {
 
   const checkMainApp = () => {
     try {
-      const mainApp = (Router as any).MainRunningApp;
+      const mainApp = asRecord(getRouterMainRunningApp());
       const currentAppID = mainApp?.appid ? String(mainApp.appid) : null;
-      const currentAppName = mainApp?.display_name || null;
+      const currentAppName = mainApp?.display_name ? String(mainApp.display_name) : null;
 
       if (currentAppID !== fallbackPreviousAppID) {
         if (fallbackPreviousAppID && fallbackPreviousAppName) {
@@ -182,7 +181,8 @@ export function createSteamLifecycleSource(observer: SteamLifecycleObserver) {
   };
 
   function start() {
-    const reg = registerAppLifetimeNotification((notification: AppLifetimeNotification) => {
+    const reg = registerAppLifetimeNotification((notificationUnknown: unknown) => {
+      const notification = notificationUnknown as AppLifetimeNotification;
       handleLifetimeNotification(notification);
     });
     if (reg) {

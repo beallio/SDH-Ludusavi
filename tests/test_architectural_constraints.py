@@ -5,25 +5,31 @@ from pathlib import Path
 def test_no_direct_steam_global_casts() -> None:
     # no direct Steam global casts outside steamRuntime.ts
     frontend_dir = Path("src")
-    pattern = re.compile(r"\(\s*window\s+as\s+any\s*\)\s*\.\s*(SteamClient|Steam3D)")
-    pattern2 = re.compile(r"window\.(SteamClient|Steam3D)")
+    pattern = re.compile(r"\(\s*(?:window|globalThis|Router)\s+as\s+any\s*\)")
+    pattern2 = re.compile(r"(?:window|globalThis)\.(?:SteamClient|Steam3D|appStore)")
 
     for ts_file in frontend_dir.rglob("*.ts*"):
-        if ts_file.name in ("steamRuntime.ts", "steamRuntime.test.ts", "steam.ts"):
+        if (
+            ts_file.name in ("steamRuntime.ts", "steam.ts")
+            or ts_file.name.endswith(".test.ts")
+            or ts_file.name.endswith(".test.tsx")
+        ):
             continue
         content = ts_file.read_text(encoding="utf-8")
-        assert not pattern.search(content), f"Found direct Steam global cast in {ts_file}"
-        assert not pattern2.search(content), f"Found direct Steam global reference in {ts_file}"
+        assert not pattern.search(content), f"Found direct any cast on global in {ts_file}"
+        assert not pattern2.search(content), f"Found direct global reference in {ts_file}"
 
 
 def test_no_updater_private_service_access() -> None:
     # no updater private-service access
     backend_dir = Path("py_modules/sdh_ludusavi")
     for py_file in backend_dir.rglob("*.py"):
-        if py_file.name == "updater.py" or py_file.name == "updater_service.py":
+        if py_file.name in ("updater.py", "updater_models.py", "service.py"):
             continue
         content = py_file.read_text(encoding="utf-8")
-        assert "UpdaterService" not in content, f"Found private updater service access in {py_file}"
+        assert "SDHLudusaviService" not in content and "PluginUpdater" not in content, (
+            f"Found private service access in {py_file}"
+        )
 
 
 def test_no_updater_orchestration_in_main() -> None:

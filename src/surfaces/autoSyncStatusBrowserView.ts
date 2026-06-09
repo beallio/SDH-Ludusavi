@@ -1,9 +1,9 @@
-import { Router } from "@decky/ui";
+
 import type { AutoSyncStatusBrowserView, AutoSyncStatusBrowserViewOwner, AutoSyncStatusKind, AutoSyncStatusState } from "../types";
 import { getAutoSyncStatusBounds, objectKeys } from "../utils/steam";
 import { log } from "../utils/logging";
 import { renderAutoSyncStatusHtml } from "./autoSyncStatusRenderer";
-import { getSteamClient } from "../utils/steamRuntime";
+import { getSteamClient, asRecord, getGamepadUIMainWindowInstance } from "../utils/steamRuntime";
 
 // Add state reference injection so it can access currentAutoSyncStatusState.visible
 let currentAutoSyncStatusState: AutoSyncStatusState = { status: "has_backup", visible: false, source: "hide" };
@@ -112,17 +112,18 @@ function ensureAutoSyncStatusBrowserView(): AutoSyncStatusBrowserView | null {
   }
 
   try {
-    const steamClient = getSteamClient();
-    const rootWindow = (Router as any).WindowStore?.GamepadUIMainWindowInstance;
+    const steamClient = asRecord(getSteamClient());
+    const browserViewAPI = asRecord(steamClient?.BrowserView);
+    const rootWindow = asRecord(getGamepadUIMainWindowInstance());
 
-    if (rootWindow?.CreateBrowserView) {
+    if (typeof rootWindow?.CreateBrowserView === "function") {
       log("info", "Creating BrowserView via GamepadUIMainWindowInstance", "autosync_status");
       autoSyncStatusBrowserViewOwner = rootWindow.CreateBrowserView(
         "sdh-ludusavi-autosync-status-strip",
       ) as AutoSyncStatusBrowserViewOwner;
-    } else if (steamClient?.BrowserView?.Create) {
+    } else if (typeof browserViewAPI?.Create === "function") {
       log("info", "Creating BrowserView via SteamClient.BrowserView.Create", "autosync_status");
-      autoSyncStatusBrowserViewOwner = steamClient.BrowserView.Create({
+      autoSyncStatusBrowserViewOwner = browserViewAPI.Create({
         strInitialURL: "about:blank"
       }) as AutoSyncStatusBrowserViewOwner | null;
     }
@@ -250,8 +251,11 @@ export function destroyAutoSyncStatusBrowserView() {
       needsSteamClientDestroy = false;
     }
     if (needsSteamClientDestroy && browserViewOwner) {
-      const steamClient = getSteamClient();
-      steamClient?.BrowserView?.Destroy?.(browserViewOwner);
+      const steamClient = asRecord(getSteamClient());
+      const browserViewAPI = asRecord(steamClient?.BrowserView);
+      if (typeof browserViewAPI?.Destroy === "function") {
+        browserViewAPI.Destroy(browserViewOwner);
+      }
     }
   } catch (err) {
     log("warning", `Could not destroy status strip BrowserView: ${err}`, "autosync_status");

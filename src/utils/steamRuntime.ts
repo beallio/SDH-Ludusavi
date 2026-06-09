@@ -13,7 +13,7 @@ export function isSteamRuntimeAvailable(): boolean {
   }
 }
 
-export function getSteamClient(): any {
+export function getSteamClient(): unknown {
   try {
     return (globalThis as any).SteamClient ?? (window as any).SteamClient;
   } catch {
@@ -61,7 +61,15 @@ export function getGamepadMainWindow(): Window | null {
   }
 }
 
-export function getSteamClientApps(): any {
+export function getGamepadUIMainWindowInstance(): unknown | null {
+  try {
+    return (Router as any).WindowStore?.GamepadUIMainWindowInstance ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function getSteamClientApps(): unknown {
   try {
     const client = (globalThis as any).SteamClient ?? (window as any).SteamClient;
     return client?.Apps ?? null;
@@ -70,7 +78,7 @@ export function getSteamClientApps(): any {
   }
 }
 
-export function getAppStore(): any {
+export function getAppStore(): unknown {
   try {
     return (globalThis as any).appStore ?? (window as any).appStore ?? null;
   } catch {
@@ -78,7 +86,7 @@ export function getAppStore(): any {
   }
 }
 
-export function getAppDetailsStore(): any {
+export function getAppDetailsStore(): unknown {
   try {
     return (globalThis as any).appDetailsStore ?? (window as any).appDetailsStore ?? null;
   } catch {
@@ -100,7 +108,7 @@ export function getCollectionStoreApps(): unknown[] | null {
   }
 }
 
-export function registerAppLifetimeNotification(callback: (app: any) => void): { unregister: () => void } | null {
+export function registerAppLifetimeNotification(callback: (app: unknown) => void): { unregister: () => void } | null {
   try {
     const client = (globalThis as any).SteamClient ?? (window as any).SteamClient;
     if (client?.GameSessions?.RegisterForAppLifetimeNotifications) {
@@ -121,7 +129,7 @@ export function registerAppLifetimeNotification(callback: (app: any) => void): {
   return null;
 }
 
-export function createBrowserView(): any {
+export function createBrowserView(): unknown {
   try {
     const client = (globalThis as any).SteamClient ?? (window as any).SteamClient;
     if (client?.BrowserView?.Create) {

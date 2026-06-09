@@ -399,7 +399,7 @@ class PluginUpdater:
                     effective_installed = _effective_pending_install_version(
                         pending_install, self._now
                     )
-                    if effective_installed:
+                    if effective_installed and effective_installed == current_version:
                         elapsed_ms = round((self._monotonic() - t0) * 1000)
                         self._log(
                             "info",
@@ -410,25 +410,28 @@ class PluginUpdater:
                             "checked_at": self._now().isoformat(),
                         }
 
-                if self._rate_limited_until and self._now() < self._rate_limited_until:
-                    elapsed_ms = round((self._monotonic() - t0) * 1000)
-                    self._log(
-                        "warning",
-                        f"Update check blocked by rate-limit cooldown until {self._rate_limited_until.isoformat()}, elapsed_ms={elapsed_ms}",
-                    )
-                    return {
-                        "status": "failed",
-                        "checked_at": self._now().isoformat(),
-                        "message": "Update check skipped due to rate-limit cooldown",
-                        "retry_after": self._rate_limited_until.isoformat(),
-                    }
+            if self._rate_limited_until and self._now() < self._rate_limited_until:
+                elapsed_ms = round((self._monotonic() - t0) * 1000)
+                self._log(
+                    "warning",
+                    f"Update check blocked by rate-limit cooldown until {self._rate_limited_until.isoformat()}, elapsed_ms={elapsed_ms}",
+                )
+                return {
+                    "status": "failed",
+                    "checked_at": self._now().isoformat(),
+                    "message": "Update check skipped due to rate-limit cooldown",
+                    "retry_after": self._rate_limited_until.isoformat(),
+                }
 
+            if not force:
                 last_checked_at_str = self._cache.get("last_checked_at")
                 last_checked_channel = self._cache.get("last_checked_channel")
                 last_checked_version = self._cache.get("last_checked_version")
                 if isinstance(last_checked_at_str, str):
                     try:
                         last_checked_at = datetime.datetime.fromisoformat(last_checked_at_str)
+                        if last_checked_at.tzinfo is None:
+                            last_checked_at = last_checked_at.replace(tzinfo=datetime.timezone.utc)
                         if (
                             self._now() - last_checked_at < datetime.timedelta(hours=24)
                             and last_checked_channel == self._channel
@@ -442,7 +445,7 @@ class PluginUpdater:
                                     f"Update check cache hit (within 24h, channel={last_checked_channel}, version={last_checked_version}), elapsed_ms={elapsed_ms}",
                                 )
                                 return last_result
-                    except ValueError:
+                    except (ValueError, TypeError):
                         pass
 
         self._log("info", "Fetching GitHub releases")

@@ -1,6 +1,7 @@
 import { Router } from "@decky/ui";
 import { GameStatus, RunningSession } from "../types";
 import { log } from "./logging";
+import { getRouterMainRunningApp, getGamepadMainWindow, getAppStore, getSteamClient, asRecord } from "./steamRuntime";
 
 let lastSteamUiGameContext: RunningSession | null = null;
 let lastSteamUiGameContextCapturedAt = 0;
@@ -26,11 +27,12 @@ export function normalize(name: string): string {
 
 export const getInstalledAppIdsString = async (): Promise<string | undefined> => {
   try {
-    const steamClient = (globalThis as any).SteamClient ?? (window as any).SteamClient;
-    if (!steamClient?.Apps?.GetInstalledApps) {
+    const steamClient = asRecord(getSteamClient());
+    const appsApi = asRecord(steamClient?.Apps);
+    if (typeof appsApi?.GetInstalledApps !== "function") {
       return undefined;
     }
-    const appsResult = steamClient.Apps.GetInstalledApps();
+    const appsResult = appsApi.GetInstalledApps();
     const apps = appsResult instanceof Promise ? await appsResult : appsResult;
     
     if (!Array.isArray(apps)) return undefined;
@@ -62,19 +64,20 @@ export const sessionFromAppOverview = (app: any): RunningSession | null => {
 };
 
 export function getMainRunningSession(): RunningSession | null {
-  const session = sessionFromAppOverview((Router as any).MainRunningApp);
+  const session = sessionFromAppOverview(getRouterMainRunningApp());
   return session ? { ...session, source: "running" } : null;
 }
 
 export function getMainSteamWindow(): Window | null {
-  return (Router as any).WindowStore?.GamepadUIMainWindowInstance?.BrowserWindow ?? null;
+  return getGamepadMainWindow();
 }
 
 export function getSteamAppNameFromStores(appID: string): string | null {
   const numericAppID = Number(appID);
-  const appStore = (globalThis as any).appStore ?? (window as any).appStore;
-  const overview = Number.isFinite(numericAppID)
-    ? appStore?.GetAppOverviewByAppID?.(numericAppID)
+  const appStore = asRecord(getAppStore());
+  const getAppOverviewByAppID = appStore?.GetAppOverviewByAppID;
+  const overview = Number.isFinite(numericAppID) && typeof getAppOverviewByAppID === "function"
+    ? getAppOverviewByAppID.call(appStore, numericAppID)
     : null;
   const overviewSession = sessionFromAppOverview(overview);
   if (overviewSession?.name) {
