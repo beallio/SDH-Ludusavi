@@ -574,6 +574,41 @@ export function PluginUpdateSection({
     }
   };
 
+  const getStatusContent = () => {
+    if (isChecking) {
+      return (
+        <>
+          <Spinner size="small" />
+          <span>Checking...</span>
+        </>
+      );
+    }
+    if (errorMsg) {
+      return (
+        <span style={{ color: "#f87171" }}>
+          {errorMsg.includes("interrupted") ? "Check interrupted" : "Failed to check"}
+        </span>
+      );
+    }
+    if (checkResult?.status === "current") {
+      return <span style={{ color: "#4ade80" }}>Up to date</span>;
+    }
+    if (checkResult?.status === "available") {
+      return (
+        <span style={{ color: "#60a5fa" }}>
+          {candidate?.channel === "development" && effectiveCurrentVersion.includes("dev") && !installedReleasePublishedAt
+            ? "Latest available development build"
+            : "Update available"}
+        </span>
+      );
+    }
+    return <span>Never checked</span>;
+  };
+
+  const lastCheckedText = checkResult?.checked_at
+    ? `Last checked: ${new Date(checkResult.checked_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}`
+    : undefined;
+
   return (
     <PanelSection title="Updates">
       <PanelSectionRow>
@@ -605,38 +640,11 @@ export function PluginUpdateSection({
       <PanelSectionRow>
         <Field
           label="Status"
-          description={
-            checkResult?.checked_at
-              ? `Last checked: ${new Date(checkResult.checked_at).toLocaleDateString()} at ${new Date(checkResult.checked_at).toLocaleTimeString()}`
-              : undefined
-          }
+          description={lastCheckedText}
           padding="standard"
         >
           <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px" }}>
-            {isChecking && (
-              <>
-                <Spinner size="small" />
-                <span>Checking...</span>
-              </>
-            )}
-            {!isChecking && errorMsg && (
-              <span style={{ color: "#f87171" }}>
-                {errorMsg.includes("interrupted") ? "Check interrupted" : "Failed to check"}
-              </span>
-            )}
-            {!isChecking && !errorMsg && checkResult?.status === "current" && (
-              <span style={{ color: "#4ade80" }}>Up to date</span>
-            )}
-            {!isChecking && !errorMsg && checkResult?.status === "available" && (
-              <span style={{ color: "#60a5fa" }}>
-                {candidate?.channel === "development" && effectiveCurrentVersion.includes("dev") && !installedReleasePublishedAt
-                  ? "Latest available development build"
-                  : "Update available"}
-              </span>
-            )}
-            {!isChecking && !checkResult && (
-              <span>Never checked</span>
-            )}
+            {getStatusContent()}
           </div>
         </Field>
       </PanelSectionRow>
