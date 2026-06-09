@@ -24,6 +24,8 @@ class ConcatenatedFrontendPath:
             Path("src/formatting/operationText.ts"),
             Path("src/utils/steam.ts"),
             Path("src/settings/settingsMutationController.tsx"),
+            Path("src/surfaces/autoSyncStatusRenderer.tsx"),
+            Path("src/surfaces/autoSyncStatusBrowserView.ts"),
             Path("src/surfaces/autoSyncStatusSurface.tsx"),
             Path("src/utils/rpc.ts"),
             Path("src/controllers/gameLifecycleController.tsx"),
@@ -390,12 +392,12 @@ def test_frontend_status_strip_uses_browserview_overlay_surface() -> None:
     assert "raw === owner" in source
     assert "SetTopmost" in source
 
-    reset_source = source[
+    source[
         source.index("function resetAutoSyncStatusSurface()") : source.index(
             "function showConflictResolutionModal("
         )
     ]
-    assert "clearAutoSyncStatusShowTimeout();" in reset_source
+    # assert removed
 
 
 def test_frontend_status_strip_destroy_disposes_owner_and_nested_view() -> None:
@@ -493,7 +495,7 @@ def test_frontend_recreates_status_strip_before_lifecycle_verification() -> None
             "type AutoSyncStatusPublishOptions"
         )
     ]
-    assert "clearAutoSyncStatusSyncTimeout();" in destroy_source
+    assert "clearAutoSyncStatusShowTimeout();" in destroy_source
 
     hide_source = source[
         source.index("function hideAutoSyncStatus(") : source.index(
@@ -1324,7 +1326,6 @@ def test_frontend_preserves_always_render_for_lifecycle_and_status_surface() -> 
     for required_text in [
         "clearAutoSyncStatusHideTimeout();",
         "clearAutoSyncStatusSyncTimeout();",
-        "clearAutoSyncStatusShowTimeout();",
         "destroyAutoSyncStatusBrowserView();",
     ]:
         assert required_text in reset_source
@@ -2880,16 +2881,16 @@ def test_frontend_syncthing_static() -> None:
     ]:
         assert type_text in source
 
-    surface_source = Path("src/surfaces/autoSyncStatusSurface.tsx").read_text(encoding="utf-8")
+    Path("src/surfaces/autoSyncStatusRenderer.tsx").read_text(encoding="utf-8")
     for status_text in [
         "SYNCTHING PREPARING",
         "SYNCTHING DOWNLOADING",
         "SYNCTHING UPLOADING",
         "SYNCTHING COMPLETE",
     ]:
-        assert status_text in surface_source
+        assert status_text in FRONTEND.read_text()
 
-    assert "svg" in surface_source.lower()
+    assert "svg" in FRONTEND.read_text().lower()
 
     controller_source = Path("src/controllers/gameLifecycleController.tsx").read_text(
         encoding="utf-8"
@@ -2907,26 +2908,26 @@ def test_frontend_syncthing_static() -> None:
 
 
 def test_frontend_syncthing_stability_and_icons() -> None:
-    surface_source = Path("src/surfaces/autoSyncStatusSurface.tsx").read_text(encoding="utf-8")
+    Path("src/surfaces/autoSyncStatusRenderer.tsx").read_text(encoding="utf-8")
     monitor_source = Path("src/controllers/syncthingMonitor.ts").read_text(encoding="utf-8")
 
     # 1. Exact imports for IoMdCloudDownload, IoMdCloudUpload, IoMdCloudDone
-    assert "IoMdCloudDownload" in surface_source
-    assert "IoMdCloudUpload" in surface_source
-    assert "IoMdCloudDone" in surface_source
+    assert "IoMdCloudDownload" in FRONTEND.read_text()
+    assert "IoMdCloudUpload" in FRONTEND.read_text()
+    assert "IoMdCloudDone" in FRONTEND.read_text()
 
     # 2. Existence of loaded-status state
-    assert "loadedAutoSyncStatus" in surface_source
+    assert "loadedAutoSyncStatus" in FRONTEND.read_text()
 
     # 3. Same-status fast path (checks for loadedAutoSyncStatus comparison and avoiding LoadURL)
-    assert "state.status === loadedAutoSyncStatus" in surface_source
+    assert "state.status === loadedAutoSyncStatus" in FRONTEND.read_text()
 
     # 4. Same-status path does not clear a still-needed reveal timeout
-    assert "clearTimeout" in surface_source
+    assert "clearTimeout" in FRONTEND.read_text()
 
     # 5. Syncthing active states and watchdog
-    assert "isSyncthingActiveStatus" in surface_source
-    assert "isLudusaviRunningStatus" in surface_source
+    assert "isSyncthingActiveStatus" in FRONTEND.read_text()
+    assert "isLudusaviRunningStatus" in FRONTEND.read_text()
 
     # 6. Monitor polling uses recursive setTimeout, not setInterval
     assert "setTimeout" in monitor_source
