@@ -1,82 +1,20 @@
 from __future__ import annotations
 
 import datetime
-import functools
-import json
 import re
-import ssl
 import time
-import urllib.error
-import urllib.request
-from dataclasses import dataclass
-from typing import Any, List, Literal, Mapping
+from typing import Any, List, Literal
 
 from sdh_ludusavi._version import resolve_version
 
 
-@functools.total_ordering
-@dataclass(frozen=True)
-class ParsedPluginVersion:
-    major: int
-    minor: int
-    patch: int
-    is_dev: bool = False
-    dev_suffix: str | None = None
-    build_metadata: str | None = None
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, ParsedPluginVersion):
-            return NotImplemented
-        return (
-            self.major == other.major
-            and self.minor == other.minor
-            and self.patch == other.patch
-            and self.is_dev == other.is_dev
-        )
-
-    def __lt__(self, other: object) -> bool:
-        if not isinstance(other, ParsedPluginVersion):
-            return NotImplemented
-        self_base = (self.major, self.minor, self.patch)
-        other_base = (other.major, other.minor, other.patch)
-        if self_base != other_base:
-            return self_base < other_base
-        if self.is_dev and not other.is_dev:
-            return True
-        return False
-
-
-@dataclass(frozen=True)
-class ReleaseManifest:
-    schema_version: int
-    plugin_name: str
-    package_name: str
-    version: str
-    source_version: str
-    tag: str
-    channel: Literal["stable", "dev"]
-    asset_name: str
-    sha256: str
-    generated_at: str
-
-
-@dataclass(frozen=True)
-class UpdateCandidate:
-    version: str
-    tag: str
-    channel: Literal["stable", "development"]
-    artifact_url: str
-    sha256: str
-    release_url: str
-    published_at: str
-    action: Literal["update", "move_to_stable", "downgrade_to_stable"]
-
-
-@dataclass(frozen=True)
-class JsonResponse:
-    status: int
-    headers: Mapping[str, str]
-    body: dict[str, Any] | list[Any]
+from sdh_ludusavi.updater_client import ReleaseClient, GitHubReleaseClient
+from sdh_ludusavi.updater_models import (
+    ParsedPluginVersion,
+    UpdateCandidate,
+    parse_release_manifest,
+    as_string_key_mapping,
+)
 
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-dev\.([a-zA-Z0-9.-]+))?(?:\+([a-zA-Z0-9.-]+))?$")
@@ -101,38 +39,6 @@ def parse_plugin_version(version_str: str) -> ParsedPluginVersion | None:
         dev_suffix=dev_suffix,
         build_metadata=build_metadata,
     )
-
-
-def _get_user_agent() -> str:
-    try:
-        ver = resolve_version()
-    # Intentionally broad
-    except Exception:
-        ver = "0.1.0"
-    return f"SDH-Ludusavi/{ver}"
-
-
-def _get_ssl_context() -> ssl.SSLContext:
-    from pathlib import Path
-
-    context = ssl.create_default_context()
-    standard_paths = [
-        "/etc/ssl/certs/ca-certificates.crt",
-        "/etc/pki/tls/certs/ca-bundle.crt",
-        "/etc/ssl/ca-bundle.pem",
-        "/etc/pki/tls/cacert.pem",
-        "/etc/ssl/certs/ca-bundle.crt",
-    ]
-    for path_str in standard_paths:
-        path = Path(path_str)
-        if path.exists():
-            try:
-                context.load_verify_locations(cafile=str(path))
-                break
-            # Intentionally broad
-            except Exception:
-                pass
-    return context
 
 
 def _is_fresh_pending_install(pending: Any) -> bool:
@@ -192,42 +98,14 @@ def _effective_pending_install_version(pending: Any) -> str | None:
     return None
 
 
-def fetch_json(url: str, *, timeout_seconds: float = 15.0) -> JsonResponse:
-    req = urllib.request.Request(
-        url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2026-03-10",
-            "User-Agent": _get_user_agent(),
-        },
-    )
-    try:
-        with urllib.request.urlopen(
-            req, timeout=timeout_seconds, context=_get_ssl_context()
-        ) as response:
-            status = response.status
-            resp_headers = {k.lower(): v for k, v in response.headers.items()}
-            body_bytes = response.read()
-            body = json.loads(body_bytes.decode("utf-8"))
-            return JsonResponse(status=status, headers=resp_headers, body=body)
-    except urllib.error.HTTPError as e:
-        resp_headers = {k.lower(): v for k, v in e.headers.items()}
-        try:
-            body = json.loads(e.read().decode("utf-8"))
-        # Intentionally broad
-        except Exception:
-            body = {}
-        return JsonResponse(status=e.code, headers=resp_headers, body=body)
-    # Intentionally broad
-    except Exception as e:
-        return JsonResponse(status=500, headers={}, body={"error": str(e)})
-
-
-def validate_release_candidate(release: dict[str, Any]) -> UpdateCandidate | None:
-    if release.get("draft", False):
+def validate_release_candidate(release: object, client: ReleaseClient) -> UpdateCandidate | None:
+    release_record = as_string_key_mapping(release)
+    if release_record is None:
+        return None
+    if release_record.get("draft", False):
         return None
 
-    tag_name = release.get("tag_name", "")
+    tag_name = str(release_record.get("tag_name", ""))
     if not tag_name or not tag_name.startswith("v"):
         return None
 
@@ -238,63 +116,66 @@ def validate_release_candidate(release: dict[str, Any]) -> UpdateCandidate | Non
 
     expected_manifest_name = f"SDH-Ludusavi-{tag_name}.manifest.json"
 
-    assets = release.get("assets", [])
-    manifest_assets = [a for a in assets if a.get("name", "") == expected_manifest_name]
+    assets = release_record.get("assets", [])
+    if not isinstance(assets, list):
+        return None
+    manifest_assets = []
+    for a in assets:
+        a_dict = as_string_key_mapping(a)
+        if a_dict is not None and str(a_dict.get("name", "")) == expected_manifest_name:
+            manifest_assets.append(a_dict)
     if len(manifest_assets) != 1:
         return None
     manifest_asset = manifest_assets[0]
 
-    resp = fetch_json(manifest_asset["browser_download_url"])
-    if resp.status != 200 or not isinstance(resp.body, dict):
+    resp = client.get_manifest(str(manifest_asset.get("browser_download_url", "")))
+    if resp.status != 200:
         return None
-    manifest = resp.body
+
+    manifest = parse_release_manifest(resp.body)
+    if manifest is None:
+        return None
 
     # Validate manifest structure & field requirements
-    if manifest.get("schemaVersion") != 1:
+    if manifest.plugin_name != "SDH-Ludusavi":
         return None
-    if manifest.get("pluginName") != "SDH-Ludusavi":
+    if manifest.package_name != "sdh-ludusavi":
         return None
-    if manifest.get("packageName") != "sdh-ludusavi":
+    if manifest.tag != release_record.get("tag_name"):
         return None
-    if manifest.get("tag") != release.get("tag_name"):
-        return None
-    if "v" + str(manifest.get("version")) != release.get("tag_name"):
+    if "v" + manifest.version != release_record.get("tag_name"):
         return None
 
     # Validate channel matches prerelease
-    manifest_channel = manifest.get("channel")
-    is_prerelease = release.get("prerelease", False)
-    if manifest_channel == "stable" and is_prerelease:
+    is_prerelease = bool(release_record.get("prerelease", False))
+    if manifest.channel == "stable" and is_prerelease:
         return None
-    if manifest_channel == "dev" and not is_prerelease:
-        return None
-    if manifest_channel not in ("stable", "dev"):
-        return None
-
-    # Validate sha256 syntax
-    sha256 = manifest.get("sha256")
-    if not isinstance(sha256, str) or not re.match(r"^[a-fA-F0-9]{64}$", sha256):
+    if manifest.channel == "dev" and not is_prerelease:
         return None
 
     # Validate exactly one ZIP matching manifest assetName
-    zip_assets = [a for a in assets if a.get("name", "").endswith(".zip")]
+    zip_assets = []
+    for a in assets:
+        a_dict = as_string_key_mapping(a)
+        if a_dict is not None and str(a_dict.get("name", "")).endswith(".zip"):
+            zip_assets.append(a_dict)
     if len(zip_assets) != 1:
         return None
     zip_asset = zip_assets[0]
-    if zip_asset.get("name") != manifest.get("assetName"):
+    if str(zip_asset.get("name", "")) != manifest.asset_name:
         return None
 
     channel: Literal["stable", "development"] = (
-        "stable" if manifest_channel == "stable" else "development"
+        "stable" if manifest.channel == "stable" else "development"
     )
     return UpdateCandidate(
-        version=manifest["version"],
-        tag=manifest["tag"],
+        version=manifest.version,
+        tag=manifest.tag,
         channel=channel,
-        artifact_url=zip_asset["browser_download_url"],
-        sha256=sha256,
-        release_url=release.get("html_url", ""),
-        published_at=release.get("published_at", ""),
+        artifact_url=str(zip_asset.get("browser_download_url", "")),
+        sha256=manifest.sha256,
+        release_url=str(release_record.get("html_url", "")),
+        published_at=str(release_record.get("published_at", "")),
         action="update",
     )
 
@@ -412,7 +293,8 @@ def check_for_update(
     if service:
         service.log("info", f"Fetching GitHub releases from {url}")
     t0 = time.monotonic()
-    resp = fetch_json(url)
+    client = GitHubReleaseClient()
+    resp = client.list_releases()
     elapsed_ms = round((time.monotonic() - t0) * 1000)
     if service:
         service.log(
@@ -449,8 +331,9 @@ def check_for_update(
             ).isoformat()
 
         msg = "Rate limit exceeded"
-        if isinstance(resp.body, dict) and "message" in resp.body:
-            msg = str(resp.body["message"])
+        body_record = as_string_key_mapping(resp.body)
+        if body_record is not None and "message" in body_record:
+            msg = str(body_record["message"])
 
         if service:
             service.log(
@@ -467,11 +350,12 @@ def check_for_update(
 
     if resp.status != 200 or not isinstance(resp.body, list):
         msg = "Failed to check for updates"
-        if isinstance(resp.body, dict):
-            if "message" in resp.body:
-                msg = str(resp.body["message"])
-            elif "error" in resp.body:
-                msg = str(resp.body["error"])
+        body_record = as_string_key_mapping(resp.body)
+        if body_record is not None:
+            if "message" in body_record:
+                msg = str(body_record["message"])
+            elif "error" in body_record:
+                msg = str(body_record["error"])
         if service:
             service.log(
                 "error",
@@ -488,7 +372,7 @@ def check_for_update(
     for r in resp.body:
         if not isinstance(r, dict):
             continue
-        c = validate_release_candidate(r)
+        c = validate_release_candidate(r, client)
         if c:
             candidates.append(c)
     parse_elapsed_ms = round((time.monotonic() - t1) * 1000)
@@ -540,12 +424,12 @@ def revalidate_install_candidate(candidate_dict: dict[str, Any]) -> dict[str, An
     if not tag:
         raise ValueError("Candidate missing tag")
 
-    url = f"https://api.github.com/repos/beallio/SDH-Ludusavi/releases/tags/{tag}"
-    resp = fetch_json(url)
+    client = GitHubReleaseClient()
+    resp = client.list_releases()
     if resp.status != 200 or not isinstance(resp.body, dict):
         raise ValueError(f"Failed to fetch release for tag {tag}: {resp.status}")
 
-    validated = validate_release_candidate(resp.body)
+    validated = validate_release_candidate(resp.body, client)
     if not validated:
         raise ValueError("Release validation failed during revalidaion")
 
@@ -785,10 +669,10 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
             "message": "Candidate missing tag",
         }
 
-    url = f"https://api.github.com/repos/beallio/SDH-Ludusavi/releases/tags/{tag}"
-    service.log("info", f"Fetching candidate release from {url}")
+    service.log("info", f"Fetching candidate release for tag {tag}")
     t1 = time.monotonic()
-    resp = fetch_json(url)
+    client = GitHubReleaseClient()
+    resp = client.get_release(tag)
     fetch_elapsed_ms = round((time.monotonic() - t1) * 1000)
     service.log(
         "info",
@@ -836,8 +720,9 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
             service._save_state()
 
         msg = "Rate limit exceeded"
-        if isinstance(resp.body, dict) and "message" in resp.body:
-            msg = str(resp.body["message"])
+        body_record = as_string_key_mapping(resp.body)
+        if body_record is not None and "message" in body_record:
+            msg = str(body_record["message"])
 
         service.log(
             "warning",
@@ -860,7 +745,7 @@ def revalidate_plugin_update(service: Any, candidate: dict[str, Any]) -> dict[st
             "message": msg,
         }
 
-    validated = validate_release_candidate(resp.body)
+    validated = validate_release_candidate(resp.body, client)
     if not validated:
         msg = "Release validation failed during revalidation"
         elapsed_ms = round((time.monotonic() - t0) * 1000)

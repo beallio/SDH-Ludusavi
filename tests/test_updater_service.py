@@ -396,7 +396,17 @@ def test_revalidate_plugin_update_respects_rate_limit(tmp_path: Path, monkeypatc
         fetch_called = True
         raise RuntimeError("Should not be called")
 
-    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_json)
+    class MockClient:
+        def list_releases(self):
+            return mock_fetch_json("releases")
+
+        def get_release(self, tag):
+            return mock_fetch_json(tag)
+
+        def get_manifest(self, url):
+            return mock_fetch_json(url)
+
+    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient())
 
     # Call revalidate_plugin_update
     res = service.revalidate_plugin_update(candidate)
@@ -426,7 +436,7 @@ def test_revalidate_plugin_update_records_rate_limit(tmp_path: Path, monkeypatch
 
     # Mock fetch_json to return 403 rate limit response
     import sdh_ludusavi.updater as updater_mod
-    from sdh_ludusavi.updater import JsonResponse
+    from sdh_ludusavi.updater_models import JsonResponse
 
     def mock_fetch_json(url: str, **kwargs) -> Any:
         return JsonResponse(
@@ -438,7 +448,17 @@ def test_revalidate_plugin_update_records_rate_limit(tmp_path: Path, monkeypatch
             body={"message": "API rate limit exceeded"},
         )
 
-    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_json)
+    class MockClient:
+        def list_releases(self):
+            return mock_fetch_json("releases")
+
+        def get_release(self, tag):
+            return mock_fetch_json(tag)
+
+        def get_manifest(self, url):
+            return mock_fetch_json(url)
+
+    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient())
 
     # Call revalidate_plugin_update
     res = service.revalidate_plugin_update(candidate)
@@ -471,7 +491,7 @@ def test_revalidate_plugin_update_does_not_hold_lock_during_fetch(
     }
 
     import sdh_ludusavi.updater as updater_mod
-    from sdh_ludusavi.updater import JsonResponse
+    from sdh_ludusavi.updater_models import JsonResponse
 
     lock_held_during_fetch = None
 
@@ -512,24 +532,31 @@ def test_revalidate_plugin_update_does_not_hold_lock_during_fetch(
     # We mock the second fetch_json call (for the manifest) to return manifest body
     manifest_fetched = False
 
-    def mock_fetch_json_routing(url: str, **kwargs) -> Any:
-        nonlocal manifest_fetched
-        if "tags/" in url:
-            return mock_fetch_json(url, **kwargs)
-        else:
+    class MockClient:
+        def get_release(self, tag):
+            return mock_fetch_json(tag)
+
+        def get_manifest(self, url):
+            nonlocal manifest_fetched
             manifest_fetched = True
             return JsonResponse(
                 status=200,
                 headers={},
                 body={
-                    "name": "SDH-Ludusavi",
+                    "schemaVersion": 1,
+                    "pluginName": "SDH-Ludusavi",
+                    "packageName": "sdh-ludusavi",
                     "version": "0.2.1",
-                    "manifest_version": 2,
+                    "sourceVersion": "0.2.1",
+                    "tag": "v0.2.1",
+                    "channel": "stable",
+                    "assetName": "SDH-Ludusavi-v0.2.1.zip",
                     "sha256": "a" * 64,
+                    "generatedAt": "2026-05-30T12:00:00Z",
                 },
             )
 
-    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_json_routing)
+    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient())
 
     service.revalidate_plugin_update(candidate)
 
@@ -542,7 +569,7 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     import sys
     import types
     import asyncio
-    from sdh_ludusavi.updater import JsonResponse
+    from sdh_ludusavi.updater_models import JsonResponse
     import sdh_ludusavi.updater as updater_mod
 
     settings_file = tmp_path / "settings.json"
@@ -596,11 +623,21 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     def mock_fetch_success(url: str, **kwargs) -> JsonResponse:
         if "manifest" in url or "manifest.json" in url:
             return JsonResponse(status=200, headers={}, body=manifest)
-        if "tags/" in url:
-            return JsonResponse(status=200, headers={}, body=releases[0])
-        return JsonResponse(status=200, headers={}, body=releases)
+        if url == "releases":
+            return JsonResponse(status=200, headers={}, body=releases)
+        return JsonResponse(status=200, headers={}, body=releases[0])
 
-    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_success)
+    class MockClient:
+        def list_releases(self):
+            return mock_fetch_success("releases")
+
+        def get_release(self, tag):
+            return mock_fetch_success(tag)
+
+        def get_manifest(self, url):
+            return mock_fetch_success(url)
+
+    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient())
 
     # Let's call main.py Plugin.check_for_plugin_update indirectly or directly via service/helpers
     # For testing, we mock decky for main.py import
@@ -675,10 +712,18 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     logged.clear()
 
     # D. Failed fetch logging
+    class MockClientFailed:
+        def list_releases(self):
+            return JsonResponse(status=500, headers={}, body={"error": "fetch failed"})
+
+        def get_release(self, tag):
+            return JsonResponse(status=500, headers={}, body={"error": "fetch failed"})
+
+        def get_manifest(self, url):
+            return JsonResponse(status=500, headers={}, body={"error": "fetch failed"})
+
     monkeypatch.setattr(
-        updater_mod,
-        "fetch_json",
-        lambda url, **kwargs: JsonResponse(status=500, headers={}, body={"error": "fetch failed"}),
+        updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClientFailed()
     )
     res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
     assert res["status"] == "failed"
@@ -689,10 +734,18 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     logged.clear()
 
     # E. Current logging
+    class MockClientLambdaCurrent:
+        def list_releases(self):
+            return JsonResponse(status=200, headers={}, body=[])
+
+        def get_release(self, tag):
+            return JsonResponse(status=200, headers={}, body=[])
+
+        def get_manifest(self, url):
+            return JsonResponse(status=200, headers={}, body=[])
+
     monkeypatch.setattr(
-        updater_mod,
-        "fetch_json",
-        lambda url, **kwargs: JsonResponse(status=200, headers={}, body=[]),
+        updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClientLambdaCurrent()
     )
     res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
     assert res["status"] == "current"
@@ -727,11 +780,17 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     logged.clear()
 
     # B. Fetch failure revalidation
-    monkeypatch.setattr(
-        updater_mod,
-        "fetch_json",
-        lambda url, **kwargs: JsonResponse(status=404, headers={}, body={}),
-    )
+    class MockClient404:
+        def list_releases(self):
+            return JsonResponse(status=404, headers={}, body={})
+
+        def get_release(self, tag):
+            return JsonResponse(status=404, headers={}, body={})
+
+        def get_manifest(self, url):
+            return JsonResponse(status=404, headers={}, body={})
+
+    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient404())
     res = service.revalidate_plugin_update(candidate)
     assert res["status"] == "failed"
     assert any(
@@ -743,10 +802,18 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
 
     # C. Validation failure revalidation
     # Mock tags fetch to return invalid release object
+    class MockClientDraft2:
+        def list_releases(self):
+            return JsonResponse(status=200, headers={}, body={"draft": True})
+
+        def get_release(self, tag):
+            return JsonResponse(status=200, headers={}, body={"draft": True})
+
+        def get_manifest(self, url):
+            return JsonResponse(status=200, headers={}, body={"draft": True})
+
     monkeypatch.setattr(
-        updater_mod,
-        "fetch_json",
-        lambda url, **kwargs: JsonResponse(status=200, headers={}, body={"draft": True}),
+        updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClientDraft2()
     )
     res = service.revalidate_plugin_update(candidate)
     assert res["status"] == "failed"
@@ -757,7 +824,17 @@ def test_updater_backend_logging_and_privacy(tmp_path: Path, monkeypatch) -> Non
     logged.clear()
 
     # D. Mismatch failures revalidation (e.g. SHA mismatch)
-    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_success)
+    class MockClientMismatch:
+        def list_releases(self):
+            return mock_fetch_success("releases")
+
+        def get_release(self, tag):
+            return mock_fetch_success(tag)
+
+        def get_manifest(self, url):
+            return mock_fetch_success(url)
+
+    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient())
     bad_sha_candidate = dict(candidate, sha256="e" * 64)
     res = service.revalidate_plugin_update(bad_sha_candidate)
     assert res["status"] == "failed"
@@ -855,7 +932,7 @@ def test_updater_cache_version_aware_and_invalidation(tmp_path: Path, monkeypatc
     import types
     from sdh_ludusavi.service import SDHLudusaviService
     from sdh_ludusavi.persistence import JsonSettingsStore
-    from sdh_ludusavi.updater import JsonResponse
+    from sdh_ludusavi.updater_models import JsonResponse
 
     settings_file = tmp_path / "settings.json"
     cache_file = tmp_path / "cache.json"
@@ -900,16 +977,18 @@ def test_updater_cache_version_aware_and_invalidation(tmp_path: Path, monkeypatc
     # Mock release fetch: return a release candidate
     import sdh_ludusavi.updater as updater_mod
 
+    class MockClientLambda:
+        def list_releases(self):
+            return JsonResponse(status=200, headers={}, body=releases)
+
+        def get_release(self, tag):
+            return JsonResponse(status=200, headers={}, body=releases)
+
+        def get_manifest(self, url):
+            return JsonResponse(status=200, headers={}, body=manifest)
+
     monkeypatch.setattr(
-        updater_mod,
-        "fetch_json",
-        lambda url, **kwargs: (
-            JsonResponse(status=200, headers={}, body=manifest)
-            if "manifest" in url or "manifest.json" in url
-            else JsonResponse(status=200, headers={}, body="a" * 64)
-            if "sha256" in url
-            else JsonResponse(status=200, headers={}, body=releases)
-        ),
+        updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClientLambda()
     )
 
     # Setup plugin for main.py check_for_plugin_update
@@ -956,7 +1035,17 @@ def test_updater_cache_version_aware_and_invalidation(tmp_path: Path, monkeypatc
             return JsonResponse(status=200, headers={}, body="a" * 64)
         return JsonResponse(status=200, headers={}, body=releases)
 
-    monkeypatch.setattr(updater_mod, "fetch_json", mock_fetch_counted)
+    class MockClient:
+        def list_releases(self):
+            return mock_fetch_counted("releases")
+
+        def get_release(self, tag):
+            return mock_fetch_counted(tag)
+
+        def get_manifest(self, url):
+            return mock_fetch_counted(url)
+
+    monkeypatch.setattr(updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClient())
 
     # Call with same version: cached hit, fetch_calls should remain 0
     res2 = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=False))
@@ -971,16 +1060,18 @@ def test_updater_cache_version_aware_and_invalidation(tmp_path: Path, monkeypatc
 
     # 2. Invalidation tests
     # Reset to available cache
+    class MockClientLambdaInvalidation:
+        def list_releases(self):
+            return JsonResponse(status=200, headers={}, body=releases)
+
+        def get_release(self, tag):
+            return JsonResponse(status=200, headers={}, body=releases)
+
+        def get_manifest(self, url):
+            return JsonResponse(status=200, headers={}, body=manifest)
+
     monkeypatch.setattr(
-        updater_mod,
-        "fetch_json",
-        lambda url, **kwargs: (
-            JsonResponse(status=200, headers={}, body=manifest)
-            if "manifest" in url or "manifest.json" in url
-            else JsonResponse(status=200, headers={}, body="a" * 64)
-            if "sha256" in url
-            else JsonResponse(status=200, headers={}, body=releases)
-        ),
+        updater_mod, "GitHubReleaseClient", lambda *args, **kwargs: MockClientLambda()
     )
     res = asyncio.run(plugin.check_for_plugin_update("0.2.0", force=True))
     assert service._update_check_cache.get("last_result") is not None
