@@ -167,6 +167,31 @@ The frontend strictly isolates untyped runtime access and splits massive compone
 
 ## Technical Reference: Status & Operations
 
+### Frontend Diagnostic Logging
+
+Frontend user flows log through `src/utils/logging.ts`, which writes to the matching
+browser console level and forwards the same entry to the backend diagnostic log buffer.
+Structured UI entries use this format:
+
+```text
+event_name: field_name=value other_field="string value"
+```
+
+Fields are sorted for stable searching. UI code should log transitions at controller
+and action boundaries: requested, started, completed, skipped, superseded, failed, or
+rolled back. Do not log React renders, full settings objects, environment values, full
+checksums, or high-frequency polling samples.
+
+The primary operation labels are:
+
+- `ui`: plugin, QAM, initialization, and cache-selection events.
+- `ui_settings`: optimistic settings requests and persistence outcomes.
+- `refresh`: manual game-list refresh events.
+- `Backup` / `Restore`: manual game operations.
+- `launcher`: Ludusavi launcher actions.
+- `logs`: plugin and Ludusavi log-modal actions.
+- `lifecycle`: Steam lifecycle source setup, fallback, and failures.
+
 ### Game Status Values
 - `has_backup`: Ludusavi recognizes at least one backup for the game.
 - `needs_first_backup`: Ludusavi recognizes the game, but no backup exists yet.

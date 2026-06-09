@@ -45,7 +45,7 @@ import type {
   RpcStatus,
   Settings
 } from "../../types";
-import { log } from "../../utils/logging";
+import { log, logUiEvent } from "../../utils/logging";
 import {
   captureSteamUiGameContext,
   findGameForRunningSession,
@@ -205,9 +205,10 @@ export function LudusaviContent({
   useEffect(() => {
     isMounted.current = true;
     clearLastQueuedSelectedGame();
-    log("info", "Plugin mounted, starting initial load");
+    logUiEvent("qam_content_mounted", {}, "info");
     void loadInitial();
     return () => {
+      logUiEvent("qam_content_unmounted", {}, "info");
       isMounted.current = false;
     };
   }, []);
@@ -218,6 +219,15 @@ export function LudusaviContent({
 
   useEffect(() => {
     if (isQuickAccessVisible && !wasQuickAccessVisible.current) {
+      logUiEvent(
+        "qam_opened",
+        {
+          game_count: games.length,
+          selected_game: selectedGame || null,
+          settings_loaded: ludusaviState.settings !== null,
+        },
+        "info",
+      );
       pendingCurrentGameSelection.current = true;
       const resetDelays = [50, 150, 350];
       resetQuickAccessScroll(qamContentRef.current);
@@ -227,6 +237,8 @@ export function LudusaviContent({
           delay
         );
       });
+    } else if (!isQuickAccessVisible && wasQuickAccessVisible.current) {
+      logUiEvent("qam_closed", { selected_game: selectedGame || null }, "info");
     }
     wasQuickAccessVisible.current = isQuickAccessVisible;
   }, [isQuickAccessVisible]);
@@ -253,6 +265,15 @@ export function LudusaviContent({
   const loadInitial = async () => {
     const isWarmed = ludusaviState.settings !== null && ludusaviState.games !== null;
     if (!isMounted.current) return;
+    const startedAt = performance.now();
+    logUiEvent(
+      "initial_load_started",
+      {
+        cached_game_count: ludusaviState.games?.length ?? 0,
+        warmed: isWarmed,
+      },
+      "info",
+    );
     if (!isWarmed) {
       setBusyLabel("Loading");
     }
@@ -276,7 +297,25 @@ export function LudusaviContent({
       if (isMounted.current) {
         setOperation(loadedOperation);
       }
+      logUiEvent(
+        "initial_load_completed",
+        {
+          elapsed_ms: Math.round(performance.now() - startedAt),
+          operation_running: loadedOperation.is_running,
+          warmed: isWarmed,
+        },
+        "info",
+      );
     } catch (error) {
+      logUiEvent(
+        "initial_load_failed",
+        {
+          elapsed_ms: Math.round(performance.now() - startedAt),
+          message: error instanceof Error ? error.message : String(error),
+          warmed: isWarmed,
+        },
+        "error",
+      );
       log("error", `Initial load failed: ${error}`);
     } finally {
       activeInitPromise = null;
@@ -370,13 +409,26 @@ export function LudusaviContent({
 
     const cacheCurrent = !isRpcStatus(cacheCurrentResult) && cacheCurrentResult === true;
     const preferredGame = isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game;
+    logUiEvent("game_list_source_selected", {
+      cache_current: cacheCurrent,
+      installed_app_ids_changed: installedAppIdsChanged,
+      preferred_game: preferredGame,
+      warmed: isWarmed,
+    });
 
     if (cacheCurrent && ludusaviState.games) {
       applyCachedRefreshResult(preferredGame);
+      logUiEvent("game_list_loaded_from_cache", {
+        game_count: ludusaviState.games.length,
+      }, "info");
     } else {
       const refreshed = await refreshGamesCall(false, installedAppIds);
       if (applyRefreshResult(refreshed, preferredGame)) {
         ludusaviStore.setInstalledAppIds(installedAppIds);
+        logUiEvent("game_list_refreshed", {
+          game_count: isRpcStatus(refreshed) ? 0 : refreshed.games.length,
+          reason: installedAppIdsChanged ? "installed_apps_changed" : "cache_stale_or_cold",
+        }, "info");
       }
     }
   };
@@ -452,7 +504,8 @@ export function LudusaviContent({
   };
 
   const refreshGames = async () => {
-    log("info", "Manual refresh triggered");
+    const startedAt = performance.now();
+    logUiEvent("manual_refresh_started", { previous_game_count: games.length }, "info", "refresh");
     setBusyLabel("Refreshing games");
     try {
       const installedAppIds = await getInstalledAppIdsString();
@@ -481,8 +534,27 @@ export function LudusaviContent({
           setOperation(operationStatus);
           setLogs(recentLogs);
         }
+        logUiEvent(
+          "manual_refresh_completed",
+          {
+            elapsed_ms: Math.round(performance.now() - startedAt),
+            game_count: result.games.length,
+            log_count: recentLogs.length,
+          },
+          "info",
+          "refresh",
+        );
       }
     } catch (error) {
+      logUiEvent(
+        "manual_refresh_failed",
+        {
+          elapsed_ms: Math.round(performance.now() - startedAt),
+          message: error instanceof Error ? error.message : String(error),
+        },
+        "error",
+        "refresh",
+      );
       log("error", `Manual refresh failed: ${error}`);
       notify(
         ludusaviStore,
@@ -499,12 +571,13 @@ export function LudusaviContent({
   };
 
   const showLudusaviLogs = async () => {
-    log("info", "Showing Ludusavi logs");
+    logUiEvent("ludusavi_logs_requested", {}, "info", "logs");
     try {
       const result = await getLudusaviLogs();
       const logs =
         typeof result === "string" ? result : result.message || `Failed to fetch logs: ${result.status}`;
       showModal(<LudusaviLogModal logs={logs} />);
+      logUiEvent("ludusavi_logs_opened", { character_count: logs.length }, "info", "logs");
     } catch (error) {
       log("error", `Failed to fetch Ludusavi logs: ${error}`);
       notify(
@@ -519,12 +592,13 @@ export function LudusaviContent({
 
   const showPluginLogs = async () => {
     try {
-      log("debug", `Fetching plugin logs (cached=${logs.length})`, "logs");
+      logUiEvent("plugin_logs_requested", { cached_log_count: logs.length }, "info", "logs");
       const currentLogs = await getRecentLogs();
       if (isMounted.current) {
         setLogs(currentLogs);
       }
       showModal(<LogModal logs={currentLogs} />);
+      logUiEvent("plugin_logs_opened", { log_count: currentLogs.length }, "info", "logs");
     } catch (error) {
       log("error", `Failed to fetch plugin logs: ${error}`);
       notify(
@@ -560,9 +634,11 @@ export function LudusaviContent({
     operationCall: (gameName: string) => Promise<RpcResult<OperationResult>>
   ) => {
     if (!selectedGame) {
+      logUiEvent("manual_operation_skipped", { reason: "no_selected_game", type: label }, "warning");
       return;
     }
-    log("info", `Triggering force ${label} for ${selectedGame}`, label, selectedGame);
+    const startedAt = performance.now();
+    logUiEvent("manual_operation_started", { type: label }, "info", label, selectedGame);
     setBusyLabel(`${label} running`);
     const icon = label === "Backup" ? <FaSave /> : <FaDownload />;
     notify(
@@ -574,7 +650,18 @@ export function LudusaviContent({
     );
     try {
       const result = await operationCall(selectedGame);
-      log("info", `Force ${label} completed: ${JSON.stringify(result)}`, label, selectedGame);
+      logUiEvent(
+        "manual_operation_completed",
+        {
+          elapsed_ms: Math.round(performance.now() - startedAt),
+          reason: result.reason,
+          status: result.status,
+          type: label,
+        },
+        result.status === "failed" ? "error" : "info",
+        label,
+        selectedGame,
+      );
       const resultIcon = result.status === "failed" ? <FaExclamationTriangle /> : icon;
       const category = result.status === "failed" ? "failures_errors" : "manual_operations";
       notify(
@@ -594,6 +681,17 @@ export function LudusaviContent({
         setLogs(recentLogs);
       }
     } catch (error) {
+      logUiEvent(
+        "manual_operation_failed",
+        {
+          elapsed_ms: Math.round(performance.now() - startedAt),
+          message: error instanceof Error ? error.message : String(error),
+          type: label,
+        },
+        "error",
+        label,
+        selectedGame,
+      );
       log("error", `Force ${label} failed: ${error}`, label, selectedGame);
       notify(
         ludusaviStore,

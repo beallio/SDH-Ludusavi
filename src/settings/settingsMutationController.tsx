@@ -17,7 +17,7 @@ import type {
   Settings,
   UpdateChannel
 } from "../types";
-import { log } from "../utils/logging";
+import { log, logUiEvent, type LogFields, type LogLevel } from "../utils/logging";
 
 type MountedRef = { current: boolean };
 type NotifyFailure = (title: string, body: string) => void;
@@ -104,6 +104,7 @@ async function processSettingsQueue() {
 
 function enqueueSettingsUpdate(task: () => Promise<void>) {
   settingsQueue.push(task);
+  logUiEvent("settings_update_queued", { queue_depth: settingsQueue.length }, "debug", "ui_settings");
   notifyQueueListeners();
   void processSettingsQueue();
 }
@@ -183,6 +184,16 @@ export function createSettingsMutationController({
 }: SettingsMutationControllerOptions) {
   setActiveSettingsStore(ludusaviStore, notifyFailure);
 
+  const logSettingsEvent = (
+    event: string,
+    setting: string,
+    fields: LogFields = {},
+    level: LogLevel = "info",
+    gameName?: string,
+  ) => {
+    logUiEvent(event, { setting, ...fields }, level, "ui_settings", gameName);
+  };
+
   const markBusy = () => {
     if (isMounted.current) {
       setBusyLabel("Updating settings");
@@ -198,6 +209,10 @@ export function createSettingsMutationController({
 
   const toggleAutoSync = (enabled: boolean) => {
     const updateSeq = ++autoSyncSeq;
+    logSettingsEvent("settings_change_requested", "auto_sync_enabled", {
+      sequence: updateSeq,
+      value: enabled,
+    });
     ludusaviStore.setAutoSyncEnabled(enabled);
     markBusy();
 
@@ -226,6 +241,14 @@ export function createSettingsMutationController({
         }
         if (updateSeq === autoSyncSeq) {
           applySettingsGlobal(ludusaviStore, result);
+          logSettingsEvent("settings_change_persisted", "auto_sync_enabled", {
+            sequence: updateSeq,
+            value: result.auto_sync_enabled,
+          });
+        } else {
+          logSettingsEvent("settings_change_superseded", "auto_sync_enabled", {
+            sequence: updateSeq,
+          }, "debug");
         }
       } catch (error) {
         awaitFailed = true;
@@ -233,6 +256,11 @@ export function createSettingsMutationController({
         if (updateSeq === autoSyncSeq) {
           const fallback = lastPersistedAutoSync ?? false;
           ludusaviStore.setAutoSyncEnabled(fallback);
+          logSettingsEvent("settings_change_rolled_back", "auto_sync_enabled", {
+            fallback,
+            message: error instanceof Error ? error.message : String(error),
+            sequence: updateSeq,
+          }, "error");
           reportSettingsFailure(error);
         }
       }
@@ -241,6 +269,10 @@ export function createSettingsMutationController({
 
   const toggleNotificationSetting = (key: keyof NotificationSettings, enabled: boolean) => {
     const updateSeq = ++notificationSeq;
+    logSettingsEvent("settings_change_requested", `notifications.${String(key)}`, {
+      sequence: updateSeq,
+      value: enabled,
+    });
     const previousNotifications = ludusaviStore.getSnapshot().settings?.notifications ?? defaultNotificationSettings;
     const nextNotifications = { ...previousNotifications, [key]: enabled };
     ludusaviStore.setNotificationSettings(nextNotifications);
@@ -271,6 +303,14 @@ export function createSettingsMutationController({
         }
         if (updateSeq === notificationSeq) {
           applySettingsGlobal(ludusaviStore, result);
+          logSettingsEvent("settings_change_persisted", `notifications.${String(key)}`, {
+            sequence: updateSeq,
+            value: result.notifications?.[key],
+          });
+        } else {
+          logSettingsEvent("settings_change_superseded", `notifications.${String(key)}`, {
+            sequence: updateSeq,
+          }, "debug");
         }
       } catch (error) {
         awaitFailed = true;
@@ -278,6 +318,11 @@ export function createSettingsMutationController({
         if (updateSeq === notificationSeq) {
           const fallback = lastPersistedNotifications ?? defaultNotificationSettings;
           ludusaviStore.setNotificationSettings(fallback);
+          logSettingsEvent("settings_change_rolled_back", `notifications.${String(key)}`, {
+            fallback: fallback[key],
+            message: error instanceof Error ? error.message : String(error),
+            sequence: updateSeq,
+          }, "error");
           reportSettingsFailure(error);
         }
       }
@@ -287,6 +332,10 @@ export function createSettingsMutationController({
   const toggleUpdateChannel = (enabled: boolean) => {
     const channel = enabled ? "development" : "stable";
     const updateSeq = ++updateChannelSeq;
+    logSettingsEvent("settings_change_requested", "update_channel", {
+      sequence: updateSeq,
+      value: channel,
+    });
     ludusaviStore.setUpdateChannel(channel);
     markBusy();
 
@@ -315,6 +364,14 @@ export function createSettingsMutationController({
         }
         if (updateSeq === updateChannelSeq) {
           applySettingsGlobal(ludusaviStore, result);
+          logSettingsEvent("settings_change_persisted", "update_channel", {
+            sequence: updateSeq,
+            value: result.update_channel,
+          });
+        } else {
+          logSettingsEvent("settings_change_superseded", "update_channel", {
+            sequence: updateSeq,
+          }, "debug");
         }
       } catch (error) {
         awaitFailed = true;
@@ -322,6 +379,11 @@ export function createSettingsMutationController({
         if (updateSeq === updateChannelSeq) {
           const fallback = lastPersistedUpdateChannel ?? "stable";
           ludusaviStore.setUpdateChannel(fallback);
+          logSettingsEvent("settings_change_rolled_back", "update_channel", {
+            fallback,
+            message: error instanceof Error ? error.message : String(error),
+            sequence: updateSeq,
+          }, "error");
           reportSettingsFailure(error);
         }
       }
@@ -330,6 +392,10 @@ export function createSettingsMutationController({
 
   const toggleAutomaticUpdateChecks = (enabled: boolean) => {
     const updateSeq = ++automaticUpdateChecksSeq;
+    logSettingsEvent("settings_change_requested", "automatic_update_checks", {
+      sequence: updateSeq,
+      value: enabled,
+    });
     ludusaviStore.setAutomaticUpdateChecks(enabled);
     markBusy();
 
@@ -358,6 +424,14 @@ export function createSettingsMutationController({
         }
         if (updateSeq === automaticUpdateChecksSeq) {
           applySettingsGlobal(ludusaviStore, result);
+          logSettingsEvent("settings_change_persisted", "automatic_update_checks", {
+            sequence: updateSeq,
+            value: result.automatic_update_checks,
+          });
+        } else {
+          logSettingsEvent("settings_change_superseded", "automatic_update_checks", {
+            sequence: updateSeq,
+          }, "debug");
         }
       } catch (error) {
         awaitFailed = true;
@@ -365,6 +439,11 @@ export function createSettingsMutationController({
         if (updateSeq === automaticUpdateChecksSeq) {
           const fallback = lastPersistedAutomaticUpdateChecks ?? true;
           ludusaviStore.setAutomaticUpdateChecks(fallback);
+          logSettingsEvent("settings_change_rolled_back", "automatic_update_checks", {
+            fallback,
+            message: error instanceof Error ? error.message : String(error),
+            sequence: updateSeq,
+          }, "error");
           reportSettingsFailure(error);
         }
       }
@@ -374,15 +453,26 @@ export function createSettingsMutationController({
   const onGameChange = (data: SingleDropdownOption | string | null | undefined) => {
     const value = (typeof data === "object" && data !== null) ? data.data : data;
     if (typeof value !== "string" || value.trim() === "") {
-      log("warning", `onGameChange received invalid game selection value: ${String(value)}`);
+      logSettingsEvent("settings_change_rejected", "selected_game", {
+        reason: "invalid_value",
+        value: String(value),
+      }, "warning");
       return;
     }
     const lastQueued = lastQueuedSelectedGame ?? ludusaviStore.getSnapshot().selectedGame;
     if (value === lastQueued) {
+      logSettingsEvent("settings_change_skipped", "selected_game", {
+        reason: "already_selected",
+        value,
+      }, "debug", value);
       return;
     }
-    log("info", `Selected game changed to ${value}`);
     const updateSeq = ++selectedGameSeq;
+    logSettingsEvent("settings_change_requested", "selected_game", {
+      previous_value: lastQueued,
+      sequence: updateSeq,
+      value,
+    }, "info", value);
     lastQueuedSelectedGame = value;
     ludusaviStore.setSelectedGame(value);
     markBusy();
@@ -412,6 +502,14 @@ export function createSettingsMutationController({
         }
         if (updateSeq === selectedGameSeq) {
           applySettingsGlobal(ludusaviStore, result);
+          logSettingsEvent("settings_change_persisted", "selected_game", {
+            sequence: updateSeq,
+            value: result.selected_game,
+          }, "info", value);
+        } else {
+          logSettingsEvent("settings_change_superseded", "selected_game", {
+            sequence: updateSeq,
+          }, "debug", value);
         }
       } catch (error) {
         awaitFailed = true;
@@ -420,6 +518,11 @@ export function createSettingsMutationController({
           const fallback = lastPersistedSelectedGame ?? "";
           ludusaviStore.setSelectedGame(fallback);
           lastQueuedSelectedGame = fallback;
+          logSettingsEvent("settings_change_rolled_back", "selected_game", {
+            fallback,
+            message: error instanceof Error ? error.message : String(error),
+            sequence: updateSeq,
+          }, "error", value);
           reportSettingsFailure(error);
         }
       }

@@ -2,7 +2,7 @@ import { ButtonItem, PanelSection, PanelSectionRow } from "@decky/ui";
 import { useState } from "react";
 
 import { launchLudusavi, type LudusaviLaunchCommand } from "../../ludusaviLauncher";
-import { log } from "../../utils/logging";
+import { log, logUiEvent } from "../../utils/logging";
 
 type LudusaviLauncherSectionProps = {
   ludusaviCommand: LudusaviLaunchCommand | null;
@@ -17,6 +17,13 @@ export function LudusaviLauncherSection({
   const [isLaunching, setIsLaunching] = useState(false);
 
   async function onLaunch() {
+    const startedAt = performance.now();
+    logUiEvent(
+      "ludusavi_launch_requested",
+      { command_available: ludusaviCommand !== null },
+      "info",
+      "launcher",
+    );
     try {
       setIsLaunching(true);
       setStatus("Launching Ludusavi...");
@@ -28,10 +35,24 @@ export function LudusaviLauncherSection({
       await launchLudusavi(ludusaviCommand, { logger: log });
 
       setStatus("Ludusavi launch requested.");
+      logUiEvent(
+        "ludusavi_launch_completed",
+        { elapsed_ms: Math.round(performance.now() - startedAt) },
+        "info",
+        "launcher",
+      );
       // Best-effort clear status after 3s
       setTimeout(() => setStatus(null), 3000);
     } catch (err) {
-      console.error(err);
+      logUiEvent(
+        "ludusavi_launch_failed",
+        {
+          elapsed_ms: Math.round(performance.now() - startedAt),
+          message: err instanceof Error ? err.message : String(err),
+        },
+        "error",
+        "launcher",
+      );
       setStatus(err instanceof Error ? err.message : String(err));
     } finally {
       setIsLaunching(false);

@@ -30,7 +30,7 @@ import {
 } from "./components/qam/LudusaviContent";
 import { createGameLifecycleController } from "./controllers/gameLifecycleController";
 import { isRpcStatus } from "./utils/rpc";
-import { log } from "./utils/logging";
+import { log, logUiEvent } from "./utils/logging";
 import {
   LudusaviStateProvider,
   LudusaviStateStore,
@@ -205,10 +205,11 @@ dropdownStyleEl.textContent = `
 
 
 export default definePlugin(() => {
-  console.log("SDH-Ludusavi plugin initializing");
+  logUiEvent("plugin_initializing", {}, "info");
 
   if (!dropdownStyleEl.parentNode) {
     document.head.appendChild(dropdownStyleEl);
+    logUiEvent("qam_styles_attached");
   }
 
   const ludusaviStore = createLudusaviStateStore();
@@ -223,11 +224,19 @@ export default definePlugin(() => {
         return;
       }
       if (ludusaviStore.getSnapshot().settings !== null) {
-        log("debug", "Startup settings hydration skipped because state is already populated");
+        logUiEvent("startup_settings_hydration_skipped", { reason: "state_already_populated" });
         return;
       }
       applySettingsGlobal(ludusaviStore, settings);
-      log("info", "Lifecycle settings hydrated at plugin startup");
+      logUiEvent(
+        "startup_settings_hydrated",
+        {
+          auto_sync_enabled: settings.auto_sync_enabled,
+          selected_game: settings.selected_game,
+          update_channel: settings.update_channel,
+        },
+        "info",
+      );
     } catch (err) {
       log("error", `Failed to hydrate lifecycle settings at plugin startup: ${err}`);
     }
@@ -276,6 +285,7 @@ export default definePlugin(() => {
     icon: <PluginIcon />,
     alwaysRender: true,
     onDismount() {
+      logUiEvent("plugin_dismounting", {}, "info");
       lifecycleController.dispose();
       resetAutoSyncStatusSurface();
 
@@ -286,7 +296,7 @@ export default definePlugin(() => {
       resetSettingsMutationController();
       resetLudusaviContentLoadState();
 
-      console.log("SDH-Ludusavi unloading");
+      logUiEvent("plugin_dismounted", {}, "info");
     },
   };
 });

@@ -1,4 +1,4 @@
-import { log } from "../utils/logging";
+import { log, logUiEvent } from "../utils/logging";
 import { registerAppLifetimeNotification, getRouterRunningApps, getRouterMainRunningApp, asRecord } from "../utils/steamRuntime";
 import {
   getMainRunningSession,
@@ -121,7 +121,12 @@ export function createSteamLifecycleSource(observer: SteamLifecycleObserver) {
       }
       void observer.onAppExit(session);
     } catch (err) {
-      console.error("SDH-Ludusavi: app lifetime notification failed", err);
+      logUiEvent(
+        "lifetime_notification_failed",
+        { message: err instanceof Error ? err.message : String(err) },
+        "error",
+        "lifecycle",
+      );
     }
   };
 
@@ -143,7 +148,12 @@ export function createSteamLifecycleSource(observer: SteamLifecycleObserver) {
         fallbackPreviousAppName = currentAppName;
       }
     } catch (err) {
-      console.error("SDH-Ludusavi: watcher loop failed", err);
+      logUiEvent(
+        "fallback_poll_failed",
+        { message: err instanceof Error ? err.message : String(err) },
+        "error",
+        "lifecycle",
+      );
     }
   };
 
@@ -187,13 +197,21 @@ export function createSteamLifecycleSource(observer: SteamLifecycleObserver) {
     });
     if (reg) {
       lifecycleRegistration = reg;
+      logUiEvent("lifecycle_source_started", { source: "steam_notifications" }, "info", "lifecycle");
       reconcileStartupSession();
     } else {
+      logUiEvent("lifecycle_source_started", { source: "router_polling" }, "warning", "lifecycle");
       startFallbackPolling();
     }
   }
 
   function dispose() {
+    logUiEvent(
+      "lifecycle_source_disposed",
+      { active_session_count: activeSessions.size, fallback_active: fallbackIntervalID !== null },
+      "info",
+      "lifecycle",
+    );
     unregisterLifecycleNotifications();
     if (fallbackIntervalID !== null) {
       window.clearInterval(fallbackIntervalID);
