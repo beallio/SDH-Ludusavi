@@ -141,7 +141,6 @@ def test_get_json_accepts_valid_mutated_base_url() -> None:
     """Mutating base_url to another loopback address is fine."""
     api = SyncthingAPI("http://127.0.0.1:8384", "test-key")
     api.base_url = "http://127.1.2.3:8384"
-    # Will fail with connection error (no server), not a validation error
     with pytest.raises(RuntimeError, match="Cannot reach Syncthing API"):
         api.get_json("/rest/system/version")
 
@@ -151,9 +150,13 @@ def test_get_json_accepts_valid_mutated_base_url() -> None:
 # ============================================
 
 
-def test_local_https_uses_self_signed_by_default() -> None:
+def test_local_https_accepts_self_signed_by_default() -> None:
+    import ssl
+
     api = SyncthingAPI("https://127.0.0.1:8384", "test-key")
     assert api.ssl_context is not None
+    assert api.ssl_context.verify_mode == ssl.CERT_NONE
+    assert api.ssl_context.check_hostname is False
 
 
 def test_local_https_uses_verified_tls_when_opted_out() -> None:
@@ -180,7 +183,20 @@ class _RedirectHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        pass  # suppress HTTP server logs during tests
+        pass
+
+
+class _OkHandler(http.server.BaseHTTPRequestHandler):
+    """Serves a minimal JSON response so redirect targets resolve cleanly."""
+
+    def do_GET(self) -> None:  # type: ignore[override]
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"ok": true}')
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        pass
 
 
 @pytest.fixture
@@ -196,15 +212,25 @@ def redirect_server() -> Generator[int, None, None]:
 
 
 @pytest.fixture
-def loopback_redirect_server() -> Generator[int, None, None]:
-    """Yield an ephemeral port where a GET returns 301 to another loopback."""
-    server = http.server.HTTPServer(("127.0.0.1", 0), _RedirectHandler)
-    server.redirect_target = "http://127.0.0.1:18384/safe"  # type: ignore[attr-defined]
-    port = server.server_address[1]
-    t = threading.Thread(target=server.handle_request, daemon=True)
+def loopback_redirect_server() -> Generator[tuple[int, int], None, None]:
+    """Yield (redirect_port, target_port) where a GET redirects loopback-to-loopback."""
+    # Target server on an ephemeral port
+    target = http.server.HTTPServer(("127.0.0.1", 0), _OkHandler)
+    target_port = target.server_address[1]
+    t = threading.Thread(target=target.handle_request, daemon=True)
     t.start()
-    yield port
-    server.server_close()
+
+    # Redirect server pointing to the target via loopback
+    redirect = http.server.HTTPServer(("127.0.0.1", 0), _RedirectHandler)
+    redirect.redirect_target = f"http://127.0.0.1:{target_port}/rest/system/version"  # type: ignore[attr-defined]
+    redirect_port = redirect.server_address[1]
+    t2 = threading.Thread(target=redirect.handle_request, daemon=True)
+    t2.start()
+
+    yield (redirect_port, target_port)
+
+    redirect.server_close()
+    target.server_close()
 
 
 def test_rejects_redirect_to_non_loopback(redirect_server: int) -> None:
@@ -214,11 +240,12 @@ def test_rejects_redirect_to_non_loopback(redirect_server: int) -> None:
         api.get_json("/rest/system/version")
 
 
-def test_follows_redirect_to_loopback(loopback_redirect_server: int) -> None:
-    """A redirect to another loopback address is followed."""
-    api = SyncthingAPI(f"http://127.0.0.1:{loopback_redirect_server}", "test-key")
-    with pytest.raises(RuntimeError, match="Cannot reach Syncthing API"):
-        api.get_json("/rest/system/version")
+def test_follows_redirect_to_loopback(loopback_redirect_server: tuple[int, int]) -> None:
+    """A redirect to another loopback address is followed and the response is returned."""
+    redirect_port, _ = loopback_redirect_server
+    api = SyncthingAPI(f"http://127.0.0.1:{redirect_port}", "test-key")
+    result = api.get_json("/rest/system/version")
+    assert result == {"ok": True}
 
 
 # ============================================
@@ -254,15 +281,6 @@ def test_no_private_ssl_api_used() -> None:
     assert "ssl._create_default_https_context" not in source
 
 
-def test_validate_local_api_url_is_module_level() -> None:
-    """_validate_local_api_url is accessible as a module-level function."""
-    from sdh_ludusavi.syncthing.api import _validate_local_api_url
-
-    _validate_local_api_url("http://127.0.0.1:8384")
-    with pytest.raises(RuntimeError, match="Only local Syncthing"):
-        _validate_local_api_url("http://192.168.1.50:8384")
-
-
 # ============================================
 # Keyword-only parameter enforcement
 # ============================================
@@ -278,12 +296,10 @@ def test_keyword_only_allow_local_https_self_signed() -> None:
     assert allow_param.kind == allow_param.KEYWORD_ONLY
 
 
-def test_local_https_opt_out_uses_explicit_verified_context() -> None:
-    """When allow_local_https_self_signed=False, self.ssl_context is
-    an explicit verified SSLContext (CERT_REQUIRED, check_hostname=True)."""
-    import ssl
+def test_validate_local_api_url_is_module_level() -> None:
+    """_validate_local_api_url is accessible as a module-level function."""
+    from sdh_ludusavi.syncthing.api import _validate_local_api_url
 
-    api = SyncthingAPI("https://127.0.0.1:8384", "test-key", allow_local_https_self_signed=False)
-    assert api.ssl_context is not None
-    assert api.ssl_context.verify_mode == ssl.CERT_REQUIRED
-    assert api.ssl_context.check_hostname is True
+    _validate_local_api_url("http://127.0.0.1:8384")
+    with pytest.raises(RuntimeError, match="Only local Syncthing"):
+        _validate_local_api_url("http://192.168.1.50:8384")
