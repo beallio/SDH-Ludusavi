@@ -24,4 +24,4 @@ CACHE_MARKER_UNCHANGED = object()
 
 # Safety margin for "Different" recency: if backup timestamp is not more than
 # this many seconds newer than the local save, treat it as ambiguous.
-RECENCY_DIFFERS_TIMEDELTA: float = 120.0
+RECENCY_TIMESTAMP_MARGIN_SECONDS: float = 120.0
