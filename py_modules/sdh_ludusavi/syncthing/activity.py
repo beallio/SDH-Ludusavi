@@ -77,9 +77,11 @@ def get_events(api: SyncthingAPI, since: int, event_timeout_seconds: float) -> l
 
 
 def get_connection_snapshot(api: SyncthingAPI) -> ConnectionSnapshot:
+    # Errors here travel through RPC via start_watch; never echo the response
+    # payload because it can contain device IDs, which are backend-only.
     data = api.get_json("/rest/system/connections", timeout=10)
     if not isinstance(data, dict):
-        raise RuntimeError(f"Unexpected system connections response: {data}")
+        raise RuntimeError("Unexpected system connections response: not a JSON object")
     in_bytes_total = 0
     out_bytes_total = 0
     total = data.get("total")
@@ -90,7 +92,7 @@ def get_connection_snapshot(api: SyncthingAPI) -> ConnectionSnapshot:
     # "all peers offline"; an empty connected set is a peer-availability signal.
     connections = data.get("connections")
     if not isinstance(connections, dict):
-        raise RuntimeError(f"Unexpected system connections response: {data}")
+        raise RuntimeError("Unexpected system connections response: missing connections map")
     connected_devices = frozenset(
         device_id
         for device_id, info in connections.items()
@@ -109,10 +111,11 @@ def get_connection_totals(api: SyncthingAPI) -> tuple[int, int]:
 
 
 def get_my_device_id(api: SyncthingAPI) -> str:
+    # Same RPC-visible error path as above: the payload holds device IDs.
     data = api.get_json("/rest/system/status", timeout=10)
     my_id = data.get("myID") if isinstance(data, dict) else None
     if not isinstance(my_id, str) or not my_id:
-        raise RuntimeError(f"Unexpected system status response: {data}")
+        raise RuntimeError("Unexpected system status response: missing myID")
     return my_id
 
 
