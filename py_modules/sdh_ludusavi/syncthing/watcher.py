@@ -295,12 +295,19 @@ class SyncthingWatchManager:
             except Exception as exc:
                 return {"status": "skipped", "reason": "api_unavailable", "message": str(exc)}
 
-            # Identify the local device so configured folder devices are remote-only
+            # Identify the local device so configured folder devices are remote-only.
+            # Raw API errors stay in backend logs; they can echo response payloads
+            # holding device IDs, which must never travel through RPC.
             try:
                 my_device_id = get_my_device_id(api)
             # Intentionally broad
             except Exception as exc:
-                return {"status": "skipped", "reason": "api_unavailable", "message": str(exc)}
+                logger.warning("Syncthing system status probe failed: %s", exc)
+                return {
+                    "status": "skipped",
+                    "reason": "api_unavailable",
+                    "message": "Syncthing system status query failed.",
+                }
 
             # Resolve containing folder
             try:
@@ -321,9 +328,14 @@ class SyncthingWatchManager:
             # Require at least one connected peer that shares the matched folder
             try:
                 snapshot = get_connection_snapshot(api)
-            # Intentionally broad
+            # Intentionally broad; sanitized for RPC like the system status probe
             except Exception as exc:
-                return {"status": "skipped", "reason": "api_unavailable", "message": str(exc)}
+                logger.warning("Syncthing connections probe failed: %s", exc)
+                return {
+                    "status": "skipped",
+                    "reason": "api_unavailable",
+                    "message": "Syncthing connections query failed.",
+                }
 
             connected_count = len(set(folder.device_ids) & snapshot.connected_devices)
             logger.info(

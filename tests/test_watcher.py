@@ -610,3 +610,42 @@ def test_watch_keeps_last_known_peers_when_connections_poll_fails() -> None:
 
     assert watch.latest_sample["status"] == "activity"
     assert not watch.stop_event.is_set()
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+@patch("sdh_ludusavi.syncthing.watcher.get_my_device_id")
+def test_watch_manager_sanitizes_system_status_probe_failure(
+    mock_my_id, mock_resolve_creds
+) -> None:
+    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
+    mock_my_id.side_effect = RuntimeError("HTTP 500 body: RAW-RESPONSE-WITH-DEVICE-ID")
+
+    result = SyncthingWatchManager().start_watch(
+        "post_game", "Hades", "1145300", "/home/deck/Sync/Hades"
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "api_unavailable"
+    # Raw API responses can hold device IDs and must never travel through RPC.
+    assert "RAW-RESPONSE-WITH-DEVICE-ID" not in result["message"]
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+@patch("sdh_ludusavi.syncthing.watcher.get_my_device_id")
+@patch("sdh_ludusavi.syncthing.watcher.resolve_folder_by_path")
+@patch("sdh_ludusavi.syncthing.watcher.get_connection_snapshot")
+def test_watch_manager_sanitizes_connections_probe_failure(
+    mock_snapshot, mock_resolve_path, mock_my_id, mock_resolve_creds
+) -> None:
+    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
+    mock_my_id.return_value = "LOCAL-DEVICE"
+    mock_resolve_path.return_value = _shared_folder(("DEV-A",))
+    mock_snapshot.side_effect = RuntimeError("Invalid JSON: 'RAW-RESPONSE-WITH-DEVICE-ID'")
+
+    result = SyncthingWatchManager().start_watch(
+        "post_game", "Hades", "1145300", "/home/deck/Sync/Hades"
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "api_unavailable"
+    assert "RAW-RESPONSE-WITH-DEVICE-ID" not in result["message"]
