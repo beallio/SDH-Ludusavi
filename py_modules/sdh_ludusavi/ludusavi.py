@@ -153,8 +153,13 @@ class PyludusaviAdapter:
         """
         Compare the local save recency against the latest Ludusavi backup.
 
-        Uses a restore preview to determine if the backup contains changes
-        not present in the local save.
+        Returns one of:
+            "no_backup"      - no backups exist for the game
+            "local_current"  - backup and local save are identical
+            "backup_newer"   - backup contains data absent locally (safe restore)
+            "backup_differs" - backup and local both exist and differ; direction
+                               unknown from this signal alone
+            "ambiguous"      - preview failed or returned an unexpected shape
         """
         # Check if any backup exists first
         backups_data = self._client.backups_list(games=[game_name]).data.get("games", {})
@@ -194,9 +199,9 @@ class PyludusaviAdapter:
             game_backups = backups_data.get(game_name, {})
             backups = game_backups.get("backups") or []
             if backups:
-                latest_backup = backups[0]
-                if isinstance(latest_backup, dict):
-                    metadata["backupModifiedAt"] = latest_backup.get("when")
+                backup_when = _newest_backup_when(backups)
+                if backup_when is not None:
+                    metadata["backupModifiedAt"] = backup_when
             backup_path = game_backups.get("backupPath")
             if backup_path:
                 metadata["backupPath"] = backup_path
@@ -373,3 +378,14 @@ def _game_error(game: dict[str, Any]) -> str | None:
                 error = value.get("error")
                 return str(error) if error else "Ludusavi reported a failed item"
     return None
+
+
+def _newest_backup_when(backups: list[dict[str, Any]] | list[Any]) -> str | None:
+    """Return the latest 'when' timestamp from a list of backup dicts."""
+    newest: str | None = None
+    for backup in backups:
+        when = backup.get("when")
+        if isinstance(when, str):
+            if newest is None or when > newest:
+                newest = when
+    return newest
