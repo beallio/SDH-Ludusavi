@@ -16,6 +16,7 @@ from ._types import (
     FolderRuntime,
     RemoteProgress,
     ConnectionRates,
+    ConnectionSnapshot,
     LocalActivity,
     ActivityStatus,
     int_field,
@@ -75,14 +76,47 @@ def get_events(api: SyncthingAPI, since: int, event_timeout_seconds: float) -> l
     return events
 
 
-def get_connection_totals(api: SyncthingAPI) -> tuple[int, int]:
+def get_connection_snapshot(api: SyncthingAPI) -> ConnectionSnapshot:
+    # Errors here travel through RPC via start_watch; never echo the response
+    # payload because it can contain device IDs, which are backend-only.
     data = api.get_json("/rest/system/connections", timeout=10)
     if not isinstance(data, dict):
-        raise RuntimeError(f"Unexpected system connections response: {data}")
+        raise RuntimeError("Unexpected system connections response: not a JSON object")
+    in_bytes_total = 0
+    out_bytes_total = 0
     total = data.get("total")
     if isinstance(total, dict):
-        return int(total.get("inBytesTotal", 0) or 0), int(total.get("outBytesTotal", 0) or 0)
-    return 0, 0
+        in_bytes_total = int(total.get("inBytesTotal", 0) or 0)
+        out_bytes_total = int(total.get("outBytesTotal", 0) or 0)
+    # A missing or non-dict connections map must fail rather than read as
+    # "all peers offline"; an empty connected set is a peer-availability signal.
+    connections = data.get("connections")
+    if not isinstance(connections, dict):
+        raise RuntimeError("Unexpected system connections response: missing connections map")
+    connected_devices = frozenset(
+        device_id
+        for device_id, info in connections.items()
+        if isinstance(info, dict) and info.get("connected") is True
+    )
+    return ConnectionSnapshot(
+        in_bytes_total=in_bytes_total,
+        out_bytes_total=out_bytes_total,
+        connected_devices=connected_devices,
+    )
+
+
+def get_connection_totals(api: SyncthingAPI) -> tuple[int, int]:
+    snapshot = get_connection_snapshot(api)
+    return snapshot.in_bytes_total, snapshot.out_bytes_total
+
+
+def get_my_device_id(api: SyncthingAPI) -> str:
+    # Same RPC-visible error path as above: the payload holds device IDs.
+    data = api.get_json("/rest/system/status", timeout=10)
+    my_id = data.get("myID") if isinstance(data, dict) else None
+    if not isinstance(my_id, str) or not my_id:
+        raise RuntimeError("Unexpected system status response: missing myID")
+    return my_id
 
 
 def compute_rates(

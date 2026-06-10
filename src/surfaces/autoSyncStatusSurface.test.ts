@@ -5,6 +5,7 @@ import {
   iconSvgForAutoSyncStatus,
   shouldAutoHideStatus,
 } from "./autoSyncStatusSurface";
+import { renderAutoSyncStatusHtml } from "./autoSyncStatusRenderer";
 
 vi.mock("@decky/api", () => ({
   callable: () => () => Promise.resolve(),
@@ -46,6 +47,32 @@ describe("AutoSyncStatusSurface Status Pending Upload", () => {
     );
     expect(autoSyncStatusText.syncthing_folder_not_found).toBe(
       "LOCAL BACKUP SAVED - PATH NOT SHARED",
+    );
+  });
+});
+
+describe("AutoSyncStatusSurface No Connected Peers", () => {
+  it("renders the no-peers warning with the exact selected text", () => {
+    expect(autoSyncStatusText.syncthing_no_peers).toBe(
+      "LOCAL BACKUP SAVED - NO SYNCTHING PEERS ONLINE",
+    );
+  });
+
+  it("treats the no-peers warning as terminal with auto-hide", () => {
+    expect(isSyncthingActiveStatus("syncthing_no_peers")).toBe(false);
+    expect(shouldAutoHideStatus("syncthing_no_peers")).toBe(true);
+  });
+
+  it("uses the amber warning style and fallback icon treatment", () => {
+    const html = renderAutoSyncStatusHtml({
+      status: "syncthing_no_peers",
+      visible: true,
+      source: "rpc_result",
+    });
+    expect(html).toContain("LOCAL BACKUP SAVED - NO SYNCTHING PEERS ONLINE");
+    expect(html).toContain("#f59e0b");
+    expect(iconSvgForAutoSyncStatus("syncthing_no_peers")).toBe(
+      iconSvgForAutoSyncStatus("syncthing_unavailable"),
     );
   });
 });

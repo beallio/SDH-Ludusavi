@@ -87,6 +87,9 @@ class FolderSelection:
     fs_watcher_enabled: bool | None = None
     fs_watcher_delay_seconds: int | None = None
     rescan_interval_seconds: int | None = None
+    # Configured remote device IDs for this folder. Backend-only: never log
+    # these or return them through RPC.
+    device_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -113,6 +116,15 @@ class RemoteProgress:
 class ConnectionRates:
     in_bytes_per_second: float
     out_bytes_per_second: float
+
+
+@dataclass(frozen=True)
+class ConnectionSnapshot:
+    in_bytes_total: int
+    out_bytes_total: int
+    # Device IDs whose Syncthing "connected" field is true. Backend-only:
+    # never log these or return them through RPC.
+    connected_devices: frozenset[str] = frozenset()
 
 
 @dataclass

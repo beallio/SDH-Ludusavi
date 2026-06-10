@@ -15,7 +15,8 @@ export const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
   syncthing_uploading: "SYNCTHING UPLOADING",
   syncthing_complete: "SYNCTHING COMPLETE",
   syncthing_unavailable: "LOCAL BACKUP SAVED - SYNCTHING UNAVAILABLE",
-  syncthing_folder_not_found: "LOCAL BACKUP SAVED - PATH NOT SHARED"
+  syncthing_folder_not_found: "LOCAL BACKUP SAVED - PATH NOT SHARED",
+  syncthing_no_peers: "LOCAL BACKUP SAVED - NO SYNCTHING PEERS ONLINE"
 };
 export function isLudusaviRunningStatus(status: AutoSyncStatusKind): boolean {
   return status === "checking" || status === "backing_up" || status === "restoring";
@@ -196,7 +197,7 @@ body {
   box-sizing: border-box;
 }
 .text { display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; min-width: 245px; }
-.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" ? "#f59e0b" : state.status === "syncthing_unavailable" || state.status === "syncthing_folder_not_found" ? "#f59e0b" : "#1a9fff"}; }
+.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" ? "#f59e0b" : state.status === "syncthing_unavailable" || state.status === "syncthing_folder_not_found" || state.status === "syncthing_no_peers" ? "#f59e0b" : "#1a9fff"}; }
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }

@@ -91,9 +91,10 @@ Using Syncthing allows for near-instant local backups that sync in the backgroun
 - **Syncthing Uploading**: Syncthing is uploading/serving backup folder data to a remote peer.
 - **Syncthing Complete**: Syncthing synchronization has settled locally. This confirms there is no longer active transfer or scanning on the Steam Deck, but it does NOT guarantee that remote devices have finished downloading the save.
 - **Local Backup Saved - Syncthing Unavailable**: The backup succeeded, but configured Syncthing API access failed.
-- **Local Backup Saved - Path Not Shared**: The backup succeeded, but its directory is not in a Syncthing shared folder.
+- **Local Backup Saved - Path Not Shared**: The backup succeeded, but its directory is not in a Syncthing shared folder, or the shared folder has no configured remote devices.
+- **Local Backup Saved - No Syncthing Peers Online**: The backup succeeded, but none of the devices that share the backup folder are currently connected, so remote propagation was not observed. Syncthing will sync later once a peer reconnects.
 
-When Syncthing is not configured, the plugin silently reports the normal local-backup result without a Syncthing warning.
+When Syncthing is not configured, the plugin silently reports the normal local-backup result without a Syncthing warning. Peer connectivity, not internet connectivity, controls these warnings: Syncthing monitoring runs whenever at least one device sharing the backup folder is connected (including over LAN without internet), and is skipped when none are.
 
 ## License
 

@@ -152,7 +152,8 @@ export type AutoSyncStatusKind =
   | "syncthing_uploading"
   | "syncthing_complete"
   | "syncthing_unavailable"
-  | "syncthing_folder_not_found";
+  | "syncthing_folder_not_found"
+  | "syncthing_no_peers";
 
 export type SyncthingWatchStartResult =
   | {
