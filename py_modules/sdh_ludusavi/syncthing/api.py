@@ -21,17 +21,29 @@ def _is_loopback_host(host: str | None) -> bool:
     if host is None:
         return False
 
-    # localhost is always loopback
     if host.lower() == "localhost":
         return True
 
-    # Try as an IP address
     try:
         addr = ipaddress.ip_address(host)
         return addr.is_loopback
     except ValueError:
-        # Not an IP address and not localhost -> not loopback
         return False
+
+
+def _validate_local_api_url(api_url: str) -> None:
+    """Validate that *api_url* is a loopback-only HTTP/HTTPS URL.
+
+    Raises RuntimeError with _LOCAL_ONLY_ERROR if the URL is not acceptable.
+    """
+    parsed = urllib.parse.urlparse(api_url)
+    host = parsed.hostname
+
+    if parsed.scheme not in ("http", "https"):
+        raise RuntimeError(_LOCAL_ONLY_ERROR.format(scheme=parsed.scheme, host=host or api_url))
+
+    if not _is_loopback_host(host):
+        raise RuntimeError(_LOCAL_ONLY_ERROR.format(scheme=parsed.scheme, host=host or ""))
 
 
 class _LoopbackOnlyHTTPRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -60,16 +72,8 @@ class SyncthingAPI:
         self.api_key = api_key
 
         # Validate that URL is loopback-only
+        _validate_local_api_url(self.base_url)
         parsed = urllib.parse.urlparse(self.base_url)
-        host = parsed.hostname
-
-        if parsed.scheme not in ("http", "https"):
-            raise RuntimeError(
-                _LOCAL_ONLY_ERROR.format(scheme=parsed.scheme, host=host or self.base_url)
-            )
-
-        if not _is_loopback_host(host):
-            raise RuntimeError(_LOCAL_ONLY_ERROR.format(scheme=parsed.scheme, host=host or ""))
 
         # Set up SSL context for HTTPS
         if parsed.scheme == "https" and allow_local_https_self_signed:
@@ -89,6 +93,9 @@ class SyncthingAPI:
     def get_json(
         self, path: str, params: dict[str, Any] | None = None, timeout: float = 30.0
     ) -> Any:
+        # Re-validate base_url to protect against post-construction mutation
+        _validate_local_api_url(self.base_url)
+
         query = ""
         if params:
             query = "?" + urllib.parse.urlencode(params)

@@ -125,6 +125,28 @@ def test_rejects_scheme_less_localhost() -> None:
 
 
 # ============================================
+# Defensive re-validation in get_json
+# ============================================
+
+
+def test_get_json_rejects_mutated_base_url() -> None:
+    """Mutating base_url to non-loopback after construction is caught."""
+    api = SyncthingAPI("http://127.0.0.1:8384", "test-key")
+    api.base_url = "http://192.168.1.50:8384"
+    with pytest.raises(RuntimeError, match="Only local Syncthing"):
+        api.get_json("/rest/system/version")
+
+
+def test_get_json_accepts_valid_mutated_base_url() -> None:
+    """Mutating base_url to another loopback address is fine."""
+    api = SyncthingAPI("http://127.0.0.1:8384", "test-key")
+    api.base_url = "http://127.1.2.3:8384"
+    # Will fail with connection error (no server), not a validation error
+    with pytest.raises(RuntimeError, match="Cannot reach Syncthing API"):
+        api.get_json("/rest/system/version")
+
+
+# ============================================
 # SSL context behavior
 # ============================================
 
@@ -182,7 +204,7 @@ def loopback_redirect_server() -> Generator[int, None, None]:
 
 
 def test_rejects_redirect_to_non_loopback(redirect_server: int) -> None:
-    """A redirect to a non-loopback host is rejected by _LoopbackOnlyHTTPRedirectHandler."""
+    """A redirect to a non-loopback host is rejected."""
     api = SyncthingAPI(f"http://127.0.0.1:{redirect_server}", "test-key")
     with pytest.raises(RuntimeError, match="redirected to non-loopback host"):
         api.get_json("/rest/system/version")
@@ -191,8 +213,6 @@ def test_rejects_redirect_to_non_loopback(redirect_server: int) -> None:
 def test_follows_redirect_to_loopback(loopback_redirect_server: int) -> None:
     """A redirect to another loopback address is followed."""
     api = SyncthingAPI(f"http://127.0.0.1:{loopback_redirect_server}", "test-key")
-    # The redirect goes to 127.0.0.1:18384 which won't respond, so it will
-    # fail with a connection error rather than a redirect rejection.
     with pytest.raises(RuntimeError, match="Cannot reach Syncthing API"):
         api.get_json("/rest/system/version")
 
@@ -228,3 +248,12 @@ def test_no_private_ssl_api_used() -> None:
     source = inspect.getsource(SyncthingAPI.__init__)
     assert "ssl._create_unverified_context" not in source
     assert "ssl._create_default_https_context" not in source
+
+
+def test_validate_local_api_url_is_module_level() -> None:
+    """_validate_local_api_url is accessible as a module-level function."""
+    from sdh_ludusavi.syncthing.api import _validate_local_api_url
+
+    _validate_local_api_url("http://127.0.0.1:8384")
+    with pytest.raises(RuntimeError, match="Only local Syncthing"):
+        _validate_local_api_url("http://192.168.1.50:8384")
