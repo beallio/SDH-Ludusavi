@@ -352,6 +352,94 @@ describe("GameLifecycleController", () => {
     );
   });
 
+  it("successful backup without connected peers publishes the no-peers warning", async () => {
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+    mockRpc.startSyncthingActivityWatch.mockResolvedValue({
+      status: "skipped",
+      reason: "no_connected_peers",
+      message: "no peers connected",
+    });
+
+    triggerStart(1145300);
+    await vi.advanceTimersByTimeAsync(100);
+    mockNotifyFailure.mockClear();
+
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.publish).toHaveBeenCalledWith(
+      "syncthing_no_peers",
+      expect.objectContaining({ source: "rpc_result" }),
+    );
+    expect(mockNotifyFailure).not.toHaveBeenCalled();
+  });
+
+  it("unshared folder reason maps to the path-not-shared warning", async () => {
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+    mockRpc.startSyncthingActivityWatch.mockResolvedValue({
+      status: "skipped",
+      reason: "folder_not_shared",
+      message: "folder has no remote devices",
+    });
+
+    triggerStart(1145300);
+    await vi.advanceTimersByTimeAsync(100);
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.publish).toHaveBeenCalledWith(
+      "syncthing_folder_not_found",
+      expect.objectContaining({ source: "rpc_result" }),
+    );
+  });
+
+  it("pre-game no-peer detection produces no Syncthing warning", async () => {
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+    mockRpc.checkGameStart.mockResolvedValue({ status: "skipped", reason: "local_current" });
+    mockRpc.startSyncthingActivityWatch.mockResolvedValue({
+      status: "skipped",
+      reason: "no_connected_peers",
+      message: "no peers connected",
+    });
+
+    triggerStart(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.publish).not.toHaveBeenCalledWith(
+      "syncthing_no_peers",
+      expect.any(Object),
+    );
+    expect(mockStatusSurface.publish).not.toHaveBeenCalledWith(
+      "syncthing_unavailable",
+      expect.any(Object),
+    );
+    expect(mockNotifyFailure).not.toHaveBeenCalled();
+  });
+
   it("never pauses or resumes a process during exit handling", async () => {
     const controller = createGameLifecycleController({
       store: mockStore,

@@ -24,11 +24,27 @@ def folder_label(folder: dict[str, Any]) -> str:
     return str(folder_id) if folder_id else ""
 
 
+def folder_device_ids(
+    folder: dict[str, Any], *, local_device_id: str | None = None
+) -> tuple[str, ...]:
+    devices = folder.get("devices")
+    if not isinstance(devices, list):
+        return ()
+    device_ids = {
+        str(device["deviceID"])
+        for device in devices
+        if isinstance(device, dict) and device.get("deviceID")
+    }
+    device_ids.discard(local_device_id or "")
+    return tuple(sorted(device_ids))
+
+
 def folder_selection_from_config(
     folder: dict[str, Any],
     *,
     selected_path: str | None = None,
     normalized_folder_path: str | None = None,
+    local_device_id: str | None = None,
 ) -> FolderSelection:
     raw_path = folder.get("path")
     path = (
@@ -62,6 +78,7 @@ def folder_selection_from_config(
         fs_watcher_enabled=watcher,
         fs_watcher_delay_seconds=fs_watcher_delay_seconds,
         rescan_interval_seconds=rescan_interval_seconds,
+        device_ids=folder_device_ids(folder, local_device_id=local_device_id),
     )
 
 
@@ -72,7 +89,9 @@ def resolve_folder_by_id(api: SyncthingAPI, folder_id: str) -> FolderSelection:
     raise RuntimeError(f"Unknown Syncthing folder ID {folder_id}")
 
 
-def resolve_folder_by_path(api: SyncthingAPI, selected_path: str) -> FolderSelection:
+def resolve_folder_by_path(
+    api: SyncthingAPI, selected_path: str, *, local_device_id: str | None = None
+) -> FolderSelection:
     _norm_selected = normalize_path(selected_path)
     candidates: list[tuple[int, dict[str, Any], str]] = []
 
@@ -93,4 +112,5 @@ def resolve_folder_by_path(api: SyncthingAPI, selected_path: str) -> FolderSelec
         folder_data,
         selected_path=_norm_selected,
         normalized_folder_path=_norm_folder_path,
+        local_device_id=local_device_id,
     )

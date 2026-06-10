@@ -15,6 +15,7 @@ from ._types import (
     RemoteProgress,
     LocalActivity,
     ConnectionRates,
+    ConnectionSnapshot,
     DEFAULT_EVENT_TIMEOUT_SECONDS,
     DEFAULT_ACTIVE_WINDOW_SECONDS,
     DEFAULT_MIN_RATE_BYTES_PER_SECOND,
@@ -23,7 +24,8 @@ from .activity import (
     get_initial_folder_state_and_runtime,
     get_event_cursor,
     get_events,
-    get_connection_totals,
+    get_connection_snapshot,
+    get_my_device_id,
     get_folder_status,
     compute_rates,
     prune_remote_progress,
@@ -64,6 +66,7 @@ class SyncthingWatch:
         app_id: str | None,
         folder: FolderSelection,
         api: SyncthingAPI,
+        initial_snapshot: ConnectionSnapshot | None = None,
     ) -> None:
         self.watch_id = watch_id
         self.phase = phase
@@ -83,6 +86,9 @@ class SyncthingWatch:
         self.rates = ConnectionRates(0.0, 0.0)
         self.previous_totals: tuple[int, int] | None = None
         self.previous_totals_time: float | None = None
+        self.connected_devices: frozenset[str] = (
+            initial_snapshot.connected_devices if initial_snapshot else frozenset()
+        )
 
     def start(self) -> None:
         self.thread = threading.Thread(
@@ -123,6 +129,22 @@ class SyncthingWatch:
         # 2. Poll connection totals and compute rates.
         self._tick_connections(now_pre)
 
+        # 2b. Stop with a terminal result if every relevant peer disconnected.
+        if self.folder.device_ids and not set(self.folder.device_ids) & self.connected_devices:
+            logger.info(
+                "Syncthing watch %s stopping: no connected peers (phase=%s configured=%d)",
+                self.watch_id,
+                self.phase,
+                len(self.folder.device_ids),
+            )
+            self.latest_sample = {
+                "status": "failed",
+                "reason": "no_connected_peers",
+                "message": "All Syncthing devices configured for the backup folder are disconnected.",
+            }
+            self.stop_event.set()
+            return
+
         # 3. Poll current folder status and detect sequence changes.
         self._tick_folder_status(now_pre)
 
@@ -145,7 +167,8 @@ class SyncthingWatch:
 
     def _tick_connections(self, now: float) -> None:
         try:
-            current_totals = get_connection_totals(self.api)
+            snapshot = get_connection_snapshot(self.api)
+            current_totals = (snapshot.in_bytes_total, snapshot.out_bytes_total)
             self.rates = compute_rates(
                 self.previous_totals,
                 self.previous_totals_time,
@@ -154,7 +177,8 @@ class SyncthingWatch:
             )
             self.previous_totals = current_totals
             self.previous_totals_time = now
-        # Intentionally broad
+            self.connected_devices = snapshot.connected_devices
+        # Intentionally broad; keeps the last known connected-device set
         except Exception:
             self.rates = ConnectionRates(0.0, 0.0)
 
@@ -271,17 +295,69 @@ class SyncthingWatchManager:
             except Exception as exc:
                 return {"status": "skipped", "reason": "api_unavailable", "message": str(exc)}
 
+            # Identify the local device so configured folder devices are remote-only.
+            # Probe errors can echo response payloads holding device IDs, which must
+            # never travel through RPC or logs; record only the exception class.
+            try:
+                my_device_id = get_my_device_id(api)
+            # Intentionally broad
+            except Exception as exc:
+                logger.warning("Syncthing system status probe failed: %s", type(exc).__name__)
+                return {
+                    "status": "skipped",
+                    "reason": "api_unavailable",
+                    "message": "Syncthing system status query failed.",
+                }
+
             # Resolve containing folder
             try:
-                folder = resolve_folder_by_path(api, backup_path)
+                folder = resolve_folder_by_path(api, backup_path, local_device_id=my_device_id)
             # Intentionally broad
             except Exception as exc:
                 if "No configured Syncthing folder contains path" in str(exc):
                     return {"status": "skipped", "reason": "folder_not_found", "message": str(exc)}
                 return {"status": "skipped", "reason": "api_unavailable", "message": str(exc)}
 
+            if not folder.device_ids:
+                return {
+                    "status": "skipped",
+                    "reason": "folder_not_shared",
+                    "message": "The Syncthing folder has no configured remote devices.",
+                }
+
+            # Require at least one connected peer that shares the matched folder
+            try:
+                snapshot = get_connection_snapshot(api)
+            # Intentionally broad; sanitized for RPC and logs like the status probe
+            except Exception as exc:
+                logger.warning("Syncthing connections probe failed: %s", type(exc).__name__)
+                return {
+                    "status": "skipped",
+                    "reason": "api_unavailable",
+                    "message": "Syncthing connections query failed.",
+                }
+
+            connected_count = len(set(folder.device_ids) & snapshot.connected_devices)
+            logger.info(
+                "Syncthing peer availability: phase=%s configured=%d connected=%d",
+                phase,
+                len(folder.device_ids),
+                connected_count,
+            )
+            if connected_count == 0:
+                return {
+                    "status": "skipped",
+                    "reason": "no_connected_peers",
+                    "message": (
+                        f"None of the {len(folder.device_ids)} configured devices "
+                        "for the backup folder are connected."
+                    ),
+                }
+
             watch_id = str(uuid.uuid4())
-            watch = SyncthingWatch(watch_id, phase, game_name, app_id, folder, api)
+            watch = SyncthingWatch(
+                watch_id, phase, game_name, app_id, folder, api, initial_snapshot=snapshot
+            )
             watch.start()
 
             self.watches[watch_id] = watch
