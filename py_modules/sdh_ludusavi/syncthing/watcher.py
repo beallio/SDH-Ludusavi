@@ -296,13 +296,13 @@ class SyncthingWatchManager:
                 return {"status": "skipped", "reason": "api_unavailable", "message": str(exc)}
 
             # Identify the local device so configured folder devices are remote-only.
-            # Raw API errors stay in backend logs; they can echo response payloads
-            # holding device IDs, which must never travel through RPC.
+            # Probe errors can echo response payloads holding device IDs, which must
+            # never travel through RPC or logs; record only the exception class.
             try:
                 my_device_id = get_my_device_id(api)
             # Intentionally broad
             except Exception as exc:
-                logger.warning("Syncthing system status probe failed: %s", exc)
+                logger.warning("Syncthing system status probe failed: %s", type(exc).__name__)
                 return {
                     "status": "skipped",
                     "reason": "api_unavailable",
@@ -328,9 +328,9 @@ class SyncthingWatchManager:
             # Require at least one connected peer that shares the matched folder
             try:
                 snapshot = get_connection_snapshot(api)
-            # Intentionally broad; sanitized for RPC like the system status probe
+            # Intentionally broad; sanitized for RPC and logs like the status probe
             except Exception as exc:
-                logger.warning("Syncthing connections probe failed: %s", exc)
+                logger.warning("Syncthing connections probe failed: %s", type(exc).__name__)
                 return {
                     "status": "skipped",
                     "reason": "api_unavailable",

@@ -649,3 +649,22 @@ def test_watch_manager_sanitizes_connections_probe_failure(
     assert result["status"] == "skipped"
     assert result["reason"] == "api_unavailable"
     assert "RAW-RESPONSE-WITH-DEVICE-ID" not in result["message"]
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+@patch("sdh_ludusavi.syncthing.watcher.get_my_device_id")
+def test_watch_manager_keeps_raw_probe_responses_out_of_logs(
+    mock_my_id, mock_resolve_creds, caplog
+) -> None:
+    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
+    mock_my_id.side_effect = RuntimeError("HTTP 500 body: RAW-RESPONSE-WITH-DEVICE-ID")
+
+    with caplog.at_level("DEBUG", logger="sdh_ludusavi.syncthing.watcher"):
+        result = SyncthingWatchManager().start_watch(
+            "post_game", "Hades", "1145300", "/home/deck/Sync/Hades"
+        )
+
+    assert result["reason"] == "api_unavailable"
+    # get_json errors can embed response bodies holding device IDs; logs must
+    # carry only the probe type and exception class.
+    assert "RAW-RESPONSE-WITH-DEVICE-ID" not in caplog.text
