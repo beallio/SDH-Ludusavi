@@ -86,10 +86,14 @@ def get_connection_snapshot(api: SyncthingAPI) -> ConnectionSnapshot:
     if isinstance(total, dict):
         in_bytes_total = int(total.get("inBytesTotal", 0) or 0)
         out_bytes_total = int(total.get("outBytesTotal", 0) or 0)
+    # A missing or non-dict connections map must fail rather than read as
+    # "all peers offline"; an empty connected set is a peer-availability signal.
     connections = data.get("connections")
+    if not isinstance(connections, dict):
+        raise RuntimeError(f"Unexpected system connections response: {data}")
     connected_devices = frozenset(
         device_id
-        for device_id, info in (connections.items() if isinstance(connections, dict) else ())
+        for device_id, info in connections.items()
         if isinstance(info, dict) and info.get("connected") is True
     )
     return ConnectionSnapshot(

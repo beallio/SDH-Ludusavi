@@ -69,15 +69,31 @@ def test_get_connection_snapshot_rejects_malformed_response() -> None:
         get_connection_snapshot(api)
 
 
-def test_get_connection_snapshot_tolerates_missing_sections() -> None:
+def test_get_connection_snapshot_rejects_missing_connections_map() -> None:
     api = Mock()
-    api.get_json.return_value = {}
+    api.get_json.return_value = {"total": {"inBytesTotal": 100, "outBytesTotal": 200}}
+
+    with pytest.raises(RuntimeError, match="Unexpected system connections response"):
+        get_connection_snapshot(api)
+
+
+def test_get_connection_snapshot_rejects_non_dict_connections_map() -> None:
+    api = Mock()
+    api.get_json.return_value = {"connections": ["DEV-A"]}
+
+    with pytest.raises(RuntimeError, match="Unexpected system connections response"):
+        get_connection_snapshot(api)
+
+
+def test_get_connection_snapshot_tolerates_missing_totals() -> None:
+    api = Mock()
+    api.get_json.return_value = {"connections": {"DEV-A": {"connected": True}}}
 
     snapshot = get_connection_snapshot(api)
 
     assert snapshot.in_bytes_total == 0
     assert snapshot.out_bytes_total == 0
-    assert snapshot.connected_devices == frozenset()
+    assert snapshot.connected_devices == frozenset({"DEV-A"})
 
 
 def test_get_connection_totals_wraps_snapshot() -> None:
