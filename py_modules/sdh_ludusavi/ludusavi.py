@@ -170,10 +170,14 @@ class PyludusaviAdapter:
 
             if change == "Same":
                 return "local_current"
-            if change in ("New", "Different"):
-                # In a restore context, New/Different implies the backup has
-                # data that should be applied to local.
+            if change == "New":
+                # In a restore context, New implies the backup contains files
+                # that don't exist locally — safe to auto-restore.
                 return "backup_newer"
+            if change == "Different":
+                # Different means both sides exist and differ; direction is
+                # unknown, so signal the caller to corroborate via timestamps.
+                return "backup_differs"
         except (LudusaviError, KeyError, TypeError, ValueError) as exc:
             LOGGER.debug(
                 "Restore preview failed or returned unexpected shape during recency check for %s: %s",

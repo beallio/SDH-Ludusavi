@@ -21,3 +21,7 @@ MAX_INSTALLED_APP_IDS_BYTES = 16_384
 
 CONFIG_MARKER_READ_FAILED = object()
 CACHE_MARKER_UNCHANGED = object()
+
+# Safety margin for "Different" recency: if backup timestamp is not more than
+# this many seconds newer than the local save, treat it as ambiguous.
+RECENCY_DIFFERS_TIMEDELTA: float = 120.0

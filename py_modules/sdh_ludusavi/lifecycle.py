@@ -4,6 +4,9 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, cast
 
+from datetime import datetime
+
+from .constants import RECENCY_DIFFERS_TIMEDELTA
 from .coordinator import OperationLockedError
 from .gateway import LudusaviGateway
 from .history import HistoryManager
@@ -36,6 +39,32 @@ class GameLifecycleManager:
 
     def __init__(self, dependencies: LifecycleDependencies) -> None:
         self.dependencies = dependencies
+
+    @staticmethod
+    def _parse_iso_timestamp(ts: str | None) -> datetime | None:
+        """Parse an ISO-8601 timestamp string, returning None if unparseable."""
+        if ts is None:
+            return None
+        try:
+            return datetime.fromisoformat(ts)
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _conflict_response(
+        game_name: str,
+        metadata: dict[str, object],
+    ) -> dict[str, object]:
+        """Build a standard conflict response for ambiguous recency."""
+        return {
+            "status": "conflict",
+            "operation": "restore",
+            "game": game_name,
+            "reason": "ambiguous_recency",
+            "localLabel": "Keep Local Save",
+            "backupLabel": "Restore Backup Save",
+            **metadata,
+        }
 
     def check_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Check whether a game launch needs a restore without changing local saves."""
@@ -74,18 +103,27 @@ class GameLifecycleManager:
             return self.dependencies.skip("start", game.name, "local_current")
 
         metadata = self.dependencies.conflict_metadata(game.name)
+
+        if recency == "backup_differs":
+            local_dt = self._parse_iso_timestamp(cast(str | None, metadata.get("localModifiedAt")))
+            backup_dt = self._parse_iso_timestamp(
+                cast(str | None, metadata.get("backupModifiedAt"))
+            )
+            if local_dt is not None and backup_dt is not None:
+                delta = (backup_dt - local_dt).total_seconds()
+                if delta > RECENCY_DIFFERS_TIMEDELTA:
+                    return {
+                        "status": "needed",
+                        "operation": "restore",
+                        "game": game.name,
+                    }
+
+        # Fall through to conflict for: ambiguous, backup_differs without
+        # clear direction, or any other unknown value.
         self.dependencies.history.record_history(
             game.name, "start", "auto_start", "skipped", reason="ambiguous_recency"
         )
-        return {
-            "status": "conflict",
-            "operation": "restore",
-            "game": game.name,
-            "reason": "ambiguous_recency",
-            "localLabel": "Keep Local Save",
-            "backupLabel": "Restore Backup Save",
-            **metadata,
-        }
+        return self._conflict_response(game.name, metadata)
 
     def resolve_game_start_conflict(
         self, game_name: str, app_id: str | None, resolution: str

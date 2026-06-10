@@ -187,13 +187,23 @@ def test_compare_recency_returns_no_backup_when_ludusavi_has_no_backup() -> None
     assert client.requested_games == ["Hades"]
 
 
-def test_compare_recency_returns_backup_newer_when_restore_preview_shows_changes() -> None:
+def test_compare_recency_returns_backup_newer_when_restore_preview_shows_new() -> None:
+    adapter, client = adapter_with_backups(
+        backup_data={"games": {"Hades": {"backups": [{"when": "2026-05-10T00:00:00Z"}]}}},
+        restore_data={"games": {"Hades": {"change": "New"}}},
+    )
+
+    assert adapter.compare_recency("Hades") == "backup_newer"
+    assert client.preview_requested is True
+
+
+def test_compare_recency_returns_backup_differs_when_restore_preview_shows_different() -> None:
     adapter, client = adapter_with_backups(
         backup_data={"games": {"Hades": {"backups": [{"when": "2026-05-10T00:00:00Z"}]}}},
         restore_data={"games": {"Hades": {"change": "Different"}}},
     )
 
-    assert adapter.compare_recency("Hades") == "backup_newer"
+    assert adapter.compare_recency("Hades") == "backup_differs"
     assert client.preview_requested is True
 
 
