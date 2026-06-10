@@ -86,7 +86,7 @@ Using Syncthing allows for near-instant local backups that sync in the backgroun
 - **Backup ready**: Ludusavi has a valid backup for this game.
 - **Needs first backup**: Ludusavi recognizes the game, but no backup has been created yet.
 - **Skipped — local save is already current**: The plugin detected that your local save matches or is newer than the backup, so no restore was performed.
-- **Skipped — recency is ambiguous**: The plugin couldn't determine which save is newer and will prompt you to choose.
+- **Skipped — recency is ambiguous**: The plugin couldn't determine which save is newer and will prompt you to choose. This also occurs when your local save and the backup have both changed (for example, after playing in Desktop Mode); the plugin only restores automatically when the backup is clearly newer, and otherwise pauses the launch so you can choose.
 - **Syncthing Downloading**: Syncthing is downloading/applying backup folder data.
 - **Syncthing Uploading**: Syncthing is uploading/serving backup folder data to a remote peer.
 - **Syncthing Complete**: Syncthing synchronization has settled locally. This confirms there is no longer active transfer or scanning on the Steam Deck, but it does NOT guarantee that remote devices have finished downloading the save.
