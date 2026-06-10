@@ -63,10 +63,13 @@ def test_get_connection_snapshot_parses_totals_and_connected_devices() -> None:
 
 def test_get_connection_snapshot_rejects_malformed_response() -> None:
     api = Mock()
-    api.get_json.return_value = ["not", "a", "dict"]
+    api.get_json.return_value = ["DEV-A", "DEV-B"]
 
-    with pytest.raises(RuntimeError, match="Unexpected system connections response"):
+    with pytest.raises(RuntimeError, match="Unexpected system connections response") as excinfo:
         get_connection_snapshot(api)
+
+    # Device IDs are backend-only; the error travels through RPC and must not echo them.
+    assert "DEV-A" not in str(excinfo.value)
 
 
 def test_get_connection_snapshot_rejects_missing_connections_map() -> None:
@@ -81,8 +84,10 @@ def test_get_connection_snapshot_rejects_non_dict_connections_map() -> None:
     api = Mock()
     api.get_json.return_value = {"connections": ["DEV-A"]}
 
-    with pytest.raises(RuntimeError, match="Unexpected system connections response"):
+    with pytest.raises(RuntimeError, match="Unexpected system connections response") as excinfo:
         get_connection_snapshot(api)
+
+    assert "DEV-A" not in str(excinfo.value)
 
 
 def test_get_connection_snapshot_tolerates_missing_totals() -> None:
@@ -116,3 +121,13 @@ def test_get_my_device_id_rejects_malformed_response() -> None:
 
     with pytest.raises(RuntimeError, match="Unexpected system status response"):
         get_my_device_id(api)
+
+
+def test_get_my_device_id_error_does_not_echo_response() -> None:
+    api = Mock()
+    api.get_json.return_value = {"myID": 123, "nearbyID": "SOME-DEVICE"}
+
+    with pytest.raises(RuntimeError, match="Unexpected system status response") as excinfo:
+        get_my_device_id(api)
+
+    assert "SOME-DEVICE" not in str(excinfo.value)
