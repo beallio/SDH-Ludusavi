@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, cast
+from typing import Any, Callable, Literal, cast
 
-from .constants import RECENCY_DIFFERS_TIMEDELTA
+from .constants import RECENCY_TIMESTAMP_MARGIN_SECONDS
 from .coordinator import OperationLockedError
 from .gateway import LudusaviGateway
 from .history import HistoryManager
@@ -13,6 +13,43 @@ from .registry import GameRegistry
 from sdh_ludusavi.game_names import sanitize_game_name
 
 LOGGER = logging.getLogger("sdh_ludusavi.service.lifecycle")
+
+
+def _parse_iso_timestamp(ts: object) -> datetime | None:
+    """Parse an ISO-8601 timestamp to aware UTC, returning None if unparseable.
+
+    Naive timestamps are assumed to be UTC so that mixed naive/aware
+    inputs can never raise during subtraction.
+    """
+    if not isinstance(ts, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _timestamp_direction(
+    local_modified_at: object,
+    backup_modified_at: object,
+    margin_seconds: float,
+) -> Literal["backup_newer", "not_newer", "unknown"]:
+    """Decide restore direction from conflict-metadata timestamps.
+
+    Returns "backup_newer" only when the backup timestamp exceeds the local
+    timestamp by strictly more than margin_seconds. Missing or unparseable
+    input yields "unknown".
+    """
+    local = _parse_iso_timestamp(local_modified_at)
+    backup = _parse_iso_timestamp(backup_modified_at)
+    if local is None or backup is None:
+        return "unknown"
+    if (backup - local).total_seconds() > margin_seconds:
+        return "backup_newer"
+    return "not_newer"
 
 
 @dataclass(frozen=True)
@@ -38,23 +75,6 @@ class GameLifecycleManager:
 
     def __init__(self, dependencies: LifecycleDependencies) -> None:
         self.dependencies = dependencies
-
-    @staticmethod
-    def _parse_iso_timestamp(ts: str | None) -> datetime | None:
-        """Parse an ISO-8601 timestamp to aware UTC, returning None if unparseable.
-
-        Naive timestamps are assumed to be UTC so that mixed naive/aware
-        inputs can never raise during subtraction.
-        """
-        if ts is None:
-            return None
-        try:
-            parsed = datetime.fromisoformat(ts)
-        except (ValueError, TypeError):
-            return None
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
 
     @staticmethod
     def _conflict_response(
@@ -111,18 +131,25 @@ class GameLifecycleManager:
         metadata = self.dependencies.conflict_metadata(game.name)
 
         if recency == "backup_differs":
-            local_dt = self._parse_iso_timestamp(cast(str | None, metadata.get("localModifiedAt")))
-            backup_dt = self._parse_iso_timestamp(
-                cast(str | None, metadata.get("backupModifiedAt"))
+            direction = _timestamp_direction(
+                metadata.get("localModifiedAt"),
+                metadata.get("backupModifiedAt"),
+                RECENCY_TIMESTAMP_MARGIN_SECONDS,
             )
-            if local_dt is not None and backup_dt is not None:
-                delta = (backup_dt - local_dt).total_seconds()
-                if delta > RECENCY_DIFFERS_TIMEDELTA:
-                    return {
-                        "status": "needed",
-                        "operation": "restore",
-                        "game": game.name,
-                    }
+            if direction == "backup_newer":
+                self.dependencies.log(
+                    "info",
+                    f"Backup for {game.name} differs and is newer by timestamp; proceeding with restore",
+                    "start",
+                    game.name,
+                )
+                return {"status": "needed", "operation": "restore", "game": game.name}
+            self.dependencies.log(
+                "info",
+                f"Backup for {game.name} differs but direction is {direction}; deferring to conflict resolution",
+                "start",
+                game.name,
+            )
 
         # Fall through to conflict for: ambiguous, backup_differs without
         # clear direction, or any other unknown value.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from sdh_ludusavi.lifecycle import GameLifecycleManager, LifecycleDependencies
+from sdh_ludusavi.lifecycle import GameLifecycleManager, LifecycleDependencies, _timestamp_direction
 
 
 def _make_manager(
@@ -174,3 +174,69 @@ def test_backup_differs_conflict_when_timestamps_mix_naive_and_aware() -> None:
     result = manager.check_game_start("Hades")
     assert result["status"] == "conflict"
     assert result["reason"] == "ambiguous_recency"
+
+
+def test_timestamp_direction_backup_newer_beyond_margin() -> None:
+    assert (
+        _timestamp_direction("2026-06-01T00:00:00+00:00", "2026-06-01T00:05:00Z", 120)
+        == "backup_newer"
+    )
+
+
+def test_timestamp_direction_not_newer_at_exact_margin() -> None:
+    # Strictly-greater-than semantics: exactly 120s is NOT clearly newer.
+    assert (
+        _timestamp_direction("2026-06-01T00:00:00+00:00", "2026-06-01T00:02:00Z", 120)
+        == "not_newer"
+    )
+
+
+def test_timestamp_direction_unknown_on_missing_or_bad_input() -> None:
+    assert _timestamp_direction(None, "2026-06-01T00:05:00Z", 120) == "unknown"
+    assert _timestamp_direction("2026-06-01T00:00:00+00:00", None, 120) == "unknown"
+    assert _timestamp_direction("garbage", "2026-06-01T00:05:00Z", 120) == "unknown"
+    assert _timestamp_direction(123, "2026-06-01T00:05:00Z", 120) == "unknown"  # type: ignore[arg-type]
+
+
+def test_backup_differs_decisions_are_logged() -> None:
+    manager = _make_manager(
+        recency="backup_differs",
+        local_modified_at="2026-06-01T00:00:00+00:00",
+        backup_modified_at="2026-06-01T02:05:00+00:00",
+    )
+    manager.check_game_start("Hades")
+    logged = " | ".join(str(call) for call in manager.dependencies.log.call_args_list)
+    assert "proceeding with restore" in logged
+
+
+def test_conflict_records_skipped_history_with_ambiguous_recency() -> None:
+    manager = _make_manager(
+        recency="backup_differs",
+        local_modified_at="2026-06-01T02:10:00+00:00",
+        backup_modified_at="2026-06-01T02:05:00+00:00",
+    )
+    manager.check_game_start("Hades")
+    manager.dependencies.history.record_history.assert_called_once_with(
+        "Hades", "start", "auto_start", "skipped", reason="ambiguous_recency"
+    )
+
+
+def test_auto_restore_does_not_record_skip_history() -> None:
+    manager = _make_manager(
+        recency="backup_differs",
+        local_modified_at="2026-06-01T00:00:00+00:00",
+        backup_modified_at="2026-06-01T02:05:00+00:00",
+    )
+    manager.check_game_start("Hades")
+    manager.dependencies.history.record_history.assert_not_called()
+
+
+def test_backup_differs_auto_restore_with_zulu_suffix_backup_timestamp() -> None:
+    """Ludusavi emits RFC3339 'Z'-suffixed timestamps; the direction check must parse them."""
+    manager = _make_manager(
+        recency="backup_differs",
+        local_modified_at="2026-06-01T00:00:00+00:00",
+        backup_modified_at="2026-06-01T02:05:00Z",
+    )
+    result = manager.check_game_start("Hades")
+    assert result == {"status": "needed", "operation": "restore", "game": "Hades"}
