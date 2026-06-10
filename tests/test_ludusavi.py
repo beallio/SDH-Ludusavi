@@ -261,6 +261,51 @@ def test_conflict_metadata_local_modified_at_is_timezone_aware_utc(tmp_path):
     assert datetime.fromisoformat(str(metadata["localModifiedAt"])).tzinfo is not None
 
 
+def test_get_conflict_metadata_uses_newest_backup_timestamp() -> None:
+    """When multiple backups exist, pick the one with the latest 'when' timestamp."""
+    adapter, _client = adapter_with_backups(
+        backup_data={
+            "games": {
+                "Hades": {
+                    "backups": [
+                        {"when": "2026-05-10T00:00:00Z", "name": "full"},
+                        {"when": "2026-06-01T12:00:00Z", "name": "differential"},
+                    ],
+                    "backupPath": "/backup/Hades",
+                }
+            }
+        },
+    )
+
+    metadata = adapter.get_conflict_metadata("Hades")
+
+    assert metadata["backupModifiedAt"] == "2026-06-01T12:00:00Z"
+    assert metadata["backupPath"] == "/backup/Hades"
+
+
+def test_newest_backup_when_returns_latest_timestamp() -> None:
+    from sdh_ludusavi.ludusavi import _newest_backup_when
+
+    backups: list[dict[str, object]] = [
+        {"when": "2026-05-10T00:00:00Z", "name": "full"},
+        {"when": "2026-06-01T12:00:00Z", "name": "differential"},
+    ]
+    assert _newest_backup_when(backups) == "2026-06-01T12:00:00Z"
+
+
+def test_newest_backup_when_returns_none_for_empty_list() -> None:
+    from sdh_ludusavi.ludusavi import _newest_backup_when
+
+    assert _newest_backup_when([]) is None
+
+
+def test_newest_backup_when_returns_none_when_no_when_keys() -> None:
+    from sdh_ludusavi.ludusavi import _newest_backup_when
+
+    backups: list[dict[str, object]] = [{"name": "full"}, {"name": "differential"}]
+    assert _newest_backup_when(backups) is None
+
+
 def test_refresh_statuses_forwards_game_names_to_client() -> None:
     calls = []
 
