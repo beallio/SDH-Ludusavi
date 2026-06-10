@@ -161,3 +161,16 @@ def test_conflict_payload_includes_metadata() -> None:
     assert "backupPath" in result
     assert "localLabel" in result
     assert "backupLabel" in result
+
+
+def test_backup_differs_conflict_when_timestamps_mix_naive_and_aware() -> None:
+    """A naive local timestamp paired with an aware backup timestamp must not
+    raise; it must resolve safely (normalized comparison, not a crash)."""
+    manager = _make_manager(
+        recency="backup_differs",
+        local_modified_at="2026-06-01T02:10:00",  # naive
+        backup_modified_at="2026-06-01T02:05:00+00:00",  # aware
+    )
+    result = manager.check_game_start("Hades")
+    assert result["status"] == "conflict"
+    assert result["reason"] == "ambiguous_recency"

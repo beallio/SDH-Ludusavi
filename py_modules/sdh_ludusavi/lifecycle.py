@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable, cast
-
-from datetime import datetime
 
 from .constants import RECENCY_DIFFERS_TIMEDELTA
 from .coordinator import OperationLockedError
@@ -42,13 +41,20 @@ class GameLifecycleManager:
 
     @staticmethod
     def _parse_iso_timestamp(ts: str | None) -> datetime | None:
-        """Parse an ISO-8601 timestamp string, returning None if unparseable."""
+        """Parse an ISO-8601 timestamp to aware UTC, returning None if unparseable.
+
+        Naive timestamps are assumed to be UTC so that mixed naive/aware
+        inputs can never raise during subtraction.
+        """
         if ts is None:
             return None
         try:
-            return datetime.fromisoformat(ts)
+            parsed = datetime.fromisoformat(ts)
         except (ValueError, TypeError):
             return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     @staticmethod
     def _conflict_response(
