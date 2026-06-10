@@ -96,18 +96,14 @@ def test_resolve_folder_by_path() -> None:
     ]
     api = MockAPI(folders)
 
-    # Resolve a path inside folder2 (which is deeper than folder1)
-    # Note: expanduser will expand ~/ to the user home. Let's expand them for comparison.
     home = os.path.expanduser("~")
     resolved = resolve_folder_by_path(api, os.path.join(home, "Sync/Saves/game1"))
     assert resolved.folder_id == "folder2"
     assert resolved.label == "Folder 2"
 
-    # Path inside folder3
     resolved3 = resolve_folder_by_path(api, os.path.join(home, "Games/game2"))
     assert resolved3.folder_id == "folder3"
 
-    # Path not contained
     with pytest.raises(RuntimeError, match="No configured Syncthing folder contains path"):
         resolve_folder_by_path(api, "/other/path")
 
@@ -145,7 +141,6 @@ def test_folder_selection_parses_filesystem_watcher_delay() -> None:
 def test_compute_activity_status() -> None:
     now = time.monotonic()
 
-    # 1. Idle state
     status = compute_activity_status(
         folder_state="idle",
         remote_progress={},
@@ -161,7 +156,6 @@ def test_compute_activity_status() -> None:
     assert status.downloading is False
     assert status.uploading is False
 
-    # 2. Local downloading (State is syncing)
     status = compute_activity_status(
         folder_state="syncing",
         remote_progress={},
@@ -177,7 +171,6 @@ def test_compute_activity_status() -> None:
     assert status.downloading is True
     assert status.uploading is False
 
-    # 3. Local uploading (Remote progress exists)
     status = compute_activity_status(
         folder_state="idle",
         remote_progress={"peer1": RemoteProgress("peer1", file_count=1, last_seen_monotonic=now)},
@@ -193,7 +186,6 @@ def test_compute_activity_status() -> None:
     assert status.downloading is False
     assert status.uploading is True
 
-    # 4. Scanning state
     status = compute_activity_status(
         folder_state="scanning",
         remote_progress={},
@@ -208,7 +200,6 @@ def test_compute_activity_status() -> None:
     assert status.update_in_progress is True
     assert status.settled is False
 
-    # 5. Update needed (receive needed)
     status = compute_activity_status(
         folder_state="idle",
         remote_progress={},
@@ -223,7 +214,6 @@ def test_compute_activity_status() -> None:
     assert status.update_in_progress is True
     assert status.settled is False
 
-    # 6. Pending remote ack (Strict TDD RED test: expected to pass eventually but will fail now)
     status = compute_activity_status(
         folder_state="idle",
         remote_progress={},
