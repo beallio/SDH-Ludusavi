@@ -157,8 +157,12 @@ def test_local_https_uses_self_signed_by_default() -> None:
 
 
 def test_local_https_uses_verified_tls_when_opted_out() -> None:
+    import ssl
+
     api = SyncthingAPI("https://127.0.0.1:8384", "test-key", allow_local_https_self_signed=False)
-    assert api.ssl_context is None
+    assert api.ssl_context is not None
+    assert api.ssl_context.verify_mode == ssl.CERT_REQUIRED
+    assert api.ssl_context.check_hostname is True
 
 
 # ============================================
@@ -257,3 +261,29 @@ def test_validate_local_api_url_is_module_level() -> None:
     _validate_local_api_url("http://127.0.0.1:8384")
     with pytest.raises(RuntimeError, match="Only local Syncthing"):
         _validate_local_api_url("http://192.168.1.50:8384")
+
+
+# ============================================
+# Keyword-only parameter enforcement
+# ============================================
+
+
+def test_keyword_only_allow_local_https_self_signed() -> None:
+    """allow_local_https_self_signed is keyword-only; positional raises TypeError."""
+    from inspect import signature
+
+    sig = signature(SyncthingAPI.__init__)
+    allow_param = sig.parameters.get("allow_local_https_self_signed")
+    assert allow_param is not None
+    assert allow_param.kind == allow_param.KEYWORD_ONLY
+
+
+def test_local_https_opt_out_uses_explicit_verified_context() -> None:
+    """When allow_local_https_self_signed=False, self.ssl_context is
+    an explicit verified SSLContext (CERT_REQUIRED, check_hostname=True)."""
+    import ssl
+
+    api = SyncthingAPI("https://127.0.0.1:8384", "test-key", allow_local_https_self_signed=False)
+    assert api.ssl_context is not None
+    assert api.ssl_context.verify_mode == ssl.CERT_REQUIRED
+    assert api.ssl_context.check_hostname is True
