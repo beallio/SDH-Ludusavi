@@ -66,6 +66,7 @@ class SyncthingAPI:
         self,
         base_url: str,
         api_key: str,
+        *,
         allow_local_https_self_signed: bool = True,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -81,6 +82,9 @@ class SyncthingAPI:
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             self.ssl_context = ctx
+        elif parsed.scheme == "https":
+            # Explicit verified TLS context when self-signed is opted out
+            self.ssl_context = ssl.create_default_context()
         else:
             self.ssl_context = None
 
