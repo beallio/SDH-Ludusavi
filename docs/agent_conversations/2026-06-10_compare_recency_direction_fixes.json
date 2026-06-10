@@ -1,0 +1,27 @@
+{
+  "date": "2026-06-10",
+  "task_objective": "Fix compare_recency direction issues from review f5f7bbc",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/lifecycle.py",
+    "py_modules/sdh_ludusavi/constants.py",
+    "tests/test_recency_direction.py"
+  ],
+  "tests_added": [
+    "test_backup_differs_conflict_when_timestamps_mix_naive_and_aware",
+    "test_timestamp_direction_backup_newer_beyond_margin",
+    "test_timestamp_direction_not_newer_at_exact_margin",
+    "test_timestamp_direction_unknown_on_missing_or_bad_input",
+    "test_backup_differs_decisions_are_logged",
+    "test_conflict_records_skipped_history_with_ambiguous_recency",
+    "test_auto_restore_does_not_record_skip_history",
+    "test_backup_differs_auto_restore_with_zulu_suffix_backup_timestamp"
+  ],
+  "design_decisions": [
+    "Normalized parsed timestamps to aware UTC to prevent naive/aware subtraction errors.",
+    "Extracted _timestamp_direction and _parse_iso_timestamp helpers for direct unit testing.",
+    "Renamed RECENCY_DIFFERS_TIMEDELTA to RECENCY_TIMESTAMP_MARGIN_SECONDS for clarity.",
+    "Added logging for backup_differs decisions.",
+    "Added tests for history recording and Zulu-suffix timestamps."
+  ],
+  "results": "All remaining review notes addressed. All tests pass, type checks pass, formatting checks pass. Changes committed atomically."
+}
