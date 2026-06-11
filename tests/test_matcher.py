@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 from sdh_ludusavi.matcher import GameRegistryMatcher
-from sdh_ludusavi.service import GameStatus
+from sdh_ludusavi.types import GameStatus
 
 
 def test_game_registry_matcher_normalization() -> None:
