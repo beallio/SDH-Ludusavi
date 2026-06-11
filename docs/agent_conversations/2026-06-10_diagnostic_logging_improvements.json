@@ -1,0 +1,30 @@
+{
+  "date": "2026-06-10",
+  "task_objective": "Add diagnostic logging so users can determine from the logs why the plugin made auto-sync decisions and why the status bar showed, hid, or never appeared",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/ludusavi.py",
+    "py_modules/sdh_ludusavi/lifecycle.py",
+    "src/surfaces/autoSyncStatusSurface.tsx",
+    "src/controllers/gameLifecycleController.tsx",
+    "docs/plans/diagnostic_logging_improvements.md"
+  ],
+  "tests_added": [
+    "tests/test_decision_logging.py::test_compare_recency_logs_no_backup_verdict",
+    "tests/test_decision_logging.py::test_compare_recency_logs_preview_change_and_verdict",
+    "tests/test_decision_logging.py::test_compare_recency_logs_ambiguous_when_preview_fails",
+    "tests/test_decision_logging.py::test_check_game_start_logs_restore_needed_decision",
+    "tests/test_decision_logging.py::test_check_game_start_logs_conflict_prompt_with_timestamps",
+    "tests/test_decision_logging.py::test_check_game_exit_logs_preview_summary",
+    "src/surfaces/autoSyncStatusSurface.suppression.test.ts (4 tests: running-status timeout log, suppressed-final-result log, auto-hide schedule debug log, unhandled-result-status log)",
+    "src/controllers/gameLifecycleController.logging.test.ts (2 tests: pre-check status bar suppression reasons, stale-epoch drop logging)"
+  ],
+  "design_decisions": [
+    "Audit-first approach: identified silent decision points rather than blanket-adding logs. The biggest user-facing mysteries were completeAutoSyncStatus silently dropping the final result after the 10s running-status timeout, the epoch guard silently dropping stale publishes, and the controller never explaining why the pre-RPC 'VERIFYING GAME SAVE' bar was suppressed.",
+    "compare_recency now logs its verdict (and the restore-preview change value) at info level via the module LOGGER, which DeckyLogHandler routes into the diagnostic ring buffer and decky logger, so the verdict appears in the in-plugin Log modal.",
+    "check_game_exit extracts and logs the full preview summary (decision/change/files/registry counts) before any skip decision, so every exit skip reason can be corroborated.",
+    "Conflict-prompt and backup_differs direction logs now include the local/backup timestamps that drove the decision.",
+    "Log levels: info for behavior-visible decisions (verdicts, suppression, timeout-hide); debug for mechanical detail (auto-hide scheduling, stale-epoch drops, unhandled result fallthrough).",
+    "Kept gameLifecycleController.tsx within its 550-line module size budget by compacting the new helpers rather than raising the budget."
+  ],
+  "results": "All quality gates pass: ruff check/format clean, ty clean, 503 backend tests pass, 85 frontend vitest tests pass, tsc --noEmit clean."
+}

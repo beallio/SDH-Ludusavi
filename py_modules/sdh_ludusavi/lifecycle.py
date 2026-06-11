@@ -124,35 +124,52 @@ class GameLifecycleManager:
             return self.dependencies.skip("start", game.name, "operation_running")
 
         if recency == "backup_newer":
+            self.dependencies.log(
+                "info",
+                f"Restore needed for {game.name}: backup is newer than the local save",
+                "start",
+                game.name,
+            )
             return {"status": "needed", "operation": "restore", "game": game.name}
         if recency == "local_current":
             return self.dependencies.skip("start", game.name, "local_current")
 
         metadata = self.dependencies.conflict_metadata(game.name)
+        local_modified_at = metadata.get("localModifiedAt")
+        backup_modified_at = metadata.get("backupModifiedAt")
 
         if recency == "backup_differs":
             direction = _timestamp_direction(
-                metadata.get("localModifiedAt"),
-                metadata.get("backupModifiedAt"),
+                local_modified_at,
+                backup_modified_at,
                 RECENCY_TIMESTAMP_MARGIN_SECONDS,
             )
             if direction == "backup_newer":
                 self.dependencies.log(
                     "info",
-                    f"Backup for {game.name} differs and is newer by timestamp; proceeding with restore",
+                    f"Backup for {game.name} differs and is newer by timestamp; proceeding with restore "
+                    f"(local={local_modified_at}, backup={backup_modified_at})",
                     "start",
                     game.name,
                 )
                 return {"status": "needed", "operation": "restore", "game": game.name}
             self.dependencies.log(
                 "info",
-                f"Backup for {game.name} differs but direction is {direction}; deferring to conflict resolution",
+                f"Backup for {game.name} differs but direction is {direction}; deferring to conflict resolution "
+                f"(local={local_modified_at}, backup={backup_modified_at})",
                 "start",
                 game.name,
             )
 
         # Fall through to conflict for: ambiguous, backup_differs without
         # clear direction, or any other unknown value.
+        self.dependencies.log(
+            "info",
+            f"Recency for {game.name} is {recency}; prompting user to resolve conflict "
+            f"(local={local_modified_at}, backup={backup_modified_at})",
+            "start",
+            game.name,
+        )
         self.dependencies.history.record_history(
             game.name, "start", "auto_start", "skipped", reason="ambiguous_recency"
         )
@@ -289,15 +306,21 @@ class GameLifecycleManager:
 
             game_output = cast(dict[str, Any], games_output.get(game.name, {}))
             decision = game_output.get("decision")
-            if decision in ("Ignored", "Cancelled"):
-                return self.dependencies.skip("exit", game.name, "not_processed")
-
             files = game_output.get("files", {})
             registry = game_output.get("registry", {})
+            change = game_output.get("change")
+            self.dependencies.log(
+                "info",
+                f"Exit preview for {game.name}: decision={decision} change={change} "
+                f"files={len(files)} registry={len(registry)}",
+                "exit",
+                game.name,
+            )
+
+            if decision in ("Ignored", "Cancelled"):
+                return self.dependencies.skip("exit", game.name, "not_processed")
             if not files and not registry:
                 return self.dependencies.skip("exit", game.name, "no_files_found")
-
-            change = game_output.get("change")
             if change == "Same":
                 return self.dependencies.skip("exit", game.name, "local_current")
         except OperationLockedError:
