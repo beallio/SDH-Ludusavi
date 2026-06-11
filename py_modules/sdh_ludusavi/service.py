@@ -336,18 +336,6 @@ class SDHLudusaviService:
         return self._log_buffer.get_recent()
 
     _logs = property(lambda self: self._log_buffer._logs)
-    _games = property(
-        lambda self: self._registry._games,
-        lambda self, v: setattr(self._registry, "_games", v),
-    )
-    _installed_app_ids = property(
-        lambda self: self._registry._installed_app_ids,
-        lambda self, v: setattr(self._registry, "_installed_app_ids", v),
-    )
-    _ludusavi_config_mtime_ns = property(
-        lambda self: self._registry._ludusavi_config_mtime_ns,
-        lambda self, v: setattr(self._registry, "_ludusavi_config_mtime_ns", v),
-    )
 
     def pause_game_process(self, pid: int) -> dict[str, object]:
         """Suspend a launched game process tree while start sync runs."""
