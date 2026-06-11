@@ -437,13 +437,6 @@ class SDHLudusaviService:
         return self._updater.has_pending_install()
 
 
-# Keep fuzzy matching module-level functions mapped to GameRegistryMatcher
-def _normalize(game_name: str) -> str:
-    from .matcher import GameRegistryMatcher
-
-    return GameRegistryMatcher().normalize(game_name)
-
-
 def _conflict_metadata(service: SDHLudusaviService, game_name: str) -> dict[str, object]:
     try:
         metadata = service._gateway.get_adapter().get_conflict_metadata(game_name)

@@ -107,8 +107,8 @@ def test_short_configured_game_name_matches_boundary_safe_launcher_name(tmp_path
 
 
 def test_normalization_retains_special_chars(tmp_path: Path) -> None:
-    from sdh_ludusavi.service import _normalize
+    from sdh_ludusavi.matcher import GameRegistryMatcher
 
     # Periods and hyphens should be retained in the refined version
-    assert _normalize("Game.v1-2") == "game.v1-2"
-    assert _normalize("Game: Edition") == "game edition"
+    assert GameRegistryMatcher().normalize("Game.v1-2") == "game.v1-2"
+    assert GameRegistryMatcher().normalize("Game: Edition") == "game edition"
