@@ -708,7 +708,10 @@ def test_is_game_cache_current_does_not_block_event_loop(
 
     class BlockingService:
         def is_game_cache_current(self, installed_app_ids: str | None = None) -> bool:
-            event.wait()
+            # Bounded wait: if the handler regresses to running on the event
+            # loop, the elapsed-time assertion fails after ~5s instead of
+            # hanging pytest forever (no pytest-timeout plugin is configured).
+            event.wait(timeout=5.0)
             return True
 
     monkeypatch.setattr(plugin, "_service", lambda: BlockingService())
@@ -751,6 +754,8 @@ def test_main_offloads_service_initialization(
 
     assert "startup_init" in calls
     assert "reconcile_pending_update_install" in calls
+    assert calls.index("startup_init") < calls.index("reconcile_pending_update_install")
+    assert "reconcile_call" in calls
 
 
 def test_main_logs_initialization_failure_without_crashing(
@@ -766,6 +771,26 @@ def test_main_logs_initialization_failure_without_crashing(
         return {"status": "ok"}
 
     monkeypatch.setattr(plugin, "_call", fake_call)
+
+    asyncio.run(plugin._main())
+
+    assert any(
+        "Service initialization failed during startup: disk exploded" in msg
+        for msg in logger.errors
+    )
+
+
+def test_main_logs_initialization_failure_via_real_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decky, logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+
+    def exploding_service() -> Any:
+        raise RuntimeError("disk exploded")
+
+    monkeypatch.setattr(plugin, "_service", exploding_service)
 
     asyncio.run(plugin._main())
 
