@@ -1,3 +1,5 @@
+"""Contract tests for the symbols and methods main.py consumes from the service façade."""
+
 from __future__ import annotations
 
 import inspect
@@ -36,11 +38,66 @@ class DummyAdapter:
         return {}
 
 
-def test_sdh_ludusavi_service_interface_compatibility(tmp_path: Path) -> None:
-    """
-    Ensure all 29 expected public methods exist on SDHLudusaviService with the
-    correct names, parameters, and signature contracts required by main.py.
-    """
+def test_facade_public_symbols() -> None:
+    import sdh_ludusavi.constants as constants
+    import sdh_ludusavi.coordinator as coordinator
+    import sdh_ludusavi.service as service
+
+    assert service.__all__ == [
+        "SDHLudusaviService",
+        "OperationLockedError",
+        "DEFAULT_NOTIFICATION_SETTINGS",
+    ]
+    assert service.OperationLockedError is coordinator.OperationLockedError
+    assert service.DEFAULT_NOTIFICATION_SETTINGS is constants.DEFAULT_NOTIFICATION_SETTINGS
+
+
+EXPECTED_METHODS: dict[str, list[str]] = {
+    "get_settings": [],
+    "get_game_history": [],
+    "set_auto_sync_enabled": ["enabled"],
+    "set_selected_game": ["game_name"],
+    "set_notification_settings": ["settings"],
+    "log": ["level", "message", "operation", "game_name"],
+    "set_update_channel": ["channel"],
+    "set_automatic_update_checks": ["enabled"],
+    "get_update_check_context": [],
+    "check_for_plugin_update": ["current_version", "force"],
+    "record_update_install_requested": ["candidate"],
+    "confirm_update_install_handoff": ["version"],
+    "clear_pending_update_install": ["version"],
+    "reconcile_pending_update_install": ["current_version"],
+    "revalidate_plugin_update": ["candidate"],
+    "has_pending_update_install": [],
+    "start_syncthing_activity_watch": ["phase", "game_name", "app_id"],
+    "get_syncthing_activity": ["watch_id"],
+    "stop_syncthing_activity_watch": ["watch_id"],
+    "get_ludusavi_launcher_shortcut_id": [],
+    "set_ludusavi_launcher_shortcut_id": ["app_id"],
+    "clear_ludusavi_launcher_shortcut_id": [],
+    "get_ludusavi_command": [],
+    "refresh_games": ["force", "installed_app_ids"],
+    "is_game_cache_current": ["installed_app_ids"],
+    "check_game_start": ["game_name", "app_id"],
+    "resolve_game_start_conflict": ["game_name", "app_id", "resolution"],
+    "restore_game_on_start": ["game_name", "app_id"],
+    "handle_game_start": ["game_name", "app_id"],
+    "check_game_exit": ["game_name", "app_id"],
+    "backup_game_on_exit": ["game_name", "app_id"],
+    "handle_game_exit": ["game_name", "app_id"],
+    "force_backup": ["game_name"],
+    "force_restore": ["game_name"],
+    "get_versions": [],
+    "get_ludusavi_logs": [],
+    "get_operation_status": [],
+    "get_recent_logs": [],
+    "pause_game_process": ["pid"],
+    "resume_game_process": ["pid"],
+    "stop": [],
+}
+
+
+def test_facade_method_signatures(tmp_path: Path) -> None:
     service = SDHLudusaviService(
         adapter=DummyAdapter(),
         settings_store=JsonSettingsStore(tmp_path / "settings.json"),
@@ -56,150 +113,11 @@ def test_sdh_ludusavi_service_interface_compatibility(tmp_path: Path) -> None:
     assert "cache_path" in init_sig.parameters
     assert "log_limit" in init_sig.parameters
 
-    # 2. stop
-    assert hasattr(service, "stop")
-    assert inspect.ismethod(service.stop)
-    assert len(inspect.signature(service.stop).parameters) == 0
-
-    # 3. log
-    assert hasattr(service, "log")
-    log_sig = inspect.signature(service.log)
-    assert list(log_sig.parameters.keys()) == ["level", "message", "operation", "game_name"]
-
-    # 4. get_settings
-    assert hasattr(service, "get_settings")
-    assert len(inspect.signature(service.get_settings).parameters) == 0
-
-    # 5. set_auto_sync_enabled
-    assert hasattr(service, "set_auto_sync_enabled")
-    assert list(inspect.signature(service.set_auto_sync_enabled).parameters.keys()) == ["enabled"]
-
-    # 6. set_selected_game
-    assert hasattr(service, "set_selected_game")
-    assert list(inspect.signature(service.set_selected_game).parameters.keys()) == ["game_name"]
-
-    # 7. set_notification_settings
-    assert hasattr(service, "set_notification_settings")
-    assert list(inspect.signature(service.set_notification_settings).parameters.keys()) == [
-        "settings"
-    ]
-
-    # 8. get_game_history
-    assert hasattr(service, "get_game_history")
-    assert len(inspect.signature(service.get_game_history).parameters) == 0
-
-    # 9. get_ludusavi_launcher_shortcut_id
-    assert hasattr(service, "get_ludusavi_launcher_shortcut_id")
-    assert len(inspect.signature(service.get_ludusavi_launcher_shortcut_id).parameters) == 0
-
-    # 10. set_ludusavi_launcher_shortcut_id
-    assert hasattr(service, "set_ludusavi_launcher_shortcut_id")
-    assert list(inspect.signature(service.set_ludusavi_launcher_shortcut_id).parameters.keys()) == [
-        "app_id"
-    ]
-
-    # 11. clear_ludusavi_launcher_shortcut_id
-    assert hasattr(service, "clear_ludusavi_launcher_shortcut_id")
-    assert len(inspect.signature(service.clear_ludusavi_launcher_shortcut_id).parameters) == 0
-
-    # 12. get_ludusavi_command
-    assert hasattr(service, "get_ludusavi_command")
-    assert len(inspect.signature(service.get_ludusavi_command).parameters) == 0
-
-    # 13. is_game_cache_current
-    assert hasattr(service, "is_game_cache_current")
-    assert list(inspect.signature(service.is_game_cache_current).parameters.keys()) == [
-        "installed_app_ids"
-    ]
-
-    # 14. refresh_games
-    assert hasattr(service, "refresh_games")
-    assert list(inspect.signature(service.refresh_games).parameters.keys()) == [
-        "force",
-        "installed_app_ids",
-    ]
-
-    # 15. check_game_start
-    assert hasattr(service, "check_game_start")
-    assert list(inspect.signature(service.check_game_start).parameters.keys()) == [
-        "game_name",
-        "app_id",
-    ]
-
-    # 16. resolve_game_start_conflict
-    assert hasattr(service, "resolve_game_start_conflict")
-    assert list(inspect.signature(service.resolve_game_start_conflict).parameters.keys()) == [
-        "game_name",
-        "app_id",
-        "resolution",
-    ]
-
-    # 17. restore_game_on_start
-    assert hasattr(service, "restore_game_on_start")
-    assert list(inspect.signature(service.restore_game_on_start).parameters.keys()) == [
-        "game_name",
-        "app_id",
-    ]
-
-    # 18. handle_game_start
-    assert hasattr(service, "handle_game_start")
-    assert list(inspect.signature(service.handle_game_start).parameters.keys()) == [
-        "game_name",
-        "app_id",
-    ]
-
-    # 19. check_game_exit
-    assert hasattr(service, "check_game_exit")
-    assert list(inspect.signature(service.check_game_exit).parameters.keys()) == [
-        "game_name",
-        "app_id",
-    ]
-
-    # 20. backup_game_on_exit
-    assert hasattr(service, "backup_game_on_exit")
-    assert list(inspect.signature(service.backup_game_on_exit).parameters.keys()) == [
-        "game_name",
-        "app_id",
-    ]
-
-    # 21. handle_game_exit
-    assert hasattr(service, "handle_game_exit")
-    assert list(inspect.signature(service.handle_game_exit).parameters.keys()) == [
-        "game_name",
-        "app_id",
-    ]
-
-    # 22. force_backup
-    assert hasattr(service, "force_backup")
-    assert list(inspect.signature(service.force_backup).parameters.keys()) == ["game_name"]
-
-    # 23. force_restore
-    assert hasattr(service, "force_restore")
-    assert list(inspect.signature(service.force_restore).parameters.keys()) == ["game_name"]
-
-    # 24. get_versions
-    assert hasattr(service, "get_versions")
-    assert len(inspect.signature(service.get_versions).parameters) == 0
-
-    # 25. get_ludusavi_logs
-    assert hasattr(service, "get_ludusavi_logs")
-    assert len(inspect.signature(service.get_ludusavi_logs).parameters) == 0
-
-    # 26. get_operation_status
-    assert hasattr(service, "get_operation_status")
-    assert len(inspect.signature(service.get_operation_status).parameters) == 0
-
-    # 27. get_recent_logs
-    assert hasattr(service, "get_recent_logs")
-    assert len(inspect.signature(service.get_recent_logs).parameters) == 0
-
-    # 28. resume_game_process
-    assert hasattr(service, "resume_game_process")
-    assert list(inspect.signature(service.resume_game_process).parameters.keys()) == ["pid"]
-
-    # 29. pause_game_process
-    assert hasattr(service, "pause_game_process")
-    assert list(inspect.signature(service.pause_game_process).parameters.keys()) == ["pid"]
+    for name, params in EXPECTED_METHODS.items():
+        method = getattr(service, name, None)
+        assert method is not None, f"main.py calls service.{name} but it does not exist"
+        assert inspect.ismethod(method), name
+        assert list(inspect.signature(method).parameters) == params, name
 
 
 def test_sdh_ludusavi_service_facade_behavior(tmp_path: Path) -> None:
