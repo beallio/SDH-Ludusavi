@@ -1330,8 +1330,8 @@ def test_force_restore_calls_refresh_after_operation(tmp_path: Path) -> None:
 def test_global_operation_lock_blocks_new_operations(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
     service.refresh_games()
-    service._operation.is_running = True
-    service._operation.name = "refresh"
+    service._coordinator._operation.is_running = True
+    service._coordinator._operation.name = "refresh"
 
     with pytest.raises(OperationLockedError):
         service.force_backup("Hades")
@@ -1948,7 +1948,7 @@ def test_watchdog_does_not_resume_during_active_operation(
         service._watchdog._paused_pids[123] = time.time() - 20.0
 
     # Simulate an active operation (like cloud sync) running
-    service._operation.is_running = True
+    service._coordinator._operation.is_running = True
 
     # Sleep for a short while (0.2s) and verify watchdog hasn't resumed the PID
     time.sleep(0.2)
@@ -1956,7 +1956,7 @@ def test_watchdog_does_not_resume_during_active_operation(
     assert (123, signal.SIGCONT) not in signals
 
     # Mark the operation as finished
-    service._operation.is_running = False
+    service._coordinator._operation.is_running = False
 
     # Wait for the watchdog to detect the inactive operation status and resume the PID
     for _ in range(200):
