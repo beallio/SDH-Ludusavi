@@ -42,7 +42,7 @@ describe("AutoSyncStatusSurface Status Pending Upload", () => {
       visible: true,
       source: "rpc_result",
     });
-    expect(pendingHtml).toContain("icon-spin-ring");
+    expect(pendingHtml).toContain('class="icon icon-spin-ring"');
     expect(pendingHtml).toContain(".icon-spin-ring .spinner-ring");
 
     const completeHtml = renderAutoSyncStatusHtml({
