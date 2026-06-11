@@ -154,7 +154,14 @@ class Plugin:
         )
 
     async def get_ludusavi_launcher_shortcut_id(self) -> int:
-        return self._service().get_ludusavi_launcher_shortcut_id()
+        result = await self._call(
+            "get_ludusavi_launcher_shortcut_id",
+            lambda: self._service().get_ludusavi_launcher_shortcut_id(),
+        )
+        # bool is an int subclass; exclude it explicitly. -1 == "no shortcut".
+        if isinstance(result, int) and not isinstance(result, bool):
+            return result
+        return -1
 
     async def set_ludusavi_launcher_shortcut_id(self, app_id: int) -> bool:
         return await self._call(
@@ -192,8 +199,17 @@ class Plugin:
     ) -> None:
         """
         Route frontend logs to the backend service.
+
+        Stays on the event loop intentionally: this is the hottest RPC and the
+        work is an in-memory ring-buffer append. It must therefore never be the
+        call that *constructs* the service (disk I/O); before construction,
+        fall back to decky's logger directly.
         """
-        self._service().log(level, message, operation, game_name)
+        backend = self._backend
+        if backend is None:
+            decky.logger.info(f"[frontend:{level}] {operation or 'frontend'}: {message}")
+            return
+        backend.log(level, message, operation, game_name)
 
     async def refresh_games(
         self, force: bool = False, installed_app_ids: str | None = None
@@ -203,7 +219,13 @@ class Plugin:
         )
 
     async def is_game_cache_current(self, installed_app_ids: str | None = None) -> bool:
-        return self._service().is_game_cache_current(installed_app_ids)
+        result = await self._call(
+            "is_game_cache_current",
+            lambda: self._service().is_game_cache_current(installed_app_ids),
+        )
+        # _call converts failures to status dicts; the frontend expects a bare
+        # boolean. False is the safe default: it triggers a refresh.
+        return result if isinstance(result, bool) else False
 
     async def handle_game_start(
         self, game_name: str, app_id: str | None = None
@@ -266,26 +288,57 @@ class Plugin:
         return await self._call("force_restore", lambda: self._service().force_restore(game_name))
 
     async def get_versions(self) -> dict[str, str] | dict[str, object]:
-        return await self._call("get_versions", self._service().get_versions)
+        return await self._call("get_versions", lambda: self._service().get_versions())
 
     async def get_operation_status(self) -> dict[str, object]:
-        return self._service().get_operation_status()
+        result = await self._call(
+            "get_operation_status", lambda: self._service().get_operation_status()
+        )
+        if isinstance(result, dict) and "is_running" in result:
+            return result
+        # Failure/skip dicts from _call lack "is_running"; return an idle state
+        # matching coordinator.OperationState() defaults.
+        return {
+            "is_running": False,
+            "name": None,
+            "game_name": None,
+            "last_result": None,
+            "last_error": None,
+        }
 
     async def get_recent_logs(self) -> list[dict[str, object]]:
-        return self._service().get_recent_logs()
+        result = await self._call("get_recent_logs", lambda: self._service().get_recent_logs())
+        return result if isinstance(result, list) else []
 
     async def get_ludusavi_logs(self) -> str:
         return await self._call("get_ludusavi_logs", lambda: self._service().get_ludusavi_logs())
 
     async def _main(self) -> None:
         decky.logger.info("SDH-ludusavi backend loaded")
-        service = self._service()
+
+        init_result = await self._call("startup_init", self._service)
+        if isinstance(init_result, dict) and init_result.get("status") == "failed":
+            decky.logger.error(
+                "Service initialization failed during startup: %s",
+                init_result.get("message"),
+            )
+            return
+
         try:
             from sdh_ludusavi._version import resolve_version
-
-            service.reconcile_pending_update_install(resolve_version())
         except Exception:
-            decky.logger.exception("Failed to reconcile pending update install on startup")
+            decky.logger.exception("Failed to import version resolver on startup")
+            return
+
+        reconcile_result = await self._call(
+            "reconcile_pending_update_install",
+            lambda: self._service().reconcile_pending_update_install(resolve_version()),
+        )
+        if isinstance(reconcile_result, dict) and reconcile_result.get("status") == "failed":
+            decky.logger.error(
+                "Failed to reconcile pending update install on startup: %s",
+                reconcile_result.get("message"),
+            )
 
     async def _unload(self) -> None:
         backend = self._backend

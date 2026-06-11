@@ -20,12 +20,16 @@ class FakeLogger:
         self.infos: list[str] = []
         self.warnings: list[str] = []
         self.exceptions: list[str] = []
+        self.errors: list[str] = []
 
     def info(self, message: str, *args: object) -> None:
         self.infos.append(_format_log(message, args))
 
     def warning(self, message: str, *args: object) -> None:
         self.warnings.append(_format_log(message, args))
+
+    def error(self, message: str, *args: object) -> None:
+        self.errors.append(_format_log(message, args))
 
     def exception(self, message: str, *args: object) -> None:
         self.exceptions.append(_format_log(message, args))
@@ -691,3 +695,81 @@ def test_plugin_syncthing_rpc(tmp_path: Path, monkeypatch) -> None:
     stop_res = asyncio.run(plugin.stop_syncthing_activity_watch("test-id"))
     assert stop_res["status"] == "stopped"
     service.stop_syncthing_activity_watch.assert_called_once_with("test-id")
+
+
+def test_is_game_cache_current_does_not_block_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decky, _logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+
+    event = threading.Event()
+
+    class BlockingService:
+        def is_game_cache_current(self, installed_app_ids: str | None = None) -> bool:
+            event.wait()
+            return True
+
+    monkeypatch.setattr(plugin, "_service", lambda: BlockingService())
+
+    async def scenario() -> None:
+        started = time.perf_counter()
+        task = asyncio.create_task(plugin.is_game_cache_current("1,2"))
+        await asyncio.sleep(0.01)
+
+        assert time.perf_counter() - started < 0.08
+        event.set()
+        assert await task is True
+
+    asyncio.run(scenario())
+
+
+def test_main_offloads_service_initialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decky, logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+    calls: list[str] = []
+
+    async def fake_call(operation: str, callback: Any) -> object:
+        calls.append(operation)
+        if callable(callback):
+            return callback()
+        return None
+
+    class FakeService:
+        def reconcile_pending_update_install(self, version: str) -> None:
+            calls.append("reconcile_call")
+
+    plugin._backend = FakeService()
+    monkeypatch.setattr(plugin, "_call", fake_call)
+    monkeypatch.setattr(plugin, "_service", lambda: plugin._backend)
+
+    asyncio.run(plugin._main())
+
+    assert "startup_init" in calls
+    assert "reconcile_pending_update_install" in calls
+
+
+def test_main_logs_initialization_failure_without_crashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decky, logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+
+    async def fake_call(operation: str, callback: Any) -> object:
+        if operation == "startup_init":
+            return {"status": "failed", "message": "disk exploded"}
+        return {"status": "ok"}
+
+    monkeypatch.setattr(plugin, "_call", fake_call)
+
+    asyncio.run(plugin._main())
+
+    assert any(
+        "Service initialization failed during startup: disk exploded" in msg
+        for msg in logger.errors
+    )
