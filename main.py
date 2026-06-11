@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import functools
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import threading
 from typing import Any
@@ -52,6 +54,7 @@ class Plugin:
     def __init__(self) -> None:
         self._backend: SDHLudusaviService | None = None
         self._backend_lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="sdh-rpc")
 
     def _service(self) -> SDHLudusaviService:
         if self._backend is None:
@@ -376,6 +379,7 @@ class Plugin:
                     decky.logger.exception("Synchronous unload stop fallback failed")
             raise
         finally:
+            self._executor.shutdown(wait=False, cancel_futures=True)
             log_fn = getattr(backend, "log", None) if backend is not None else None
             if log_fn is not None:
                 backend.log("info", "Unload ended")
@@ -403,7 +407,7 @@ class Plugin:
             if the operation failed or was blocked by the service lock.
         """
         try:
-            return await _run_blocking(callback)
+            return await _run_blocking(self._executor, callback)
         except OperationLockedError as exc:
             decky.logger.info("%s skipped: %s", operation, exc)
             return {"status": "skipped", "reason": "operation_running", "message": str(exc)}
@@ -447,99 +451,19 @@ def _ensure_private_directory(path: Path) -> None:
     path.chmod(0o700)
 
 
-async def _run_blocking(callback: Any) -> Any:
+async def _run_blocking(executor: ThreadPoolExecutor, callback: Any) -> Any:
     """
-    Helper to run a synchronous callback in a dedicated thread while
-    maintaining the async event loop's responsiveness.
+    Run a synchronous callback on the shared RPC executor without blocking
+    the event loop. Cancelling the awaiting coroutine cannot interrupt a
+    callback that is already running; the work finishes in the background
+    and its result is discarded.
     """
     loop = asyncio.get_running_loop()
-    future: asyncio.Future[Any] = loop.create_future()
     context = contextvars.copy_context()
-    read_fd, write_fd = os.pipe()
-    completion: tuple[str, Any] | None = None
-    completion_lock = threading.Lock()
-    reader_registered = False
-    thread_started = False
-    read_fd_closed = False
-
-    def close_fd(fd: int) -> None:
-        try:
-            os.close(fd)
-        except OSError:
-            return
-
-    def close_read_fd() -> None:
-        nonlocal read_fd_closed
-        if read_fd_closed:
-            return
-        read_fd_closed = True
-        close_fd(read_fd)
-
-    def remove_reader_if_active() -> None:
-        if loop.is_closed() or not loop.is_running():
-            return
-        try:
-            loop.remove_reader(read_fd)
-        except (OSError, RuntimeError):
-            return
-
-    def read_completion_signal() -> None:
-        remove_reader_if_active()
-        if not read_fd_closed:
-            try:
-                os.read(read_fd, 1)
-            except OSError:
-                pass
-            close_read_fd()
-        with completion_lock:
-            completed = completion
-        if future.done() or completed is None:
-            return
-        kind, payload = completed
-        if kind == "error":
-            future.set_exception(payload)
-            return
-        future.set_result(payload)
-
-    def worker() -> None:
-        nonlocal completion
-        try:
-            result = context.run(callback)
-        except BaseException as error:
-            completed = ("error", error)
-        else:
-            completed = ("result", result)
-        with completion_lock:
-            completion = completed
-        try:
-            os.write(write_fd, b"x")
-        except OSError:
-            pass
-        finally:
-            close_fd(write_fd)
-
     try:
-        loop.add_reader(read_fd, read_completion_signal)
-        reader_registered = True
-        thread = threading.Thread(target=worker, name="sdh-ludusavi-worker", daemon=True)
-        thread.start()
-        thread_started = True
-    except BaseException:
-        if reader_registered:
-            remove_reader_if_active()
-        close_read_fd()
-        if not thread_started:
-            close_fd(write_fd)
-        future.cancel()
-        raise
-
-    try:
-        return await asyncio.shield(future)
+        return await loop.run_in_executor(executor, functools.partial(context.run, callback))
     except asyncio.CancelledError:
         decky.logger.warning(
             "SDH-ludusavi operation was cancelled while worker may still be running"
         )
-        remove_reader_if_active()
-        close_read_fd()
-        future.cancel()
         raise
