@@ -131,7 +131,7 @@ function getSerializedIcon(status: AutoSyncStatusKind): string {
   let icon: any;
   if (status === "syncthing_downloading") {
     icon = IoMdCloudDownload;
-  } else if (status === "syncthing_uploading" || status === "syncthing_pending_upload") {
+  } else if (status === "syncthing_uploading") {
     icon = IoMdCloudUpload;
   } else if (status === "syncthing_complete") {
     icon = IoMdCloudDone;
@@ -157,10 +157,12 @@ export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
   if (status === "checking") {
     return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="3" opacity="0.8"/><path d="M10 2a8 8 0 0 1 8 8" fill="none" stroke="#0b151f" stroke-width="3" stroke-linecap="round"/></svg>';
   }
+  if (status === "syncthing_pending_upload") {
+    return '<svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><g class="spinner-ring"><path d="M448 256c0-106-86-192-192-192S64 150 64 256s86 192 192 192 192-86 192-192z" fill="none" stroke="currentColor" stroke-miterlimit="10" stroke-width="32" opacity="0.8"/><path d="M256 64a192 192 0 0 1 192 192" fill="none" stroke="#0b151f" stroke-width="32" stroke-linecap="round"/></g><path d="M333.88 240.59a8 8 0 0 1-6.66-6.66C320.68 192.78 290.82 168 256 168c-32.37 0-53.93 21.22-62.48 43.58a7.92 7.92 0 0 1-6.16 5c-27.67 4.35-50.82 22.56-51.35 54.3-.52 31.53 25.51 57.11 57 57.11H326c27.5 0 50-13.72 50-44 0-27.22-22-40.41-42.12-43.4z" fill="currentColor"/></svg>';
+  }
   if (
     status === "syncthing_downloading" ||
     status === "syncthing_uploading" ||
-    status === "syncthing_pending_upload" ||
     status === "syncthing_complete"
   ) {
     return getSerializedIcon(status);
@@ -206,11 +208,15 @@ body {
   animation: spin 1s linear infinite;
   transform-origin: 50% 50%;
 }
+.icon-spin-ring .spinner-ring {
+  animation: spin 1s linear infinite;
+  transform-origin: 256px 256px;
+}
 </style>
 </head>
 <body>
 <div class="bar">
-  <div class="text"><span class="icon${state.status === "checking" ? " icon-spin" : ""}">${iconSvgForAutoSyncStatus(state.status)}</span>${autoSyncStatusText[state.status]}</div>
+  <div class="text"><span class="icon${state.status === "checking" ? " icon-spin" : state.status === "syncthing_pending_upload" ? " icon-spin-ring" : ""}">${iconSvgForAutoSyncStatus(state.status)}</span>${autoSyncStatusText[state.status]}</div>
 </div>
 </body>
 </html>`;

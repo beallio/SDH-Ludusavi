@@ -27,11 +27,30 @@ describe("AutoSyncStatusSurface Status Pending Upload", () => {
     expect(isSyncthingActiveStatus("checking")).toBe(false);
   });
 
-  it("should render correct icon for syncthing_pending_upload matching syncthing_uploading", () => {
+  it("renders a spinner-ring cloud icon for syncthing_pending_upload", () => {
     const pendingIcon = iconSvgForAutoSyncStatus("syncthing_pending_upload");
-    const uploadingIcon = iconSvgForAutoSyncStatus("syncthing_uploading");
-    expect(pendingIcon).toBe(uploadingIcon);
     expect(pendingIcon).toContain("<svg");
+    expect(pendingIcon).toContain('class="spinner-ring"');
+    // Static cloud path from IoCloudCircleOutline stays outside the spinning group.
+    expect(pendingIcon).toContain("M333.88 240.59");
+    expect(pendingIcon).not.toBe(iconSvgForAutoSyncStatus("syncthing_uploading"));
+  });
+
+  it("applies the ring-spin animation class only to syncthing_pending_upload", () => {
+    const pendingHtml = renderAutoSyncStatusHtml({
+      status: "syncthing_pending_upload",
+      visible: true,
+      source: "rpc_result",
+    });
+    expect(pendingHtml).toContain("icon-spin-ring");
+    expect(pendingHtml).toContain(".icon-spin-ring .spinner-ring");
+
+    const completeHtml = renderAutoSyncStatusHtml({
+      status: "syncthing_complete",
+      visible: true,
+      source: "rpc_result",
+    });
+    expect(completeHtml).not.toContain('class="icon icon-spin-ring"');
   });
 
   it("keeps active Syncthing states visible until the monitor replaces them", () => {
