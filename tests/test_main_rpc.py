@@ -242,18 +242,16 @@ def test_get_recent_logs_coerces_failure_to_empty_list(
 def test_log_rpc_before_service_construction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    decky, _logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    decky, logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
     module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
 
-    mock_service = MockService()
+    def fail_service() -> Any:
+        raise AssertionError("log must never construct the service")
 
-    class FakePlugin(module.Plugin):
-        def _service(self) -> Any:
-            return mock_service
+    monkeypatch.setattr(plugin, "_service", fail_service)
 
-    plugin = FakePlugin()
-    # plugin._backend is initially None because _service() hasn't been called.
     asyncio.run(plugin.log("info", "test message"))
 
-    # Assert _backend remains None
     assert plugin._backend is None
+    assert "[frontend:info] frontend: test message" in logger.infos
