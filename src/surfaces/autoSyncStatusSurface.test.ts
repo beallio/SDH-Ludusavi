@@ -70,6 +70,35 @@ describe("AutoSyncStatusSurface Status Pending Upload", () => {
   });
 });
 
+describe("AutoSyncStatusSurface Uploading Arrow Animation", () => {
+  it("renders the uploading cloud with a clipped fill rect over the arrow cutout", () => {
+    const uploadIcon = iconSvgForAutoSyncStatus("syncthing_uploading");
+    expect(uploadIcon).toContain("<svg");
+    // Cloud body with the arrow cutout from IoMdCloudUpload stays intact.
+    expect(uploadIcon).toContain("M403.002 217.001");
+    expect(uploadIcon).toContain("M288 276v76h-64v-76h-68l100-100 100 100h-68z");
+    expect(uploadIcon).toContain("<clipPath");
+    expect(uploadIcon).toContain('class="upload-arrow-fill"');
+  });
+
+  it("animates the arrow fill upward only for syncthing_uploading", () => {
+    const uploadingHtml = renderAutoSyncStatusHtml({
+      status: "syncthing_uploading",
+      visible: true,
+      source: "rpc_result",
+    });
+    expect(uploadingHtml).toContain("@keyframes arrow-fill-up");
+    expect(uploadingHtml).toContain(".upload-arrow-fill");
+
+    const downloadingHtml = renderAutoSyncStatusHtml({
+      status: "syncthing_downloading",
+      visible: true,
+      source: "rpc_result",
+    });
+    expect(downloadingHtml).not.toContain('class="upload-arrow-fill"');
+  });
+});
+
 describe("AutoSyncStatusSurface No Connected Peers", () => {
   it("renders the no-peers warning with the exact selected text", () => {
     expect(autoSyncStatusText.syncthing_no_peers).toBe(

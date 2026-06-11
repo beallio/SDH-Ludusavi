@@ -1,4 +1,4 @@
-import { IoMdCloudDownload, IoMdCloudUpload, IoMdCloudDone } from "react-icons/io";
+import { IoMdCloudDownload, IoMdCloudDone } from "react-icons/io";
 import type { AutoSyncStatusKind, AutoSyncStatusState } from "../types";
 import { log } from "../utils/logging";
 
@@ -131,8 +131,6 @@ function getSerializedIcon(status: AutoSyncStatusKind): string {
   let icon: any;
   if (status === "syncthing_downloading") {
     icon = IoMdCloudDownload;
-  } else if (status === "syncthing_uploading") {
-    icon = IoMdCloudUpload;
   } else if (status === "syncthing_complete") {
     icon = IoMdCloudDone;
   } else {
@@ -160,9 +158,11 @@ export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
   if (status === "syncthing_pending_upload") {
     return '<svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><g class="spinner-ring"><path d="M448 256c0-106-86-192-192-192S64 150 64 256s86 192 192 192 192-86 192-192z" fill="none" stroke="currentColor" stroke-miterlimit="10" stroke-width="32" opacity="0.8"/><path d="M256 64a192 192 0 0 1 192 192" fill="none" stroke="#0b151f" stroke-width="32" stroke-linecap="round"/></g><path d="M333.88 240.59a8 8 0 0 1-6.66-6.66C320.68 192.78 290.82 168 256 168c-32.37 0-53.93 21.22-62.48 43.58a7.92 7.92 0 0 1-6.16 5c-27.67 4.35-50.82 22.56-51.35 54.3-.52 31.53 25.51 57.11 57 57.11H326c27.5 0 50-13.72 50-44 0-27.22-22-40.41-42.12-43.4z" fill="currentColor"/></svg>';
   }
+  if (status === "syncthing_uploading") {
+    return '<svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><defs><clipPath id="upload-arrow-clip"><path d="M288 276v76h-64v-76h-68l100-100 100 100h-68z"/></clipPath></defs><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999zM288 276v76h-64v-76h-68l100-100 100 100h-68z" fill="currentColor"/><rect class="upload-arrow-fill" x="156" y="176" width="200" height="176" fill="#f8fafc" clip-path="url(#upload-arrow-clip)"/></svg>';
+  }
   if (
     status === "syncthing_downloading" ||
-    status === "syncthing_uploading" ||
     status === "syncthing_complete"
   ) {
     return getSerializedIcon(status);
@@ -211,6 +211,14 @@ body {
 .icon-spin-ring .spinner-ring {
   animation: spin 1s linear infinite;
   transform-origin: 256px 256px;
+}
+@keyframes arrow-fill-up {
+  0% { transform: translateY(176px); }
+  75% { transform: translateY(0); }
+  100% { transform: translateY(0); }
+}
+.upload-arrow-fill {
+  animation: arrow-fill-up 1.6s ease-out infinite;
 }
 </style>
 </head>
