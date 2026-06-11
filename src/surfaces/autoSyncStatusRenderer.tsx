@@ -168,7 +168,15 @@ export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
     return getSerializedIcon(status);
   }
 
-  const rotation = status === "restoring" ? ' style="transform: rotate(180deg); transform-origin: 50% 50%;"' : "";
+  if (status === "backing_up" || status === "restoring") {
+    const rotation =
+      status === "restoring"
+        ? ' style="transform: rotate(180deg); transform-origin: 50% 50%;"'
+        : "";
+    return `<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"${rotation}><defs><clipPath id="backup-arrow-clip"><path d="M11.6 15.2h-3.2v-4.8H5.9L10 4.8l4.1 5.6h-2.5z"/></clipPath></defs><path d="M10 1.2a8.8 8.8 0 1 0 0 17.6 8.8 8.8 0 0 0 0-17.6zM11.6 15.2h-3.2v-4.8H5.9L10 4.8l4.1 5.6h-2.5z" fill="currentColor" fill-rule="evenodd"/><rect class="backup-arrow-fill" x="5.5" y="4.8" width="9" height="10.4" fill="#f8fafc" clip-path="url(#backup-arrow-clip)"/></svg>`;
+  }
+
+  const rotation = (status as string) === "restoring" ? ' style="transform: rotate(180deg); transform-origin: 50% 50%;"' : "";
   return `<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"${rotation}><circle cx="10" cy="10" r="8.8" fill="currentColor"/><path d="M10 5.3v8.3" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/><path d="M6.8 8.4 10 5.2l3.2 3.2" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 
@@ -219,6 +227,14 @@ body {
 }
 .upload-arrow-fill {
   animation: arrow-fill-up 1.6s ease-out infinite;
+}
+@keyframes backup-arrow-fill-up {
+  0% { transform: translateY(10.4px); }
+  75% { transform: translateY(0); }
+  100% { transform: translateY(0); }
+}
+.backup-arrow-fill {
+  animation: backup-arrow-fill-up 1.6s ease-out infinite;
 }
 </style>
 </head>
