@@ -8,6 +8,11 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from .constants import (
+    WATCHDOG_ABSOLUTE_RESUME_SECONDS,
+    WATCHDOG_STUCK_RESUME_SECONDS,
+)
+
 LOGGER = logging.getLogger("sdh_ludusavi.service.watchdog")
 MAX_SIGNAL_PID = 2_147_483_647
 
@@ -134,23 +139,27 @@ class ProcessWatchdog:
 
     def _check_and_resume_stuck_pids(self) -> None:
         now = time.time()
-        stuck_pids = []
+        stuck: list[tuple[int, float, str]] = []
         with self._paused_pids_lock:
             if not self._paused_pids:
                 self._watchdog_active = False
                 return
-            # If a Ludusavi operation is actively running (e.g., slow cloud sync),
-            # do not auto-resume any processes yet.
-            if self._is_operation_running():
-                return
+            operation_running = self._is_operation_running()
             for pid, paused_at in list(self._paused_pids.items()):
-                if now - paused_at > 15.0:
-                    stuck_pids.append(pid)
+                paused_for = now - paused_at
+                if paused_for > WATCHDOG_ABSOLUTE_RESUME_SECONDS:
+                    # Unconditional safety net: even a (claimed) running
+                    # operation may not keep a game suspended past the longest
+                    # legal operation duration.
+                    stuck.append((pid, paused_for, "absolute ceiling"))
+                elif not operation_running and paused_for > WATCHDOG_STUCK_RESUME_SECONDS:
+                    stuck.append((pid, paused_for, "idle timeout"))
 
-        for pid in stuck_pids:
+        for pid, paused_for, why in stuck:
             self._log(
                 "warning",
-                f"Watchdog detected PID {pid} suspended for too long. Resuming automatically.",
+                f"Watchdog detected PID {pid} suspended for {paused_for:.0f}s "
+                f"({why} exceeded). Resuming automatically.",
                 "watchdog",
                 None,
             )
