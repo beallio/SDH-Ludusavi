@@ -336,7 +336,6 @@ class SDHLudusaviService:
         return self._log_buffer.get_recent()
 
     _logs = property(lambda self: self._log_buffer._logs)
-    _operation = property(lambda self: self._coordinator._operation)
     _games = property(
         lambda self: self._registry._games,
         lambda self, v: setattr(self._registry, "_games", v),
