@@ -177,6 +177,7 @@ class PyludusaviAdapter:
         backups_data = self._client.backups_list(games=[game_name]).data.get("games", {})
         game_backups = backups_data.get(game_name, {})
         if not game_backups.get("backups"):
+            LOGGER.info("Recency check for %s: no backups exist -> no_backup", game_name)
             return "no_backup"
 
         # Run a restore preview to see if the backup differs from local
@@ -187,16 +188,23 @@ class PyludusaviAdapter:
             game_output = preview.get("games", {}).get(game_name, {})
             change = game_output.get("change")
 
-            if change == "Same":
-                return "local_current"
-            if change == "New":
+            verdicts = {
                 # In a restore context, New implies the backup contains files
-                # that don't exist locally — safe to auto-restore.
-                return "backup_newer"
-            if change == "Different":
-                # Different means both sides exist and differ; direction is
-                # unknown, so signal the caller to corroborate via timestamps.
-                return "backup_differs"
+                # that don't exist locally — safe to auto-restore. Different
+                # means both sides exist and differ; direction is unknown, so
+                # the caller must corroborate via timestamps.
+                "Same": "local_current",
+                "New": "backup_newer",
+                "Different": "backup_differs",
+            }
+            verdict = verdicts.get(str(change), "ambiguous")
+            LOGGER.info(
+                "Recency check for %s: restore preview change=%s -> %s",
+                game_name,
+                change,
+                verdict,
+            )
+            return verdict
         except (LudusaviError, KeyError, TypeError, ValueError) as exc:
             LOGGER.debug(
                 "Restore preview failed or returned unexpected shape during recency check for %s: %s",
@@ -204,6 +212,7 @@ class PyludusaviAdapter:
                 exc,
             )
 
+        LOGGER.info("Recency check for %s: restore preview unavailable -> ambiguous", game_name)
         return "ambiguous"
 
     def get_conflict_metadata(self, game_name: str) -> dict[str, object]:

@@ -78,9 +78,22 @@ function scheduleAutoSyncStatusHide(state: AutoSyncStatusState) {
     return;
   }
 
+  const hideDelay = isRunning ? 10000 : 2000;
+  log(
+    "debug",
+    `Auto-hide scheduled in ${hideDelay}ms for status=${state.status}`,
+    "autosync_status",
+    state.gameName
+  );
   autoSyncStatusHideTimeoutID = window.setTimeout(() => {
     if (isRunning) {
       autoSyncStatusTimedOut = true;
+      log(
+        "info",
+        `Status bar timed out after ${hideDelay}ms while still '${currentAutoSyncStatusState.status}'; the final operation result will not be displayed`,
+        "autosync_status",
+        currentAutoSyncStatusState.gameName
+      );
     }
     hideAutoSyncStatus({
       source: "timeout",
@@ -89,7 +102,7 @@ function scheduleAutoSyncStatusHide(state: AutoSyncStatusState) {
       tracked: currentAutoSyncStatusState.tracked,
       resultStatus: currentAutoSyncStatusState.resultStatus
     });
-  }, isRunning ? 10000 : 2000);
+  }, hideDelay);
 }
 
 function syncAutoSyncStatusBrowserViewDeferred(state: AutoSyncStatusState) {
@@ -177,6 +190,12 @@ export function completeAutoSyncStatus(
   }
 
   if (autoSyncStatusTimedOut) {
+    log(
+      "info",
+      `Final status for result '${result.status}' suppressed: status bar already timed out during the operation`,
+      "autosync_status",
+      options.gameName
+    );
     return;
   }
 
@@ -213,7 +232,15 @@ export function completeAutoSyncStatus(
       source: "rpc_result",
       resultStatus: result.status
     });
+    return;
   }
+
+  log(
+    "debug",
+    `No status bar update for unhandled result status '${result.status}'`,
+    "autosync_status",
+    options.gameName
+  );
 }
 
 export function resetAutoSyncStatusSurface() {

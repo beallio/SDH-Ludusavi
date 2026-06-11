@@ -99,20 +99,29 @@ function createEpochGuardedSurface(
   epoch: number,
   getCurrentEpoch: () => number,
 ): AutoSyncStatusSurface {
+  const logStaleDrop = (kind: string, detail: string, gameName?: string) => {
+    log("debug", `Dropped stale status ${kind} (epoch ${epoch} superseded by ${getCurrentEpoch()}): ${detail}`, "lifecycle", gameName);
+  };
   return {
     publish: (status, options) => {
       if (epoch === getCurrentEpoch()) {
         surface.publish(status, options);
+      } else {
+        logStaleDrop("publish", `status=${status}`, options.gameName);
       }
     },
     complete: (result, options) => {
       if (epoch === getCurrentEpoch()) {
         surface.complete(result, options);
+      } else {
+        logStaleDrop("complete", `result=${result.status}`, options.gameName);
       }
     },
     hide: (options) => {
       if (epoch === getCurrentEpoch()) {
         surface.hide(options);
+      } else {
+        logStaleDrop("hide", `source=${options?.source ?? "hide"}`, options?.gameName);
       }
     },
   };
@@ -187,6 +196,12 @@ export function createGameLifecycleController(
     return store.shouldPublishAutoSyncStatusBeforeRpc(tracked);
   }
 
+  function logPreRpcStatusBarSuppressed(phase: "start" | "exit", name: string, tracked: boolean) {
+    const snapshot = ludusaviStore.getSnapshot();
+    const detail = `tracked=${tracked} autoSyncNotificationsEnabled=${snapshot.autoSyncNotificationsEnabled} trackedNames=${snapshot.trackedNames?.size ?? 0} trackedAppIDs=${snapshot.trackedAppIDs?.size ?? 0}`;
+    log("info", `Pre-check status bar not shown on ${phase} for ${name}: ${detail}`, "lifecycle", name);
+  }
+
   const handleAppStart = async (name: string, appID: string, instanceID?: number) => {
     await ensureStateReady();
     const epoch = ++lifecycleEpoch;
@@ -208,6 +223,8 @@ export function createGameLifecycleController(
         appID,
         tracked,
       });
+    } else {
+      logPreRpcStatusBarSuppressed("start", name, tracked);
     }
 
     const autoSyncEnabled = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
@@ -379,6 +396,8 @@ export function createGameLifecycleController(
         appID,
         tracked,
       });
+    } else {
+      logPreRpcStatusBarSuppressed("exit", name, tracked);
     }
 
     try {
