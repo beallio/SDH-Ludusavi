@@ -10,12 +10,6 @@ from typing import Any, Callable, cast
 from ._version import resolve_version  # noqa: F401
 from .persistence import JsonSettingsStore, SettingsStore, PersistenceManager  # noqa: F401
 from .coordinator import OperationLockedError, OperationCoordinator  # noqa: F401
-from .watchdog import (  # noqa: F401
-    _coerce_signal_pid,  # noqa: F401
-    _send_signal_tree,  # noqa: F401
-    _read_ppid,  # noqa: F401
-    _process_tree,  # noqa: F401
-)
 
 from .constants import DEFAULT_NOTIFICATION_SETTINGS
 from .updater import PluginUpdater
