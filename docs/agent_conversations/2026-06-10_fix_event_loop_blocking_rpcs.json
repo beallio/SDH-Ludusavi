@@ -1,0 +1,32 @@
+{
+  "date": "2026-06-10",
+  "task_objective": "Eliminate Event-Loop-Blocking RPCs and Bound Ludusavi Discovery (Review Finding B2) to prevent the plugin frontend from freezing during slow synchronous work.",
+  "files_modified": [
+    "docs/plans/2026-06-09_fix_event_loop_blocking_rpcs.md",
+    "main.py",
+    "py_modules/pyludusavi/discovery.py",
+    "tests/test_main_rpc.py",
+    "tests/test_main.py",
+    "tests/test_ludusavi_discovery.py"
+  ],
+  "tests_added": [
+    "test_is_game_cache_current_returns_service_bool",
+    "test_is_game_cache_current_coerces_failure_to_false",
+    "test_get_ludusavi_launcher_shortcut_id_returns_int",
+    "test_get_ludusavi_launcher_shortcut_id_coerces_failure_to_minus_one",
+    "test_get_operation_status_coerces_failure_to_idle_default",
+    "test_get_recent_logs_coerces_failure_to_empty_list",
+    "test_log_rpc_before_service_construction",
+    "test_is_game_cache_current_does_not_block_event_loop",
+    "test_main_offloads_service_initialization",
+    "test_main_logs_initialization_failure_without_crashing",
+    "test_verify_passes_timeout_to_subprocess_run",
+    "test_verify_returns_false_when_subprocess_times_out"
+  ],
+  "design_decisions": [
+    "Per-handler failure defaults: Handlers whose frontend callers expect a primitive or specific shape now coerce failure payloads from `_call`. `is_game_cache_current` returns `False` on failure to force a cache refresh (safe direction); `get_ludusavi_launcher_shortcut_id` returns `-1` (established 'no shortcut' sentinel); `get_operation_status` returns an idle state matching `coordinator.OperationState()` defaults; and `get_recent_logs` returns `[]` to prevent `.map` crashes in the frontend UI.",
+    "Log on-loop: `log` stays strictly on the event loop because it's a high-frequency RPC, preventing excessive thread-spawning overhead. However, it now features a pre-construction fallback: if `_backend` is `None` (service not yet constructed), it logs directly to `decky.logger` instead of constructing the service synchronously and risking disk I/O blocks.",
+    "Vendored-patch authorization: The vendored `pyludusavi.discovery` library was patched to bound the verification subprocess execution time (to 15s) using `subprocess.run(timeout=...)`. This ensures a hung `flatpak` process cannot wedge adapter initialization indefinitely. This localized patch is authorized and must be upstreamed to pyludusavi and removed on the next re-vendor."
+  ],
+  "results": "Successfully offloaded 5 synchronous RPC handlers and `_main` initialization to background threads using `_call()`. Added 15-second subprocess timeouts to Ludusavi discovery checks. All project tests (including TDD coercion tests, loop blocking validation, and subprocess timeout handling) pass successfully. The frontend behavior and contracts remain unchanged."
+}

@@ -74,3 +74,33 @@ def test_default_flatpak_lookup_raises_when_all_candidates_fail(
         discovery.find_ludusavi()
 
     assert calls == []
+
+
+def test_verify_passes_timeout_to_subprocess_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["timeout"] = kwargs.get("timeout")
+
+        class R:
+            returncode = 0
+
+        return R()
+
+    monkeypatch.setattr(discovery.subprocess, "run", fake_run)
+    assert discovery._verify(["ludusavi"]) is True
+    assert captured["timeout"] == discovery._VERIFY_TIMEOUT_SECONDS
+    assert captured["timeout"] is not None
+
+
+def test_verify_returns_false_when_subprocess_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout", 0))
+
+    monkeypatch.setattr(discovery.subprocess, "run", fake_run)
+    assert discovery._verify(["flatpak", "run", APP_ID]) is False
