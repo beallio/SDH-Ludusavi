@@ -349,10 +349,6 @@ class SDHLudusaviService:
         lambda self: self._registry._ludusavi_config_mtime_ns,
         lambda self, v: setattr(self._registry, "_ludusavi_config_mtime_ns", v),
     )
-    _watchdog_active = property(lambda self: self._watchdog._watchdog_active)
-    _watchdog_thread = property(lambda self: self._watchdog._watchdog_thread)
-    _paused_pids = property(lambda self: self._watchdog._paused_pids)
-    _paused_pids_lock = property(lambda self: self._watchdog._paused_pids_lock)
 
     def pause_game_process(self, pid: int) -> dict[str, object]:
         """Suspend a launched game process tree while start sync runs."""
