@@ -45,11 +45,12 @@ def test_env_variable_logging_redaction(tmp_path):
     # The log message starts with "Filtered environment variables:" (current)
     # or "Environment summary:" (proposed)
     env_log = next(
-        (entry for entry in service._logs if "environment" in entry.message.lower()), None
+        (entry for entry in service.get_recent_logs() if "environment" in entry["message"].lower()),
+        None,
     )
     assert env_log is not None
 
-    log_content = env_log.message
+    log_content = env_log["message"]
 
     # SENSITIVE: DECKY_TOKEN should NOT be in the log
     assert "DECKY_TOKEN" not in log_content

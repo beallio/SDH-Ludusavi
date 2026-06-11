@@ -35,6 +35,6 @@ def test_game_name_sanitization(tmp_path):
 
     # Test backup logging
     service.force_backup(malicious_name)
-    log_entry = service._logs[-1]
-    assert "\n" not in log_entry.message
-    assert "Hades [ERROR] Spoofed error" in log_entry.message
+    log_entry = service.get_recent_logs()[-1]
+    assert "\n" not in log_entry["message"]
+    assert "Hades [ERROR] Spoofed error" in log_entry["message"]

@@ -335,8 +335,6 @@ class SDHLudusaviService:
         """Return the most recent log entries in chronological order."""
         return self._log_buffer.get_recent()
 
-    _logs = property(lambda self: self._log_buffer._logs)
-
     def pause_game_process(self, pid: int) -> dict[str, object]:
         """Suspend a launched game process tree while start sync runs."""
         return self._watchdog.pause(pid)
