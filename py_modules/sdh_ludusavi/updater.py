@@ -4,6 +4,7 @@ import datetime
 import re
 from contextlib import AbstractContextManager
 from typing import Any, Callable, List, Literal, Mapping, cast
+from dataclasses import dataclass
 
 from sdh_ludusavi.updater_client import ReleaseClient
 from sdh_ludusavi.updater_models import (
@@ -15,6 +16,18 @@ from sdh_ludusavi.updater_models import (
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-dev\.([a-zA-Z0-9.-]+))?(?:\+([a-zA-Z0-9.-]+))?$")
 _PENDING_INSTALL_MISMATCH_GRACE = datetime.timedelta(minutes=15)
+MAX_MANIFEST_FETCH_ATTEMPTS = 5
+
+
+@dataclass(frozen=True)
+class PrevalidatedRelease:
+    record: Mapping[str, object]  # the original release JSON mapping
+    tag_name: str
+    version: ParsedPluginVersion  # parsed from tag_name[1:]
+    published_at: str  # str(record.get("published_at", ""))
+    prerelease: bool  # bool(record.get("prerelease", False))
+    manifest_asset: Mapping[str, object]
+    zip_asset: Mapping[str, object]
 
 
 def parse_plugin_version(version_str: str) -> ParsedPluginVersion | None:
@@ -94,7 +107,7 @@ def _effective_pending_install_version(
     return None
 
 
-def validate_release_candidate(release: object, client: ReleaseClient) -> UpdateCandidate | None:
+def prevalidate_release_candidate(release: object) -> PrevalidatedRelease | None:
     release_record = as_string_key_mapping(release)
     if release_record is None:
         return None
@@ -116,15 +129,41 @@ def validate_release_candidate(release: object, client: ReleaseClient) -> Update
     if not isinstance(assets, list):
         return None
     manifest_assets = []
+    zip_assets = []
     for a in assets:
         a_dict = as_string_key_mapping(a)
-        if a_dict is not None and str(a_dict.get("name", "")) == expected_manifest_name:
-            manifest_assets.append(a_dict)
+        if a_dict is not None:
+            name = str(a_dict.get("name", ""))
+            if name == expected_manifest_name:
+                manifest_assets.append(a_dict)
+            elif name.endswith(".zip"):
+                zip_assets.append(a_dict)
     if len(manifest_assets) != 1:
         return None
-    manifest_asset = manifest_assets[0]
+    if len(zip_assets) != 1:
+        return None
 
-    resp = client.get_manifest(str(manifest_asset.get("browser_download_url", "")))
+    manifest_asset = manifest_assets[0]
+    zip_asset = zip_assets[0]
+
+    published_at = str(release_record.get("published_at", ""))
+    prerelease = bool(release_record.get("prerelease", False))
+
+    return PrevalidatedRelease(
+        record=release_record,
+        tag_name=tag_name,
+        version=parsed_version,
+        published_at=published_at,
+        prerelease=prerelease,
+        manifest_asset=manifest_asset,
+        zip_asset=zip_asset,
+    )
+
+
+def validate_prevalidated_candidate(
+    pre: PrevalidatedRelease, client: ReleaseClient
+) -> UpdateCandidate | None:
+    resp = client.get_manifest(str(pre.manifest_asset.get("browser_download_url", "")))
     if resp.status != 200:
         return None
 
@@ -136,26 +175,17 @@ def validate_release_candidate(release: object, client: ReleaseClient) -> Update
         return None
     if manifest.package_name != "sdh-ludusavi":
         return None
-    if manifest.tag != release_record.get("tag_name"):
+    if manifest.tag != pre.tag_name:
         return None
-    if "v" + manifest.version != release_record.get("tag_name"):
-        return None
-
-    is_prerelease = bool(release_record.get("prerelease", False))
-    if manifest.channel == "stable" and is_prerelease:
-        return None
-    if manifest.channel == "dev" and not is_prerelease:
+    if "v" + manifest.version != pre.tag_name:
         return None
 
-    zip_assets = []
-    for a in assets:
-        a_dict = as_string_key_mapping(a)
-        if a_dict is not None and str(a_dict.get("name", "")).endswith(".zip"):
-            zip_assets.append(a_dict)
-    if len(zip_assets) != 1:
+    if manifest.channel == "stable" and pre.prerelease:
         return None
-    zip_asset = zip_assets[0]
-    if str(zip_asset.get("name", "")) != manifest.asset_name:
+    if manifest.channel == "dev" and not pre.prerelease:
+        return None
+
+    if str(pre.zip_asset.get("name", "")) != manifest.asset_name:
         return None
 
     channel: Literal["stable", "development"] = (
@@ -165,12 +195,19 @@ def validate_release_candidate(release: object, client: ReleaseClient) -> Update
         version=manifest.version,
         tag=manifest.tag,
         channel=channel,
-        artifact_url=str(zip_asset.get("browser_download_url", "")),
+        artifact_url=str(pre.zip_asset.get("browser_download_url", "")),
         sha256=manifest.sha256,
-        release_url=str(release_record.get("html_url", "")),
-        published_at=str(release_record.get("published_at", "")),
+        release_url=str(pre.record.get("html_url", "")),
+        published_at=pre.published_at,
         action="update",
     )
+
+
+def validate_release_candidate(release: object, client: ReleaseClient) -> UpdateCandidate | None:
+    pre = prevalidate_release_candidate(release)
+    if pre is None:
+        return None
+    return validate_prevalidated_candidate(pre, client)
 
 
 def select_candidate(
@@ -525,19 +562,49 @@ class PluginUpdater:
                 "message": msg,
             }
 
-        candidates = []
+        prevalidated: list[PrevalidatedRelease] = []
         t1 = self._monotonic()
         for r in resp.body:
             if not isinstance(r, dict):
                 continue
-            c = validate_release_candidate(r, self._client)
+            pre = prevalidate_release_candidate(r)
+            if pre is None:
+                continue
+            if self._channel == "stable" and pre.prerelease:
+                continue
+            prevalidated.append(pre)
+
+        prevalidated.sort(
+            key=lambda p: (
+                p.version.major,
+                p.version.minor,
+                p.version.patch,
+                not p.version.is_dev,
+                p.published_at,
+            ),
+            reverse=True,
+        )
+
+        candidates: list[UpdateCandidate] = []
+        attempts = 0
+        for pre in prevalidated:
+            if attempts >= MAX_MANIFEST_FETCH_ATTEMPTS:
+                self._log(
+                    "warning",
+                    f"Update check stopped after {MAX_MANIFEST_FETCH_ATTEMPTS} manifest validation attempts without a valid candidate",
+                )
+                break
+            attempts += 1
+            c = validate_prevalidated_candidate(pre, self._client)
             if c:
                 candidates.append(c)
+                break
+
         parse_elapsed_ms = round((self._monotonic() - t1) * 1000)
 
         self._log(
             "info",
-            f"Parsed {len(candidates)} valid candidate releases, elapsed_ms={parse_elapsed_ms}",
+            f"Prevalidated {len(prevalidated)} releases, manifest attempts={attempts}, valid={len(candidates)}, elapsed_ms={parse_elapsed_ms}",
         )
 
         t2 = self._monotonic()
