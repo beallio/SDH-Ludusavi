@@ -124,3 +124,41 @@ describe("AutoSyncStatusSurface No Connected Peers", () => {
     );
   });
 });
+
+describe("AutoSyncStatusSurface Local Backup Arrow Animation", () => {
+  it("renders the backing_up circle with an arrow cutout and clipped fill rect", () => {
+    const backupIcon = iconSvgForAutoSyncStatus("backing_up");
+    expect(backupIcon).toContain("<svg");
+    expect(backupIcon).toContain("<clipPath");
+    expect(backupIcon).toContain('id="backup-arrow-clip"');
+    expect(backupIcon).toContain('class="backup-arrow-fill"');
+    expect(backupIcon).toContain('fill-rule="evenodd"');
+  });
+
+  it("shares the animated icon with restoring, rotated 180 degrees", () => {
+    const restoreIcon = iconSvgForAutoSyncStatus("restoring");
+    expect(restoreIcon).toContain('class="backup-arrow-fill"');
+    expect(restoreIcon).toContain("rotate(180deg)");
+    expect(iconSvgForAutoSyncStatus("backing_up")).not.toContain("rotate(180deg)");
+  });
+
+  it("keeps the static fallback icon for warning statuses", () => {
+    expect(iconSvgForAutoSyncStatus("backing_up")).not.toBe(
+      iconSvgForAutoSyncStatus("syncthing_unavailable"),
+    );
+    expect(iconSvgForAutoSyncStatus("syncthing_no_peers")).not.toContain(
+      "backup-arrow-fill",
+    );
+    expect(iconSvgForAutoSyncStatus("conflict")).not.toContain("backup-arrow-fill");
+  });
+
+  it("defines the backup arrow fill keyframes in the rendered html", () => {
+    const backingUpHtml = renderAutoSyncStatusHtml({
+      status: "backing_up",
+      visible: true,
+      source: "rpc_result",
+    });
+    expect(backingUpHtml).toContain("@keyframes backup-arrow-fill-up");
+    expect(backingUpHtml).toContain(".backup-arrow-fill");
+  });
+});
