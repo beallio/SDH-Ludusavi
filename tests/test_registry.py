@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+import threading
 
 from sdh_ludusavi.registry import GameRegistry, _normalize_installed_app_ids
 from sdh_ludusavi.types import GameStatus
@@ -243,3 +244,93 @@ def test_targeted_refresh_skips_alias_rebuild_when_config_stale() -> None:
     registry._ludusavi_config_mtime_ns = None
     registry.refresh_after_operation(game_name="Hades")
     adapter.get_aliases.assert_not_called()
+
+
+class TrackingRLock:
+    """RLock wrapper that records acquisition depth for lock-coverage tests."""
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self.depth = 0
+        self.acquisitions = 0
+
+    def __enter__(self) -> "TrackingRLock":
+        self._lock.acquire()
+        self.depth += 1
+        self.acquisitions += 1
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.depth -= 1
+        self._lock.release()
+
+
+def test_refresh_games_cache_hit_reads_under_state_lock() -> None:
+    gateway = MagicMock()
+    run_locked = MagicMock()
+    log = MagicMock()
+    save = MagicMock()
+    get_history = MagicMock(return_value={})
+    gateway.current_config_mtime_ns.return_value = 12345
+
+    registry = GameRegistry(gateway, run_locked, log, save, get_history)
+    cache = {
+        "games": [
+            {
+                "name": "Hades",
+                "configured": True,
+                "has_backup": True,
+                "needs_first_backup": False,
+                "steam_id": "413150",
+                "error": None,
+            }
+        ],
+        "aliases": {"H": "Hades"},
+        "ids": {"413150": "Hades"},
+        "installed_app_ids": "300,413150",
+        "ludusavi_config_mtime_ns": 12345,
+    }
+    registry.load_cache(cache)
+    registry._state_lock = TrackingRLock()
+
+    result = registry.refresh_games(force=False, installed_app_ids="300,413150")
+
+    assert result["dependency_error"] is None
+    assert len(result["games"]) == 1
+    run_locked.assert_not_called()
+    assert registry._state_lock.acquisitions >= 1
+
+
+def test_refresh_games_fallback_reads_under_state_lock() -> None:
+    gateway = MagicMock()
+    run_locked = MagicMock(side_effect=RuntimeError("boom"))
+    log = MagicMock()
+    save = MagicMock()
+    get_history = MagicMock(return_value={})
+    gateway.current_config_mtime_ns.return_value = 12345
+
+    registry = GameRegistry(gateway, run_locked, log, save, get_history)
+    cache = {
+        "games": [
+            {
+                "name": "Hades",
+                "configured": True,
+                "has_backup": True,
+                "needs_first_backup": False,
+                "steam_id": "413150",
+                "error": None,
+            }
+        ],
+        "aliases": {"H": "Hades"},
+        "ids": {"413150": "Hades"},
+        "installed_app_ids": "300,413150",
+        "ludusavi_config_mtime_ns": 12345,
+    }
+    registry.load_cache(cache)
+    registry._state_lock = TrackingRLock()
+
+    result = registry.refresh_games(force=True)
+
+    assert "boom" in str(result["dependency_error"])
+    assert len(result["games"]) == 1
+    assert registry._state_lock.acquisitions >= 1

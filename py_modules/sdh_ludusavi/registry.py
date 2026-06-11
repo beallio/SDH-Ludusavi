@@ -112,29 +112,38 @@ class GameRegistry:
         """Refresh statuses from the gateway if needed or requested."""
         normalized_installed_app_ids = _normalize_installed_app_ids(installed_app_ids)
         config_mtime_ns = self._gateway.current_config_mtime_ns()
-        needs_refresh = force or not self._games
-
-        if not force and normalized_installed_app_ids is not None:
-            if self._installed_app_ids != normalized_installed_app_ids:
-                needs_refresh = True
-                self.log("debug", "installed_app_ids changed, forcing refresh", "refresh")
 
         if config_mtime_ns is CONFIG_MARKER_READ_FAILED:
-            needs_refresh = True
             committed_config_mtime_ns = None
-            self.log("debug", "Ludusavi config marker unavailable, forcing refresh", "refresh")
         else:
             committed_config_mtime_ns = cast(int | None, config_mtime_ns)
 
-        if not force and self._ludusavi_config_mtime_ns != committed_config_mtime_ns:
-            needs_refresh = True
-            self.log("debug", "Ludusavi config changed, forcing refresh", "refresh")
+        # Lock-ordering note: the decision reads and cached-payload reads must
+        # hold _state_lock because _refresh_statuses_unlocked repopulates these
+        # structures under it from coordinator-locked worker threads. The lock
+        # is released before _run_locked so it never nests around the
+        # coordinator's operation lock.
+        with self._state_lock:
+            needs_refresh = force or not self._games
+            if not force and normalized_installed_app_ids is not None:
+                if self._installed_app_ids != normalized_installed_app_ids:
+                    needs_refresh = True
+                    self.log("debug", "installed_app_ids changed, forcing refresh", "refresh")
+            if config_mtime_ns is CONFIG_MARKER_READ_FAILED:
+                needs_refresh = True
+                self.log("debug", "Ludusavi config marker unavailable, forcing refresh", "refresh")
+            if not force and self._ludusavi_config_mtime_ns != committed_config_mtime_ns:
+                needs_refresh = True
+                self.log("debug", "Ludusavi config changed, forcing refresh", "refresh")
+            if not needs_refresh:
+                cached_games = self._cached_games()
+                cached_aliases = dict(self._aliases)
 
         if not needs_refresh:
             self.log("debug", "Returning cached game list", "refresh")
             return {
-                "games": self._cached_games(),
-                "aliases": dict(self._aliases),
+                "games": cached_games,
+                "aliases": cached_aliases,
                 "history": self._get_history(),
                 "dependency_error": None,
             }
@@ -149,17 +158,22 @@ class GameRegistry:
                     committed_config_mtime_ns,
                 ),
             )
+            with self._state_lock:
+                aliases = dict(self._aliases)
             return {
                 "games": [game.to_dict() for game in games],
-                "aliases": dict(self._aliases),
+                "aliases": aliases,
                 "history": self._get_history(),
                 "dependency_error": None,
             }
         # Intentionally broad: fallback to cached statuses if refresh fails
         except Exception as exc:
+            with self._state_lock:
+                fallback_games = self._cached_games()
+                fallback_aliases = dict(self._aliases)
             return {
-                "games": self._cached_games(),
-                "aliases": dict(self._aliases),
+                "games": fallback_games,
+                "aliases": fallback_aliases,
                 "history": self._get_history(),
                 "dependency_error": str(exc),
             }
@@ -273,7 +287,8 @@ class GameRegistry:
         )
 
     def _cached_games(self) -> list[dict[str, object]]:
-        return [game.to_dict() for game in self._games.values()]
+        with self._state_lock:
+            return [game.to_dict() for game in self._games.values()]
 
 
 def _normalize_installed_app_ids(raw: str | None) -> str | None:
