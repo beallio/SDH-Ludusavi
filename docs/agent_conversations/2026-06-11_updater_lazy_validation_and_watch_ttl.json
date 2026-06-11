@@ -1,0 +1,24 @@
+{
+  "date": "2026-06-11",
+  "task_objective": "Implement lazy updater validation and Syncthing watch TTL.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/updater.py",
+    "tests/test_updater_lazy.py",
+    "py_modules/sdh_ludusavi/syncthing/watcher.py",
+    "tests/test_watcher.py"
+  ],
+  "tests_added": [
+    "test_updater_lazy.py",
+    "test_watch_self_terminates_after_ttl",
+    "test_manager_poll_returns_stopped_after_ttl_deregistration",
+    "test_watch_within_ttl_does_not_expire",
+    "test_no_connected_peers_terminal_watch_stays_registered",
+    "test_watch_ttl_exceeds_frontend_cap"
+  ],
+  "design_decisions": [
+    "Split validate_release_candidate into prevalidate and full validation.",
+    "Fetch at most 5 manifests sequentially.",
+    "Add 180s TTL to SyncthingWatch to protect against zombie threads if the frontend unmounts without calling stop_watch."
+  ],
+  "results": "All tests pass, code formatted and typed correctly. Gates completed."
+}

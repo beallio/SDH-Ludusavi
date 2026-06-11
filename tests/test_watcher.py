@@ -668,3 +668,138 @@ def test_watch_manager_keeps_raw_probe_responses_out_of_logs(
     # get_json errors can embed response bodies holding device IDs; logs must
     # carry only the probe type and exception class.
     assert "RAW-RESPONSE-WITH-DEVICE-ID" not in caplog.text
+
+
+def test_watch_self_terminates_after_ttl() -> None:
+    callback_calls = []
+
+    def on_expired(wid):
+        callback_calls.append(wid)
+
+    watch = SyncthingWatch(
+        "watch-ttl-1",
+        "post_game",
+        "Hades",
+        "1145300",
+        _shared_folder(("DEV-A",)),
+        None,
+        initial_snapshot=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+        on_expired=on_expired,
+    )
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime",
+            return_value=("idle", FolderRuntime(sequence=5)),
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.get_event_cursor", return_value=100),
+    ):
+        watch.deadline_monotonic = time.monotonic() - 1.0  # force past
+        watch._run()  # Should return immediately and set status
+
+    assert watch.stop_event.is_set()
+    assert watch.latest_sample == {
+        "status": "stopped",
+        "watch_id": "watch-ttl-1",
+        "reason": "watch_ttl_expired",
+    }
+    assert callback_calls == ["watch-ttl-1"]
+
+
+def test_manager_poll_returns_stopped_after_ttl_deregistration() -> None:
+    manager = SyncthingWatchManager()
+
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime") as mock_init,
+        patch("sdh_ludusavi.syncthing.watcher.get_event_cursor") as mock_cursor,
+        patch("sdh_ludusavi.syncthing.watcher.get_my_device_id") as mock_my_id,
+        patch("sdh_ludusavi.syncthing.watcher.get_connection_snapshot") as mock_snapshot,
+        patch("sdh_ludusavi.syncthing.watcher.get_folder_status") as mock_status,
+        patch("sdh_ludusavi.syncthing.watcher.get_events") as mock_events,
+        patch(
+            "sdh_ludusavi.syncthing.watcher.resolve_api_credentials",
+            return_value=("http://127.0.0.1:8384", "test-key", None),
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.resolve_folder_by_path",
+            return_value=_shared_folder(("DEV-A",)),
+        ),
+    ):
+        mock_init.return_value = ("idle", FolderRuntime(sequence=5))
+        mock_cursor.return_value = 100
+        mock_my_id.return_value = "LOCAL-DEVICE"
+        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
+        mock_status.return_value = {"state": "idle", "sequence": 5}
+        mock_events.return_value = []
+
+        res = manager.start_watch("pre_game", "Hades", "1145300", "/home/deck/Sync/Hades")
+        watch_id = res["watch_id"]
+
+        # Manually invoke deregistration to simulate expiration
+        watch = manager.watches[watch_id]
+        watch.stop_event.set()
+        watch.thread.join(timeout=1.0)
+
+        manager._deregister_expired_watch(watch_id)
+
+        assert watch_id not in manager.watches
+        poll_res = manager.poll_watch(watch_id)
+        assert poll_res == {"status": "stopped", "watch_id": watch_id}
+
+
+def test_watch_within_ttl_does_not_expire() -> None:
+    from sdh_ludusavi.syncthing.watcher import WATCH_TTL_SECONDS
+
+    callback_calls = []
+
+    def on_expired(wid):
+        callback_calls.append(wid)
+
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch._on_expired = on_expired
+    watch.deadline_monotonic = time.monotonic() + WATCH_TTL_SECONDS
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+            return_value=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_folder_status",
+            return_value={"state": "idle", "sequence": 5},
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.get_events", return_value=[]),
+    ):
+        watch._tick(time.monotonic())
+
+    assert not watch.stop_event.is_set()
+    assert len(callback_calls) == 0
+
+
+def test_no_connected_peers_terminal_watch_stays_registered() -> None:
+    callback_calls = []
+
+    def on_expired(wid):
+        callback_calls.append(wid)
+
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch._on_expired = on_expired
+
+    with patch(
+        "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+        return_value=ConnectionSnapshot(0, 0, frozenset()),
+    ):
+        # We manually call _tick to simulate the disconnect path in the watch loop.
+        # It should set stop_event but NOT call on_expired.
+        watch._tick(time.monotonic())
+
+    assert watch.latest_sample["status"] == "failed"
+    assert watch.latest_sample["reason"] == "no_connected_peers"
+    assert watch.stop_event.is_set()
+    assert len(callback_calls) == 0
+
+
+def test_watch_ttl_exceeds_frontend_cap() -> None:
+    from sdh_ludusavi.syncthing.watcher import WATCH_TTL_SECONDS
+
+    assert WATCH_TTL_SECONDS >= 120 + 30
