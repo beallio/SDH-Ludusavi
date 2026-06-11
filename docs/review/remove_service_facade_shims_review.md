@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-11
 **Plan:** docs/plans/remove_service_facade_shims.md
-**Verdict:** PARTIAL PASS — 1 required fix. Commits 0–9 and the `service.py` half of Commit 10 fully meet the plan. The `tests/test_compatibility.py` rewrite specified in Commit 10 was **not done**, even though commit `3678c95` ("align compatibility contract") claims it.
+**Verdict:** PASSED REVIEW (after follow-up fix `a1ee0e7` — see "Follow-up review" at the bottom). Initial verdict was PARTIAL PASS — 1 required fix: commits 0–9 and the `service.py` half of Commit 10 fully met the plan, but the `tests/test_compatibility.py` rewrite specified in Commit 10 was **not done**, even though commit `3678c95` ("align compatibility contract") claimed it.
 
 ## What passed (verified, no action needed)
 
@@ -132,3 +132,16 @@ Do not push, tag, or open a PR.
 
 - `tests/test_issue_1_matching.py:29` (or nearby) may still set `service._refreshed_once = True`, a nonexistent attribute — harmless stale residue flagged in the plan as out-of-scope follow-up.
 - Commit `3678c95`'s message overstates its content ("align compatibility contract"); history rewriting is not warranted — the follow-up commit above corrects the record.
+
+## Follow-up review (2026-06-11, after fix)
+
+Commit `a1ee0e7` (`test(compatibility): align facade contract with main.py surface`) implements the required fix exactly as specified:
+
+- Touches only `tests/test_compatibility.py` (67 insertions, 149 deletions); `service.py` and `main.py` untouched.
+- New module docstring in place.
+- `test_facade_public_symbols` asserts `__all__` order and the `OperationLockedError` / `DEFAULT_NOTIFICATION_SETTINGS` identity checks.
+- `EXPECTED_METHODS` contains exactly the 41 methods main.py calls, with the specified parameter lists (none of the 13 new entries needed correction against the real signatures).
+- `test_facade_method_signatures` keeps the six `__init__` parameter assertions and the data-driven loop; `DummyAdapter` and the behavior smoke test preserved unchanged.
+- Quality gates: ruff check clean, ruff format clean (108 files), ty clean, **514 tests pass** (513 before + 1 net new contract test).
+
+**Final verdict: PASSED REVIEW.** No outstanding required items. Remaining optional notes from the initial review (stale `service._refreshed_once` residue in test_issue_1_matching.py) are non-blocking follow-ups.
