@@ -9,31 +9,20 @@ from typing import Any, Callable, cast
 # For test backward compatibility, import helper objects into module scope
 from ._version import resolve_version  # noqa: F401
 from .persistence import JsonSettingsStore, SettingsStore, PersistenceManager  # noqa: F401
-from .coordinator import OperationLockedError, OperationState, OperationCoordinator  # noqa: F401
+from .coordinator import OperationLockedError, OperationCoordinator  # noqa: F401
 from .watchdog import (  # noqa: F401
     _coerce_signal_pid,  # noqa: F401
     _send_signal_tree,  # noqa: F401
-    _child_pids,  # noqa: F401
-    MAX_SIGNAL_PID,  # noqa: F401
     _read_ppid,  # noqa: F401
     _process_tree,  # noqa: F401
 )
-from .log_buffer import LogEntry, DeckyLogHandler  # noqa: F401
 
-from .constants import (
-    DEFAULT_NOTIFICATION_SETTINGS,
-    CONFIG_MARKER_READ_FAILED,
-    CACHE_MARKER_UNCHANGED,
-)
+from .constants import DEFAULT_NOTIFICATION_SETTINGS
 from .updater import PluginUpdater
 from .types import LudusaviAdapter, GameStatus
 from sdh_ludusavi.game_names import sanitize_game_name
 
 LOGGER = logging.getLogger(__name__)
-
-# For backward compatibility
-_CONFIG_MARKER_READ_FAILED = CONFIG_MARKER_READ_FAILED
-_CACHE_MARKER_UNCHANGED = CACHE_MARKER_UNCHANGED
 
 
 # Maintain module level variables for AST check in test_service.py
@@ -358,7 +347,6 @@ class SDHLudusaviService:
         lambda self: self._registry._games,
         lambda self, v: setattr(self._registry, "_games", v),
     )
-    _aliases = property(lambda self: self._registry._aliases)
     _installed_app_ids = property(
         lambda self: self._registry._installed_app_ids,
         lambda self, v: setattr(self._registry, "_installed_app_ids", v),
@@ -479,20 +467,6 @@ def _normalize(game_name: str) -> str:
     from .matcher import GameRegistryMatcher
 
     return GameRegistryMatcher().normalize(game_name)
-
-
-def _fuzzy_match_allowed(normalized_input: str, normalized_target: str, configured: bool) -> bool:
-    from .matcher import GameRegistryMatcher
-
-    return GameRegistryMatcher().fuzzy_match_allowed(
-        normalized_input, normalized_target, configured
-    )
-
-
-def _normalize_installed_app_ids(raw: str | None) -> str | None:
-    from .registry import _normalize_installed_app_ids as norm
-
-    return norm(raw)
 
 
 def _conflict_metadata(service: SDHLudusaviService, game_name: str) -> dict[str, object]:
