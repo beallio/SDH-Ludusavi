@@ -1,0 +1,26 @@
+{
+  "date": "2026-06-11",
+  "objective": "Remove obsolete facade property shims and explicit property re-exports from SDHLudusaviService in service.py.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/service.py",
+    "tests/test_service.py",
+    "tests/test_compatibility.py",
+    "tests/test_exception_boundaries.py",
+    "tests/test_future_exception_cleanup.py",
+    "tests/test_issue_10_sanitization.py",
+    "tests/test_issue_1_matching.py",
+    "tests/test_issue_5_env_logging.py",
+    "tests/test_matcher.py",
+    "tests/test_matching.py"
+  ],
+  "tests_added": [],
+  "design_decisions": [
+    "Removed unused properties like _CONFIG_MARKER_READ_FAILED and _CACHE_MARKER_UNCHANGED.",
+    "Retargeted tests reading watchdog state properties like _watchdog_active to use service._watchdog directly.",
+    "Removed registry state proxies and retargeted directly to service._registry in test suites.",
+    "Removed _decky_log diagnostic properties and explicit decky mock in tests.",
+    "Split re-exported types from service.py into their exact modules like persistence and types to prevent indirect usages.",
+    "Declared an explicit __all__ for service.py."
+  ],
+  "results": "All tests pass successfully with unused facade shims completely decoupled and clean direct sub-manager dependencies in the test suite."
+}
