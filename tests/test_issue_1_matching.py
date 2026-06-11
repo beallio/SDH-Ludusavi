@@ -1,5 +1,6 @@
 from __future__ import annotations
-from sdh_ludusavi.service import SDHLudusaviService, GameStatus
+from sdh_ludusavi.service import SDHLudusaviService
+from sdh_ludusavi.types import GameStatus
 
 
 class FakeAdapter:

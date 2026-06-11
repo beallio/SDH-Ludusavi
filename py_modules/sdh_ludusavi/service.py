@@ -6,15 +6,16 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, cast
 
-# For test backward compatibility, import helper objects into module scope
-from ._version import resolve_version  # noqa: F401
+from ._version import resolve_version
 from .persistence import SettingsStore, PersistenceManager
-from .coordinator import OperationLockedError, OperationCoordinator  # noqa: F401
+from .coordinator import OperationLockedError, OperationCoordinator
 
 from .constants import DEFAULT_NOTIFICATION_SETTINGS
 from .updater import PluginUpdater
 from .types import LudusaviAdapter, GameStatus
 from sdh_ludusavi.game_names import sanitize_game_name
+
+__all__ = ["SDHLudusaviService", "OperationLockedError", "DEFAULT_NOTIFICATION_SETTINGS"]
 
 LOGGER = logging.getLogger(__name__)
 
