@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import threading
 from typing import Any, Callable
 
 
@@ -16,6 +17,7 @@ class HistoryManager:
         self._service = service
         self._save_callback = save_callback
         self._game_history: dict[str, dict[str, Any]] = {}
+        self._lock = threading.RLock()
 
         # Initialize and validate input history
         if isinstance(initial_history, dict):
@@ -32,7 +34,10 @@ class HistoryManager:
 
     def get_history(self) -> dict[str, dict[str, Any]]:
         """Return the complete validated game operation history."""
-        return self._game_history
+        # Entries are replaced wholesale (never mutated in place), so copying
+        # the outer and per-game dicts is sufficient for a consistent snapshot.
+        with self._lock:
+            return {game: dict(history) for game, history in self._game_history.items()}
 
     def record_history(
         self,
@@ -57,27 +62,33 @@ class HistoryManager:
         if entry is None:
             return
 
-        if game_name not in self._game_history:
-            self._game_history[game_name] = {
-                "last_backup": None,
-                "last_restore": None,
-                "last_skip": None,
-                "last_failure": None,
-                "last_operation": None,
-            }
+        with self._lock:
+            if game_name not in self._game_history:
+                self._game_history[game_name] = {
+                    "last_backup": None,
+                    "last_restore": None,
+                    "last_skip": None,
+                    "last_failure": None,
+                    "last_operation": None,
+                }
 
-        history = self._game_history[game_name]
-        if status == "backed_up":
-            field = "last_backup"
-        elif status == "restored":
-            field = "last_restore"
-        elif status == "failed":
-            field = "last_failure"
-        else:
-            field = "last_skip"
+            history = self._game_history[game_name]
+            if status == "backed_up":
+                field = "last_backup"
+            elif status == "restored":
+                field = "last_restore"
+            elif status == "failed":
+                field = "last_failure"
+            else:
+                field = "last_skip"
 
-        history[field] = entry
-        self._update_last_operation(history)
+            history[field] = entry
+            self._update_last_operation(history)
+
+        # Lock-ordering note: _save_callback (service._save_state) acquires the
+        # service _state_lock and re-enters get_history(). Invoke it only after
+        # releasing self._lock so the lock order is never history -> service,
+        # which would deadlock against _save_state's service -> history order.
         self._save_callback()
 
     def _coerce_history_entry(self, entry: Any) -> dict[str, Any] | None:
