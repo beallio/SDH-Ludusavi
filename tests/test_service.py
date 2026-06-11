@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from sdh_ludusavi.service import JsonSettingsStore, OperationLockedError, SDHLudusaviService
+from sdh_ludusavi.service import OperationLockedError, SDHLudusaviService
+from sdh_ludusavi.persistence import JsonSettingsStore
 from sdh_ludusavi.types import GameStatus
 
 

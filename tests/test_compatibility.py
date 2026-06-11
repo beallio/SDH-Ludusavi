@@ -3,7 +3,8 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
-from sdh_ludusavi.service import SDHLudusaviService, JsonSettingsStore
+from sdh_ludusavi.service import SDHLudusaviService
+from sdh_ludusavi.persistence import JsonSettingsStore
 
 
 class DummyAdapter:

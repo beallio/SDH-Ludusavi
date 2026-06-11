@@ -9,7 +9,8 @@ mock_decky = types.SimpleNamespace()
 mock_decky.logger = MagicMock()
 sys.modules["decky"] = mock_decky
 
-from sdh_ludusavi.service import SDHLudusaviService, JsonSettingsStore  # noqa: E402
+from sdh_ludusavi.service import SDHLudusaviService  # noqa: E402
+from sdh_ludusavi.persistence import JsonSettingsStore  # noqa: E402
 
 
 # Obsolete test_run_blocking_retrieves_exception_on_cancellation removed because _run_blocking is now delegated to asyncio.to_thread.
