@@ -8,7 +8,7 @@ from typing import Any, Callable, cast
 
 # For test backward compatibility, import helper objects into module scope
 from ._version import resolve_version  # noqa: F401
-from .persistence import JsonSettingsStore, SettingsStore, PersistenceManager  # noqa: F401
+from .persistence import SettingsStore, PersistenceManager
 from .coordinator import OperationLockedError, OperationCoordinator  # noqa: F401
 
 from .constants import DEFAULT_NOTIFICATION_SETTINGS

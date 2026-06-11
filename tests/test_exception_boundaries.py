@@ -6,7 +6,8 @@ from unittest.mock import MagicMock
 
 from pyludusavi import LudusaviError
 from sdh_ludusavi.ludusavi import PyludusaviAdapter
-from sdh_ludusavi.service import SDHLudusaviService, JsonSettingsStore
+from sdh_ludusavi.service import SDHLudusaviService
+from sdh_ludusavi.persistence import JsonSettingsStore
 
 
 def test_no_bare_except_and_broad_except_comment_check():
