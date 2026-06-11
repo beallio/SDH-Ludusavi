@@ -4,7 +4,7 @@ import logging
 import time
 import uuid
 import threading
-from typing import Any
+from typing import Any, Callable
 
 from .api import SyncthingAPI
 from .config import SyncthingNotConfiguredError, resolve_api_credentials
@@ -44,6 +44,10 @@ MIN_DETECTION_GRACE_SECONDS = 30
 MAX_DETECTION_GRACE_SECONDS = 120
 DETECTION_GRACE_MARGIN_SECONDS = 20
 
+# Frontend enforces MAX_WATCH_DURATION_MS = 120_000 (syncthingMonitor.ts);
+# backend TTL = frontend cap + 60s margin so well-behaved clients never hit it.
+WATCH_TTL_SECONDS = 180.0
+
 
 def detection_grace_ms(folder: FolderSelection) -> int:
     if folder.fs_watcher_enabled is False:
@@ -67,6 +71,7 @@ class SyncthingWatch:
         folder: FolderSelection,
         api: SyncthingAPI,
         initial_snapshot: ConnectionSnapshot | None = None,
+        on_expired: Callable[[str], None] | None = None,
     ) -> None:
         self.watch_id = watch_id
         self.phase = phase
@@ -75,6 +80,8 @@ class SyncthingWatch:
         self.folder = folder
         self.api = api
         self.started_at = time.time()
+        self.deadline_monotonic = time.monotonic() + WATCH_TTL_SECONDS
+        self._on_expired = on_expired
         self.stop_event = threading.Event()
         self.latest_sample: dict[str, Any] = {}
         self.thread: threading.Thread | None = None
@@ -120,6 +127,23 @@ class SyncthingWatch:
         self._tick_sample(time.monotonic())
 
         while not self.stop_event.is_set():
+            if time.monotonic() >= self.deadline_monotonic:
+                logger.warning(
+                    "Syncthing watch %s exceeded %ss TTL without stop_watch; self-terminating (phase=%s)",
+                    self.watch_id,
+                    WATCH_TTL_SECONDS,
+                    self.phase,
+                )
+                self.latest_sample = {
+                    "status": "stopped",
+                    "watch_id": self.watch_id,
+                    "reason": "watch_ttl_expired",
+                }
+                self.stop_event.set()
+                if self._on_expired:
+                    self._on_expired(self.watch_id)
+                break
+
             self._tick(time.monotonic())
 
     def _tick(self, now: float) -> None:
@@ -356,7 +380,14 @@ class SyncthingWatchManager:
 
             watch_id = str(uuid.uuid4())
             watch = SyncthingWatch(
-                watch_id, phase, game_name, app_id, folder, api, initial_snapshot=snapshot
+                watch_id,
+                phase,
+                game_name,
+                app_id,
+                folder,
+                api,
+                initial_snapshot=snapshot,
+                on_expired=self._deregister_expired_watch,
             )
             watch.start()
 
@@ -370,6 +401,13 @@ class SyncthingWatchManager:
                 "path": folder.path,
                 "detection_grace_ms": detection_grace_ms(folder),
             }
+
+    def _deregister_expired_watch(self, watch_id: str) -> None:
+        # Lock-ordering note: stop_watch joins the thread with a timeout. If a TTL
+        # expiry races stop_watch, the thread can block briefly here; the join times
+        # out, stop_watch releases the lock, and pop is a harmless no-op.
+        with self.lock:
+            self.watches.pop(watch_id, None)
 
     def poll_watch(self, watch_id: str) -> dict[str, Any]:
         import copy
