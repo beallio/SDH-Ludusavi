@@ -1615,8 +1615,8 @@ def test_refresh_games_cache_invalidation_via_ludusavi_config_mtime(
     result = service.refresh_games(force=False, installed_app_ids="1,2,3")
 
     assert [g["name"] for g in result["games"]] == ["Hades", "Celeste"]
-    assert service._installed_app_ids == "1,2,3"
-    assert service._ludusavi_config_mtime_ns == 101
+    assert service._registry._installed_app_ids == "1,2,3"
+    assert service._registry._ludusavi_config_mtime_ns == 101
     saved_state = json.loads(cache_path.read_text(encoding="utf-8"))
     assert saved_state["ludusavi_config_mtime_ns"] == 101
 
@@ -1649,8 +1649,8 @@ def test_failed_refresh_does_not_persist_pending_cache_markers(tmp_path: Path) -
     result = service.refresh_games(force=False, installed_app_ids="1,2,3,4")
 
     assert result["dependency_error"] == "refresh failed"
-    assert service._installed_app_ids == "1,2,3"
-    assert service._ludusavi_config_mtime_ns == 100
+    assert service._registry._installed_app_ids == "1,2,3"
+    assert service._registry._ludusavi_config_mtime_ns == 100
 
 
 def test_concurrent_refresh_does_not_overwrite_first_refresh_cache_markers(
@@ -1685,8 +1685,8 @@ def test_concurrent_refresh_does_not_overwrite_first_refresh_cache_markers(
     assert not first.is_alive()
     assert rejected["dependency_error"] == "refresh is already running"
     assert [game["name"] for game in first_result[0]["games"]] == ["Hades", "Celeste"]
-    assert service._installed_app_ids == "1,3"
-    assert service._ludusavi_config_mtime_ns == 100
+    assert service._registry._installed_app_ids == "1,3"
+    assert service._registry._ludusavi_config_mtime_ns == 100
 
 
 def test_config_marker_read_failure_forces_refresh_instead_of_cache_hit(
@@ -1716,8 +1716,8 @@ def test_config_marker_read_failure_forces_refresh_instead_of_cache_hit(
     result = service.refresh_games(force=False, installed_app_ids="1,2,3")
 
     assert [game["name"] for game in result["games"]] == ["Hades", "Celeste"]
-    assert service._installed_app_ids == "1,2,3"
-    assert service._ludusavi_config_mtime_ns is None
+    assert service._registry._installed_app_ids == "1,2,3"
+    assert service._registry._ludusavi_config_mtime_ns is None
 
 
 def test_refresh_games_reuses_aliases_when_config_marker_is_unchanged(
@@ -1767,7 +1767,7 @@ def test_match_game_serializes_lazy_refresh_for_concurrent_callers(tmp_path: Pat
 
     adapter.refresh_statuses = slow_refresh
     service = service_with_state(tmp_path, adapter)
-    service._games = {}
+    service._registry._games = {}
     matches: list[str | None] = []
     errors: list[BaseException] = []
 
