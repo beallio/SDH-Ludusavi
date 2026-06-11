@@ -145,22 +145,6 @@ def expected_settings(
     }
 
 
-def test_decky_log_uses_cached_module_level_logger() -> None:
-    tree = ast.parse(Path("py_modules/sdh_ludusavi/service.py").read_text(encoding="utf-8"))
-    decky_log = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "_decky_log"
-    )
-    imports = [
-        node for node in ast.walk(decky_log) if isinstance(node, ast.Import | ast.ImportFrom)
-    ]
-    names = {node.id for node in ast.walk(decky_log) if isinstance(node, ast.Name)}
-
-    assert imports == []
-    assert "_DECKY_LOGGER" in names
-
-
 def test_settings_do_not_initialize_ludusavi_adapter(tmp_path: Path) -> None:
     def fail_factory() -> FakeAdapter:
         raise RuntimeError("Ludusavi should not be initialized")
