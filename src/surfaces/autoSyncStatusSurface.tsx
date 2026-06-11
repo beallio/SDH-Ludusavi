@@ -12,6 +12,12 @@ import { syncAutoSyncStatusBrowserView, destroyAutoSyncStatusBrowserView, setBro
 
 export { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus };
 
+// Backend operations are hard-bounded at 900s (LUDUSAVI_OPERATION_TIMEOUT_SECONDS in
+// py_modules/sdh_ludusavi/constants.py). Running statuses hide when their result is
+// published; this ceiling only fires if the frontend never hears back.
+export const RUNNING_STATUS_HIDE_CEILING_MS = 930000;
+export const RESULT_HIDE_DELAY_MS = 2000;
+
 let currentAutoSyncStatusState: AutoSyncStatusState = {
   status: "has_backup",
   visible: false,
@@ -78,7 +84,7 @@ function scheduleAutoSyncStatusHide(state: AutoSyncStatusState) {
     return;
   }
 
-  const hideDelay = isRunning ? 10000 : 2000;
+  const hideDelay = isRunning ? RUNNING_STATUS_HIDE_CEILING_MS : RESULT_HIDE_DELAY_MS;
   log(
     "debug",
     `Auto-hide scheduled in ${hideDelay}ms for status=${state.status}`,
@@ -119,7 +125,7 @@ function syncAutoSyncStatusBrowserViewDeferred(state: AutoSyncStatusState) {
 
 export function publishAutoSyncStatus(status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions) {
   const shouldResetSurface = shouldResetStatusStripSurfaceBeforeVerification(status, options);
-  if (status === "backing_up" || status === "restoring") {
+  if (isLudusaviRunningStatus(status)) {
     autoSyncStatusTimedOut = false;
   }
 
