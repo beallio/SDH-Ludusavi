@@ -26,7 +26,6 @@ class FakeAdapter:
 def test_fuzzy_matching_length_check(tmp_path):
     state_file = tmp_path / "state.json"
     service = SDHLudusaviService(adapter=FakeAdapter(), state_path=state_file)
-    service._refreshed_once = True
 
     # Manually populate _games for testing _match_game
     service._registry._games = {
