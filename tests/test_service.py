@@ -434,6 +434,38 @@ def test_signal_process_methods_reject_pid_above_os_signal_range(
     assert service._paused_pids == {}
 
 
+def test_force_backup_timeout_fails_and_releases_operation_lock(tmp_path: Path) -> None:
+    """A LudusaviError (e.g. subprocess timeout) during backup must surface as a
+    failed RPC payload, record failure history, and leave the global lock free
+    so the next operation can run."""
+    from pyludusavi import LudusaviError
+
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    calls = {"n": 0}
+
+    def flaky_backup(game_name: str, preview: bool = False):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise LudusaviError("Ludusavi command timed out after 900.0s: [...]")
+        return {"games": {game_name: {}}}
+
+    adapter.backup = flaky_backup
+
+    with pytest.raises(LudusaviError):
+        service.force_backup("Hades")
+
+    history = service.get_game_history()["Hades"]
+    assert history["last_failure"]["message"].startswith("Ludusavi command timed out")
+    assert service.get_operation_status()["is_running"] is False
+
+    # Lock must be free: a second backup attempt reaches the adapter and succeeds.
+    result = service.force_backup("Hades")
+    assert result["status"] == "backed_up"
+    assert calls["n"] == 2
+
+
 @pytest.mark.parametrize(
     "invalid_input",
     [True, False, 2.5, "2.5", "", "   ", "abc", "-5", "+1", 2_147_483_648],

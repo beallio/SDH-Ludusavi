@@ -82,3 +82,61 @@ def test_process_watchdog_failed_resume() -> None:
             assert 7777 in wd._paused_pids
 
         wd.stop()
+
+
+def test_watchdog_defers_resume_while_operation_running_within_ceiling() -> None:
+    """Paused 60s with an operation running: must NOT be resumed (pre-existing
+    deferral behavior, now bounded)."""
+    log_mock = MagicMock()
+    is_op_running = MagicMock(return_value=True)
+
+    with (
+        patch("sdh_ludusavi.watchdog.os.kill") as mock_kill,
+        patch("sdh_ludusavi.watchdog._process_tree", return_value=[8888]),
+    ):
+        svc = DummyService()
+        wd = ProcessWatchdog(svc, log_callback=log_mock, is_operation_running=is_op_running)
+
+        with wd._paused_pids_lock:
+            wd._paused_pids[8888] = time.time() - 60.0
+
+        wd._check_and_resume_stuck_pids()
+
+        mock_kill.assert_not_called()
+        assert 8888 in wd._paused_pids
+        wd.stop()
+
+
+def test_watchdog_resumes_past_absolute_ceiling_even_when_operation_running() -> None:
+    """Paused longer than WATCHDOG_ABSOLUTE_RESUME_SECONDS with an operation
+    running: MUST be resumed, and the warning log must mention the absolute
+    ceiling."""
+    from sdh_ludusavi.constants import WATCHDOG_ABSOLUTE_RESUME_SECONDS
+
+    log_mock = MagicMock()
+    is_op_running = MagicMock(return_value=True)
+
+    with (
+        patch("sdh_ludusavi.watchdog.os.kill") as mock_kill,
+        patch("sdh_ludusavi.watchdog._process_tree", return_value=[7777]),
+    ):
+        svc = DummyService()
+        wd = ProcessWatchdog(svc, log_callback=log_mock, is_operation_running=is_op_running)
+
+        with wd._paused_pids_lock:
+            wd._paused_pids[7777] = time.time() - (WATCHDOG_ABSOLUTE_RESUME_SECONDS + 1)
+
+        wd._check_and_resume_stuck_pids()
+
+        mock_kill.assert_called_with(7777, 18)
+        assert 7777 not in wd._paused_pids
+
+        # Check that the warning log mentions the absolute ceiling
+        called_with_absolute = False
+        for call in log_mock.call_args_list:
+            if call[0][0] == "warning" and "absolute ceiling" in call[0][1]:
+                called_with_absolute = True
+                break
+        assert called_with_absolute, "Warning log must mention the absolute ceiling"
+
+        wd.stop()

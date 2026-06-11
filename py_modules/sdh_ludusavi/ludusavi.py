@@ -13,6 +13,11 @@ from typing import Any, cast
 
 from pyludusavi import LudusaviError
 
+from .constants import (
+    LUDUSAVI_OPERATION_TIMEOUT_SECONDS,
+    LUDUSAVI_PREVIEW_TIMEOUT_SECONDS,
+)
+
 
 FLATPAK_ID = "com.github.mtkennerly.ludusavi"
 LOGGER = logging.getLogger(__name__)
@@ -66,11 +71,18 @@ class PyludusaviAdapter:
         with ThreadPoolExecutor(max_workers=2) as executor:
             if game_names:
                 preview_future = executor.submit(
-                    self._client.backup, games=game_names, preview=True
+                    self._client.backup,
+                    games=game_names,
+                    preview=True,
+                    timeout=LUDUSAVI_PREVIEW_TIMEOUT_SECONDS,
                 )
+                # backups_list has no timeout param; executor 30s default applies
                 backups_future = executor.submit(self._client.backups_list, games=game_names)
             else:
-                preview_future = executor.submit(self._client.backup, preview=True)
+                preview_future = executor.submit(
+                    self._client.backup, preview=True, timeout=LUDUSAVI_PREVIEW_TIMEOUT_SECONDS
+                )
+                # backups_list has no timeout param; executor 30s default applies
                 backups_future = executor.submit(self._client.backups_list)
             preview = preview_future.result().data
             backups = backups_future.result().data
@@ -169,7 +181,9 @@ class PyludusaviAdapter:
 
         # Run a restore preview to see if the backup differs from local
         try:
-            preview = self._client.restore(games=[game_name], preview=True).data
+            preview = self._client.restore(
+                games=[game_name], preview=True, timeout=LUDUSAVI_PREVIEW_TIMEOUT_SECONDS
+            ).data
             game_output = preview.get("games", {}).get(game_name, {})
             change = game_output.get("change")
 
@@ -209,7 +223,12 @@ class PyludusaviAdapter:
             LOGGER.debug("Failed to retrieve backup list for conflict metadata: %s", exc)
 
         try:
-            preview = self._client.backup(games=[game_name], preview=True, force=True).data
+            preview = self._client.backup(
+                games=[game_name],
+                preview=True,
+                force=True,
+                timeout=LUDUSAVI_PREVIEW_TIMEOUT_SECONDS,
+            ).data
             files = preview.get("games", {}).get(game_name, {}).get("files", {})
             mtimes = []
             if isinstance(files, dict):
@@ -233,15 +252,25 @@ class PyludusaviAdapter:
         return metadata
 
     def backup(self, game_name: str, preview: bool = False) -> dict[str, object]:
+        timeout = (
+            LUDUSAVI_PREVIEW_TIMEOUT_SECONDS if preview else LUDUSAVI_OPERATION_TIMEOUT_SECONDS
+        )
         return cast(
             dict[str, object],
-            self._client.backup(games=[game_name], preview=preview, force=True).data,
+            self._client.backup(
+                games=[game_name], preview=preview, force=True, timeout=timeout
+            ).data,
         )
 
     def restore(self, game_name: str, preview: bool = False) -> dict[str, object]:
+        timeout = (
+            LUDUSAVI_PREVIEW_TIMEOUT_SECONDS if preview else LUDUSAVI_OPERATION_TIMEOUT_SECONDS
+        )
         return cast(
             dict[str, object],
-            self._client.restore(games=[game_name], preview=preview, force=True).data,
+            self._client.restore(
+                games=[game_name], preview=preview, force=True, timeout=timeout
+            ).data,
         )
 
     def get_versions(self) -> dict[str, str]:

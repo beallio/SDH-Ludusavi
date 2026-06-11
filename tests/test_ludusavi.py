@@ -5,6 +5,10 @@ from datetime import datetime
 import pytest
 
 import pyludusavi
+from sdh_ludusavi.constants import (
+    LUDUSAVI_OPERATION_TIMEOUT_SECONDS,
+    LUDUSAVI_PREVIEW_TIMEOUT_SECONDS,
+)
 from sdh_ludusavi.ludusavi import (
     FLATPAK_ID,
     PyludusaviAdapter,
@@ -149,23 +153,36 @@ class FakeLudusaviClient:
         self.backup_preview_data = backup_preview_data or {}
         self.requested_games: list[str] | None = None
         self.preview_requested: bool = False
+        self.calls: list[tuple] = []
 
     def backups_list(self, games: list[str] | None = None) -> FakeResponse:
         self.requested_games = games
         return FakeResponse(self.backup_data)
 
     def restore(
-        self, games: list[str] | None = None, preview: bool = False, **kwargs: object
+        self,
+        games: list[str] | None = None,
+        preview: bool = False,
+        force: bool = False,
+        timeout: float | None = None,
+        **kwargs: object,
     ) -> FakeResponse:
         self.requested_games = games
         self.preview_requested = preview
+        self.calls.append(("restore", tuple(games or ()), preview, timeout))
         return FakeResponse(self.restore_data)
 
     def backup(
-        self, games: list[str] | None = None, preview: bool = False, **kwargs: object
+        self,
+        games: list[str] | None = None,
+        preview: bool = False,
+        force: bool = False,
+        timeout: float | None = None,
+        **kwargs: object,
     ) -> FakeResponse:
         self.requested_games = games
         self.preview_requested = preview
+        self.calls.append(("backup", tuple(games or ()), preview, timeout))
         return FakeResponse(self.backup_preview_data)
 
 
@@ -310,8 +327,10 @@ def test_refresh_statuses_forwards_game_names_to_client() -> None:
     calls = []
 
     class MockClient:
-        def backup(self, games: list[str] | None = None, preview: bool = False) -> FakeResponse:
-            calls.append(("backup", games, preview))
+        def backup(
+            self, games: list[str] | None = None, preview: bool = False, **kwargs: object
+        ) -> FakeResponse:
+            calls.append(("backup", games, preview, kwargs.get("timeout")))
             return FakeResponse({"games": {}})
 
         def backups_list(self, games: list[str] | None = None) -> FakeResponse:
@@ -322,5 +341,57 @@ def test_refresh_statuses_forwards_game_names_to_client() -> None:
     adapter._client = MockClient()
 
     adapter.refresh_statuses(game_names=["Hades"])
-    assert ("backup", ["Hades"], True) in calls
+    assert ("backup", ["Hades"], True, LUDUSAVI_PREVIEW_TIMEOUT_SECONDS) in calls
     assert ("backups_list", ["Hades"]) in calls
+
+
+def test_adapter_backup_passes_operation_timeout() -> None:
+    adapter, client = adapter_with_backups({"games": {}})
+    adapter.backup("Hades")
+    assert ("backup", ("Hades",), False, LUDUSAVI_OPERATION_TIMEOUT_SECONDS) in client.calls
+
+
+def test_adapter_backup_preview_passes_preview_timeout() -> None:
+    adapter, client = adapter_with_backups({"games": {}})
+    adapter.backup("Hades", preview=True)
+    assert ("backup", ("Hades",), True, LUDUSAVI_PREVIEW_TIMEOUT_SECONDS) in client.calls
+
+
+def test_adapter_restore_passes_operation_timeout() -> None:
+    adapter, client = adapter_with_backups({"games": {}})
+    adapter.restore("Hades")
+    assert ("restore", ("Hades",), False, LUDUSAVI_OPERATION_TIMEOUT_SECONDS) in client.calls
+
+
+def test_refresh_statuses_uses_preview_timeout() -> None:
+    """The bulk preview inside refresh_statuses must pass the preview budget."""
+    calls = []
+
+    class MockClient:
+        def backup(
+            self, games: list[str] | None = None, preview: bool = False, **kwargs: object
+        ) -> FakeResponse:
+            calls.append(("backup", games, preview, kwargs.get("timeout")))
+            return FakeResponse({"games": {}})
+
+        def backups_list(self, games: list[str] | None = None) -> FakeResponse:
+            return FakeResponse({"games": {}})
+
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    adapter._client = MockClient()
+    adapter.refresh_statuses()
+    assert ("backup", None, True, LUDUSAVI_PREVIEW_TIMEOUT_SECONDS) in calls
+
+
+def test_compare_recency_restore_preview_uses_preview_timeout() -> None:
+    adapter, client = adapter_with_backups(
+        backup_data={"games": {"Hades": {"backups": [{"when": "2026-05-10T00:00:00Z"}]}}}
+    )
+    adapter.compare_recency("Hades")
+    assert ("restore", ("Hades",), True, LUDUSAVI_PREVIEW_TIMEOUT_SECONDS) in client.calls
+
+
+def test_get_conflict_metadata_preview_uses_preview_timeout() -> None:
+    adapter, client = adapter_with_backups({"games": {}})
+    adapter.get_conflict_metadata("Hades")
+    assert ("backup", ("Hades",), True, LUDUSAVI_PREVIEW_TIMEOUT_SECONDS) in client.calls
