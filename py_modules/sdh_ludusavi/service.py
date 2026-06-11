@@ -19,33 +19,6 @@ from sdh_ludusavi.game_names import sanitize_game_name
 LOGGER = logging.getLogger(__name__)
 
 
-# Maintain module level variables for AST check in test_service.py
-try:
-    import decky
-
-    _DECKY_LOGGER = getattr(decky, "logger", None)
-except (ImportError, AttributeError):
-    _DECKY_LOGGER = None
-
-
-def _decky_log(level: str, message: str) -> None:
-    """Helper to log to decky.logger if available."""
-    if not _DECKY_LOGGER:
-        return
-
-    logger_level_map = {
-        "warning": getattr(_DECKY_LOGGER, "warning", _DECKY_LOGGER.info),
-        "error": getattr(
-            _DECKY_LOGGER, "error", getattr(_DECKY_LOGGER, "exception", _DECKY_LOGGER.info)
-        ),
-        "debug": getattr(_DECKY_LOGGER, "info", None),
-        "info": getattr(_DECKY_LOGGER, "info", None),
-    }
-    logger_level = logger_level_map.get(level, getattr(_DECKY_LOGGER, "info", None))
-    if logger_level:
-        logger_level(f"[DEBUG] {message}" if level == "debug" else message)
-
-
 class SDHLudusaviService:
     """The core synchronous backend service for SDH-ludusavi.
 
