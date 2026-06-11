@@ -105,8 +105,12 @@ Autosync status strip behavior:
 - Failed or unsafe-to-sync state: show `UNABLE TO SYNC` and emit one Decky failure
   toast.
 
-Checking and running states auto-hide after 10 seconds. A late success stays quiet. A
-late failure still shows the failure toast.
+Checking and running states stay visible while their operation runs and are replaced
+when the operation's result is published. A stuck-bar safety ceiling force-hides them
+after 930 seconds (just above the backend's 900-second operation bound), and only if
+that ceiling fires does a late success stay quiet. A late failure always shows the
+failure toast. Publishing any new running status clears a previous ceiling
+suppression.
 
 ## Dependency Requirements
 

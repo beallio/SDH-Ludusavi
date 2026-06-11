@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { RUNNING_STATUS_HIDE_CEILING_MS } from "./autoSyncStatusSurface";
 
 vi.mock("@decky/api", () => ({
   callable: () => () => Promise.resolve(),
@@ -50,7 +51,7 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
       tracked: true,
     });
 
-    await vi.advanceTimersByTimeAsync(10000);
+    await vi.advanceTimersByTimeAsync(RUNNING_STATUS_HIDE_CEILING_MS);
 
     const messages = loggedMessages();
     expect(
@@ -66,7 +67,7 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
       appID: "1145300",
       tracked: true,
     });
-    await vi.advanceTimersByTimeAsync(10000);
+    await vi.advanceTimersByTimeAsync(RUNNING_STATUS_HIDE_CEILING_MS);
     logMock.mockClear();
 
     surface.completeAutoSyncStatus(
@@ -102,9 +103,65 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
         (message) =>
           message.startsWith("debug:") &&
           message.includes("uto-hide") &&
-          message.includes("10000"),
+          message.includes(String(RUNNING_STATUS_HIDE_CEILING_MS)),
       ),
     ).toBe(true);
+  });
+
+  it("keeps a running status visible well past the old 10s timeout", async () => {
+    const surface = await freshSurface();
+    surface.publishAutoSyncStatus("backing_up", {
+      source: "lifecycle_exit", gameName: "Hades", appID: "1145300", tracked: true,
+    });
+    logMock.mockClear();
+
+    await vi.advanceTimersByTimeAsync(60000); // 1 minute: > 10s, < ceiling
+
+    const messages = loggedMessages();
+    expect(messages.some((m) => m.includes("timed out"))).toBe(false);
+    expect(messages.some((m) => m.includes("visible=false"))).toBe(false);
+  });
+
+  it("publishes the final result when the operation completes before the ceiling", async () => {
+    const surface = await freshSurface();
+    surface.publishAutoSyncStatus("backing_up", {
+      source: "lifecycle_exit", gameName: "Hades", appID: "1145300", tracked: true,
+    });
+    await vi.advanceTimersByTimeAsync(60000);
+    logMock.mockClear();
+
+    surface.completeAutoSyncStatus(
+      { status: "backed_up", game: "Hades" },
+      { gameName: "Hades", appID: "1145300", tracked: true },
+    );
+
+    const messages = loggedMessages();
+    expect(messages.some((m) => m.includes("Status update:") && m.includes("status=has_backup"))).toBe(true);
+    expect(messages.some((m) => m.includes("suppressed"))).toBe(false);
+  });
+
+  it("clears a previous timeout suppression when a new running status is published", async () => {
+    const surface = await freshSurface();
+    // Game A: backup exceeds the ceiling -> timedOut flag set
+    surface.publishAutoSyncStatus("backing_up", {
+      source: "lifecycle_exit", gameName: "GameA", appID: "1", tracked: true,
+    });
+    await vi.advanceTimersByTimeAsync(RUNNING_STATUS_HIDE_CEILING_MS);
+
+    // Game B: new lifecycle publishes "checking", which must reset the flag
+    surface.publishAutoSyncStatus("checking", {
+      source: "lifecycle_start", gameName: "GameB", appID: "2", tracked: true,
+    });
+    logMock.mockClear();
+
+    surface.completeAutoSyncStatus(
+      { status: "backed_up", game: "GameB" },
+      { gameName: "GameB", appID: "2", tracked: true },
+    );
+
+    const messages = loggedMessages();
+    expect(messages.some((m) => m.includes("suppressed"))).toBe(false);
+    expect(messages.some((m) => m.includes("Status update:") && m.includes("status=has_backup"))).toBe(true);
   });
 
   it("logs unhandled result statuses instead of silently ignoring them", async () => {

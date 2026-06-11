@@ -1,0 +1,20 @@
+{
+  "date": "2026-06-10",
+  "task_objective": "Keep running status bar visible until operation completes",
+  "files_modified": [
+    "src/surfaces/autoSyncStatusSurface.suppression.test.ts",
+    "src/surfaces/autoSyncStatusSurface.tsx",
+    "docs/specs/custom_status_bar_ui.md"
+  ],
+  "tests_added": [
+    "keeps a running status visible well past the old 10s timeout",
+    "publishes the final result when the operation completes before the ceiling",
+    "clears a previous timeout suppression when a new running status is published"
+  ],
+  "design_decisions": [
+    "Ceiling=930s chosen to match the backend 900s bound (user decision).",
+    "Suppression retained but ceiling-only.",
+    "Stale-flag reset widened to all running statuses to fix the checking-suppression edge case."
+  ],
+  "results": "Successfully updated tests to enforce new 930s ceiling, applied the logic in autoSyncStatusSurface, updated the spec, and verified all tests pass."
+}
