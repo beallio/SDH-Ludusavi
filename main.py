@@ -4,13 +4,14 @@ import asyncio
 import contextvars
 import functools
 import os
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor
 from pathlib import Path
 import threading
 from typing import Any
 
 import decky
 
+from sdh_ludusavi.rpc_pool import DaemonThreadPool
 from sdh_ludusavi.service import (
     DEFAULT_NOTIFICATION_SETTINGS,
     OperationLockedError,
@@ -54,7 +55,9 @@ class Plugin:
     def __init__(self) -> None:
         self._backend: SDHLudusaviService | None = None
         self._backend_lock = threading.Lock()
-        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="sdh-rpc")
+        # Daemon workers: an in-flight RPC must never keep the old plugin
+        # process alive after Decky's SystemExit during update/unload.
+        self._executor = DaemonThreadPool(max_workers=4, thread_name_prefix="sdh-rpc")
 
     def _service(self) -> SDHLudusaviService:
         if self._backend is None:
@@ -451,7 +454,7 @@ def _ensure_private_directory(path: Path) -> None:
     path.chmod(0o700)
 
 
-async def _run_blocking(executor: ThreadPoolExecutor, callback: Any) -> Any:
+async def _run_blocking(executor: Executor, callback: Any) -> Any:
     """
     Run a synchronous callback on the shared RPC executor without blocking
     the event loop. Cancelling the awaiting coroutine cannot interrupt a
