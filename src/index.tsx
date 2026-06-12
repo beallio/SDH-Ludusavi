@@ -25,8 +25,7 @@ import {
 } from "./types";
 import { ConflictResolutionModal } from "./components/modals/ConflictResolutionModal";
 import {
-  LudusaviContent,
-  resetLudusaviContentLoadState
+  LudusaviContent
 } from "./components/qam/LudusaviContent";
 import { createGameLifecycleController } from "./controllers/gameLifecycleController";
 import { isRpcStatus } from "./utils/rpc";
@@ -36,19 +35,8 @@ import {
   LudusaviStateStore,
   createLudusaviStateStore
 } from "./state/ludusaviState";
-import {
-  applySettingsGlobal,
-  resetSettingsMutationController,
-  setActiveSettingsStore
-} from "./settings/settingsMutationController";
-import {
-  completeAutoSyncStatus,
-  hideAutoSyncStatus,
-  publishAutoSyncStatus,
-  resetAutoSyncStatusSurface
-} from "./surfaces/autoSyncStatusSurface";
 
-
+import { createPluginRuntime } from "./runtime/pluginRuntime";
 
 
 async function syncGlobalHistory(store: LudusaviStateStore) {
@@ -212,8 +200,10 @@ export default definePlugin(() => {
     logUiEvent("qam_styles_attached");
   }
 
+  const runtime = createPluginRuntime();
+
   const ludusaviStore = createLudusaviStateStore();
-  setActiveSettingsStore(ludusaviStore, (title, body) => {
+  runtime.settings.setActiveStore(ludusaviStore, (title, body) => {
     notify(ludusaviStore, "failures_errors", title, body, <FaExclamationTriangle />);
   });
   const lifecycleStateReady = (async () => {
@@ -227,7 +217,7 @@ export default definePlugin(() => {
         logUiEvent("startup_settings_hydration_skipped", { reason: "state_already_populated" });
         return;
       }
-      applySettingsGlobal(ludusaviStore, settings);
+      runtime.settings.applySettings(ludusaviStore, settings);
       logUiEvent(
         "startup_settings_hydrated",
         {
@@ -255,11 +245,7 @@ export default definePlugin(() => {
       getSyncthingActivity: getSyncthingActivityCall,
       stopSyncthingActivityWatch: stopSyncthingActivityWatchCall
     },
-    statusSurface: {
-      publish: publishAutoSyncStatus,
-      hide: hideAutoSyncStatus,
-      complete: completeAutoSyncStatus
-    },
+    statusSurface: runtime.statusSurface,
     resolveConflict: showConflictResolutionModal,
     notifyFailure: (title, body) => {
       notify(ludusaviStore, "failures_errors", title, body, <FaExclamationTriangle />);
@@ -275,6 +261,7 @@ export default definePlugin(() => {
     content: (
       <LudusaviStateProvider store={ludusaviStore}>
         <LudusaviContent
+          runtime={runtime}
           dropdownCssText={dropdownStyleEl.textContent}
           notify={notify}
           isRpcStatus={isRpcStatus}
@@ -287,14 +274,12 @@ export default definePlugin(() => {
     onDismount() {
       logUiEvent("plugin_dismounting", {}, "info");
       lifecycleController.dispose();
-      resetAutoSyncStatusSurface();
 
       if (dropdownStyleEl.parentNode) {
         dropdownStyleEl.parentNode.removeChild(dropdownStyleEl);
       }
 
-      resetSettingsMutationController();
-      resetLudusaviContentLoadState();
+      runtime.dispose();
 
       logUiEvent("plugin_dismounted", {}, "info");
     },
