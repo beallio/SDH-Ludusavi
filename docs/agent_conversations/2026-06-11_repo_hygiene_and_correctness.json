@@ -1,0 +1,43 @@
+{
+    "date": "2026-06-11",
+    "objective": "Execute the repo_hygiene_and_correctness plan to clean up repository artifacts and fix timestamp/caching bugs.",
+    "files_modified": [
+        "docs/plans/repo_hygiene_and_correctness.md",
+        "expand_tests.py",
+        "docs/agent_conversations/*",
+        "py_modules/sdh_ludusavi/history.py",
+        "tests/test_history_fixes.py",
+        "py_modules/sdh_ludusavi/gateway.py",
+        "py_modules/sdh_ludusavi/registry.py",
+        "tests/test_gateway.py",
+        "py_modules/sdh_ludusavi/ludusavi.py",
+        "tests/test_ludusavi.py",
+        "pyproject.toml",
+        "tests/test_registry.py",
+        "docs/agent_conversations/README.md"
+    ],
+    "tests_added": [
+        "test_record_history_writes_aware_utc_timestamp",
+        "test_history_mixed_era_sorting",
+        "test_history_load_validation_hardened",
+        "test_ludusavi_gateway_methods (updated for cache invalidation)"
+    ],
+    "design_decisions": [
+        "Created an orphan branch `docs-archive` to preserve 196 historical session logs without bloating the working tree.",
+        "Replaced naive `datetime.now()` with timezone-aware `datetime.now(timezone.utc)` for history entries.",
+        "Implemented a tolerant timestamp parser in `history.py` to properly sort legacy naive timestamps alongside new aware timestamps without crashing.",
+        "Added `invalidate()` to `LudusaviGateway` to clear `_adapter` and other properties on forced refresh, ensuring adapter-level caches are naturally dropped.",
+        "Used `os.getuid()` in `_ludusavi_env` to dynamically assign `XDG_RUNTIME_DIR` instead of hardcoding '1000', for non-stock user support.",
+        "Updated `test_service.py` mock adapter factory to support both direct adapter testing and forced refresh invalidation via `adapter_factory=lambda: adapter`.",
+        "Enforced a coverage floor of 83% in `pyproject.toml` via `pytest-cov` to ensure no coverage regressions."
+    ],
+    "results": [
+        "Orphan script removed, agent logs archived, working tree clean.",
+        "History module handles mixed era/format timestamps correctly.",
+        "Forced refresh correctly invalidates gateway cache.",
+        "Environment overrides are fully dynamic.",
+        "Coverage floor is actively enforced.",
+        "All tests pass (518 passed).",
+        "Overall repo hygiene and robustness improved."
+    ]
+}
