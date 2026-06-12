@@ -1,0 +1,38 @@
+{
+  "date": "2026-06-12",
+  "task_objective": "Harden the plugin self-update lifecycle: stop the old backend process from lingering on in-flight RPC work after Decky's unload, make the pending-update install record safe against concurrent backend instances during Decky's install reload storm, and cancel frontend startup hydration on dismount so ghost mounts cannot act after dispose. Root-caused from Steam Deck logs of the 2026-06-11 self-update.",
+  "branch": "fix/update-lifecycle-resilience (worktree off dev@c6a41f0, isolated from the concurrent repo_hygiene_and_correctness work)",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/rpc_pool.py (new)",
+    "main.py",
+    "py_modules/sdh_ludusavi/persistence.py",
+    "py_modules/sdh_ludusavi/updater.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "src/runtime/startupHydration.ts (new)",
+    "src/index.tsx",
+    "tests/test_rpc_pool.py (new)",
+    "tests/test_main.py",
+    "tests/test_persistence.py",
+    "tests/test_update_install_race.py (new)",
+    "src/runtime/startupHydration.test.ts (new)",
+    "docs/plans/update_lifecycle_resilience.md (new)"
+  ],
+  "tests_added": [
+    "DaemonThreadPool: result/exception delivery via real futures, daemon workers, queued-future cancellation on shutdown, submit-after-shutdown raises, shutdown(wait=True) joins idle workers, _run_blocking integration",
+    "Interpreter-exit regression: subprocess with a worker mid-sleep(30) must exit in <5s (ThreadPoolExecutor would block on its atexit join)",
+    "Plugin()._executor is a DaemonThreadPool",
+    "PersistenceManager.locked(): lock file creation, per-process reentrancy, flock exclusion against a foreign fd, cross-thread serialization",
+    "Reconcile race: stale second instance never double-promotes the pending install, never resurrects it via a later save, and a no-pending reconcile logs no promotion",
+    "createStartupHydration: applies+logs once, store-already-populated skip, RPC-failure routing, dispose-before-resolution suppresses applySettings/logs, fetch errors logged (and suppressed after dispose)"
+  ],
+  "design_decisions": [
+    "DaemonThreadPool subclasses concurrent.futures.Executor and returns real Futures, so loop.run_in_executor and the existing _run_blocking AST contract test keep working unchanged; no private CPython APIs.",
+    "Abandoning in-flight work at process exit is safe because every persistence write is atomic temp+os.replace.",
+    "Inter-process lock is an advisory flock on a sidecar file beside the state file, re-entrant per process (RLock+depth), with a bounded 5s acquisition that degrades to unlocked operation with a warning rather than hanging the plugin on a stuck peer.",
+    "Reconcile is an atomic claim: under state lock then persistence lock, re-read persisted cache, adopt it into the updater (shared sanitization with load_state), then decide — exactly-once promotion across racing instances. Lock ordering matches _save_state (state lock outer, persistence inner) to avoid ABBA deadlock.",
+    "Startup hydration extracted to a disposable unit (createStartupHydration) with dependency injection, wired into onDismount before lifecycleController.dispose().",
+    "Out of scope by agreement with the in-flight repo_hygiene_and_correctness plan: gateway.py, registry.py, ludusavi.py, history.py, pyproject addopts, expand_tests.py, docs/agent_conversations archival.",
+    "Toolchain note: quality gates ran via the shared /tmp/sdh_ludusavi/.venv tools directly (run.sh PATH); uv project sync is broken in this worktree because HEAD sits exactly on the non-PEP-440 tag v0.3.0-dev.gc6a41f0 (hatch-vcs InvalidVersion); commits used SETUPTOOLS_SCM_PRETEND_VERSION/VCS_VERSIONING_PRETEND_VERSION=0.3.0.dev0 so the unmodified pre-commit hook could run. Worth fixing the tag scheme or adding a raw-options workaround later."
+  ],
+  "results": "All five commits green through the full pre-commit gate suite (ruff check/format, ty, pytest 532 passed at 85% coverage, vitest 156 passed, tsc clean, supply-chain checks, TDD check). Branch is 6 commits ahead of dev, not merged or pushed; merge should happen after the repo_hygiene_and_correctness branch lands on dev, with a rebase if needed."
+}
