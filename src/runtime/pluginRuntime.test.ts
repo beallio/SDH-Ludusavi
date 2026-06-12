@@ -1,7 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { createPluginRuntime } from "./pluginRuntime";
 
-vi.mock("@decky/api", () => ({}));
+vi.mock("@decky/api", () => ({
+  callable: () => () => Promise.resolve(),
+}));
+
+vi.mock("@decky/ui", () => ({
+  Router: {},
+}));
 
 describe("PluginRuntime", () => {
   describe("ContentLoadCoordinator", () => {
