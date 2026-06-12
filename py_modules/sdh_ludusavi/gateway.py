@@ -26,11 +26,22 @@ class LudusaviGateway:
     ) -> None:
         self._adapter = adapter
         self._adapter_lock = threading.Lock()
-        self._adapter_factory = adapter_factory or _default_adapter_factory
+        if adapter is not None and adapter_factory is None:
+            self._adapter_factory = lambda: adapter
+        else:
+            self._adapter_factory = adapter_factory or _default_adapter_factory
         self._log = log_callback or (lambda *a, **kw: None)
         self._diagnostics_logged = False
         self._versions: dict[str, str] | None = None
         self._ludusavi_command: dict[str, object] | None = None
+
+    def invalidate(self) -> None:
+        """Drop cached adapter, versions, and command info."""
+        with self._adapter_lock:
+            self._adapter = None
+            self._versions = None
+            self._ludusavi_command = None
+            self._diagnostics_logged = False
 
     def get_adapter(self) -> LudusaviAdapter:
         """Lazily initialize and return the Ludusavi adapter."""

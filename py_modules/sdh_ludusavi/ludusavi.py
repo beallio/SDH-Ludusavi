@@ -34,7 +34,7 @@ def _ludusavi_env() -> dict[str, str]:
     """
     env: dict[str, str] = {}
     if "XDG_RUNTIME_DIR" not in os.environ:
-        env["XDG_RUNTIME_DIR"] = "/run/user/1000"
+        env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
     else:
         env["XDG_RUNTIME_DIR"] = os.environ["XDG_RUNTIME_DIR"]
     if "LD_LIBRARY_PATH" in os.environ:
