@@ -20,14 +20,7 @@ import {
 import { LogModal, LudusaviLogModal } from "../LogModal";
 import { PluginUpdateSection } from "../PluginUpdateSection";
 import { summarizeOperationResult } from "../../formatting/operationText";
-import {
-  applySettingsGlobal,
-  clearLastQueuedSelectedGame,
-  createSettingsMutationController,
-  getSettingsQueueBusy,
-  subscribeQueue,
-  syncLastQueuedSelectedGame
-} from "../../settings/settingsMutationController";
+import type { PluginRuntime } from "../../runtime/pluginRuntime";
 import {
   defaultSettings,
   LudusaviStateStore,
@@ -64,15 +57,8 @@ import { LogsSection, VersionsSection } from "./VersionAndLogsSection";
 
 const EMPTY_GAMES: readonly GameStatus[] = Object.freeze([]);
 
-let activeInitPromise: Promise<OperationStatus> | null = null;
-let activeMetadataPromise: Promise<void> | null = null;
-
-export function resetLudusaviContentLoadState() {
-  activeInitPromise = null;
-  activeMetadataPromise = null;
-}
-
 type LudusaviContentProps = {
+  runtime: PluginRuntime;
   dropdownCssText: string | null;
   notify: (
     store: LudusaviStateStore,
@@ -86,6 +72,7 @@ type LudusaviContentProps = {
 };
 
 export function LudusaviContent({
+  runtime,
   dropdownCssText,
   notify,
   isRpcStatus,
@@ -131,7 +118,7 @@ export function LudusaviContent({
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [backgroundRefreshBusy, setBackgroundRefreshBusy] = useState(false);
-  const [queueBusy, setQueueBusy] = useState(getSettingsQueueBusy());
+  const [queueBusy, setQueueBusy] = useState(runtime.settings.getQueueBusy());
   const ludusaviCommand = ludusaviState.ludusaviCommand;
   const notifySettingsFailure = useCallback(
     (title: string, body: string) => {
@@ -141,17 +128,17 @@ export function LudusaviContent({
   );
   const settingsController = useMemo(
     () =>
-      createSettingsMutationController({
+      runtime.settings.createController({
         ludusaviStore,
         isMounted,
         setBusyLabel,
         notifyFailure: notifySettingsFailure
       }),
-    [ludusaviStore, notifySettingsFailure]
+    [runtime.settings, ludusaviStore, notifySettingsFailure]
   );
 
   useEffect(() => {
-    return subscribeQueue((busy) => {
+    return runtime.settings.subscribeQueue((busy) => {
       if (isMounted.current) {
         setQueueBusy(busy);
         if (!busy) {
@@ -204,7 +191,7 @@ export function LudusaviContent({
 
   useEffect(() => {
     isMounted.current = true;
-    clearLastQueuedSelectedGame();
+    runtime.settings.clearLastQueuedSelectedGame();
     logUiEvent("qam_content_mounted", {}, "info");
     void loadInitial();
     return () => {
@@ -214,8 +201,8 @@ export function LudusaviContent({
   }, []);
 
   useEffect(() => {
-    syncLastQueuedSelectedGame(selectedGame);
-  }, [selectedGame]);
+    runtime.settings.syncLastQueuedSelectedGame(selectedGame);
+  }, [selectedGame, runtime.settings]);
 
   useEffect(() => {
     if (isQuickAccessVisible && !wasQuickAccessVisible.current) {
@@ -281,19 +268,22 @@ export function LudusaviContent({
 
     fetchMetadata();
 
-    if (!activeInitPromise) {
+    const currentInit = runtime.contentLoad.getInitPromise();
+    if (!currentInit) {
       log("debug", `Creating new initialization promise (warmed=${isWarmed})`);
-      activeInitPromise = (async () => {
+      const newInitP = (async () => {
         const loadedSettings = await fetchInitialState();
         await synchronizeGameList(isWarmed, loadedSettings);
         return getOperationStatus();
       })();
+      runtime.contentLoad.setInitPromise(newInitP);
     } else {
       log("debug", "Reusing in-flight initialization promise");
     }
 
     try {
-      const loadedOperation = await activeInitPromise;
+      const activeInit = runtime.contentLoad.getInitPromise()!;
+      const loadedOperation = await activeInit;
       if (isMounted.current) {
         setOperation(loadedOperation);
       }
@@ -318,7 +308,7 @@ export function LudusaviContent({
       );
       log("error", `Initial load failed: ${error}`);
     } finally {
-      activeInitPromise = null;
+      runtime.contentLoad.setInitPromise(null);
       if (isMounted.current) {
         setBackgroundRefreshBusy(false);
         setBusyLabel(null);
@@ -331,11 +321,11 @@ export function LudusaviContent({
     if (snapshot.versions !== null && snapshot.ludusaviCommand !== null) {
       return;
     }
-    if (activeMetadataPromise) {
+    if (runtime.contentLoad.getMetadataPromise()) {
       return;
     }
     // Load versions and commands in the background asynchronously.
-    activeMetadataPromise = (async () => {
+    const metaP = (async () => {
       try {
         const [versionsResult, commandResult] = await Promise.allSettled([
           getVersions(),
@@ -370,9 +360,10 @@ export function LudusaviContent({
       } catch (err) {
         log("error", `fetchMetadata failed: ${err}`);
       } finally {
-        activeMetadataPromise = null;
+        runtime.contentLoad.setMetadataPromise(null);
       }
     })();
+    runtime.contentLoad.setMetadataPromise(metaP);
   };
 
   const fetchInitialState = async (): Promise<RpcResult<Settings>> => {
@@ -385,7 +376,7 @@ export function LudusaviContent({
     if (isRpcStatus(loadedSettings)) {
       logRpcStatus(loadedSettings, "settings");
     } else {
-      applySettingsGlobal(ludusaviStore, loadedSettings);
+      runtime.settings.applySettings(ludusaviStore, loadedSettings);
     }
 
     if (isRpcStatus(loadedHistory)) {

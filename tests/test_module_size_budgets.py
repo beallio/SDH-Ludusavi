@@ -7,7 +7,8 @@ BUDGETS = {
     "src/surfaces/autoSyncStatusBrowserView.ts": 300,
     "src/controllers/gameLifecycleController.tsx": 550,
     "src/controllers/steamLifecycleSource.ts": 250,
-    "src/controllers/syncthingMonitor.ts": 700,
+    "src/controllers/syncthingMonitor.ts": 500,
+    "src/controllers/syncthingMonitorMachine.ts": 350,
 }
 
 
