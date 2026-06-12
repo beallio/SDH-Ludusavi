@@ -19,7 +19,8 @@ import type {
   PluginUpdateCandidate,
   UpdateCheckContext,
   UpdateCheckResult,
-  RevalidateResult
+  RevalidateResult,
+  BackupListResult,
 } from "../types";
 
 export const getSettings = callable<[], RpcResult<Settings>>("get_settings");
@@ -44,6 +45,8 @@ export const forceBackupCall = callable<[gameName: string], RpcResult<OperationR
 export const forceRestoreCall = callable<[gameName: string], RpcResult<OperationResult>>(
   "force_restore"
 );
+export const listBackupsCall = callable<[gameName: string], RpcResult<BackupListResult>>("list_backups");
+export const restoreBackupVersionCall = callable<[gameName: string, backupId: string], RpcResult<OperationResult>>("restore_backup_version");
 export const getVersions = callable<[], RpcResult<Versions>>("get_versions");
 export const getOperationStatus = callable<[], OperationStatus>("get_operation_status");
 export const getRecentLogs = callable<[], LogEntry[]>("get_recent_logs");

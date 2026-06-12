@@ -293,6 +293,15 @@ class Plugin:
     async def force_restore(self, game_name: str) -> dict[str, object]:
         return await self._call("force_restore", lambda: self._service().force_restore(game_name))
 
+    async def list_backups(self, game_name: str) -> dict[str, Any]:
+        return await self._call("list_backups", lambda: self._service().list_backups(game_name))
+
+    async def restore_backup_version(self, game_name: str, backup_id: str) -> dict[str, Any]:
+        return await self._call(
+            "restore_backup_version",
+            lambda: self._service().restore_backup_version(game_name, backup_id),
+        )
+
     async def get_versions(self) -> dict[str, str] | dict[str, object]:
         return await self._call("get_versions", lambda: self._service().get_versions())
 

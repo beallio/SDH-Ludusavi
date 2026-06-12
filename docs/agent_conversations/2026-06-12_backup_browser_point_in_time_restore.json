@@ -1,0 +1,39 @@
+{
+  "date": "2026-06-12",
+  "task_objective": "Implement Backup Browser with point-in-time restore",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/ludusavi.py",
+    "py_modules/sdh_ludusavi/lifecycle.py",
+    "main.py",
+    "tests/test_backup_browser.py",
+    "tests/test_ludusavi.py",
+    "src/types/index.ts",
+    "src/api/ludusaviRpc.ts",
+    "src/components/modals/BackupBrowserModal.tsx",
+    "src/components/qam/LudusaviContent.tsx",
+    "src/components/qam/GameSettingsSection.tsx",
+    "src/formatting/bytes.ts",
+    "src/formatting/bytes.test.ts",
+    "README.md"
+  ],
+  "tests_added": [
+    "test_adapter_list_backups_parses_and_sorts_backups",
+    "test_adapter_list_backups_missing_game",
+    "test_adapter_list_backups_propagates_ludusavi_error",
+    "test_adapter_restore_backup_calls_client",
+    "test_lifecycle_restore_backup_version_success",
+    "test_lifecycle_restore_backup_version_failure",
+    "test_lifecycle_restore_backup_version_locked",
+    "test_plugin_list_backups",
+    "test_plugin_restore_backup_version",
+    "formatBytes suite"
+  ],
+  "design_decisions": [
+    "Used TDD to implement new adapter/lifecycle features before touching UI.",
+    "list_backups endpoint extracts the 'backups' list and computes size/file_count with `_backup_disk_stats`.",
+    "BackupBrowserModal fetches data on mount, lists snapshots by date descending, and offers a Restore button.",
+    "Integrated restore action into the QAM global operation state to show busy status and toasts.",
+    "Updated README to announce new feature."
+  ],
+  "results": "All tests and quality gates passing. Feature ready for review."
+}

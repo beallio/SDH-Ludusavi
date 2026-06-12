@@ -28,3 +28,7 @@ export function formatConflictTime(value?: string | null) {
   }
   return date.toLocaleString();
 }
+
+export function formatTimestamp(value?: string | null) {
+  return formatConflictTime(value);
+}

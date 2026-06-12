@@ -15,7 +15,8 @@ import {
   getSettings,
   getVersions,
   isGameCacheCurrentCall,
-  refreshGamesCall
+  refreshGamesCall,
+  restoreBackupVersionCall
 } from "../../api/ludusaviRpc";
 import { LogModal, LudusaviLogModal } from "../LogModal";
 import { PluginUpdateSection } from "../PluginUpdateSection";
@@ -50,6 +51,7 @@ import {
 } from "../../utils/steam";
 import { AutoSyncSettingsSection } from "./AutoSyncSettingsSection";
 import { GameSettingsSection } from "./GameSettingsSection";
+import { BackupBrowserModal } from "../modals/BackupBrowserModal";
 import { LudusaviLauncherSection } from "./LudusaviLauncherSection";
 import { NotificationSettingsSection } from "./NotificationSettingsSection";
 import { QamStyles } from "./QamStyles";
@@ -698,6 +700,81 @@ export function LudusaviContent({
     }
   };
 
+  const runSnapshotRestore = async (backupId: string, whenLabel: string) => {
+    if (!selectedGame) return;
+    const label = "Restore";
+    const startedAt = performance.now();
+    logUiEvent("manual_operation_started", { type: label, backup_id: backupId }, "info", label, selectedGame);
+    setBusyLabel(`${label} running`);
+    const icon = <FaDownload />;
+    notify(
+      ludusaviStore,
+      "manual_operations",
+      `SDH-Ludusavi ${label}`,
+      `${label} started for ${selectedGame} (${whenLabel})`,
+      icon
+    );
+    try {
+      const result = await restoreBackupVersionCall(selectedGame, backupId);
+      logUiEvent(
+        "manual_operation_completed",
+        {
+          elapsed_ms: Math.round(performance.now() - startedAt),
+          reason: result.reason,
+          status: result.status,
+          type: label,
+          backup_id: backupId,
+        },
+        result.status === "failed" ? "error" : "info",
+        label,
+        selectedGame,
+      );
+      const resultIcon = result.status === "failed" ? <FaExclamationTriangle /> : icon;
+      const category = result.status === "failed" ? "failures_errors" : "manual_operations";
+      notify(
+        ludusaviStore,
+        category,
+        `SDH-Ludusavi ${label}`,
+        summarizeOperationResult(result, label),
+        resultIcon
+      );
+      const refreshed = await refreshGamesCall(false);
+      const operationStatus = await getOperationStatus();
+      const recentLogs = await getRecentLogs();
+
+      applyRefreshResult(refreshed);
+      if (isMounted.current) {
+        setOperation(operationStatus);
+        setLogs(recentLogs);
+      }
+    } catch (error) {
+      logUiEvent(
+        "manual_operation_failed",
+        {
+          elapsed_ms: Math.round(performance.now() - startedAt),
+          message: error instanceof Error ? error.message : String(error),
+          type: label,
+          backup_id: backupId,
+        },
+        "error",
+        label,
+        selectedGame,
+      );
+      log("error", `Snapshot ${label} failed: ${error}`, label, selectedGame);
+      notify(
+        ludusaviStore,
+        "failures_errors",
+        `SDH-Ludusavi ${label} failed`,
+        error instanceof Error ? error.message : String(error),
+        <FaExclamationTriangle />
+      );
+    } finally {
+      if (isMounted.current) {
+        setBusyLabel(null);
+      }
+    }
+  };
+
   return (
     <div ref={qamContentRef} className="sdh-ludusavi-qam-container">
       {styleElement}
@@ -720,6 +797,17 @@ export function LudusaviContent({
         onGameChange={onGameChange}
         onForceBackup={() => void runForceOperation("Backup", forceBackupCall)}
         onForceRestore={() => void runForceOperation("Restore", forceRestoreCall)}
+        onBrowseBackups={() => {
+          if (!selectedGame) return;
+          showModal(
+            <BackupBrowserModal
+              gameName={selectedGame}
+              isRpcStatus={isRpcStatus}
+              logRpcStatus={logRpcStatus}
+              onRestoreSnapshot={runSnapshotRestore}
+            />
+          );
+        }}
       />
 
       <NotificationSettingsSection

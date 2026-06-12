@@ -10,6 +10,7 @@ from pathlib import Path
 import stat
 import threading
 from typing import Any, cast
+import zipfile
 
 from pyludusavi import LudusaviError
 
@@ -285,6 +286,64 @@ class PyludusaviAdapter:
             ).data,
         )
 
+    def restore_backup(self, game_name: str, backup_id: str) -> dict[str, object]:
+        return cast(
+            dict[str, object],
+            self._client.restore(
+                games=[game_name],
+                backup_id=backup_id,
+                force=True,
+                timeout=LUDUSAVI_OPERATION_TIMEOUT_SECONDS,
+            ).data,
+        )
+
+    def list_backups(self, game_name: str) -> dict[str, object]:
+        response = self._client.backups_list(games=[game_name])
+
+        data = response.data.get("games", {})
+        game_data = data.get(game_name)
+        if not game_data and data:
+            game_data = next(iter(data.values()))
+        if not game_data:
+            return {"game": game_name, "backup_path": None, "total_size_bytes": None, "backups": []}
+
+        backup_path = game_data.get("backupPath")
+        api_backups = game_data.get("backups", [])
+
+        backups = []
+        total_size = 0
+        all_unknown = True
+
+        for b in api_backups:
+            b_name = b.get("name")
+            size_bytes, file_count = (None, None)
+            if backup_path and b_name:
+                size_bytes, file_count = _backup_disk_stats(str(backup_path), b_name)
+
+            if size_bytes is not None:
+                total_size += size_bytes
+                all_unknown = False
+
+            backups.append(
+                {
+                    "id": b_name,
+                    "when": b.get("when"),
+                    "locked": b.get("locked", False),
+                    "os": b.get("os"),
+                    "comment": b.get("comment"),
+                    "size_bytes": size_bytes,
+                    "file_count": file_count,
+                }
+            )
+
+        backups.sort(key=lambda x: x.get("when") or "", reverse=True)
+        return {
+            "game": game_name,
+            "backup_path": backup_path,
+            "total_size_bytes": total_size if not all_unknown else None,
+            "backups": backups,
+        }
+
     def get_versions(self) -> dict[str, str]:
         from pyludusavi import __version__ as pyludusavi_version
 
@@ -430,3 +489,69 @@ def _newest_backup_when(backups: list[dict[str, Any]] | list[Any]) -> str | None
             if newest is None or when > newest:
                 newest = when
     return newest
+
+
+def _backup_disk_stats(backup_path: str, backup_name: str) -> tuple[int | None, int | None]:
+    """Return (size_bytes, file_count) for one snapshot, or (None, None) if undeterminable."""
+    try:
+        target = Path(backup_path) / backup_name
+
+        if backup_name == ".":
+            total_size = 0
+            total_count = 0
+            for root, dirs, files in os.walk(backup_path):
+                if root == str(backup_path):
+                    dirs[:] = [d for d in dirs if not d.startswith("backup-")]
+                    files = [f for f in files if f != "mapping.yaml"]
+                for f in files:
+                    fp = os.path.join(root, f)
+                    try:
+                        st = os.stat(fp)
+                        if stat.S_ISREG(st.st_mode):
+                            total_size += st.st_size
+                            total_count += 1
+                    except OSError:
+                        pass
+            return total_size, total_count
+
+        if target.is_dir():
+            total_size = 0
+            total_count = 0
+            for root, _, files in os.walk(target):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    try:
+                        st = os.stat(fp)
+                        if stat.S_ISREG(st.st_mode):
+                            total_size += st.st_size
+                            total_count += 1
+                    except OSError:
+                        pass
+            return total_size, total_count
+
+        if target.is_file():
+            st = target.stat()
+            size = st.st_size
+            count = None
+            try:
+                with zipfile.ZipFile(target, "r") as z:
+                    count = len([info for info in z.infolist() if not info.is_dir()])
+            except zipfile.BadZipFile:
+                pass
+            return size, count
+
+        alt_target = target.with_suffix(target.suffix + ".zip")
+        if alt_target.is_file():
+            st = alt_target.stat()
+            size = st.st_size
+            count = None
+            try:
+                with zipfile.ZipFile(alt_target, "r") as z:
+                    count = len([info for info in z.infolist() if not info.is_dir()])
+            except zipfile.BadZipFile:
+                pass
+            return size, count
+
+        return None, None
+    except OSError:
+        return None, None
