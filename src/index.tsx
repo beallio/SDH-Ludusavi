@@ -37,6 +37,7 @@ import {
 } from "./state/ludusaviState";
 
 import { createPluginRuntime } from "./runtime/pluginRuntime";
+import { createStartupHydration } from "./runtime/startupHydration";
 
 
 async function syncGlobalHistory(store: LudusaviStateStore) {
@@ -206,31 +207,16 @@ export default definePlugin(() => {
   runtime.settings.setActiveStore(ludusaviStore, (title, body) => {
     notify(ludusaviStore, "failures_errors", title, body, <FaExclamationTriangle />);
   });
-  const lifecycleStateReady = (async () => {
-    try {
-      const settings = await getSettings();
-      if (isRpcStatus(settings)) {
-        logRpcStatus(settings, "startup settings");
-        return;
-      }
-      if (ludusaviStore.getSnapshot().settings !== null) {
-        logUiEvent("startup_settings_hydration_skipped", { reason: "state_already_populated" });
-        return;
-      }
-      runtime.settings.applySettings(ludusaviStore, settings);
-      logUiEvent(
-        "startup_settings_hydrated",
-        {
-          auto_sync_enabled: settings.auto_sync_enabled,
-          selected_game: settings.selected_game,
-          update_channel: settings.update_channel,
-        },
-        "info",
-      );
-    } catch (err) {
-      log("error", `Failed to hydrate lifecycle settings at plugin startup: ${err}`);
-    }
-  })();
+  const startupHydration = createStartupHydration({
+    fetchSettings: getSettings,
+    getStoredSettings: () => ludusaviStore.getSnapshot().settings,
+    isRpcStatus,
+    applySettings: (settings) => runtime.settings.applySettings(ludusaviStore, settings),
+    logRpcStatus,
+    logUiEvent,
+    logError: (message) => log("error", message),
+  });
+  const lifecycleStateReady = startupHydration.ready;
   const lifecycleController = createGameLifecycleController({
     store: ludusaviStore,
     rpc: {
@@ -273,6 +259,7 @@ export default definePlugin(() => {
     alwaysRender: true,
     onDismount() {
       logUiEvent("plugin_dismounting", {}, "info");
+      startupHydration.dispose();
       lifecycleController.dispose();
 
       if (dropdownStyleEl.parentNode) {
