@@ -342,6 +342,19 @@ class PluginUpdater:
         auto = settings.get("automatic_update_checks")
         self._automatic_checks = bool(auto) if isinstance(auto, bool) else True
 
+        self._adopt_cache(cache)
+
+    def adopt_persisted_cache(self, cache: Mapping[str, object]) -> None:
+        """Replace update bookkeeping with a freshly persisted snapshot.
+
+        Used before reconciling so a stale in-memory snapshot (taken before a
+        concurrent instance promoted the pending install) is never acted on
+        or written back.
+        """
+        with self._state_lock:
+            self._adopt_cache(cache)
+
+    def _adopt_cache(self, cache: Mapping[str, object]) -> None:
         c = cache.get("update_check_cache")
         if isinstance(c, dict):
             # Normalize cache fields

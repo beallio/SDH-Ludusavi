@@ -402,7 +402,15 @@ class SDHLudusaviService:
         return self._updater.clear_pending_install(version)
 
     def reconcile_pending_update_install(self, current_version: str) -> None:
-        self._updater.reconcile_pending_install(current_version)
+        # Atomic claim: re-read persisted state under the inter-process lock
+        # so a reconcile racing another plugin instance (Decky's update reload
+        # storm) never promotes from, or writes back, a stale snapshot.
+        # Lock order matches _save_state: state lock, then persistence lock.
+        with self._state_lock:
+            with self._persistence.locked():
+                fresh = self._persistence.load_all()
+                self._updater.adopt_persisted_cache(fresh["cache"])
+                self._updater.reconcile_pending_install(current_version)
 
     def revalidate_plugin_update(self, candidate: dict[str, Any]) -> dict[str, Any]:
         return self._updater.revalidate(candidate)
