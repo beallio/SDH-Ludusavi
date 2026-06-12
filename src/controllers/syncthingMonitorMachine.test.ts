@@ -146,6 +146,33 @@ describe("SyncthingMonitorMachine", () => {
         expect(res.state.lastProcessedTimestamp).toBe(1);
       });
 
+      it("processes valid sample with unknown folder state after initialization", () => {
+        const state = { 
+          ...createInitialWatchState("post_game"), 
+          step: "watching" as const, 
+          initialized: true, 
+          activityObserved: true, 
+          settledCount: 2, 
+          lastProcessedTimestamp: 10 
+        };
+        const res = transition(state, { 
+          type: "sample", 
+          sample: { 
+            timestamp_unix: 11, 
+            folder_state: "unknown", 
+            uploading: false, 
+            downloading: false, 
+            update_in_progress: false, 
+            settled: true, 
+            status: "IDLE" 
+          } as any 
+        });
+        expect(res.state.settledCount).toBe(3);
+        expect(res.state.completionObserved).toBe(true);
+        expect(res.state.step).toBe("complete");
+        expect(res.state.lastProcessedTimestamp).toBe(11);
+      });
+
       it("maintains rank monotonicity for post_game", () => {
         let state = { ...createInitialWatchState("post_game"), step: "watching" as const, initialized: true, publicationEnabled: true, activityObserved: true, latestStatus: "uploading" as const };
         const res = transition(state, { type: "sample", sample: { timestamp_unix: 2, uploading: false, downloading: true, update_in_progress: false, status: "idle", settled: false } as any });

@@ -151,7 +151,7 @@ export function transition(
         effects = { ...effects, resolveReadiness: "ready" };
       }
 
-      if (!isValidSample || timestamp === state.lastProcessedTimestamp) {
+      if (!Number.isFinite(timestamp) || timestamp === state.lastProcessedTimestamp) {
         effects = { ...effects, nextPoll: "active" };
         break;
       }
@@ -206,19 +206,18 @@ export function transition(
               downloading: "syncthing_downloading",
               complete: "syncthing_complete",
             };
-            effects = {
-              ...effects,
-              publish: { status: kindMap[newStatus], source: "context" },
-            };
+            if (kindMap[newStatus]) {
+              effects = {
+                ...effects,
+                publish: { status: kindMap[newStatus], source: "context" },
+              };
+              if (newStatus === "uploading" || newStatus === "complete") {
+                effects = { ...effects, clearPendingTimer: true };
+              }
+            }
           }
         }
         
-        // This effect needs to be applied if latestStatus reaches uploading/complete, whether published or not? 
-        // Wait, the original code says `if (status === "uploading" || status === "complete") { this.clearPendingTimeout(); }`
-        // inside publishStatusForPostGame, so it's tied to publication.
-        if (state.publicationEnabled && newRank > currentRank && newStatus !== "idle" && (newStatus === "uploading" || newStatus === "complete")) {
-          effects = { ...effects, clearPendingTimer: true };
-        }
         effects = { ...effects, nextPoll: nextState.completionObserved ? "none" : "active" };
         if (nextState.completionObserved) effects = { ...effects, stopWatch: true };
       } else {

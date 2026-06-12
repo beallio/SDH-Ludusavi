@@ -35,7 +35,6 @@ import {
   LudusaviStateStore,
   createLudusaviStateStore
 } from "./state/ludusaviState";
-// No global settings imports
 
 import { createPluginRuntime } from "./runtime/pluginRuntime";
 
