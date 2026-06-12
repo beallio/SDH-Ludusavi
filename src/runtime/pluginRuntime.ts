@@ -1,16 +1,17 @@
 import { createContentLoadCoordinator } from "./contentLoadCoordinator";
 import { createAutoSyncStatusSurface } from "../surfaces/autoSyncStatusSurface";
 import { createAutoSyncStatusBrowserView, type AutoSyncStatusBrowserViewApi } from "../surfaces/autoSyncStatusBrowserView";
+import { createSettingsMutationRuntime, type SettingsMutationRuntime } from "../settings/settingsMutationRuntime";
 
 export type PluginRuntimeOverrides = {
   contentLoad?: ReturnType<typeof createContentLoadCoordinator>;
-  settings?: any;
+  settings?: SettingsMutationRuntime;
   statusSurface?: ReturnType<typeof createAutoSyncStatusSurface>;
   statusView?: AutoSyncStatusBrowserViewApi;
 };
 
 export type PluginRuntime = Readonly<{
-  settings: any;
+  settings: SettingsMutationRuntime;
   statusSurface: ReturnType<typeof createAutoSyncStatusSurface>;
   statusView: AutoSyncStatusBrowserViewApi;
   contentLoad: ReturnType<typeof createContentLoadCoordinator>;
@@ -21,20 +22,17 @@ export function createPluginRuntime(overrides?: PluginRuntimeOverrides): PluginR
   const contentLoad = overrides?.contentLoad ?? createContentLoadCoordinator();
   const statusView = overrides?.statusView ?? createAutoSyncStatusBrowserView();
   const statusSurface = overrides?.statusSurface ?? createAutoSyncStatusSurface(statusView);
+  const settings = overrides?.settings ?? createSettingsMutationRuntime();
 
   return {
-    settings: overrides?.settings ?? {},
+    settings,
     statusSurface,
     statusView,
     contentLoad,
     dispose() {
       // order mirrors old onDismount: statusSurface -> settings -> contentLoad
-      if (this.statusSurface && typeof this.statusSurface.dispose === "function") {
-        this.statusSurface.dispose();
-      }
-      if (this.settings && typeof this.settings.dispose === "function") {
-        this.settings.dispose();
-      }
+      statusSurface.dispose();
+      settings.dispose();
       contentLoad.dispose();
     }
   };

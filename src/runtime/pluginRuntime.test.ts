@@ -9,6 +9,17 @@ vi.mock("@decky/ui", () => ({
   Router: {},
 }));
 
+vi.mock("react", () => ({
+  createContext: vi.fn(),
+  useContext: vi.fn(),
+  useSyncExternalStore: vi.fn(),
+}));
+
+vi.mock("react/jsx-dev-runtime", () => ({
+  jsxDEV: vi.fn(),
+  Fragment: Symbol("Fragment"),
+}));
+
 describe("PluginRuntime", () => {
   describe("ContentLoadCoordinator", () => {
     it("round-trips promises", () => {
@@ -46,15 +57,29 @@ describe("PluginRuntime", () => {
   });
 
   describe("override injection and dispose delegation", () => {
-    it("delegates dispose and allows overrides", () => {
-      const disposeMock = vi.fn();
+    it("delegates dispose and allows overrides with correct ordering", () => {
+      const order: string[] = [];
+
+      const statusSurfaceDispose = vi.fn(() => { order.push("statusSurface"); });
+      const settingsDispose = vi.fn(() => { order.push("settings"); });
+      const contentLoadDispose = vi.fn(() => { order.push("contentLoad"); });
+
       const overrides = {
+        statusSurface: {
+          publish: vi.fn(),
+          hide: vi.fn(),
+          complete: vi.fn(),
+          dispose: statusSurfaceDispose
+        } as any,
+        settings: {
+          dispose: settingsDispose
+        } as any,
         contentLoad: {
           getInitPromise: () => null,
           setInitPromise: () => {},
           getMetadataPromise: () => null,
           setMetadataPromise: () => {},
-          dispose: disposeMock
+          dispose: contentLoadDispose
         }
       };
       
@@ -62,7 +87,8 @@ describe("PluginRuntime", () => {
       expect(runtime.contentLoad).toBe(overrides.contentLoad);
       
       runtime.dispose();
-      expect(disposeMock).toHaveBeenCalled();
+      
+      expect(order).toEqual(["statusSurface", "settings", "contentLoad"]);
     });
   });
 });
