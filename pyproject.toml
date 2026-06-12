@@ -26,6 +26,7 @@ Issues = "https://github.com/beallio/SDH-Ludusavi/issues"
 
 [tool.hatch.version]
 source = "vcs"
+raw-options = { git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--abbrev=40", "--match", "v[0-9]*", "--exclude", "*-dev*"] }
 
 [tool.hatch.build.targets.wheel]
 packages = ["py_modules/sdh_ludusavi"]
