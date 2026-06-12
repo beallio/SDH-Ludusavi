@@ -94,12 +94,14 @@ def test_registry_config_mtime_refresh_gating() -> None:
     res = registry.refresh_games(force=False)
     assert "games" in res
     run_locked.assert_not_called()
+    gateway.invalidate.assert_not_called()
 
-    # If force=True, it should trigger refresh
+    # If force=True, it should trigger refresh and invalidate gateway
     gateway.get_adapter().refresh_statuses.return_value = [{"name": "Hades"}]
     res2 = registry.refresh_games(force=True)
     assert len(res2["games"]) == 1
     run_locked.assert_called_once()
+    gateway.invalidate.assert_called_once()
 
 
 def test_registry_dependency_error_fallback() -> None:

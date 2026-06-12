@@ -148,6 +148,9 @@ class GameRegistry:
                 "dependency_error": None,
             }
 
+        if force:
+            self._gateway.invalidate()
+
         self.log("debug", f"Forcing refresh_games (force={force})", "refresh")
         try:
             games = self._run_locked(

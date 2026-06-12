@@ -49,7 +49,7 @@ line-length = 100
 cache-dir = "/tmp/sdh_ludusavi/.ruff_cache"
 
 [tool.pytest.ini_options]
-addopts = "--cov=py_modules/sdh_ludusavi --cov-report=term"
+addopts = "--cov=py_modules/sdh_ludusavi --cov-report=term --cov-fail-under=83"
 cache_dir = "/tmp/sdh_ludusavi/.pytest_cache"
 pythonpath = ["py_modules"]
 asyncio_mode = "auto"
