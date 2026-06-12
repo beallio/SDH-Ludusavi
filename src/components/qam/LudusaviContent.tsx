@@ -20,14 +20,7 @@ import {
 import { LogModal, LudusaviLogModal } from "../LogModal";
 import { PluginUpdateSection } from "../PluginUpdateSection";
 import { summarizeOperationResult } from "../../formatting/operationText";
-import {
-  applySettingsGlobal,
-  clearLastQueuedSelectedGame,
-  createSettingsMutationController,
-  getSettingsQueueBusy,
-  subscribeQueue,
-  syncLastQueuedSelectedGame
-} from "../../settings/settingsMutationController";
+// No global settings imports
 import {
   defaultSettings,
   LudusaviStateStore,
@@ -127,7 +120,7 @@ export function LudusaviContent({
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [backgroundRefreshBusy, setBackgroundRefreshBusy] = useState(false);
-  const [queueBusy, setQueueBusy] = useState(getSettingsQueueBusy());
+  const [queueBusy, setQueueBusy] = useState(runtime.settings.getQueueBusy());
   const ludusaviCommand = ludusaviState.ludusaviCommand;
   const notifySettingsFailure = useCallback(
     (title: string, body: string) => {
@@ -137,17 +130,17 @@ export function LudusaviContent({
   );
   const settingsController = useMemo(
     () =>
-      createSettingsMutationController({
+      runtime.settings.createController({
         ludusaviStore,
         isMounted,
         setBusyLabel,
         notifyFailure: notifySettingsFailure
       }),
-    [ludusaviStore, notifySettingsFailure]
+    [runtime.settings, ludusaviStore, notifySettingsFailure]
   );
 
   useEffect(() => {
-    return subscribeQueue((busy) => {
+    return runtime.settings.subscribeQueue((busy) => {
       if (isMounted.current) {
         setQueueBusy(busy);
         if (!busy) {
@@ -200,7 +193,7 @@ export function LudusaviContent({
 
   useEffect(() => {
     isMounted.current = true;
-    clearLastQueuedSelectedGame();
+    runtime.settings.clearLastQueuedSelectedGame();
     logUiEvent("qam_content_mounted", {}, "info");
     void loadInitial();
     return () => {
@@ -210,8 +203,8 @@ export function LudusaviContent({
   }, []);
 
   useEffect(() => {
-    syncLastQueuedSelectedGame(selectedGame);
-  }, [selectedGame]);
+    runtime.settings.syncLastQueuedSelectedGame(selectedGame);
+  }, [selectedGame, runtime.settings]);
 
   useEffect(() => {
     if (isQuickAccessVisible && !wasQuickAccessVisible.current) {
@@ -385,7 +378,7 @@ export function LudusaviContent({
     if (isRpcStatus(loadedSettings)) {
       logRpcStatus(loadedSettings, "settings");
     } else {
-      applySettingsGlobal(ludusaviStore, loadedSettings);
+      runtime.settings.applySettings(ludusaviStore, loadedSettings);
     }
 
     if (isRpcStatus(loadedHistory)) {

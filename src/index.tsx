@@ -35,13 +35,7 @@ import {
   LudusaviStateStore,
   createLudusaviStateStore
 } from "./state/ludusaviState";
-import {
-  applySettingsGlobal,
-  resetSettingsMutationController,
-  setActiveSettingsStore
-} from "./settings/settingsMutationController";
-
-
+// No global settings imports
 
 import { createPluginRuntime } from "./runtime/pluginRuntime";
 
@@ -210,7 +204,7 @@ export default definePlugin(() => {
   const runtime = createPluginRuntime();
 
   const ludusaviStore = createLudusaviStateStore();
-  setActiveSettingsStore(ludusaviStore, (title, body) => {
+  runtime.settings.setActiveStore(ludusaviStore, (title, body) => {
     notify(ludusaviStore, "failures_errors", title, body, <FaExclamationTriangle />);
   });
   const lifecycleStateReady = (async () => {
@@ -224,7 +218,7 @@ export default definePlugin(() => {
         logUiEvent("startup_settings_hydration_skipped", { reason: "state_already_populated" });
         return;
       }
-      applySettingsGlobal(ludusaviStore, settings);
+      runtime.settings.applySettings(ludusaviStore, settings);
       logUiEvent(
         "startup_settings_hydrated",
         {
@@ -286,7 +280,6 @@ export default definePlugin(() => {
         dropdownStyleEl.parentNode.removeChild(dropdownStyleEl);
       }
 
-      resetSettingsMutationController();
       runtime.dispose();
 
       logUiEvent("plugin_dismounted", {}, "info");
