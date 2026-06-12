@@ -40,12 +40,7 @@ import {
   resetSettingsMutationController,
   setActiveSettingsStore
 } from "./settings/settingsMutationController";
-import {
-  completeAutoSyncStatus,
-  hideAutoSyncStatus,
-  publishAutoSyncStatus,
-  resetAutoSyncStatusSurface
-} from "./surfaces/autoSyncStatusSurface";
+
 
 
 import { createPluginRuntime } from "./runtime/pluginRuntime";
@@ -257,11 +252,7 @@ export default definePlugin(() => {
       getSyncthingActivity: getSyncthingActivityCall,
       stopSyncthingActivityWatch: stopSyncthingActivityWatchCall
     },
-    statusSurface: {
-      publish: publishAutoSyncStatus,
-      hide: hideAutoSyncStatus,
-      complete: completeAutoSyncStatus
-    },
+    statusSurface: runtime.statusSurface,
     resolveConflict: showConflictResolutionModal,
     notifyFailure: (title, body) => {
       notify(ludusaviStore, "failures_errors", title, body, <FaExclamationTriangle />);
@@ -290,7 +281,6 @@ export default definePlugin(() => {
     onDismount() {
       logUiEvent("plugin_dismounting", {}, "info");
       lifecycleController.dispose();
-      resetAutoSyncStatusSurface();
 
       if (dropdownStyleEl.parentNode) {
         dropdownStyleEl.parentNode.removeChild(dropdownStyleEl);
