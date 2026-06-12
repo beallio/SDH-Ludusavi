@@ -32,16 +32,44 @@ class DummyService:
 
 
 def test_ludusavi_gateway_methods() -> None:
-    gateway = LudusaviGateway(adapter=MockAdapter())
+    factory_calls = 0
 
-    with patch("sdh_ludusavi.gateway._decky_version", return_value="1.2.3"):
-        v1 = gateway.get_versions()
-        assert v1["ludusavi"] == "0.31.0"
-        assert v1["decky"] == "1.2.3"
-        assert gateway.get_versions() is v1
+    def adapter_factory():
+        nonlocal factory_calls
+        factory_calls += 1
+        return MockAdapter()
 
-    assert gateway.get_logs() == "some logs"
-    assert gateway.get_diagnostics() == {"version": "0.31.0"}
+    with patch(
+        "pyludusavi.discovery.find_ludusavi", return_value=["/usr/bin/ludusavi", "-f"]
+    ) as mock_find:
+        gateway = LudusaviGateway(adapter_factory=adapter_factory)
+
+        # Initial calls cache the values
+        gateway.get_adapter()
+        gateway.get_versions()
+        gateway.get_ludusavi_command()
+
+        assert factory_calls == 1
+        assert mock_find.call_count == 1
+
+        # Subsequent calls return cached values
+        gateway.get_adapter()
+        gateway.get_versions()
+        gateway.get_ludusavi_command()
+
+        assert factory_calls == 1
+        assert mock_find.call_count == 1
+
+        # Invalidate caches
+        gateway.invalidate()
+
+        # Next calls should re-evaluate
+        gateway.get_adapter()
+        gateway.get_versions()
+        gateway.get_ludusavi_command()
+
+        assert factory_calls == 2
+        assert mock_find.call_count == 2
 
 
 def test_ludusavi_gateway_discovery() -> None:
