@@ -429,3 +429,59 @@ class GameLifecycleManager:
         self.dependencies.history.record_history(game.name, "restore", "manual_restore", "restored")
         self.dependencies.registry.refresh_after_operation(game.name)
         return {"status": "restored", "game": game.name, "result": result}
+
+    def list_backups(self, game_name: str) -> dict[str, object]:
+        game_name = sanitize_game_name(game_name)
+        game = self.dependencies.registry.match_game(game_name)
+        if not game:
+            return self.dependencies.skip("backups_list", game_name, "unmatched_game")
+        return self.dependencies.run_locked(
+            "backups_list",
+            game.name,
+            lambda: self.dependencies.gateway.get_adapter().list_backups(game.name),
+        )
+
+    def restore_backup_version(self, game_name: str, backup_id: str) -> dict[str, object]:
+        game_name = sanitize_game_name(game_name)
+        game = self.dependencies.registry.match_game(game_name)
+        if not game:
+            return self.dependencies.skip("restore_backup_version", game_name, "unmatched_game")
+        if not game.has_backup:
+            return self.dependencies.skip("restore_backup_version", game.name, "no_backup")
+
+        if not backup_id or "/" in backup_id or "\\" in backup_id or ".." in backup_id:
+            raise ValueError(f"Invalid backup ID: {backup_id}")
+
+        try:
+            result = self.dependencies.run_locked(
+                "restore",
+                game.name,
+                lambda: self.dependencies.gateway.get_adapter().restore_backup(
+                    game.name, backup_id
+                ),
+            )
+        except OperationLockedError:
+            raise
+        # Intentionally broad: record history and re-raise on point in time restore failure
+        except Exception as exc:
+            self.dependencies.history.record_history(
+                game.name, "restore", "point_in_time_restore", "failed", message=str(exc)
+            )
+            raise
+
+        self.dependencies.history.record_history(
+            game.name, "restore", "point_in_time_restore", "restored"
+        )
+        self.dependencies.registry.refresh_after_operation(game.name)
+        self.dependencies.log(
+            "info",
+            f"Restored {game.name} from backup {backup_id}",
+            "restore",
+            game.name,
+        )
+        return {
+            "status": "restored",
+            "game": game.name,
+            "backup_id": backup_id,
+            "result": result,
+        }
