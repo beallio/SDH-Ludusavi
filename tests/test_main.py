@@ -164,6 +164,26 @@ def test_run_blocking_uses_shared_executor_without_pipes_or_threads() -> None:
     assert "queue" not in names
 
 
+def test_plugin_rpc_executor_uses_daemon_thread_pool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The RPC offload pool must never block interpreter exit during unload.
+
+    Decky stops plugins with SystemExit; ThreadPoolExecutor's non-daemon
+    workers are joined at interpreter shutdown, keeping the old plugin
+    process alive while an in-flight RPC finishes.
+    """
+    from sdh_ludusavi.rpc_pool import DaemonThreadPool
+
+    decky, _logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+
+    plugin = module.Plugin()
+
+    assert isinstance(plugin._executor, DaemonThreadPool)
+
+
 def test_call_does_not_block_event_loop_while_callback_runs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
