@@ -12,6 +12,8 @@ from sdh_ludusavi.lifecycle import GameLifecycleManager, LifecycleDependencies
 from sdh_ludusavi.ludusavi import _backup_disk_stats
 from tests.test_ludusavi import adapter_with_backups
 from tests.test_main import fake_decky_module, import_main
+from sdh_ludusavi.coordinator import OperationLockedError
+from pyludusavi import LudusaviError
 from tests.test_main_rpc import MockService
 
 
@@ -66,6 +68,17 @@ def test_adapter_list_backups_missing_game() -> None:
     adapter, client = adapter_with_backups(backup_data={"games": {}})
     res = adapter.list_backups("Hades")
     assert res == {"game": "Hades", "backup_path": None, "total_size_bytes": None, "backups": []}
+
+
+def test_adapter_list_backups_propagates_ludusavi_error() -> None:
+    adapter, client = adapter_with_backups({"games": {}})
+
+    def fail_list(*args: Any, **kwargs: Any) -> Any:
+        raise LudusaviError("fail")
+
+    client.backups_list = fail_list
+    with pytest.raises(LudusaviError):
+        adapter.list_backups("Hades")
 
 
 # 2. _backup_disk_stats
@@ -123,6 +136,8 @@ def test_adapter_restore_backup_calls_client() -> None:
     res = adapter.restore_backup("Hades", "backup_123")
     assert res == {"games": {"Hades": {"success": True}}}
     assert client.requested_games == ["Hades"]
+    assert client.last_restore_kwargs.get("backup_id") == "backup_123"
+    assert client.last_restore_kwargs.get("force") is True
 
 
 # 4. Lifecycle restore_backup_version
@@ -232,6 +247,23 @@ def test_lifecycle_restore_backup_version_failure() -> None:
     deps.history.record_history.assert_called_with(
         "Hades", "restore", "point_in_time_restore", "failed", message="failed"
     )
+
+
+def test_lifecycle_restore_backup_version_locked() -> None:
+    deps = get_deps()
+    game = MagicMock()
+    game.name = "Hades"
+    game.has_backup = True
+    deps.registry.match_game.return_value = game
+
+    deps.run_locked.side_effect = OperationLockedError("busy")
+    manager = GameLifecycleManager(deps)
+
+    with pytest.raises(OperationLockedError):
+        manager.restore_backup_version("Hades", "123")
+
+    # Should re-raise without recording a 'restored' or 'failed' entry here
+    deps.history.record_history.assert_not_called()
 
 
 # 5. Lifecycle list_backups
