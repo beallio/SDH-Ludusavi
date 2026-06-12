@@ -293,6 +293,12 @@ class SDHLudusaviService:
         """Trigger a manual restore for the specified game."""
         return self._lifecycle.force_restore(game_name)
 
+    def list_backups(self, game_name: str) -> dict[str, object]:
+        return self._lifecycle.list_backups(game_name)
+
+    def restore_backup_version(self, game_name: str, backup_id: str) -> dict[str, object]:
+        return self._lifecycle.restore_backup_version(game_name, backup_id)
+
     def get_versions(self) -> dict[str, str]:
         """Fetch version information for Ludusavi and the plugin."""
         return self._gateway.get_versions()

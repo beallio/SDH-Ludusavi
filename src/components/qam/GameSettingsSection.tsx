@@ -1,4 +1,5 @@
 import {
+  ButtonItem,
   DropdownItem,
   Field,
   PanelSection,
@@ -29,6 +30,7 @@ type GameSettingsSectionProps = {
   onGameChange: (data: SingleDropdownOption | string | null | undefined) => void;
   onForceBackup: () => void;
   onForceRestore: () => void;
+  onBrowseBackups: () => void;
 };
 
 function CompactFieldLabel({ children }: { children: ReactNode }) {
@@ -44,7 +46,8 @@ export function GameSettingsSection({
   selectedHistory,
   onGameChange,
   onForceBackup,
-  onForceRestore
+  onForceRestore,
+  onBrowseBackups
 }: GameSettingsSectionProps) {
   return (
     <PanelSection title="GAME">
@@ -173,6 +176,17 @@ export function GameSettingsSection({
         >
           Force Restore
         </SpinnerButton>
+      </PanelSectionRow>
+
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          highlightOnFocus={true}
+          disabled={isBusy || selectedStatus?.status !== "has_backup"}
+          onClick={onBrowseBackups}
+        >
+          Browse Backups
+        </ButtonItem>
       </PanelSectionRow>
     </PanelSection>
   );

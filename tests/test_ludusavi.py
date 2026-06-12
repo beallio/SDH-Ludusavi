@@ -167,6 +167,7 @@ class FakeLudusaviClient:
         self.requested_games: list[str] | None = None
         self.preview_requested: bool = False
         self.calls: list[tuple] = []
+        self.last_restore_kwargs: dict[str, object] = {}
 
     def backups_list(self, games: list[str] | None = None) -> FakeResponse:
         self.requested_games = games
@@ -183,6 +184,13 @@ class FakeLudusaviClient:
         self.requested_games = games
         self.preview_requested = preview
         self.calls.append(("restore", tuple(games or ()), preview, timeout))
+        self.last_restore_kwargs = {
+            "games": games,
+            "preview": preview,
+            "force": force,
+            "timeout": timeout,
+            **kwargs,
+        }
         return FakeResponse(self.restore_data)
 
     def backup(
