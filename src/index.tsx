@@ -25,8 +25,7 @@ import {
 } from "./types";
 import { ConflictResolutionModal } from "./components/modals/ConflictResolutionModal";
 import {
-  LudusaviContent,
-  resetLudusaviContentLoadState
+  LudusaviContent
 } from "./components/qam/LudusaviContent";
 import { createGameLifecycleController } from "./controllers/gameLifecycleController";
 import { isRpcStatus } from "./utils/rpc";
@@ -49,6 +48,7 @@ import {
 } from "./surfaces/autoSyncStatusSurface";
 
 
+import { createPluginRuntime } from "./runtime/pluginRuntime";
 
 
 async function syncGlobalHistory(store: LudusaviStateStore) {
@@ -212,6 +212,8 @@ export default definePlugin(() => {
     logUiEvent("qam_styles_attached");
   }
 
+  const runtime = createPluginRuntime();
+
   const ludusaviStore = createLudusaviStateStore();
   setActiveSettingsStore(ludusaviStore, (title, body) => {
     notify(ludusaviStore, "failures_errors", title, body, <FaExclamationTriangle />);
@@ -275,6 +277,7 @@ export default definePlugin(() => {
     content: (
       <LudusaviStateProvider store={ludusaviStore}>
         <LudusaviContent
+          runtime={runtime}
           dropdownCssText={dropdownStyleEl.textContent}
           notify={notify}
           isRpcStatus={isRpcStatus}
@@ -294,7 +297,7 @@ export default definePlugin(() => {
       }
 
       resetSettingsMutationController();
-      resetLudusaviContentLoadState();
+      runtime.dispose();
 
       logUiEvent("plugin_dismounted", {}, "info");
     },
