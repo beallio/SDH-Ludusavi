@@ -1,0 +1,1 @@
+Historical session logs (196 files through 2026-06-11) are archived on the `docs-archive` orphan branch (`git show docs-archive:docs/agent_conversations/<file>` or check out the branch). New session logs continue to be added here per the agent protocol.

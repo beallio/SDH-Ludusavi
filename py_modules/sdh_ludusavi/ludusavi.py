@@ -34,7 +34,10 @@ def _ludusavi_env() -> dict[str, str]:
     """
     env: dict[str, str] = {}
     if "XDG_RUNTIME_DIR" not in os.environ:
-        env["XDG_RUNTIME_DIR"] = "/run/user/1000"
+        candidate = f"/run/user/{os.getuid()}"
+        # Decky may run the backend as root; /run/user/0 does not exist on
+        # SteamOS, so fall back to the stock deck user's runtime dir.
+        env["XDG_RUNTIME_DIR"] = candidate if os.path.isdir(candidate) else "/run/user/1000"
     else:
         env["XDG_RUNTIME_DIR"] = os.environ["XDG_RUNTIME_DIR"]
     if "LD_LIBRARY_PATH" in os.environ:

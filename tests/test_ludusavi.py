@@ -1,6 +1,7 @@
 import os
 import threading
 from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 
@@ -58,11 +59,23 @@ def test_ludusavi_env_uses_flatpak_defaults_without_mutating_os_environ(
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
     monkeypatch.setenv("LD_LIBRARY_PATH", "decky-runtime-value")
 
-    env = _ludusavi_env()
+    with patch("os.getuid", return_value=1001), patch("os.path.isdir", return_value=True):
+        env = _ludusavi_env()
 
-    assert env["XDG_RUNTIME_DIR"] == "/run/user/1000"
+    assert env["XDG_RUNTIME_DIR"] == "/run/user/1001"
     assert env["LD_LIBRARY_PATH"] == ""
     assert os.environ["LD_LIBRARY_PATH"] == "decky-runtime-value"
+
+
+def test_ludusavi_env_falls_back_when_uid_runtime_dir_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+
+    with patch("os.getuid", return_value=0), patch("os.path.isdir", return_value=False):
+        env = _ludusavi_env()
+
+    assert env["XDG_RUNTIME_DIR"] == "/run/user/1000"
 
 
 def test_ludusavi_env_preserves_existing_xdg_runtime_dir(monkeypatch: pytest.MonkeyPatch) -> None:
