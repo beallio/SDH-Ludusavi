@@ -1,8 +1,21 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import threading
 from typing import Any, Callable
+
+
+def _parse_iso_timestamp(ts: str | None) -> datetime | None:
+    # Mirrored from lifecycle.py's _parse_iso_timestamp
+    if not isinstance(ts, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, TypeError):
+        return None
 
 
 class HistoryManager:
@@ -56,7 +69,7 @@ class HistoryManager:
                 "status": status,
                 "reason": reason,
                 "message": message,
-                "timestamp": datetime.now().isoformat(timespec="microseconds"),
+                "timestamp": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
             }
         )
         if entry is None:
@@ -149,5 +162,11 @@ class HistoryManager:
             history["last_operation"] = None
             return
 
-        valid_entries.sort(key=lambda x: str(x["timestamp"]), reverse=True)
+        def _sort_key(entry: dict[str, Any]) -> datetime:
+            dt = _parse_iso_timestamp(entry.get("timestamp"))
+            if dt is None:
+                return datetime.min.replace(tzinfo=timezone.utc)
+            return dt
+
+        valid_entries.sort(key=_sort_key, reverse=True)
         history["last_operation"] = valid_entries[0]

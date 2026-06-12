@@ -242,3 +242,62 @@ def test_last_operation_field_high_resolution_sorting(tmp_path: Path) -> None:
     history = service.refresh_games()["history"]["Hades"]
     assert history["last_operation"]["operation"] == "restore"
     # Microsecond resolution should prevent collisions in practice
+
+
+def test_record_history_writes_aware_utc_timestamp(tmp_path: Path) -> None:
+    from datetime import datetime, timedelta
+
+    service = service_with_state(tmp_path)
+    service.refresh_games()
+
+    service.force_backup("Hades")
+    history = service.refresh_games()["history"]["Hades"]
+    ts_str = history["last_backup"]["timestamp"]
+
+    dt = datetime.fromisoformat(ts_str)
+    assert dt.tzinfo is not None
+    assert dt.utcoffset() == timedelta(0)
+
+
+def test_history_mixed_era_sorting(tmp_path: Path) -> None:
+    state = {
+        "auto_sync_enabled": True,
+        "selected_game": "",
+        "games": [],
+        "aliases": {},
+        "game_history": {
+            "Hades": {
+                "last_backup": {
+                    "operation": "backup",
+                    "status": "backed_up",
+                    "timestamp": "2026-06-10T12:00:00.000001",
+                    "trigger": "manual_backup",
+                },
+                "last_restore": {
+                    "operation": "restore",
+                    "status": "restored",
+                    "timestamp": "2026-06-11T12:00:00.000001+00:00",
+                    "trigger": "manual_restore",
+                },
+                "last_failure": {
+                    "operation": "backup",
+                    "status": "failed",
+                    "timestamp": "unparseable-garbage",
+                    "trigger": "manual_backup",
+                },
+            }
+        },
+    }
+    (tmp_path / "settings.json").write_text(
+        json.dumps({"auto_sync_enabled": True, "selected_game": ""})
+    )
+    (tmp_path / "cache.json").write_text(
+        json.dumps({key: value for key, value in state.items() if key != "auto_sync_enabled"})
+    )
+
+    service = service_with_state(tmp_path)
+    refresh = service.refresh_games()
+
+    hades = refresh["history"]["Hades"]
+    assert hades["last_operation"]["operation"] == "restore"
+    assert hades["last_operation"]["timestamp"] == "2026-06-11T12:00:00.000001+00:00"
