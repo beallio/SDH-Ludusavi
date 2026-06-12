@@ -20,7 +20,7 @@ import {
 import { LogModal, LudusaviLogModal } from "../LogModal";
 import { PluginUpdateSection } from "../PluginUpdateSection";
 import { summarizeOperationResult } from "../../formatting/operationText";
-// No global settings imports
+import type { PluginRuntime } from "../../runtime/pluginRuntime";
 import {
   defaultSettings,
   LudusaviStateStore,
@@ -56,8 +56,6 @@ import { QamStyles } from "./QamStyles";
 import { LogsSection, VersionsSection } from "./VersionAndLogsSection";
 
 const EMPTY_GAMES: readonly GameStatus[] = Object.freeze([]);
-
-import type { PluginRuntime } from "../../runtime/pluginRuntime";
 
 type LudusaviContentProps = {
   runtime: PluginRuntime;

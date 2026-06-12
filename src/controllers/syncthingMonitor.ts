@@ -223,6 +223,7 @@ export class SyncthingMonitor {
       if (result === "timeout") {
         log("info", `Syncthing handoff confirmation timed out: generation=${generation} elapsed_ms=${Date.now() - context.startedAt}`);
         await this.cancelContext(context, "confirmation_timeout");
+        this.dispatch(context, { type: "handoff_finished" }, { releaseWatchID: false });
         return { status: "unavailable", reason: "confirmation_timeout" };
       }
 
@@ -380,12 +381,14 @@ export class SyncthingMonitor {
     this.clearPendingTimeout();
     this.pendingTimeoutID = window.setTimeout(async () => {
       if (context.generation === this.currentGeneration) {
-        log("info", `Syncthing pending activity timed out: generation=${context.generation}`);
-        this.clearPollTimeout();
         const wID = context.watchID;
         const effects = this.dispatch(context, { type: "pending_activity_timeout" }, { releaseWatchID: true });
-        if (effects.stopWatch && wID !== null) {
-          void this.stopWatchSafe(wID);
+        if (effects.stopWatch) {
+          log("info", `Syncthing pending activity timed out: generation=${context.generation}`);
+          this.clearPollTimeout();
+          if (wID !== null) {
+            void this.stopWatchSafe(wID);
+          }
         }
       }
     }, timeoutMs);

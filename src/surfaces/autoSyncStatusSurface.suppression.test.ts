@@ -18,20 +18,15 @@ vi.mock("../utils/logging", () => ({
   logUiEvent: vi.fn(),
 }));
 
-vi.mock("./autoSyncStatusBrowserView", () => ({
-  createAutoSyncStatusBrowserView: () => ({
+import { createAutoSyncStatusSurface } from "./autoSyncStatusSurface";
+
+function freshSurface() {
+  return createAutoSyncStatusSurface({
     sync: vi.fn(),
     destroy: vi.fn(),
     setContext: vi.fn(),
     clearShowTimeout: vi.fn()
-  }),
-}));
-
-async function freshSurface() {
-  vi.resetModules();
-  const viewMod = await import("./autoSyncStatusBrowserView");
-  const mod = await import("./autoSyncStatusSurface");
-  return mod.createAutoSyncStatusSurface(viewMod.createAutoSyncStatusBrowserView());
+  } as any);
 }
 
 describe("AutoSyncStatusSurface timeout suppression logging", () => {
@@ -48,7 +43,7 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
   const loggedMessages = () => logMock.mock.calls.map((call) => `${call[0]}:${call[1]}`);
 
   it("logs when the running status times out and warns the final result will be hidden", async () => {
-    const surface = await freshSurface();
+    const surface = freshSurface();
     surface.publish("backing_up", {
       source: "lifecycle_exit",
       gameName: "Hades",
@@ -65,7 +60,7 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
   });
 
   it("logs an explanation when a final result is suppressed by an earlier timeout", async () => {
-    const surface = await freshSurface();
+    const surface = freshSurface();
     surface.publish("backing_up", {
       source: "lifecycle_exit",
       gameName: "Hades",
@@ -94,7 +89,7 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
   });
 
   it("logs the auto-hide schedule at debug level", async () => {
-    const surface = await freshSurface();
+    const surface = freshSurface();
     surface.publish("backing_up", {
       source: "lifecycle_exit",
       gameName: "Hades",
@@ -114,7 +109,7 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
   });
 
   it("keeps a running status visible well past the old 10s timeout", async () => {
-    const surface = await freshSurface();
+    const surface = freshSurface();
     surface.publish("backing_up", {
       source: "lifecycle_exit", gameName: "Hades", appID: "1145300", tracked: true,
     });
@@ -128,7 +123,7 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
   });
 
   it("publishes the final result when the operation completes before the ceiling", async () => {
-    const surface = await freshSurface();
+    const surface = freshSurface();
     surface.publish("backing_up", {
       source: "lifecycle_exit", gameName: "Hades", appID: "1145300", tracked: true,
     });
@@ -146,7 +141,7 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
   });
 
   it("clears a previous timeout suppression when a new running status is published", async () => {
-    const surface = await freshSurface();
+    const surface = freshSurface();
     // Game A: backup exceeds the ceiling -> timedOut flag set
     surface.publish("backing_up", {
       source: "lifecycle_exit", gameName: "GameA", appID: "1", tracked: true,
@@ -170,7 +165,7 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
   });
 
   it("logs unhandled result statuses instead of silently ignoring them", async () => {
-    const surface = await freshSurface();
+    const surface = freshSurface();
     surface.complete(
       { status: "paused" as any, game: "Hades" },
       { gameName: "Hades", appID: "1145300", tracked: true },
