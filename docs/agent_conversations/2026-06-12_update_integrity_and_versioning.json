@@ -1,0 +1,22 @@
+{
+  "date": "2026-06-12",
+  "objective": "Implement update integrity ADR, test vendored pyludusavi constraints, and fix vcs-versioning PEP-440 break by ignoring dev release tags.",
+  "files_modified": [
+    "pyproject.toml"
+  ],
+  "tests_added": [
+    "tests/test_version_config.py",
+    "tests/test_vendored_pyludusavi.py"
+  ],
+  "design_decisions": [
+    "Restricted `hatch-vcs` version discovery via `raw-options.git_describe_command` to use `--exclude '*-dev*'`, ensuring dev-release tags don't break PEP-440 parsing.",
+    "Verified the `raw-options` spelling and matching configuration against the broken state.",
+    "Added assertions to explicitly check the `METADATA` pin and the `pyludusavi/discovery.py` patch to prevent upstream drops during a re-vendor.",
+    "Recorded the decision to defer artifact signing due to pure-Python limitations and CI trust-root mapping."
+  ],
+  "results": {
+    "red_error_captured": "packaging.version.InvalidVersion: Error getting the version from source `vcs`: Invalid version: 'v0.3.0-dev.g252e5e1'",
+    "build_status": "Success after excluding dev tags.",
+    "gates": "All tests and checks passed."
+  }
+}
