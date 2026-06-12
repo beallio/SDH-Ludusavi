@@ -298,10 +298,7 @@ class PyludusaviAdapter:
         )
 
     def list_backups(self, game_name: str) -> dict[str, object]:
-        try:
-            response = self._client.backups_list(games=[game_name])
-        except LudusaviError:
-            return {"game": game_name, "backup_path": None, "total_size_bytes": None, "backups": []}
+        response = self._client.backups_list(games=[game_name])
 
         data = response.data.get("games", {})
         game_data = data.get(game_name)

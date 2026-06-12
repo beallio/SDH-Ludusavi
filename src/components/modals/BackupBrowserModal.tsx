@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import { ButtonItem, ConfirmModal, ModalRoot, showModal } from "@decky/ui";
 import { formatBytes } from "../../formatting/bytes";
 import { formatTimestamp } from "../../formatting/dateTime";
-import type { BackupListResult, OperationResult } from "../../types";
-import { listBackupsCall, restoreBackupVersionCall } from "../../api/ludusaviRpc";
+import type { BackupListResult } from "../../types";
+import { listBackupsCall } from "../../api/ludusaviRpc";
 
 type BackupBrowserModalProps = {
   gameName: string;
   closeModal?: () => void;
-  onRestoreComplete?: (result: OperationResult) => void;
+  onRestoreSnapshot?: (backupId: string, whenLabel: string) => void;
   isRpcStatus: (res: any) => boolean;
   logRpcStatus: (res: any, op: string) => void;
 };
@@ -16,7 +16,7 @@ type BackupBrowserModalProps = {
 export function BackupBrowserModal({
   gameName,
   closeModal,
-  onRestoreComplete,
+  onRestoreSnapshot,
   isRpcStatus,
   logRpcStatus,
 }: BackupBrowserModalProps) {
@@ -49,28 +49,15 @@ export function BackupBrowserModal({
     };
   }, [gameName, isRpcStatus, logRpcStatus]);
 
-  const onRestore = async (backupId: string) => {
+  const onRestore = (backupId: string, whenLabel: string) => {
     showModal(
       <ConfirmModal
         strTitle="Confirm Restore"
-        strDescription={`Are you sure you want to restore backup ${backupId} for ${gameName}? This will overwrite your current save data.`}
+        strDescription={`Are you sure you want to restore ${gameName} to the backup from ${whenLabel}? This will overwrite your current save data.`}
         bAlertDialog={false}
-        onOK={async () => {
-          setLoading(true);
-          try {
-            const res = await restoreBackupVersionCall(gameName, backupId);
-            if (isRpcStatus(res)) {
-              logRpcStatus(res, "restore_backup_version");
-              setError((res as any).message || "Failed to restore backup");
-            } else {
-              closeModal?.();
-              onRestoreComplete?.(res as OperationResult);
-            }
-          } catch (e: any) {
-            setError(e.toString());
-          } finally {
-            setLoading(false);
-          }
+        onOK={() => {
+          closeModal?.();
+          onRestoreSnapshot?.(backupId, whenLabel);
         }}
       />
     );
@@ -93,7 +80,8 @@ export function BackupBrowserModal({
                 <strong>Total Size:</strong>{" "}
                 {listResult.total_size_bytes !== null
                   ? formatBytes(listResult.total_size_bytes)
-                  : "Unknown"}
+                  : "Unknown"}{" "}
+                ({listResult.backups.length} snapshots)
               </div>
               {listResult.backups.length === 0 ? (
                 <div>No backups found.</div>
@@ -113,6 +101,7 @@ export function BackupBrowserModal({
                           <strong>{formatTimestamp(b.when)}</strong> {b.locked ? "(Locked)" : ""}
                         </div>
                         <div style={{ fontSize: "14px", opacity: 0.8 }}>
+                          {b.file_count !== null ? `${b.file_count} files ` : ""}
                           {b.size_bytes !== null ? formatBytes(b.size_bytes) : ""}
                         </div>
                       </div>
@@ -122,7 +111,7 @@ export function BackupBrowserModal({
                         </div>
                       )}
                       <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                        <ButtonItem layout="below" onClick={() => onRestore(b.id)}>
+                        <ButtonItem layout="below" onClick={() => onRestore(b.id, formatTimestamp(b.when))}>
                           Restore
                         </ButtonItem>
                       </div>
