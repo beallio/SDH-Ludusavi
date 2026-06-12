@@ -266,3 +266,20 @@ export type UpdateCheckContext = {
 export type RevalidateResult = PluginUpdateCandidate | { status: "failed"; message: string; checked_at?: string };
 
 export type UpdateInstallRequest = PluginUpdateCandidate & { updateTraceId: string };
+
+export type BackupSnapshot = {
+  id: string;
+  when: string;
+  locked: boolean;
+  os: string | null;
+  comment: string | null;
+  size_bytes: number | null;
+  file_count: number | null;
+};
+
+export type BackupListResult = {
+  game: string;
+  backup_path: string | null;
+  total_size_bytes: number | null;
+  backups: BackupSnapshot[];
+};

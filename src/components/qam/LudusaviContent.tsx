@@ -50,6 +50,7 @@ import {
 } from "../../utils/steam";
 import { AutoSyncSettingsSection } from "./AutoSyncSettingsSection";
 import { GameSettingsSection } from "./GameSettingsSection";
+import { BackupBrowserModal } from "../modals/BackupBrowserModal";
 import { LudusaviLauncherSection } from "./LudusaviLauncherSection";
 import { NotificationSettingsSection } from "./NotificationSettingsSection";
 import { QamStyles } from "./QamStyles";
@@ -720,6 +721,34 @@ export function LudusaviContent({
         onGameChange={onGameChange}
         onForceBackup={() => void runForceOperation("Backup", forceBackupCall)}
         onForceRestore={() => void runForceOperation("Restore", forceRestoreCall)}
+        onBrowseBackups={() => {
+          if (!selectedGame) return;
+          showModal(
+            <BackupBrowserModal
+              gameName={selectedGame}
+              isRpcStatus={isRpcStatus}
+              logRpcStatus={logRpcStatus}
+              onRestoreComplete={async (result) => {
+                logUiEvent("manual_operation_completed", { type: "Restore", status: result.status }, "info", "Restore", selectedGame);
+                notify(
+                  ludusaviStore,
+                  "manual_operations",
+                  "SDH-Ludusavi Restore",
+                  summarizeOperationResult(result, "Restore"),
+                  result.status === "failed" ? <FaExclamationTriangle /> : <FaDownload />
+                );
+                const refreshed = await refreshGamesCall(false);
+                const operationStatus = await getOperationStatus();
+                const recentLogs = await getRecentLogs();
+                applyRefreshResult(refreshed);
+                if (isMounted.current) {
+                  setOperation(operationStatus);
+                  setLogs(recentLogs);
+                }
+              }}
+            />
+          );
+        }}
       />
 
       <NotificationSettingsSection
