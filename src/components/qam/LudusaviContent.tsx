@@ -64,15 +64,10 @@ import { LogsSection, VersionsSection } from "./VersionAndLogsSection";
 
 const EMPTY_GAMES: readonly GameStatus[] = Object.freeze([]);
 
-let activeInitPromise: Promise<OperationStatus> | null = null;
-let activeMetadataPromise: Promise<void> | null = null;
-
-export function resetLudusaviContentLoadState() {
-  activeInitPromise = null;
-  activeMetadataPromise = null;
-}
+import type { PluginRuntime } from "../../runtime/pluginRuntime";
 
 type LudusaviContentProps = {
+  runtime: PluginRuntime;
   dropdownCssText: string | null;
   notify: (
     store: LudusaviStateStore,
@@ -86,6 +81,7 @@ type LudusaviContentProps = {
 };
 
 export function LudusaviContent({
+  runtime,
   dropdownCssText,
   notify,
   isRpcStatus,
@@ -281,19 +277,22 @@ export function LudusaviContent({
 
     fetchMetadata();
 
-    if (!activeInitPromise) {
+    const currentInit = runtime.contentLoad.getInitPromise();
+    if (!currentInit) {
       log("debug", `Creating new initialization promise (warmed=${isWarmed})`);
-      activeInitPromise = (async () => {
+      const newInitP = (async () => {
         const loadedSettings = await fetchInitialState();
         await synchronizeGameList(isWarmed, loadedSettings);
         return getOperationStatus();
       })();
+      runtime.contentLoad.setInitPromise(newInitP);
     } else {
       log("debug", "Reusing in-flight initialization promise");
     }
 
     try {
-      const loadedOperation = await activeInitPromise;
+      const activeInit = runtime.contentLoad.getInitPromise()!;
+      const loadedOperation = await activeInit;
       if (isMounted.current) {
         setOperation(loadedOperation);
       }
@@ -318,7 +317,7 @@ export function LudusaviContent({
       );
       log("error", `Initial load failed: ${error}`);
     } finally {
-      activeInitPromise = null;
+      runtime.contentLoad.setInitPromise(null);
       if (isMounted.current) {
         setBackgroundRefreshBusy(false);
         setBusyLabel(null);
@@ -331,11 +330,11 @@ export function LudusaviContent({
     if (snapshot.versions !== null && snapshot.ludusaviCommand !== null) {
       return;
     }
-    if (activeMetadataPromise) {
+    if (runtime.contentLoad.getMetadataPromise()) {
       return;
     }
     // Load versions and commands in the background asynchronously.
-    activeMetadataPromise = (async () => {
+    const metaP = (async () => {
       try {
         const [versionsResult, commandResult] = await Promise.allSettled([
           getVersions(),
@@ -370,9 +369,10 @@ export function LudusaviContent({
       } catch (err) {
         log("error", `fetchMetadata failed: ${err}`);
       } finally {
-        activeMetadataPromise = null;
+        runtime.contentLoad.setMetadataPromise(null);
       }
     })();
+    runtime.contentLoad.setMetadataPromise(metaP);
   };
 
   const fetchInitialState = async (): Promise<RpcResult<Settings>> => {
