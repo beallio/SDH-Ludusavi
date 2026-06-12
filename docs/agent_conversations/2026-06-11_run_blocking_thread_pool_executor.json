@@ -1,0 +1,30 @@
+{
+  "date": "2026-06-11",
+  "task_objective": "Replace pipe-based _run_blocking with a shared ThreadPoolExecutor.",
+  "files_modified": [
+    "main.py",
+    "tests/test_main.py",
+    "tests/test_issue_7_cancellation.py",
+    "tests/test_run_blocking_contract.py"
+  ],
+  "tests_added": [
+    "test_run_blocking_uses_shared_executor_without_pipes_or_threads",
+    "test_unload_shuts_down_executor_and_post_shutdown_call_fails_cleanly",
+    "test_run_blocking_success",
+    "test_run_blocking_cancellation",
+    "test_run_blocking_cancellation_logs_warning",
+    "test_run_blocking_worker_exception_propagates",
+    "test_run_blocking_worker_exception_after_cancellation_is_not_loop_error"
+  ],
+  "design_decisions": [
+    "executor created in Plugin.__init__ with max_workers=4 and thread_name_prefix='sdh-rpc'",
+    "contextvars preserved via functools.partial(context.run, callback)",
+    "executor shutdown in _unload finally block with wait=False and cancel_futures=True",
+    "no shield used for _run_blocking",
+    "Deleted obsolete tests/test_issue_7_cancellation.py that were specifically tied to the internal pipe implementation"
+  ],
+  "results": {
+    "test_counts": 516,
+    "gate_outcomes": "All gates passed successfully."
+  }
+}
