@@ -1,0 +1,23 @@
+{
+  "date": "2026-05-21",
+  "task_objective": "Remove CPU-wasting timeout polling from main.py::_run_blocking while preserving Decky backend cancellation and worker-thread completion behavior.",
+  "files_modified": [
+    "main.py",
+    "tests/test_main.py",
+    "docs/plans/review_refactor_run_blocking.md",
+    "docs/agent_conversations/2026-05-21_run_blocking_direct_await.json"
+  ],
+  "tests_added": [
+    "Updated tests/test_main.py::test_run_blocking_awaits_threadsafe_future_without_polling to forbid asyncio.wait_for and TimeoutError polling in _run_blocking."
+  ],
+  "design_decisions": [
+    "Kept the existing dedicated worker thread, contextvars.copy_context(), asyncio.Future, and loop.call_soon_threadsafe() bridge.",
+    "Replaced the 50ms wait_for timeout loop with a direct await of asyncio.shield(future).",
+    "Did not switch to asyncio.to_thread() or run_in_executor because prior hardening and current sandbox checks showed those routes have the same thread-wakeup sensitivity in this environment.",
+    "Used official Decky template/import documentation, current plugin examples, and Python asyncio documentation to ground the plan."
+  ],
+  "results": [
+    "Confirmed the updated regression failed before implementation because main.py still referenced wait_for.",
+    "Focused _run_blocking and cancellation tests passed outside the sandbox; the sandboxed selector did not wake on loop.call_soon_threadsafe without a timer, so sandboxed async/thread tests were not representative."
+  ]
+}

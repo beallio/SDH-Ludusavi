@@ -1,0 +1,27 @@
+{
+  "date": "2026-05-15",
+  "task_objective": "Implement docs/plans/shortcut_management.md using docs/specs/ludusavi_shortcut_management.md so the Ludusavi launcher uses one visible non-Steam shortcut named Ludusavi.",
+  "files_modified": [
+    "README.md",
+    "docs/agent_conversations/2026-05-15_visible_ludusavi_shortcut.json",
+    "docs/plans/ludusavi_shortcut_management_spec.md",
+    "docs/plans/shortcut_management.md",
+    "docs/specs/ludusavi_shortcut_management.md",
+    "src/ludusaviLauncher.ts",
+    "src/types/steam-globals.d.ts",
+    "tests/test_readme.py",
+    "tests/test_shortcut_artwork_static.py"
+  ],
+  "tests_added": [
+    "tests/test_shortcut_artwork_static.py visible shortcut identity, no hidden shortcut APIs, name-first cache flow, and logging assertions",
+    "tests/test_readme.py visible Ludusavi shortcut documentation assertion"
+  ],
+  "design_decisions": [
+    "Used a single SHORTCUT_NAME constant with value Ludusavi and removed separate launcher/running names.",
+    "Resolved shortcuts by exact name before cache lookup, updating the backend cache when the named shortcut differs from the saved AppID.",
+    "Kept the backend shortcut AppID RPCs unchanged as the cache source of truth.",
+    "Removed all frontend hide calls and hidden shortcut ambient API declarations.",
+    "All resolved shortcuts are prepared for launch with the current command, compatibility tool, and bundled artwork before RunGame."
+  ],
+  "results": "Focused red tests failed before implementation, then passed after the launcher refactor. Full Python, TypeScript, frontend supply-chain, build, and package checks passed; pnpm audit required network escalation after sandbox DNS failed."
+}

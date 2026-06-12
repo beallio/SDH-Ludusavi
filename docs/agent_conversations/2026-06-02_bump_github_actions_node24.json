@@ -1,0 +1,24 @@
+{
+  "date": "2026-06-02",
+  "task_objective": "Update GitHub Actions workflows to opt JavaScript actions into Node.js 24 and bump reusable action major versions where upstream tags are available.",
+  "files_modified": [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
+    ".github/workflows/dev-release.yml",
+    "docs/plans/2026-06-02_bump_github_actions_node24.md",
+    "tests/test_release_workflows.py",
+    "docs/agent_conversations/2026-06-02_bump_github_actions_node24.json"
+  ],
+  "tests_added": [
+    "tests/test_release_workflows.py::test_workflows_use_node24_action_runtime_and_current_action_majors"
+  ],
+  "design_decisions": [
+    "Verified available upstream action tags before changing workflow versions.",
+    "Added FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 to all workflows to test GitHub's Node 24 action runtime now.",
+    "Bumped the workflows to newer action major versions that have upstream tags available."
+  ],
+  "results": [
+    "The new workflow regression test failed before implementation.",
+    "After workflow changes, the focused test and all release workflow tests passed."
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "date": "2026-05-13",
+  "task_objective": "Update Refresh UI behavior to disable dropdown and show progress status.",
+  "files_modified": [
+    "src/index.tsx",
+    "docs/plans/update_refresh_ui.md"
+  ],
+  "tests_added": [],
+  "design_decisions": "Added disabled={isBusy} to the DropdownItem and updated the Status line conditional rendering to handle busyLabel === 'Refreshing games' with a bold blue message.",
+  "results": "User feedback during manual refresh is improved. Game selection is blocked during operations to prevent state inconsistency. Verified with builds and protocol checks."
+}

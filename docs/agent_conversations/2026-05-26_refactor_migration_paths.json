@@ -1,0 +1,25 @@
+{
+  "date": "2026-05-26",
+  "task_objective": "Remove leftover Decky template migration paths from Plugin._migration.",
+  "files_modified": [
+    "docs/plans/2026-05-26_refactor_migration_paths.md",
+    "main.py",
+    "tests/test_main.py"
+  ],
+  "tests_added": [
+    "tests/test_main.py::test_migration_does_not_call_decky_template_migration_helpers",
+    "tests/test_main.py::test_migration_has_no_template_scaffolding_paths"
+  ],
+  "design_decisions": [
+    "Kept Plugin._migration as the Decky lifecycle hook.",
+    "Converted migration behavior to an explicit no-op log because SDH-ludusavi has no supported legacy template namespace.",
+    "Added a case-insensitive static guard so template scaffolding path remnants cannot return to main.py."
+  ],
+  "results": [
+    "Focused migration tests passed.",
+    "Ruff check and format passed.",
+    "ty check passed.",
+    "Full pytest suite passed with 318 tests.",
+    "rg -i \"template\" main.py returned no matches."
+  ]
+}

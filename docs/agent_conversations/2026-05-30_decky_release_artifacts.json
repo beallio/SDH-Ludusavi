@@ -1,0 +1,32 @@
+{
+  "date": "2026-05-30",
+  "task objective": "Implement Decky release packaging automation and workflows for SDH-Ludusavi.",
+  "files modified": [
+    "scripts/package_plugin.py",
+    "plugin.json",
+    "AGENTS.md",
+    "DEVELOPMENT.md",
+    "README.md",
+    ".github/workflows/release.yml",
+    "tests/test_release_workflows.py"
+  ],
+  "files added": [
+    "assets/icon.png",
+    "scripts/validate_plugin_zip.py",
+    "scripts/set_release_version.py",
+    "scripts/request_dev_release.sh",
+    ".github/workflows/ci.yml",
+    ".github/workflows/dev-release.yml",
+    "tests/test_validate_plugin_zip.py",
+    "tests/test_release_workflows.py",
+    "tests/test_set_release_version.py"
+  ],
+  "tests added": [
+    "tests/test_package_plugin.py (new packaging arg tests)",
+    "tests/test_validate_plugin_zip.py (ZIP validator tests)",
+    "tests/test_release_workflows.py (dev release request helper script tests)",
+    "tests/test_set_release_version.py (version setter tests)"
+  ],
+  "design decisions": "1. Extended scripts/package_plugin.py to serve as the unified packager for both local dev and production release builds, supporting version override, release URLs, checksums, and manifest creation. 2. Added a robust python-based scripts/validate_plugin_zip.py to verify Decky compatibility, structure, and check for forbidden paths/files. 3. Added scripts/set_release_version.py to programmatically and safely update versions in metadata json files. 4. Implemented GitHub Actions for CI, release tag packaging, and manual workflow dispatch for development prereleases. 5. Protected user assets by staging and tracking assets/icon.png.",
+  "results": "All python pytest test cases (404 passed), frontend audit and typechecks, and package builds pass successfully. Hardened release workflows by replacing 'overwrite: false' with 'overwrite_files: false', excluding prerelease tags from the stable trigger, and asserting both constraints statically in tests. Merged the feature branch into main, deleted the local/remote feature branch, resolved CI pnpm Setup version mismatches, and successfully triggered and built the v0.1.0 release with manifest, checksum, and zip packages published on GitHub."
+}

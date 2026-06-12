@@ -1,0 +1,46 @@
+{
+  "date": "2026-05-10",
+  "task_objective": "Implement SDH-ludusavi as a Decky Loader plugin backed by pyludusavi.",
+  "files_modified": [
+    ".envrc",
+    ".gitignore",
+    ".protocol",
+    ".python-version",
+    "README.md",
+    "defaults/defaults.txt",
+    "docs/plans/sdh_ludusavi.md",
+    "docs/specs/sdh_ludusavi_sync.md",
+    "main.py",
+    "package.json",
+    "plugin.json",
+    "pyproject.toml",
+    "run.sh",
+    "src/index.tsx",
+    "src/sdh_ludusavi/__init__.py",
+    "src/sdh_ludusavi/_version.py",
+    "src/sdh_ludusavi/ludusavi.py",
+    "src/sdh_ludusavi/service.py",
+    "tests/test___init__.py",
+    "tests/test_frontend_static.py",
+    "tests/test_service.py",
+    "uv.lock"
+  ],
+  "tests_added": [
+    "tests/test_service.py",
+    "tests/test_frontend_static.py"
+  ],
+  "design_decisions": [
+    "Use Ludusavi game names as canonical IDs and treat Steam app IDs as optional metadata.",
+    "Keep auto-sync disabled by default and restrict the toggle to automatic start/exit behavior.",
+    "Expose manual backup and restore even when auto-sync is disabled, subject to selected game status and a global operation lock.",
+    "Keep automatic start restore conservative because pyludusavi exposes change categories but not a definitive local-vs-backup recency proof.",
+    "Use pyludusavi.Ludusavi with flatpak_id com.github.mtkennerly.ludusavi."
+  ],
+  "results": [
+    "Added backend service and pyludusavi adapter.",
+    "Replaced the sample Decky UI with the SDH-ludusavi panel controls.",
+    "Renamed Python, package, plugin, README, tests, and cache metadata to SDH-ludusavi.",
+    "Added durable plan and sync spec documentation.",
+    "Validated backend tests, type checking, formatting, linting, and frontend Rollup build."
+  ]
+}

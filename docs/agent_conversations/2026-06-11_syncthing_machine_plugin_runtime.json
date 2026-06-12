@@ -1,0 +1,29 @@
+{
+  "date": "2026-06-11",
+  "objective": "Consolidate PluginRuntime and migrate Syncthing monitor to a pure state machine",
+  "files_modified": [
+    "src/controllers/syncthingMonitor.ts",
+    "src/runtime/contentLoadCoordinator.ts",
+    "src/runtime/pluginRuntime.ts",
+    "src/surfaces/autoSyncStatusBrowserView.ts",
+    "src/surfaces/autoSyncStatusSurface.tsx",
+    "src/components/qam/LudusaviContent.tsx",
+    "src/index.tsx",
+    "src/settings/settingsMutationRuntime.ts"
+  ],
+  "tests_added": [
+    "src/controllers/syncthingMonitorMachine.test.ts",
+    "src/runtime/pluginRuntime.test.ts",
+    "src/settings/settingsMutationRuntime.test.ts"
+  ],
+  "design_decisions": [
+    "Extracted Syncthing lifecycle flags into a pure state machine mapped by exhaustive switch to reduce size budget and prevent impossible states.",
+    "Centralized component reset functions into a single injected PluginRuntime to prevent state bleed across unmounts.",
+    "Converted AutoSyncStatusSurface, AutoSyncStatusBrowserView, and SettingsMutationController into factories that store their state in closure, injected via PluginRuntime."
+  ],
+  "results": [
+    "All unit tests pass.",
+    "Global imports reduced and test stability improved.",
+    "No behavioral regressions introduced in the UI or syncthing backend."
+  ]
+}

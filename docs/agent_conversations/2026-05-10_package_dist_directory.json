@@ -1,0 +1,23 @@
+{
+  "date": "2026-05-10",
+  "task_objective": "Review and correct Decky plugin zip packaging for generated frontend output.",
+  "files_modified": [
+    "README.md",
+    "docs/agent_conversations/2026-05-10_package_dist_directory.json",
+    "docs/plans/decky_plugin_zip.md",
+    "scripts/package_plugin.py",
+    "tests/test_package_plugin.py"
+  ],
+  "tests_added": [
+    "tests/test_package_plugin.py source map archive assertion"
+  ],
+  "design_decisions": [
+    "Treat dist/ as a required runtime directory instead of packaging only dist/index.js.",
+    "Keep dist/index.js as an explicit required runtime file so missing frontend builds fail fast.",
+    "Package generated source maps and future dist assets together with the frontend bundle."
+  ],
+  "results": [
+    "Fixed the archive contents so dist/index.js.map is included when generated.",
+    "Updated packaging docs to describe dist/ as the packaged frontend runtime output."
+  ]
+}

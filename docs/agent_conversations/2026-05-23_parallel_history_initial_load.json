@@ -1,0 +1,26 @@
+{
+  "date": "2026-05-23",
+  "task_objective": "Parallelize the initial frontend settings and game-history RPCs so QAM startup no longer waits for those independent reads sequentially.",
+  "files_modified": [
+    "docs/plans/parallel_history_initial_load.md",
+    "src/index.tsx",
+    "tests/test_frontend_static.py",
+    "tests/test_main_rpc.py",
+    "docs/agent_conversations/2026-05-23_parallel_history_initial_load.json"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py::test_frontend_syncs_history_via_dedicated_rpc",
+    "tests/test_main_rpc.py::test_plugin_get_game_history_returns_service_history",
+    "updated tests/test_frontend_static.py::test_frontend_load_initial_optimizations to require parallel settings/history load"
+  ],
+  "design_decisions": [
+    "Use Promise.all for getSettings() and getGameHistoryCall() because the RPCs are independent read operations.",
+    "Keep versions and Ludusavi command discovery in the existing background Promise.allSettled path.",
+    "Leave cached-history duplicate state updates and history helper extraction out of scope for this focused performance fix."
+  ],
+  "results": [
+    "Focused frontend/backend RPC tests passed.",
+    "Ruff check, Ruff format, ty, TypeScript typecheck, pnpm supply-chain verify, and full pytest passed.",
+    "Sandboxed pytest timed out on asyncio.to_thread worker tests; rerunning outside the restricted sandbox passed 252 tests."
+  ]
+}

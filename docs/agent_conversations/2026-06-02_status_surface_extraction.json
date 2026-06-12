@@ -1,0 +1,16 @@
+{
+  "date": "2026-06-02",
+  "task_objective": "Continue the frontend index decomposition by isolating auto-sync status BrowserView ownership from src/index.tsx.",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "files_added": [
+    "src/surfaces/autoSyncStatusSurface.tsx"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py (updated to include the extracted status surface module and verify teardown through resetAutoSyncStatusSurface)"
+  ],
+  "design_decisions": "Moved BrowserView normalization, status HTML rendering, status publication, hide timers, completion mapping, and disposal into src/surfaces/autoSyncStatusSurface.tsx. Kept src/index.tsx as the lifecycle composition owner that calls publishAutoSyncStatus, hideAutoSyncStatus, completeAutoSyncStatus, and resetAutoSyncStatusSurface. Preserved the existing status strings, timeout values, BrowserView creation fallbacks, owner disposal behavior, and static characterization coverage.",
+  "results": "Focused frontend static tests, TypeScript typecheck, Rollup build, ruff check, ruff format, ty check, and the full pytest suite passed."
+}

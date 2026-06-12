@@ -1,0 +1,20 @@
+{
+  "date": "2026-05-29",
+  "task_objective": "Fix the games dropdown layout so that it spans the full width and matches the position of other buttons in the plugin menu under Decky 3.2.4 / SteamOS UI updates.",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "test_frontend_dropdown_has_below_layout"
+  ],
+  "design_decisions": [
+    "Applied layout=\"below\" to the DropdownItem component inside the GAME PanelSection of src/index.tsx.",
+    "This utilizes the native layout structure of Steam Gamepad UI (Item layout='below') to place the dropdown selector control on its own row, spanning the full width of the Quick Access Menu panel.",
+    "Added a new static assertion test in test_frontend_static.py to verify and enforce this layout property on DropdownItem."
+  ],
+  "results": [
+    "Games dropdown now spans the full width and matches the positioning of other button items.",
+    "All tests (371 total) pass, quality control lint/format checks pass, typescript builds and packages cleanly."
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "date": "2026-05-23",
+  "task_objective": "Fix stale 'Last Operation' display when QAM opens after automatic background start/exit sync events",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/service.py",
+    "main.py",
+    "src/index.tsx"
+  ],
+  "tests_added": [
+    "tests/test_last_operation_sync.py"
+  ],
+  "design_decisions": [
+    "Decoupled history state from settings payload and exposed it via a new dedicated RPC endpoint `get_game_history`.",
+    "Synchronized history on mount in index.tsx's `initialLoad` by calling `getGameHistoryCall` after `getSettings`.",
+    "Integrated a background listener update mechanism in React component mount hook to allow background auto-sync hook handlers to update the UI memory cache without causing React unmount memory leak warnings.",
+    "Added proactive background history updates in both start/exit hook execution `finally` blocks in index.tsx."
+  ],
+  "results": "250/250 tests passed, frontend builds cleanly with pnpm, ruff formatting and ty type checks pass successfully"
+}

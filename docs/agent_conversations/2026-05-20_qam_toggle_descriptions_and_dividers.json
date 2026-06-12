@@ -1,0 +1,25 @@
+{
+  "date": "2026-05-20",
+  "task_objective": "Add smaller helper descriptions under QAM toggles and remove unwanted horizontal separator lines from compact QAM rows.",
+  "files_modified": [
+    "docs/plans/qam_toggle_descriptions_and_dividers.md",
+    "src/index.tsx",
+    "tests/test_frontend_static.py",
+    "docs/agent_conversations/2026-05-20_qam_toggle_descriptions_and_dividers.json"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py::test_frontend_qam_toggles_explain_their_scope",
+    "tests/test_frontend_static.py::test_frontend_qam_removes_unwanted_row_separators"
+  ],
+  "design_decisions": [
+    "Use Decky's native ToggleField description prop for helper text instead of custom toggle wrappers.",
+    "Use Decky's native bottomSeparator=\"none\" prop on affected item controls to suppress visible row divider lines.",
+    "Keep existing focus behavior, full-width toggle wrappers, panel ordering, and notification settings semantics unchanged."
+  ],
+  "results": [
+    "Focused frontend static tests passed after red-green implementation.",
+    "Full Python test suite passed with 217 tests.",
+    "TypeScript typecheck, Ruff, ty, Rollup build, and frontend supply-chain verification passed.",
+    "Frontend supply-chain verification required network escalation after sandbox DNS failed with EAI_AGAIN."
+  ]
+}

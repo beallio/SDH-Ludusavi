@@ -1,0 +1,22 @@
+{
+  "date": "2026-06-04",
+  "task_objective": "Fix updater post-install regression by generalizing post-install update check suppression across all update paths (stable-to-dev, dev-to-dev, dev-to-stable).",
+  "files_modified": [
+    "src/components/PluginUpdateSection.tsx",
+    "main.py"
+  ],
+  "tests_added": [
+    "tests/test_updater_service.py::test_check_for_plugin_update_pending_fast_path",
+    "tests/test_frontend_static.py::test_frontend_updater_post_install_guard_and_suppression",
+    "tests/test_frontend_static.py::test_frontend_updater_codex_p2_findings"
+  ],
+  "design_decisions": [
+    "Created enterPostInstallGuard helper in PluginUpdateSection.tsx to clear active check states and seed the installed override.",
+    "Split checkForUpdates calls by source ('automatic' vs 'manual') to suppress automatic check triggers during the pending/post-install window.",
+    "Implemented check-suppression bypass check at the very top of checkForUpdates to avoid setting isChecking=true or inFlightCheck.current.",
+    "Added pending-install fast path in check_for_plugin_update on the backend to bypass network calls and return 'current' result if version is fresh and effective.",
+    "Rolled back post-install guard state on installer reject to recover original candidate state.",
+    "Cleared suppression and guard state on load completion when currentVersion equals the target version or diverges from the pre-install version."
+  ],
+  "results": "All 461 unit and static tests passed successfully. Ruff lint/formatting and TypeScript type checking passed without errors."
+}

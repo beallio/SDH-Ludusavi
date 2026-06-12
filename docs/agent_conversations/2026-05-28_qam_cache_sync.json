@@ -1,0 +1,22 @@
+{
+  "date": "2026-05-28",
+  "task_objective": "Fix QAM cache out-of-sync issues where manually adding a game or updating backups via Ludusavi GUI/CLI is not immediately detected by the plugin, by expanding get_config_mtime_ns to monitor all Ludusavi state-carrying files and backup directory files.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/ludusavi.py",
+    "tests/test_adapter_cache.py"
+  ],
+  "tests_added": [
+    "test_parse_backup_path",
+    "test_composite_mtime_config_cache_manifest",
+    "test_composite_mtime_backup_directory"
+  ],
+  "design_decisions": [
+    "Expanded config mtime to a composite SHA-256 hash containing mtimes of config.yaml, cache.yaml, manifest.yaml, the backup directory itself, and all individual game backup subdirectories and mapping.yaml files.",
+    "Wrote a custom line-by-line helper _parse_backup_path to parse backup.path from config.yaml without requiring heavy external YAML parsing dependencies.",
+    "Handled optional/absent files (such as cache.yaml or the backups directory) gracefully by catching and suppressing OSErrors, while preserving strict exception propagation for the main config.yaml file."
+  ],
+  "results": [
+    "Expanded cache marker detects changes to custom games, updated manifests, and new or modified game backups instantly (<1ms overhead, zero subprocesses).",
+    "All 369 tests in the test suite pass successfully, and Ruff checks and Ty checks pass."
+  ]
+}

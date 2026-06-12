@@ -1,0 +1,17 @@
+{
+  "date": "2026-06-04",
+  "task_objective": "Fix Updater Post-Install Stale Check State / Invalidate stale post-install check cache",
+  "files_modified": [
+    "main.py",
+    "py_modules/sdh_ludusavi/updater.py",
+    "src/components/PluginUpdateSection.tsx",
+    "tests/test_updater_service.py",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "tests/test_updater_service.py::test_updater_cache_version_aware_and_invalidation",
+    "tests/test_frontend_static.py::test_frontend_updater_check_for_updates_guard_and_hydration_skip"
+  ],
+  "design_decisions": "Introduced `last_checked_version` cache field to tracking backend check versions. Bypassed update check caching if requested version doesn't match the cached check version. Added cache invalidation logic inside `clear_stale_update_check_cache` invoked when installation requests, handoff confirmation, promotion or clear occurs. Aligned frontend `checkForUpdates` early guard to check `effectiveCurrentVersion`.",
+  "results": "All backend and frontend tests passed successfully. All validation checks passed, and Codex review verified zero correctness issues. Git commit pushed on active branch."
+}

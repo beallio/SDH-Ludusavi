@@ -1,0 +1,24 @@
+{
+  "date": "2026-05-31",
+  "task_objective": "Resolve all in-plugin updater code review findings: Decky installer argument order, pending update install metadata reconciliation on startup, release manifest asset name matching the release tag, SSL verification failures, update check in-flight promise-based guard, and rate limit cooldown on candidate install revalidation.",
+  "files_modified": [
+    "src/utils/deckyInstaller.ts",
+    "py_modules/sdh_ludusavi/updater.py",
+    "main.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "src/components/PluginUpdateSection.tsx"
+  ],
+  "tests_added": [
+    "tests/test_updater.py:test_validate_release_candidate_manifest_name_strict",
+    "tests/test_updater_service.py:test_record_update_install_requested_preserves_metadata",
+    "tests/test_main.py:test_plugin_main_triggers_reconciliation",
+    "tests/test_frontend_static.py:test_decky_installer_argument_order",
+    "tests/test_updater.py:test_ssl_context_loading",
+    "tests/test_updater_service.py:test_record_update_check_result_logs_failure",
+    "tests/test_frontend_static.py:test_frontend_update_check_inflight_guard",
+    "tests/test_updater_service.py:test_revalidate_plugin_update_respects_rate_limit",
+    "tests/test_updater_service.py:test_revalidate_plugin_update_records_rate_limit"
+  ],
+  "design_decisions": "Changed invokeDeckyInstaller argument order to url, EXPECTED_PLUGIN_NAME, version, sha256, installType to match Decky contract. Decoupled reconciliation from get_update_check_context, calling it only on Plugin._main startup. Added release tag matching to release manifest filename validation. Resolved urllib SSL failures using a _get_ssl_context helper targeting standard Linux CA paths. Implemented React promise-based in-flight guard (inFlightCheck = useRef(...)) inside PluginUpdateSection.tsx to deduplicate concurrent RPC check calls. Routed revalidate_plugin_update through the service to check/record active rate-limit cooldown states.",
+  "results": "All validation checks passed, 430 tests pass cleanly, formatting and type checking verify successfully."
+}

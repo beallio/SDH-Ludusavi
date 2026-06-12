@@ -1,0 +1,21 @@
+{
+  "date": "2026-05-17",
+  "task_objective": "Address code review feedback for durable per-game history",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/service.py",
+    "src/index.tsx",
+    "tests/test_frontend_static.py",
+    "tests/test_history.py"
+  ],
+  "tests_added": [
+    "tests/test_history_fixes.py"
+  ],
+  "design_decisions": [
+    "Decoupled backup completion from status refresh: history is recorded immediately after backup, and refresh failures are logged but don't fail the backup result.",
+    "Introduced `last_operation` field in history state, calculated by the backend based on the newest timestamp across all history slots.",
+    "Hardened `_load_state` with schema and enum validation for history entries to prevent frontend crashes on malformed data.",
+    "Simplified frontend `selectedHistory` logic by using the backend-provided `last_operation` field.",
+    "Added regression tests for backup-success/refresh-failure scenarios and parameterized auto-exit skip reasons."
+  ],
+  "results": "All 148 tests passing. Backend and frontend hardened against malformed state. UI now consistently shows the latest operation regardless of failure priority."
+}

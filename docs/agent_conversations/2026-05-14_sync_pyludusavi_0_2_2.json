@@ -1,0 +1,33 @@
+{
+  "date": "2026-05-14",
+  "task_objective": "Sync vendored pyludusavi to clean upstream 0.2.2 and keep SDH-specific subprocess environment handling in first-party code.",
+  "files_modified": [
+    "docs/plans/update_pyludusavi_0_2_2.md",
+    "py_modules/pyludusavi/",
+    "py_modules/pyludusavi-0.2.2.dist-info/",
+    "py_modules/sdh_ludusavi/ludusavi.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "scripts/package_plugin.py",
+    "tests/test_launcher_backend.py",
+    "tests/test_ludusavi.py",
+    "tests/test_ludusavi_discovery.py",
+    "tests/test_package_plugin.py",
+    "tests/test_protocol.py",
+    "tests/test_issue_4_timeout.py",
+    "tests/test_pyludusavi_logging.py",
+    "tests/test_sudo_logic.py"
+  ],
+  "tests_added": [
+    "tests/test_ludusavi.py::test_adapter_uses_upstream_pyludusavi_constructor_only",
+    "tests/test_ludusavi.py::test_adapter_injects_ld_library_path_from_sdh_executor",
+    "tests/test_ludusavi_discovery.py::test_find_ludusavi_signature_is_clean_upstream"
+  ],
+  "design_decisions": [
+    "Vendored pyludusavi was replaced with clean 0.2.2 files from the resolved uv environment.",
+    "PyludusaviAdapter now calls Ludusavi(flatpak_id=FLATPAK_ID) without patched upstream arguments.",
+    "LD_LIBRARY_PATH is cleared through an SDH-owned executor proxy instead of editing pyludusavi.",
+    "Launcher command discovery now calls find_ludusavi(explicit_flatpak_id=FLATPAK_ID).",
+    "Tests that asserted SDH patches inside pyludusavi were removed."
+  ],
+  "results": "Focused red-green tests passed. Full validation results are recorded in the final task response."
+}

@@ -1,0 +1,17 @@
+{
+  "date": "2026-05-13",
+  "task_objective": "Explain and fix why the plugin attempts backups for games Ludusavi wouldn't back up when autosync is enabled.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/service.py",
+    "tests/test_service.py"
+  ],
+  "tests_added": [
+    "tests/test_repro_eager_backup.py (temporary reproduction, now removed, logic integrated into test_service.py)"
+  ],
+  "design_decisions": [
+    "Harden handle_game_exit to skip backups if: game has error, game missing from preview, or no files/registry entries found.",
+    "Harden handle_game_start to skip restores if game has error.",
+    "Changed preview failure behavior from 'proceed' to 'skip' to be more conservative and avoid unnecessary attempts."
+  ],
+  "results": "Plugin is now more conservative with autosync backups, avoiding unnecessary Ludusavi calls for games with no data or errors."
+}

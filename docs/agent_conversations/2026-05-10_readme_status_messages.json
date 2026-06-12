@@ -1,0 +1,21 @@
+{
+  "date": "2026-05-10",
+  "task_objective": "Enumerate SDH-ludusavi status messages and descriptions in the README.",
+  "files_modified": [
+    "README.md",
+    "docs/agent_conversations/2026-05-10_readme_status_messages.json",
+    "docs/plans/readme_status_messages.md",
+    "tests/test_readme.py"
+  ],
+  "tests_added": [
+    "tests/test_readme.py"
+  ],
+  "design_decisions": [
+    "Document existing status strings without changing runtime behavior.",
+    "Group statuses by game status, operation result, skip reason, operation status fields, and UI states."
+  ],
+  "results": [
+    "Added a README Status Messages section.",
+    "Added static coverage for the documented status strings."
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "date": "2026-05-15",
+  "task_objective": "Automate GitHub releases with GitHub Actions, omit commit hash on releases, and update local scripts to push to 'steamdeck' alias.",
+  "files_modified": [
+    "scripts/package_plugin.py",
+    ".github/workflows/release.yml",
+    "scripts/post_commit.sh",
+    "AGENTS.md"
+  ],
+  "tests_added": [],
+  "design_decisions": [
+    "Added a --release flag to scripts/package_plugin.py to omit the git hash from the version.",
+    "Created a GitHub actions workflow triggering on release publish that automatically packages the plugin and attaches the zip using the --release flag.",
+    "Replaced the hardcoded Deck IP 10.168.168.20 with the `steamdeck` SSH alias in post_commit.sh.",
+    "Updated AGENTS.md to include the Release & Packaging Protocol."
+  ],
+  "results": "GitHub workflow established for automated zip generation on release without commit hash. Local pushes correctly attempt to use SSH via the 'steamdeck' alias. Project guidelines updated."
+}

@@ -1,0 +1,32 @@
+{
+  "date": "2026-05-30",
+  "task_objective": "Fix SteamOS games dropdown long-name regression with a narrow, temporary frontend workaround, avoiding broad wildcard selector side effects.",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "test_frontend_dropdown_uses_scoped_steamos_truncation_workaround"
+  ],
+  "design_decisions": [
+    "Wrap selected dropdown option value in a span with class sdh-ludusavi-game-dropdown-value using DropdownItem's renderButtonValue prop.",
+    "Replace old broad styles in dropdownStyleEl with targeted, scoped rules that apply max-width: 100% and min-width: 0 to the dropdown elements only (using class prefixes and div tags, avoiding the '*' wildcard).",
+    "Add non-collapsing rules (flex-shrink: 0, min-width: fit-content) for svg, chevron, icon, and arrow child components within the dropdown to protect them from collapse.",
+    "Add explicit code comments marking this styling workaround as temporary and explaining how to roll it back."
+  ],
+  "results": "Static frontend validation, Ruff linting/formatting, Python type checks, Pytest, TypeScript compilation, and Rollup build all pass successfully.",
+  "runtime_validation_status": "VERIFIED ON STEAM DECK",
+  "rollback_command": "git revert 9b3f9022319c8f628c2a78927f464bbb8d7bfb56",
+  "review_subagent_evidence": {
+    "conversation_id": "2ba297a0-8e52-4069-8189-cd2ea0004aff",
+    "role": "Clean Review Agent",
+    "findings": "No blocking issues found. The implementation matches the saved plan perfectly and satisfies all repository protocol requirements. Verified wildcard removal, dropdown layout, and custom CSS properties.",
+    "residual_risks": [
+      "Class Prefix Dependency: The workaround overrides CSS based on class prefixes like [class*='DropdownField' i]. If Decky or the underlying SteamOS client updates internal component classes, these styles will not target those components, which could cause a regression.",
+      "Use of 'any' in renderButtonValue."
+    ],
+    "test_gaps": [
+      "No Visual/Layout Testing: The static tests only test codebase string matching and regex logic. They cannot test computed styles, actual element widths, or layout boundaries under SteamOS."
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "date": "2026-05-19",
+  "task_objective": "Clean up the autosync status strip by making BrowserView the only production surface, removing diagnostic UI and alternate React/composition scaffolding, and archiving superseded status-strip attempt docs.",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py",
+    "docs/specs/custom_status_bar_ui.md",
+    "docs/plans/status_strip_cleanup.md",
+    "docs/archive/status-strip/plans/",
+    "docs/archive/status-strip/agent_conversations/"
+  ],
+  "tests_added": [
+    "Updated tests/test_frontend_static.py to require BrowserView-only production behavior and reject diagnostic UI, alternate surface modes, React portal/global component registration, and composition-hook artifacts."
+  ],
+  "design_decisions": [
+    "Kept the BrowserView creation, wrapper normalization through m_browserView, verbose BrowserView logs, lifecycle/RPC provenance logs, and local_current to has_backup mapping.",
+    "Moved status expiry from React component effects to module-level BrowserView timers that clear on hide and plugin dismount.",
+    "Removed the debug status strip button from the Logs panel and removed diagnostic labels from BrowserView HTML.",
+    "Archived superseded status-strip plans and session logs under docs/archive/status-strip while preserving content."
+  ],
+  "results": [
+    "./run.sh uv run pytest tests/test_frontend_static.py passed",
+    "./run.sh pnpm run typecheck passed",
+    "./run.sh pnpm run build passed",
+    "./run.sh uv run ruff check . --fix passed",
+    "./run.sh uv run ruff format . passed",
+    "./run.sh uv run ty check py_modules/sdh_ludusavi/ passed",
+    "./run.sh uv run pytest passed with 176 tests"
+  ]
+}

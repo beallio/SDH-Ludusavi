@@ -1,0 +1,31 @@
+{
+  "date": "2026-05-21",
+  "task_objective": "Split SDH-Ludusavi settings and runtime cache storage into Decky-provided directories and fix QAM spacing, separators, and version alignment.",
+  "files_modified": [
+    "README.md",
+    "docs/agent_conversations/2026-05-21_config_cache_qam_cleanup.json",
+    "docs/plans/config_cache_split_qam_cleanup.md",
+    "main.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "src/index.tsx",
+    "tests/test_frontend_static.py",
+    "tests/test_main.py",
+    "tests/test_service.py"
+  ],
+  "tests_added": [
+    "tests/test_main.py::test_service_uses_decky_plugin_settings_and_runtime_dirs",
+    "tests/test_main.py::test_storage_resolvers_require_decky_plugin_directories",
+    "tests/test_service.py::test_persists_settings_and_cache_separately",
+    "tests/test_service.py::test_does_not_load_old_combined_state_file",
+    "tests/test_service.py::test_cache_save_failure_keeps_existing_cache_file",
+    "tests/test_frontend_static.py::test_frontend_game_dropdown_uses_compact_row_layout"
+  ],
+  "design_decisions": [
+    "Use Decky's SettingsManager for user settings in DECKY_PLUGIN_SETTINGS_DIR.",
+    "Store derived cache data in DECKY_PLUGIN_RUNTIME_DIR/cache.json.",
+    "Do not migrate or read the old combined state file in the split storage path.",
+    "Keep existing frontend RPC payloads unchanged.",
+    "Use a compact Dropdown row in the GAME panel to remove the blank focus area."
+  ],
+  "results": "Focused backend and frontend static tests passed before full validation."
+}

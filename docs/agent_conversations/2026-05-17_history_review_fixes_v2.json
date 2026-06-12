@@ -1,0 +1,20 @@
+{
+  "date": "2026-05-17",
+  "task_objective": "Harden durable per-game history implementation",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/service.py",
+    "src/index.tsx",
+    "tests/test_history_fixes.py"
+  ],
+  "tests_added": [
+    "tests/test_history_fixes.py (updated with corrected mocks and resolution tests)"
+  ],
+  "design_decisions": [
+    "Corrected refresh-failure tests to mock `refresh_statuses()` instead of `get_games()`, ensuring they actually verify decoupled backup success.",
+    "Added `trigger` enum validation to `_coerce_history_entry`.",
+    "Switched history timestamps to ISO 8601 with microsecond resolution to handle same-second operations reliably and enable string-based sorting.",
+    "Updated frontend to robustly parse both ISO and space-separated timestamps and hide microseconds for display.",
+    "Removed `time.sleep()` from tests, relying on microsecond resolution for deterministic sorting."
+  ],
+  "results": "All 149 tests passing. Backend and frontend hardened against collisions and invalid triggers. Decoupled backup/refresh logic is verified by corrected tests."
+}

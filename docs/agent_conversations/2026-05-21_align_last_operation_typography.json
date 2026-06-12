@@ -1,0 +1,16 @@
+{
+  "date": "2026-05-21",
+  "task_objective": "Align the typography of the 'Last Operation' field label and message content with the 'Status' field in the QAM panel by wrapping the label in CompactFieldLabel and specifying font-size: 12px for the row styling.",
+  "files_modified": [
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py::test_frontend_qam_status_and_last_operation_use_compact_typography"
+  ],
+  "design_decisions": [
+    "Wrap the 'Last Operation' label in CompactFieldLabel to reduce its font-size to 13px (matching 'Status').",
+    "Add font-size: 12px; to the .sdh-ludusavi-last-operation-row styling class to ensure its message content matches the 12px font size of the 'Status' message."
+  ],
+  "results": "All tests and quality checks passed successfully, including typescript checking and ruff linting."
+}

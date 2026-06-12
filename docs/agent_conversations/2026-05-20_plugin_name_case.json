@@ -1,0 +1,30 @@
+{
+  "date": "2026-05-20",
+  "task_objective": "Change the user-facing plugin name to SDH-Ludusavi while keeping the project directory and internal package identity as SDH-ludusavi/sdh_ludusavi, then merge the branch to main.",
+  "files_modified": [
+    "README.md",
+    "plugin.json",
+    "scripts/package_plugin.py",
+    "scripts/post_commit.sh",
+    "src/index.tsx",
+    "src/ludusaviLauncher.ts",
+    "src/shortcutArtwork.ts",
+    "tests/test_frontend_static.py",
+    "tests/test_issue_8_ui_error.py",
+    "tests/test_package_plugin.py",
+    "tests/test_shortcut_artwork_static.py",
+    "tests/test_version.py",
+    "docs/plans/plugin_name_case.md"
+  ],
+  "tests_added": [
+    "Updated existing package/frontend/version/static tests to assert SDH-Ludusavi display and archive naming."
+  ],
+  "design_decisions": [
+    "Keep the repo directory, Python import package, cache paths, and lower-case npm package name unchanged.",
+    "Rename only user-facing plugin identity surfaces: plugin metadata, archive root/zip name, visible README text, QAM title, version row, and displayed log prefixes."
+  ],
+  "results": [
+    "Focused rename tests passed before full validation.",
+    "Prepared the branch for a final validation, commit, and fast-forward merge to main."
+  ]
+}

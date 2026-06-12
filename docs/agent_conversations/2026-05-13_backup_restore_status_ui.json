@@ -1,0 +1,11 @@
+{
+  "date": "2026-05-13",
+  "task_objective": "Update Status UI to show progress during Backup and Restore operations.",
+  "files_modified": [
+    "src/index.tsx",
+    "docs/plans/update_backup_restore_status_ui.md"
+  ],
+  "tests_added": [],
+  "design_decisions": "Extended the status line conditional rendering to handle 'Backup running' and 'Restore running' busyLabels, displaying 'Backup in progress...' and 'Restore in progress...' in the established bold blue style.",
+  "results": "User feedback is improved for force operations. The status line now reflects the active backup or restore process. Verified with builds and protocol checks."
+}

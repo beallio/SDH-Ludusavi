@@ -1,0 +1,34 @@
+{
+  "date": "2026-05-10",
+  "task_objective": "Fix runtime Ludusavi Flatpak discovery under Decky and render Automatic Sync as a Decky toggle switch.",
+  "files_modified": [
+    "docs/agent_conversations/2026-05-10_flatpak_discovery_and_toggle.json",
+    "docs/plans/flatpak_discovery_and_toggle.md",
+    "py_modules/pyludusavi/discovery.py",
+    "py_modules/sdh_ludusavi/ludusavi.py",
+    "src/index.tsx",
+    "tests/test_frontend_static.py",
+    "tests/test_ludusavi.py",
+    "tests/test_ludusavi_discovery.py"
+  ],
+  "tests_added": [
+    "tests/test_ludusavi_discovery.py absolute Flatpak fallback cases",
+    "tests/test_ludusavi.py rclone Flatpak fallback case",
+    "tests/test_frontend_static.py Decky ToggleField assertion"
+  ],
+  "design_decisions": [
+    "Flatpak discovery now tries well-known absolute executable paths after PATH lookup so Decky environments without /usr/bin in PATH can still find Ludusavi.",
+    "The rclone version probe uses the same Flatpak command candidates as Ludusavi discovery.",
+    "Ludusavi verification has a bounded timeout so broken Flatpak candidates cannot hang discovery.",
+    "Automatic Sync now uses Decky's ToggleField instead of a raw checkbox and reports backend setting failures."
+  ],
+  "results": [
+    "./run.sh uv run ruff check . --fix passed",
+    "./run.sh uv run ruff format . passed",
+    "./run.sh uv run ty check py_modules/sdh_ludusavi/ passed",
+    "./run.sh uv run pytest passed with 59 tests",
+    "./node_modules/.bin/rollup -c rebuilt dist/index.js",
+    "./run.sh uv run python scripts/package_plugin.py rebuilt out/SDH-ludusavi.zip",
+    "Gemini review completed and follow-up hardening was applied."
+  ]
+}

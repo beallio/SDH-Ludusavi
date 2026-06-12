@@ -1,0 +1,17 @@
+{
+  "date": "2026-05-23",
+  "task_objective": "Split README into user-facing and developer-facing documentation",
+  "files_modified": [
+    "README.md",
+    "DEVELOPMENT.md",
+    "AGENTS.md"
+  ],
+  "tests_added": [],
+  "design_decisions": [
+    "Created a dedicated DEVELOPMENT.md for technical, build, and architecture details to keep the main README clean for end-users.",
+    "Rewrote README.md to focus on installation via Decky Developer Mode and a recommended Syncthingy workflow for save synchronization.",
+    "Included performance warnings regarding cloud sync and emphasized the local-first approach with Syncthing.",
+    "Updated AGENTS.md to formalize DEVELOPMENT.md as a required project document."
+  ],
+  "results": "Documentation successfully split; user instructions are now prominent and technical clutter is moved to development docs."
+}

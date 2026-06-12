@@ -1,0 +1,24 @@
+{
+  "date": "2026-05-13",
+  "task_objective": "Add pyludusavi version to GUI and implement Ludusavi log viewer",
+  "files_modified": [
+    "pyproject.toml",
+    "uv.lock",
+    "py_modules/sdh_ludusavi/service.py",
+    "py_modules/sdh_ludusavi/ludusavi.py",
+    "main.py",
+    "src/index.tsx",
+    "tests/test_service.py"
+  ],
+  "tests_added": [
+    "tests/test_service.py (test_get_ludusavi_logs)"
+  ],
+  "design_decisions": [
+    "Updated pyludusavi dependency to 0.2.0 as requested.",
+    "Added get_log_path to LudusaviAdapter protocol to decouple service from adapter implementation details.",
+    "Implemented get_ludusavi_logs RPC to fetch raw Ludusavi logs.",
+    "Added LudusaviLogModal to frontend to display the raw logs.",
+    "Added pyludusavi version display in the Versions section."
+  ],
+  "results": "All features implemented, tests passing, and protocol checks verified. Ludusavi logs are now viewable in a modal, and pyludusavi version 0.2.0 is correctly displayed."
+}

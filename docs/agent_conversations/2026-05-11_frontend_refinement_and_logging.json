@@ -1,0 +1,22 @@
+{
+  "date": "2026-05-11",
+  "task_objective": "Implement frontend and backend refinements: persistent selection, unified logging, and SpinnerButtons.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/service.py",
+    "main.py",
+    "src/index.tsx",
+    "tests/test_service.py",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "tests/test_refinements.py"
+  ],
+  "design_decisions": [
+    "Added selected_game to persistent settings in the backend.",
+    "Renamed internal _log to public log in SDHLudusaviService and exposed it via RPC.",
+    "Integrated frontend log() utility with backend decky.logger and internal ring buffer.",
+    "Created SpinnerButton component to provide inline loading feedback.",
+    "Synchronized dropdown selection with backend persistence."
+  ],
+  "results": "All refinements implemented, verified with tests, and frontend build successful."
+}

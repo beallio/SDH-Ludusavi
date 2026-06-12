@@ -1,0 +1,24 @@
+{
+  "date": "2026-05-10",
+  "task_objective": "Refactor the inline log display into a Decky modal overlay.",
+  "files_modified": [
+    "docs/agent_conversations/2026-05-10_decky_log_modal.json",
+    "docs/plans/decky_log_modal.md",
+    "src/index.tsx",
+    "tests/test_frontend_static.py"
+  ],
+  "tests_added": [
+    "tests/test_frontend_static.py Decky log modal assertions"
+  ],
+  "design_decisions": [
+    "Use ConfirmModal with bAlertDialog enabled so the modal shows only the OK action.",
+    "Use Decky's installed showModal export from @decky/ui because @decky/api 1.1.3 does not export showModal.",
+    "Remove inline log state and render logs in a selectable, scrollable monospace modal body."
+  ],
+  "results": [
+    "Added the standalone LogModal component.",
+    "Changed Show Logs to open the modal with the current log entries.",
+    "Removed the inline log rendering block.",
+    "Validated frontend static tests, frontend build, and the local pre-commit hook."
+  ]
+}

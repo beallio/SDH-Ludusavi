@@ -1,0 +1,33 @@
+{
+  "date": "2026-05-26",
+  "task_objective": "Address code review findings from the Single Responsibility Principle (SRP) decomposition of SDHLudusaviService.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/log_buffer.py",
+    "py_modules/sdh_ludusavi/watchdog.py",
+    "py_modules/sdh_ludusavi/persistence.py",
+    "py_modules/sdh_ludusavi/coordinator.py",
+    "py_modules/sdh_ludusavi/gateway.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "tests/test_service.py"
+  ],
+  "files_added": [
+    "docs/plans/2026-05-27_address_srp_decomposition_findings.md",
+    "tests/test_history_integration.py"
+  ],
+  "tests_added": [
+    "tests/test_history_integration.py (10 restored integration tests)"
+  ],
+  "design_decisions": [
+    "Removed unused limit parameter in DiagnosticLogBuffer.__init__.",
+    "Prefixed fallback debug logging with '[DEBUG]' to preserve log level semantics in output.",
+    "Eliminated sys.modules and __code__ identity trampolining in watchdog.py signaling helpers.",
+    "Re-exported watchdog helper functions (_read_ppid and _process_tree) from service.py for backward compatibility with existing tests.",
+    "Redirected AST checks and process tree/os.kill monkeypatches in test_service.py to target watchdog.py canonically.",
+    "Cloned combined state dictionaries in load_all to prevent aliasing bugs.",
+    "Replaced production asserts with RuntimeErrors to preserve check execution under optimize (-O) builds.",
+    "Resolved TOCTOU race condition in run_locked by acquiring the lock first, then checking and releasing if operation is already running.",
+    "Delegated diagnostics logging upward from gateway.py to service.py and removed circular delegation and property calls.",
+    "Restored 10 operation history integration tests in test_history_integration.py covering skips, reload, and error caching."
+  ],
+  "results": "All 344 tests passed successfully. Ruff check and format pass completely. Ty checks pass with zero diagnostics. Commit c60ede3 successfully created."
+}

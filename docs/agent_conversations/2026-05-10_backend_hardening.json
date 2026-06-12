@@ -1,0 +1,35 @@
+{
+  "date": "2026-05-10",
+  "task_objective": "Merge the version display branch, then harden the SDH-ludusavi backend call boundary, state handling, global operation lock, and root/state documentation.",
+  "files_modified": [
+    "README.md",
+    "docs/agent_conversations/2026-05-10_backend_hardening.json",
+    "docs/plans/backend_hardening.md",
+    "docs/specs/sdh_ludusavi_sync.md",
+    "main.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "tests/test_ludusavi.py",
+    "tests/test_main.py",
+    "tests/test_service.py"
+  ],
+  "tests_added": [
+    "tests/test_main.py",
+    "tests/test_service.py invalid state, atomic save, and thread lock cases",
+    "tests/test_ludusavi.py conservative recency cases"
+  ],
+  "design_decisions": [
+    "Fast-forwarded feat-sdh-ludusavi-version into main before starting refactor-backend-hardening.",
+    "Offloaded blocking Decky RPC callbacks to a background worker thread while preserving skipped and failed payloads.",
+    "Used Decky settings space for runtime state when available, with a private user config fallback when Decky settings are unavailable.",
+    "Ignored invalid state files with warnings and default settings instead of failing backend startup.",
+    "Applied Gemini review follow-ups for worker BaseException mapping, locked lazy backend initialization, atomic state writes, and clearing active operation metadata.",
+    "Kept compare_recency conservative and documented that _root remains pending real Steam Deck validation."
+  ],
+  "results": [
+    "./run.sh uv run ruff check . --fix passed",
+    "./run.sh uv run ruff format . passed",
+    "./run.sh uv run ty check py_modules/sdh_ludusavi/ passed",
+    "./run.sh uv run pytest passed with 47 tests",
+    "Gemini review ran through npx @google/gemini-cli@latest with user approval for repo export"
+  ]
+}

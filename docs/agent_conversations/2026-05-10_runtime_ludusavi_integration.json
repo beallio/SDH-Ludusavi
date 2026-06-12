@@ -1,0 +1,35 @@
+{
+  "date": "2026-05-10",
+  "task_objective": "Fix runtime behavior after Steam Deck testing showed the frontend loads but does not successfully interface with Ludusavi or show useful plugin logs.",
+  "files_modified": [
+    "README.md",
+    "docs/agent_conversations/2026-05-10_runtime_ludusavi_integration.json",
+    "docs/plans/runtime_ludusavi_integration.md",
+    "docs/specs/sdh_ludusavi_sync.md",
+    "plugin.json",
+    "py_modules/sdh_ludusavi/service.py",
+    "src/index.tsx",
+    "tests/test_frontend_static.py",
+    "tests/test_package_plugin.py",
+    "tests/test_service.py"
+  ],
+  "tests_added": [
+    "tests/test_service.py lazy Ludusavi adapter initialization cases",
+    "tests/test_package_plugin.py non-root plugin metadata assertion",
+    "tests/test_frontend_static.py initial log loading order assertion"
+  ],
+  "design_decisions": [
+    "Removed Decky's _root flag so the backend runs as the Decky user and the Ludusavi Flatpak sees the user's configuration and backup metadata.",
+    "Changed SDHLudusaviService to create the real Ludusavi adapter lazily during locked Ludusavi operations instead of at service startup.",
+    "Kept settings, status, and recent-log calls available even when Ludusavi or Flatpak discovery fails.",
+    "Changed initial frontend loading to fetch recent logs after refresh so dependency errors recorded during refresh are visible in the log modal."
+  ],
+  "results": [
+    "./run.sh uv run ruff check . --fix passed",
+    "./run.sh uv run ruff format . passed",
+    "./run.sh uv run ty check py_modules/sdh_ludusavi/ passed",
+    "./run.sh uv run pytest passed with 51 tests",
+    "./node_modules/.bin/rollup -c rebuilt dist/index.js",
+    "./run.sh uv run python scripts/package_plugin.py rebuilt out/SDH-ludusavi.zip"
+  ]
+}
