@@ -827,3 +827,65 @@ def test_main_logs_initialization_failure_via_real_call(
         "Service initialization failed during startup: disk exploded" in msg
         for msg in logger.errors
     )
+
+
+def test_plugin_main_enforces_single_instance_before_service_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decky, _logger = fake_decky_module(tmp_path)
+    module = import_main(monkeypatch, decky, settings_manager=FakeSettingsManager)
+    plugin = module.Plugin()
+
+    order: list[str] = []
+
+    def fake_enforce(logger: Any, **_kwargs: Any) -> dict[str, Any]:
+        assert logger is decky.logger
+        order.append("enforce")
+        return {"status": "ok", "stale_pids": []}
+
+    monkeypatch.setattr(module, "enforce_single_instance", fake_enforce)
+
+    service = plugin._service()
+    monkeypatch.setattr(
+        service,
+        "reconcile_pending_update_install",
+        lambda _version: order.append("reconcile"),
+    )
+
+    original_service = plugin._service
+
+    def tracking_service() -> Any:
+        order.append("service")
+        return original_service()
+
+    monkeypatch.setattr(plugin, "_service", tracking_service)
+
+    asyncio.run(plugin._main())
+
+    assert "enforce" in order
+    assert order.index("enforce") < order.index("service")
+
+
+def test_plugin_main_survives_singleton_guard_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decky, _logger = fake_decky_module(tmp_path)
+    module = import_main(monkeypatch, decky, settings_manager=FakeSettingsManager)
+    plugin = module.Plugin()
+
+    def exploding_enforce(_logger: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("proc scan failed")
+
+    monkeypatch.setattr(module, "enforce_single_instance", exploding_enforce)
+
+    reconciled: list[str] = []
+    service = plugin._service()
+    monkeypatch.setattr(
+        service,
+        "reconcile_pending_update_install",
+        lambda version: reconciled.append(version),
+    )
+
+    asyncio.run(plugin._main())
+
+    assert reconciled

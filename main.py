@@ -12,6 +12,7 @@ from typing import Any
 import decky
 
 from sdh_ludusavi.rpc_pool import DaemonThreadPool
+from sdh_ludusavi.singleton import enforce_single_instance
 from sdh_ludusavi.service import (
     DEFAULT_NOTIFICATION_SETTINGS,
     OperationLockedError,
@@ -330,6 +331,11 @@ class Plugin:
 
     async def _main(self) -> None:
         decky.logger.info("SDH-ludusavi backend loaded")
+
+        # Decky's import race can leave an orphaned older backend running
+        # after an update; the newest instance is the one Decky owns, so it
+        # cleans up strictly-older siblings before touching shared state.
+        await self._call("enforce_single_instance", lambda: enforce_single_instance(decky.logger))
 
         init_result = await self._call("startup_init", self._service)
         if isinstance(init_result, dict) and init_result.get("status") == "failed":
