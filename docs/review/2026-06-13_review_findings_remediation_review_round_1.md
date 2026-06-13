@@ -484,7 +484,7 @@ Findings 1, 2, 3, 4, and 5 have been fully addressed:
 ### Finding 1
 - **Fix**: Replaced the two-value `_wait_until_gone` with a three-value version returning `(running, gone, changed)`. Updates `terminate_stale_siblings` to append `changed` to `report["skipped"]` and `gone` to `report["terminated"]` or `report["killed"]`.
 - **Tests Added/Corrected**:
-  - `test_pid_reused_after_sigterm`
+  - `test_pid_reused_between_sigterm_and_sigkill`
   - `test_uid_changes_while_waiting`
   - `test_cmdline_changes_after_sigterm`
   - `test_start_ticks_changes_after_sigterm`
@@ -517,6 +517,8 @@ Findings 1, 2, 3, 4, and 5 have been fully addressed:
 
 ### Finding 4 & 5
 - **Fix**: Updated `docs/agent_conversations/2026-06-13_review_findings_remediation.json` to properly record the RED-GREEN commands, document the invalid initial RED run, detail the files modified, and explicitly list all added test function names.
-- **Commit SHA**: (Included with doc updates)
+- **Commit SHA**: d62a8e0
 
-**Validation**: Full validation suite passes successfully, including Python tests at 85.76% coverage and frontend tests.
+**Validation**: Full validation suite passes sequentially. 603 passed Python tests at 85.82% coverage and 162 frontend tests.
+
+STATUS: CHANGES_REQUESTED
