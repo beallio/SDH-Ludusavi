@@ -175,6 +175,14 @@ def build_plugin_zip(
             if plugin_path in ("plugin.json", "package.json"):
                 data = json.loads(full_path.read_text(encoding="utf-8"))
                 data["version"] = version
+                if plugin_path == "plugin.json" and is_release:
+                    # The debug flag makes Decky hot-reload on every file
+                    # event after install, racing import_plugin and orphaning
+                    # backend processes (Decky v3.2.4, observed 2026-06-12).
+                    # Local builds keep it for the push-to-deck dev loop.
+                    flags = data.get("flags")
+                    if isinstance(flags, list):
+                        data["flags"] = [flag for flag in flags if flag != "debug"]
                 if plugin_path == "plugin.json" and release_tag:
                     if "publish" in data and "image" in data["publish"]:
                         data["publish"]["image"] = (
