@@ -169,14 +169,19 @@ def _wait_until_gone(
     return remaining, gone, changed
 
 
+def _record_pid(report: dict[str, list[int]], key: str, pid: int) -> None:
+    if pid not in report[key]:
+        report[key].append(pid)
+
+
 def _is_complete_identity(sibling: SiblingProcess) -> bool:
-    if sibling.pid <= 1:
+    if type(sibling.pid) is not int or sibling.pid <= 1:
         return False
-    if sibling.uid < 0:
+    if type(sibling.uid) is not int or sibling.uid < 0:
         return False
-    if sibling.start_ticks < 0:
+    if type(sibling.start_ticks) is not int or sibling.start_ticks < 0:
         return False
-    if not sibling.cmdline:
+    if not isinstance(sibling.cmdline, bytes) or not sibling.cmdline:
         return False
     return True
 
@@ -202,8 +207,8 @@ def terminate_stale_siblings(
 
     for sibling in siblings:
         if not _is_complete_identity(sibling):
-            if sibling.pid > 0 and sibling.pid not in report["skipped"]:
-                report["skipped"].append(sibling.pid)
+            if type(sibling.pid) is int and sibling.pid > 0:
+                _record_pid(report, "skipped", sibling.pid)
             continue
 
         key = (sibling.pid, sibling.start_ticks)
@@ -214,57 +219,63 @@ def terminate_stale_siblings(
     unique_candidates.sort(key=lambda s: s.pid)
 
     if len(unique_candidates) > _MAX_STALE_SIBLINGS:
-        report["refused"] = [s.pid for s in unique_candidates]
+        for s in unique_candidates:
+            _record_pid(report, "refused", s.pid)
         return report
 
     signalled: list[SiblingProcess] = []
     for sibling in unique_candidates:
         status = _check_identity_status(proc_root, sibling)
         if status == "gone":
-            report["terminated"].append(sibling.pid)
+            _record_pid(report, "terminated", sibling.pid)
             continue
         if status == "changed":
-            report["skipped"].append(sibling.pid)
+            _record_pid(report, "skipped", sibling.pid)
             continue
 
         try:
             kill_fn(sibling.pid, signal.SIGTERM)
             signalled.append(sibling)
         except ProcessLookupError:
-            report["terminated"].append(sibling.pid)
+            _record_pid(report, "terminated", sibling.pid)
         except OSError:
-            report["failed"].append(sibling.pid)
+            _record_pid(report, "failed", sibling.pid)
 
     survivors, gone_after_term, changed_after_term = _wait_until_gone(
         signalled, proc_root=proc_root, sleep_fn=sleep_fn, timeout_seconds=term_timeout_seconds
     )
-    report["terminated"].extend(s.pid for s in gone_after_term)
-    report["skipped"].extend(s.pid for s in changed_after_term)
+    for s in gone_after_term:
+        _record_pid(report, "terminated", s.pid)
+    for s in changed_after_term:
+        _record_pid(report, "skipped", s.pid)
 
     killed: list[SiblingProcess] = []
     for sibling in survivors:
         status = _check_identity_status(proc_root, sibling)
         if status == "gone":
-            report["terminated"].append(sibling.pid)
+            _record_pid(report, "terminated", sibling.pid)
             continue
         if status == "changed":
-            report["skipped"].append(sibling.pid)
+            _record_pid(report, "skipped", sibling.pid)
             continue
 
         try:
             kill_fn(sibling.pid, signal.SIGKILL)
             killed.append(sibling)
         except ProcessLookupError:
-            report["terminated"].append(sibling.pid)
+            _record_pid(report, "terminated", sibling.pid)
         except OSError:
-            report["failed"].append(sibling.pid)
+            _record_pid(report, "failed", sibling.pid)
 
     still_alive, gone_after_kill, changed_after_kill = _wait_until_gone(
         killed, proc_root=proc_root, sleep_fn=sleep_fn, timeout_seconds=_KILL_TIMEOUT_SECONDS
     )
-    report["killed"].extend(s.pid for s in gone_after_kill)
-    report["skipped"].extend(s.pid for s in changed_after_kill)
-    report["failed"].extend(s.pid for s in still_alive)
+    for s in gone_after_kill:
+        _record_pid(report, "killed", s.pid)
+    for s in changed_after_kill:
+        _record_pid(report, "skipped", s.pid)
+    for s in still_alive:
+        _record_pid(report, "failed", s.pid)
     return report
 
 

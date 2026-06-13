@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import shutil
 import signal
+import typing
+from typing import Any
 from pathlib import Path
 
 from sdh_ludusavi.singleton import (
@@ -164,12 +166,10 @@ def test_uid_changes_while_waiting(tmp_path: Path) -> None:
         [sibling], kill_fn=kill, sleep_fn=sleep_and_change_uid, proc_root=tmp_path
     )
 
-    assert kill.calls == [
-        (6270, signal.SIGTERM)
-    ]  # Sends term, wait loop notices change and treats it as gone?
-    # Wait, if UID changes between TERM and KILL, we should treat it as gone, so it goes in "terminated" ?
-    # Let's verify report expectations. "terminated: original identity disappeared after SIGTERM"
+    assert kill.calls == [(6270, signal.SIGTERM)]
     assert report["skipped"] == [6270]
+    assert report["terminated"] == []
+    assert report["killed"] == []
 
 
 def test_cmdline_changes_while_waiting(tmp_path: Path) -> None:
@@ -589,3 +589,73 @@ def test_refusal_logging_contains_list_and_count(tmp_path: Path) -> None:
     assert report["reason"] == "too_many_stale_siblings"
     assert any("count=9" in err for err in logger.errors)
     assert any(str(list(range(1000, 1009))) in err for err in logger.errors)
+
+
+@pytest.mark.parametrize(
+    "malformed_kwargs",
+    [
+        {"uid": None},
+        {"uid": "1000"},
+        {"uid": True},
+        {"start_ticks": None},
+        {"start_ticks": "500"},
+        {"start_ticks": True},
+        {"cmdline": None},
+        {"cmdline": "plugin"},
+        {"cmdline": b""},
+    ],
+)
+def test_malformed_runtime_identity(tmp_path: Path, malformed_kwargs: dict[str, Any]) -> None:
+    kwargs = {"pid": 6270, "uid": 1000, "start_ticks": 500, "cmdline": PLUGIN_TITLE}
+    kwargs.update(malformed_kwargs)
+
+    sibling = SiblingProcess(**typing.cast(Any, kwargs))
+
+    report = terminate_stale_siblings(
+        [sibling], kill_fn=ExplodingKill(), sleep_fn=exploding_sleep, proc_root=tmp_path
+    )
+
+    assert report["skipped"] == [6270]
+    assert report["terminated"] == []
+    assert report["killed"] == []
+    assert not report.get("refused")
+
+
+def test_duplicate_skipped_entries_are_prevented(tmp_path: Path) -> None:
+    kill = FakeKill(tmp_path)
+    write_proc_entry(tmp_path, 6270, start_ticks=900)
+
+    siblings = [
+        SiblingProcess(pid=6270, uid=1000, start_ticks=500, cmdline=PLUGIN_TITLE),
+        SiblingProcess(pid=6270, uid=1000, start_ticks=600, cmdline=PLUGIN_TITLE),
+    ]
+    report = terminate_stale_siblings(
+        siblings, kill_fn=kill, sleep_fn=lambda _s: None, proc_root=tmp_path
+    )
+    assert report["skipped"] == [6270]
+
+
+def test_incomplete_and_complete_do_not_duplicate_skipped(tmp_path: Path) -> None:
+    kill = FakeKill(tmp_path)
+    write_proc_entry(tmp_path, 6270, start_ticks=900)
+
+    siblings = [
+        SiblingProcess(pid=6270, uid=1000, start_ticks=500, cmdline=typing.cast(Any, b"")),
+        SiblingProcess(pid=6270, uid=1000, start_ticks=600, cmdline=PLUGIN_TITLE),
+    ]
+    report = terminate_stale_siblings(
+        siblings, kill_fn=kill, sleep_fn=lambda _s: None, proc_root=tmp_path
+    )
+    assert report["skipped"] == [6270]
+
+
+def test_duplicate_pid_outcomes_are_prevented(tmp_path: Path) -> None:
+    kill = FakeKill(tmp_path)
+    siblings = [
+        SiblingProcess(pid=6270, uid=1000, start_ticks=500, cmdline=PLUGIN_TITLE),
+        SiblingProcess(pid=6270, uid=1000, start_ticks=600, cmdline=PLUGIN_TITLE),
+    ]
+    report = terminate_stale_siblings(
+        siblings, kill_fn=kill, sleep_fn=lambda _s: None, proc_root=tmp_path
+    )
+    assert report["terminated"] == [6270]

@@ -3,26 +3,30 @@
   "objective": "Address review findings: singleton PID reuse, oversized match sets, and re-vendor pyludusavi 0.2.6",
   "branch": "fix/review-findings-remediation",
   "files_modified": [
-    "py_modules/pyludusavi/*",
-    "py_modules/pyludusavi-0.2.6.dist-info/*",
+    "docs/agent_conversations/2026-06-13_review_findings_remediation.json",
+    "docs/plans/2026-06-13_review_findings_remediation.md",
+    "docs/review/2026-06-13_review_findings_remediation_review_round_1.md",
+    "docs/review/2026-06-13_review_findings_remediation_review_round_2.md",
+    "py_modules/pyludusavi-0.2.6.dist-info/METADATA",
+    "py_modules/pyludusavi-0.2.6.dist-info/RECORD",
+    "py_modules/pyludusavi-0.2.6.dist-info/WHEEL",
+    "py_modules/pyludusavi-0.2.6.dist-info/licenses/LICENSE",
+    "py_modules/pyludusavi/discovery.py",
     "py_modules/sdh_ludusavi/singleton.py",
     "pyproject.toml",
-    "uv.lock",
     "scripts/package_plugin.py",
     "scripts/validate_plugin_zip.py",
     "tests/test_ludusavi.py",
-    "tests/test_protocol.py",
-    "tests/test_package_plugin.py",
-    "tests/test_validate_plugin_zip.py",
     "tests/test_ludusavi_discovery.py",
-    "tests/test_vendored_pyludusavi.py",
+    "tests/test_package_plugin.py",
+    "tests/test_protocol.py",
     "tests/test_singleton.py",
-    "docs/plans/2026-06-13_review_findings_remediation.md",
-    "docs/review/2026-06-13_review_findings_remediation_review_round_1.md",
-    "docs/agent_conversations/2026-06-13_review_findings_remediation.json"
+    "tests/test_validate_plugin_zip.py",
+    "tests/test_vendored_pyludusavi.py",
+    "uv.lock"
   ],
   "tests_added": [
-    "test_pid_reused_after_sigterm",
+    "test_pid_reused_between_sigterm_and_sigkill",
     "test_uid_changes_while_waiting",
     "test_cmdline_changes_after_sigterm",
     "test_start_ticks_changes_after_sigterm",
@@ -35,7 +39,11 @@
     "test_limit_ignores_incomplete_identities",
     "test_nine_complete_triggers_refusal",
     "test_refusal_logging_contains_list_and_count",
-    "test_upstream_timeout_behavior_present"
+    "test_upstream_timeout_behavior_present",
+    "test_malformed_runtime_identity",
+    "test_duplicate_skipped_entries_are_prevented",
+    "test_incomplete_and_complete_do_not_duplicate_skipped",
+    "test_duplicate_pid_outcomes_are_prevented"
   ],
   "design_decisions": {
     "process_identity_design": "Introduced a frozen SiblingProcess dataclass encapsulating PID, UID, start_ticks, and cmdline. The identities are captured using _capture_identity which takes a stable snapshot by reading start_ticks twice. A process is re-verified during wait intervals. A zombie or vanished process is classified as 'gone'. A process whose identity changes is 'changed' and tracked in the 'skipped' array.",
@@ -46,10 +54,11 @@
   "results": {
     "red_commands": [
       "The initial RED run was invalid because only coverage failed.",
-      "Review Round 1 RED command: UV_FROZEN=1 ./run.sh uv run pytest -o addopts=\"\" tests/test_singleton.py -k \"identity or reused or changes or differently or zombies or incomplete or trigger or refusal\" > /tmp/sdh_ludusavi/2026-06-13_review_findings_remediation_review_round_1_red.log"
+      "Review Round 1 RED command: UV_FROZEN=1 ./run.sh uv run pytest -o addopts=\"\" tests/test_singleton.py -k \"identity or reused or changes or differently or zombies or incomplete or trigger or refusal\" > /tmp/sdh_ludusavi/2026-06-13_review_findings_remediation_review_round_1_red.log",
+      "Review Round 2 RED command: UV_FROZEN=1 ./run.sh uv run pytest -o addopts=\"\" tests/test_singleton.py -k \"malformed_runtime_identity or duplicate\" > /tmp/sdh_ludusavi/2026-06-13_review_findings_remediation_review_round_2_red.log"
     ],
     "green_commands": "UV_FROZEN=1 ./run.sh uv run pytest tests/test_singleton.py",
-    "validation": "Passed all linting, typechecking, python and pnpm tests successfully. 580 passed Python tests with 85.61% coverage. 162 passed frontend tests.",
+    "validation": "Passed all linting, typechecking, python and pnpm tests successfully. 603 passed Python tests with 85.82% coverage. 162 passed frontend tests.",
     "commit_shas": [
       "e5e9706 docs(plans): add review findings remediation plan",
       "5e8deb7 fix(singleton): bind cleanup signals to process identities and refuse oversized match sets",
