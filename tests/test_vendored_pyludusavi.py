@@ -41,17 +41,19 @@ def test_pin_matches_vendored_version():
     )
 
 
-def test_local_patch_survives_revendor():
+def test_upstream_timeout_behavior_present():
     """
-    Assert the local discovery timeout patch is present in pyludusavi.
-    A re-vendor that drops the local discovery timeout patch must fail this test
-    until the patch is re-applied or upstreamed.
+    Assert the upstream discovery timeout is present in pyludusavi.
     """
     discovery_path = Path("py_modules/pyludusavi/discovery.py")
     assert discovery_path.exists(), "discovery.py not found in vendored pyludusavi"
 
     content = discovery_path.read_text()
-    assert "SDH-Ludusavi local patch" in content, "Local patch marker missing"
-    assert "_VERIFY_TIMEOUT_SECONDS" in content, (
-        "Local patch identifier _VERIFY_TIMEOUT_SECONDS missing"
+    assert "SDH-Ludusavi local patch" not in content, "Local patch marker must be absent"
+    assert "_DISCOVERY_VERIFY_TIMEOUT_SECONDS = 15.0" in content, (
+        "Upstream timeout constant missing"
     )
+    assert content.count("timeout=_DISCOVERY_VERIFY_TIMEOUT_SECONDS") == 2, (
+        "Upstream timeout constant not passed to subprocess calls"
+    )
+    assert "subprocess.TimeoutExpired" in content, "TimeoutExpired must be handled"

@@ -4,18 +4,13 @@ from pathlib import Path
 from typing import Mapping, Optional, Union
 from ._environment import resolve_environment
 
+_DISCOVERY_VERIFY_TIMEOUT_SECONDS = 15.0
+
 
 class LudusaviNotFoundError(Exception):
     """Raised when the Ludusavi executable or Flatpak could not be found."""
 
     pass
-
-
-# SDH-Ludusavi local patch (see docs/plans/2026-06-09_fix_event_loop_blocking_rpcs.md):
-# bound the discovery verification subprocess so a wedged `flatpak run` cannot
-# hang adapter initialization indefinitely. Upstream to pyludusavi and remove
-# on the next re-vendor.
-_VERIFY_TIMEOUT_SECONDS = 15.0
 
 
 def find_ludusavi(
@@ -91,7 +86,7 @@ def _verify(prefix: list[str], env: Optional[dict[str, str]] = None) -> bool:
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=_VERIFY_TIMEOUT_SECONDS,
+                timeout=_DISCOVERY_VERIFY_TIMEOUT_SECONDS,
             )
         else:
             result = subprocess.run(
@@ -100,7 +95,7 @@ def _verify(prefix: list[str], env: Optional[dict[str, str]] = None) -> bool:
                 text=True,
                 check=False,
                 env=env,
-                timeout=_VERIFY_TIMEOUT_SECONDS,
+                timeout=_DISCOVERY_VERIFY_TIMEOUT_SECONDS,
             )
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):

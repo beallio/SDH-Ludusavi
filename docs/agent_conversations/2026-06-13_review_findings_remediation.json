@@ -1,0 +1,78 @@
+{
+  "date": "2026-06-13",
+  "objective": "Address review findings: singleton PID reuse, oversized match sets, and re-vendor pyludusavi 0.2.6",
+  "branch": "fix/review-findings-remediation",
+  "files_modified": [
+    "docs/agent_conversations/2026-06-13_review_findings_remediation.json",
+    "docs/plans/2026-06-13_review_findings_remediation.md",
+    "docs/review/2026-06-13_review_findings_remediation_review_round_1.md",
+    "docs/review/2026-06-13_review_findings_remediation_review_round_2.md",
+    "docs/review/2026-06-13_review_findings_remediation_review_round_3.md",
+    "py_modules/pyludusavi-0.2.6.dist-info/METADATA",
+    "py_modules/pyludusavi-0.2.6.dist-info/RECORD",
+    "py_modules/pyludusavi-0.2.6.dist-info/WHEEL",
+    "py_modules/pyludusavi-0.2.6.dist-info/licenses/LICENSE",
+    "py_modules/pyludusavi/discovery.py",
+    "py_modules/sdh_ludusavi/singleton.py",
+    "pyproject.toml",
+    "scripts/package_plugin.py",
+    "scripts/validate_plugin_zip.py",
+    "tests/test_ludusavi.py",
+    "tests/test_ludusavi_discovery.py",
+    "tests/test_package_plugin.py",
+    "tests/test_protocol.py",
+    "tests/test_singleton.py",
+    "tests/test_validate_plugin_zip.py",
+    "tests/test_vendored_pyludusavi.py",
+    "uv.lock"
+  ],
+  "tests_added": [
+    "test_pid_reused_between_sigterm_and_sigkill",
+    "test_uid_changes_while_waiting",
+    "test_cmdline_changes_after_sigterm",
+    "test_start_ticks_changes_after_sigterm",
+    "test_malformed_identity_data_after_sigterm",
+    "test_identity_changes_during_post_sigkill_wait",
+    "test_discovery_reads_ticks_differently",
+    "test_discovery_reads_ticks_consistently",
+    "test_discovery_ignores_zombies",
+    "test_discovery_own_process_ticks_differ",
+    "test_limit_ignores_incomplete_identities",
+    "test_nine_complete_triggers_refusal",
+    "test_refusal_logging_contains_list_and_count",
+    "test_upstream_timeout_behavior_present",
+    "test_malformed_runtime_identity",
+    "test_duplicate_skipped_entries_are_prevented",
+    "test_incomplete_and_complete_do_not_duplicate_skipped",
+    "test_duplicate_pid_outcomes_are_prevented"
+  ],
+  "design_decisions": {
+    "process_identity_design": "Introduced a frozen SiblingProcess dataclass encapsulating PID, UID, start_ticks, and cmdline. The identities are captured using _capture_identity which takes a stable snapshot by reading start_ticks twice. A process is re-verified during wait intervals. A zombie or vanished process is classified as 'gone'. A process whose identity changes is 'changed' and tracked in the 'skipped' array.",
+    "safety_limit_behavior": "Enforced the maximum limit of 8 stale siblings. Excluded incomplete identities (e.g. empty cmdline or negative pids) before checking the limit. If the valid deduplicated count exceeds 8, all identities are refused with no signals sent, the complete list is logged, and plugin startup continues safely.",
+    "pyludusavi_override": "Used the explicit `exclude-newer-package` option exclusively for `pyludusavi=2026-06-14T00:00:00Z` to download version 0.2.6 while preserving the global 7-day UV policy. The dependency rule was updated to `>=0.2.6` and the local timeout patch was removed naturally.",
+    "local_discovery_patch": "Removed the old local timeout patch and its related tests in favor of the upstream timeout behavior in 0.2.6, asserting that it functions correctly."
+  },
+  "results": {
+    "red_commands": [
+      "The initial RED run was invalid because only coverage failed.",
+      "Review Round 1 RED command: UV_FROZEN=1 ./run.sh uv run pytest -o addopts=\"\" tests/test_singleton.py -k \"identity or reused or changes or differently or zombies or incomplete or trigger or refusal\" > /tmp/sdh_ludusavi/2026-06-13_review_findings_remediation_review_round_1_red.log",
+      "Review Round 2 RED command: UV_FROZEN=1 ./run.sh uv run pytest -o addopts=\"\" tests/test_singleton.py -k \"malformed_runtime_identity or duplicate\" > /tmp/sdh_ludusavi/2026-06-13_review_findings_remediation_review_round_2_red.log"
+    ],
+    "green_commands": [
+      "UV_FROZEN=1 ./run.sh uv run pytest -o addopts=\"\" tests/test_singleton.py -k \"identity or reused or changes or differently or zombies or incomplete or trigger or refusal\"",
+      "UV_FROZEN=1 ./run.sh uv run pytest -o addopts=\"\" tests/test_singleton.py -k \"malformed_runtime_identity or duplicate\"",
+      "UV_FROZEN=1 ./run.sh uv run pytest"
+    ],
+    "validation": "Passed all linting, typechecking, python and pnpm tests successfully. 603 passed Python tests with 85.82% coverage. 162 passed frontend tests.",
+    "commit_shas": [
+      "e5e9706 docs(plans): add review findings remediation plan",
+      "5e8deb7 fix(singleton): bind cleanup signals to process identities and refuse oversized match sets",
+      "2ac00c4 chore(deps): re-vendor pyludusavi 0.2.6",
+      "ae8d4f1 docs(agent): record review findings remediation session",
+      "25673a0 fix(singleton): exact identity tracking and valid safety cap",
+      "d62a8e0 docs(review): record round 1 resolution and update session log",
+      "7f570ce fix(singleton): exact runtime type validation and duplicate pid prevention",
+      "96ddc13 docs(review): record round 3 documentation findings and session log"
+    ]
+  }
+}

@@ -140,11 +140,11 @@ wheels = [
 
 [[package]]
 name = "pyludusavi"
-version = "0.2.5"
+version = "0.2.6"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/35/07/3b44b115fd09c2d89b383f546103671ada6fa6570161273fa53f9517611f/pyludusavi-0.2.5.tar.gz", hash = "sha256:8db5e42955bdcb6efb009969b1d8bc59075780f265106e703b19fd18a18e3fed", size = 13026, upload-time = "2026-06-13T02:22:43.886Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d6/7f/9a1763bb2761af6e18471ac5ca567c2b8b76c464d94bf8a43414603560de/pyludusavi-0.2.6.tar.gz", hash = "sha256:93c51e1194d4c2f4e72f55a29c59aebb3a11849dbdc1e4a5366452fb638f1565", size = 13182, upload-time = "2026-06-13T06:13:22.575Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/62/8a/5bc00a7a9a5c2363e05122fd2207893d723c2ae6c7f0384dd8bfd6a74972/pyludusavi-0.2.5-py3-none-any.whl", hash = "sha256:0eefa84c5435d24965aadbea378239c8c47296d00814050759707106dc7919ad", size = 15471, upload-time = "2026-06-13T02:22:44.625Z" },
+    { url = "https://files.pythonhosted.org/packages/49/fa/b3a93c9f52711297a4d455fdc457101c04905f4a6b4771414d333978553b/pyludusavi-0.2.6-py3-none-any.whl", hash = "sha256:4e6e425c4ef43bf8810b5fcc3912a1c61291d329dd979b71a946064c1048e16b", size = 15647, upload-time = "2026-06-13T06:13:23.397Z" },
 ]
 
 [[package]]
@@ -232,7 +232,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pyludusavi", specifier = ">=0.2.5" }]
+requires-dist = [{ name = "pyludusavi", specifier = ">=0.2.6" }]
 
 [package.metadata.requires-dev]
 dev = [
