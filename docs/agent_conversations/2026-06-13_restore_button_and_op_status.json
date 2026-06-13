@@ -1,0 +1,14 @@
+{
+  "date": "2026-06-13",
+  "objective": "Fix restore button width and update operation status to reflect 'Restore complete' after manual restore.",
+  "files_modified": [
+    "src/components/modals/BackupBrowserModal.tsx",
+    "src/components/qam/LudusaviContent.tsx"
+  ],
+  "tests_added": [],
+  "design_decisions": [
+    "Used flex: 1 and minWidth: 0 on text column, fixed width 120px with flexShrink: 0 on Restore button in BackupBrowserModal.",
+    "Refetched game history after runSnapshotRestore and runForceOperation, then stored via ludusaviStore.setGameHistory to correctly update last operation text."
+  ],
+  "results": "All tests passed. Reviewer granted PASS. Merged to dev and dispatched dev release."
+}
