@@ -36,6 +36,13 @@ describe("AutoSyncStatusSurface Status Pending Upload", () => {
     expect(pendingIcon).not.toBe(iconSvgForAutoSyncStatus("syncthing_uploading"));
   });
 
+  it("tightens the pending icon viewBox so the ring fills the box like sibling icons", () => {
+    const pendingIcon = iconSvgForAutoSyncStatus("syncthing_pending_upload");
+    // Ring outer edge spans 48..464 (circle 64..448 plus 32-wide stroke), so the
+    // viewBox must crop to that 416-unit window centered on (256, 256).
+    expect(pendingIcon).toContain('viewBox="48 48 416 416"');
+  });
+
   it("applies the ring-spin animation class only to syncthing_pending_upload", () => {
     const pendingHtml = renderAutoSyncStatusHtml({
       status: "syncthing_pending_upload",
