@@ -72,7 +72,7 @@
       "25673a0 fix(singleton): exact identity tracking and valid safety cap",
       "d62a8e0 docs(review): record round 1 resolution and update session log",
       "7f570ce fix(singleton): exact runtime type validation and duplicate pid prevention",
-      "pending/current documentation commit"
+      "96ddc13 docs(review): record round 3 documentation findings and session log"
     ]
   }
 }
