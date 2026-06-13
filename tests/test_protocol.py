@@ -20,7 +20,7 @@ def test_decky_required_plugin_files_exist():
         "src/index.tsx",
         "py_modules/sdh_ludusavi/service.py",
         "py_modules/pyludusavi/__init__.py",
-        "py_modules/pyludusavi-0.2.4.dist-info/licenses/LICENSE",
+        "py_modules/pyludusavi-0.2.5.dist-info/licenses/LICENSE",
     ]:
         assert Path(required_path).exists()
 
