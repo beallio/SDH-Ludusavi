@@ -23,8 +23,6 @@ from typing import Any, Callable
 KillFn = Callable[[int, int], None]
 SleepFn = Callable[[float], None]
 
-# A storm should only ever leak a handful of instances; anything beyond this
-# suggests the identity match is wrong, so refuse to signal.
 _MAX_STALE_SIBLINGS = 8
 _TERM_TIMEOUT_SECONDS = 3.0
 _KILL_TIMEOUT_SECONDS = 1.0
@@ -40,12 +38,10 @@ class SiblingProcess:
 
 
 def _read_start_ticks(proc_root: Path, pid: int) -> int | None:
-    """Field 22 of /proc/<pid>/stat (starttime in clock ticks)."""
     try:
         data = (proc_root / str(pid) / "stat").read_bytes()
         _, _, after_comm = data.rpartition(b")")
         fields = after_comm.split()
-        # after_comm holds fields 3..52; starttime (field 22) is index 19.
         return int(fields[19])
     except (OSError, ValueError, IndexError):
         return None
@@ -71,52 +67,50 @@ def _read_uid(proc_root: Path, pid: int) -> int | None:
     return None
 
 
-def _is_running(proc_root: Path, pid: int) -> bool:
-    """A vanished or zombie process no longer needs signalling."""
+def _capture_identity(proc_root: Path, pid: int) -> SiblingProcess | None:
+    ticks_before = _read_start_ticks(proc_root, pid)
+    if ticks_before is None:
+        return None
+    uid = _read_uid(proc_root, pid)
+    if uid is None:
+        return None
+    try:
+        cmdline = (proc_root / str(pid) / "cmdline").read_bytes()
+    except OSError:
+        return None
+    if not cmdline:
+        return None
     state = _read_state(proc_root, pid)
-    return state is not None and state != "Z"
+    if state is None or state == "Z":
+        return None
+    ticks_after = _read_start_ticks(proc_root, pid)
+    if ticks_after != ticks_before:
+        return None
+
+    return SiblingProcess(pid=pid, uid=uid, start_ticks=ticks_before, cmdline=cmdline)
 
 
 def _check_identity_status(proc_root: Path, sibling: SiblingProcess) -> str:
-    """Returns 'running', 'gone', or 'changed'"""
     if not (proc_root / str(sibling.pid)).exists():
         return "gone"
-    ticks1 = _read_start_ticks(proc_root, sibling.pid)
-    uid = _read_uid(proc_root, sibling.pid)
-    try:
-        cmdline = (proc_root / str(sibling.pid) / "cmdline").read_bytes()
-    except OSError:
-        cmdline = None
     state = _read_state(proc_root, sibling.pid)
-
     if state == "Z":
         return "gone"
 
-    if ticks1 is None or uid is None or not cmdline or state is None:
+    current = _capture_identity(proc_root, sibling.pid)
+    if current is None:
         return "changed"
-
-    ticks2 = _read_start_ticks(proc_root, sibling.pid)
-    if ticks1 != ticks2:
+    if current != sibling:
         return "changed"
-
-    if ticks1 != sibling.start_ticks or uid != sibling.uid or cmdline != sibling.cmdline:
-        return "changed"
-
     return "running"
 
 
 def find_stale_siblings(
     *, proc_root: Path = Path("/proc"), pid: int | None = None
 ) -> list[SiblingProcess]:
-    """Strictly-older processes with our exact cmdline and uid."""
     own_pid = os.getpid() if pid is None else pid
-    try:
-        own_cmdline = (proc_root / str(own_pid) / "cmdline").read_bytes()
-        own_uid = _read_uid(proc_root, own_pid)
-        own_ticks = _read_start_ticks(proc_root, own_pid)
-    except OSError:
-        return []
-    if not own_cmdline or own_uid is None or own_ticks is None:
+    own_identity = _capture_identity(proc_root, own_pid)
+    if own_identity is None:
         return []
 
     stale: list[SiblingProcess] = []
@@ -126,31 +120,24 @@ def find_stale_siblings(
         other_pid = int(entry.name)
         if other_pid == own_pid:
             continue
-        try:
-            if (entry / "cmdline").read_bytes() != own_cmdline:
-                continue
-        except OSError:
+        other_identity = _capture_identity(proc_root, other_pid)
+        if other_identity is None:
             continue
-        if _read_uid(proc_root, other_pid) != own_uid:
+        if other_identity.cmdline != own_identity.cmdline:
             continue
-        other_ticks = _read_start_ticks(proc_root, other_pid)
-        if other_ticks is None:
+        if other_identity.uid != own_identity.uid:
             continue
-        # Strictly older only: in a mutual scan, exactly one instance (the
-        # youngest — Decky's dict winner) survives.
-        if (other_ticks, other_pid) < (own_ticks, own_pid):
-            stale.append(
-                SiblingProcess(
-                    pid=other_pid, uid=own_uid, start_ticks=other_ticks, cmdline=own_cmdline
-                )
-            )
+        if (other_identity.start_ticks, other_identity.pid) < (
+            own_identity.start_ticks,
+            own_identity.pid,
+        ):
+            stale.append(other_identity)
     return stale
 
 
 def find_stale_sibling_pids(
     *, proc_root: Path = Path("/proc"), pid: int | None = None
 ) -> list[int]:
-    """Pids of strictly-older processes with our exact cmdline and uid."""
     return sorted(sibling.pid for sibling in find_stale_siblings(proc_root=proc_root, pid=pid))
 
 
@@ -160,10 +147,10 @@ def _wait_until_gone(
     proc_root: Path,
     sleep_fn: SleepFn,
     timeout_seconds: float,
-) -> tuple[list[SiblingProcess], list[SiblingProcess]]:
-    """Returns (survivors, gone/changed)"""
+) -> tuple[list[SiblingProcess], list[SiblingProcess], list[SiblingProcess]]:
     remaining = siblings[:]
     gone: list[SiblingProcess] = []
+    changed: list[SiblingProcess] = []
     waited = 0.0
     while remaining and waited < timeout_seconds:
         sleep_fn(_POLL_INTERVAL_SECONDS)
@@ -175,11 +162,23 @@ def _wait_until_gone(
             if status == "gone":
                 gone.append(sibling)
             elif status == "changed":
-                gone.append(sibling)
+                changed.append(sibling)
             else:
                 still_running.append(sibling)
         remaining = still_running
-    return remaining, gone
+    return remaining, gone, changed
+
+
+def _is_complete_identity(sibling: SiblingProcess) -> bool:
+    if sibling.pid <= 1:
+        return False
+    if sibling.uid < 0:
+        return False
+    if sibling.start_ticks < 0:
+        return False
+    if not sibling.cmdline:
+        return False
+    return True
 
 
 def terminate_stale_siblings(
@@ -190,7 +189,6 @@ def terminate_stale_siblings(
     proc_root: Path = Path("/proc"),
     term_timeout_seconds: float = _TERM_TIMEOUT_SECONDS,
 ) -> dict[str, list[int]]:
-    """SIGTERM the given pids, escalate survivors to SIGKILL."""
     report: dict[str, list[int]] = {
         "terminated": [],
         "killed": [],
@@ -199,27 +197,28 @@ def terminate_stale_siblings(
         "refused": [],
     }
 
-    # Deduplicate by (pid, start_ticks)
     seen: set[tuple[int, int]] = set()
     unique_candidates: list[SiblingProcess] = []
+
     for sibling in siblings:
+        if not _is_complete_identity(sibling):
+            if sibling.pid > 0 and sibling.pid not in report["skipped"]:
+                report["skipped"].append(sibling.pid)
+            continue
+
         key = (sibling.pid, sibling.start_ticks)
         if key not in seen:
             seen.add(key)
             unique_candidates.append(sibling)
 
-    # Sort deterministically by PID
     unique_candidates.sort(key=lambda s: s.pid)
 
-    # Valid candidates only
-    candidates = [s for s in unique_candidates if s.pid > 1]
-
-    if len(candidates) > _MAX_STALE_SIBLINGS:
-        report["refused"] = [s.pid for s in candidates]
+    if len(unique_candidates) > _MAX_STALE_SIBLINGS:
+        report["refused"] = [s.pid for s in unique_candidates]
         return report
 
     signalled: list[SiblingProcess] = []
-    for sibling in candidates:
+    for sibling in unique_candidates:
         status = _check_identity_status(proc_root, sibling)
         if status == "gone":
             report["terminated"].append(sibling.pid)
@@ -236,10 +235,11 @@ def terminate_stale_siblings(
         except OSError:
             report["failed"].append(sibling.pid)
 
-    survivors, gone_after_term = _wait_until_gone(
+    survivors, gone_after_term, changed_after_term = _wait_until_gone(
         signalled, proc_root=proc_root, sleep_fn=sleep_fn, timeout_seconds=term_timeout_seconds
     )
     report["terminated"].extend(s.pid for s in gone_after_term)
+    report["skipped"].extend(s.pid for s in changed_after_term)
 
     killed: list[SiblingProcess] = []
     for sibling in survivors:
@@ -259,10 +259,11 @@ def terminate_stale_siblings(
         except OSError:
             report["failed"].append(sibling.pid)
 
-    still_alive, gone_after_kill = _wait_until_gone(
+    still_alive, gone_after_kill, changed_after_kill = _wait_until_gone(
         killed, proc_root=proc_root, sleep_fn=sleep_fn, timeout_seconds=_KILL_TIMEOUT_SECONDS
     )
     report["killed"].extend(s.pid for s in gone_after_kill)
+    report["skipped"].extend(s.pid for s in changed_after_kill)
     report["failed"].extend(s.pid for s in still_alive)
     return report
 
@@ -275,7 +276,6 @@ def enforce_single_instance(
     kill_fn: KillFn = os.kill,
     sleep_fn: SleepFn = time.sleep,
 ) -> dict[str, Any]:
-    """Find and terminate stale siblings; never raises."""
     try:
         siblings = find_stale_siblings(proc_root=proc_root, pid=pid)
         if not siblings:
@@ -315,11 +315,11 @@ def enforce_single_instance(
                 report["skipped"],
             )
         return {"status": "ok", "stale_pids": stale_pids, **report}
-    # Intentionally broad: the guard must never block plugin startup.
+    # Intentionally broad to protect plugin startup
     except Exception as exc:
         try:
             logger.error("Singleton guard failed: %s", exc)
-        # Intentionally broad: even logging the failure must not raise.
+        # Intentionally broad inside fallback
         except Exception:
             pass
         return {"status": "failed", "message": str(exc), "stale_pids": []}
