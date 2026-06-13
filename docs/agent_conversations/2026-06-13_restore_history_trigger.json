@@ -1,0 +1,18 @@
+{
+  "date": "2026-06-13",
+  "task_objective": "Fix point-in-time restore not recorded by collapsing to manual_restore",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/lifecycle.py",
+    "tests/test_backup_browser.py",
+    "tests/test_history_integration.py",
+    "tests/test_service.py"
+  ],
+  "tests_added": [
+    "test_history_point_in_time_restore_records_restored"
+  ],
+  "design_decisions": [
+    "Collapsed Backup Browser's point-in-time restore to use 'manual_restore' trigger instead of 'point_in_time_restore' which was dropping entries in history logic.",
+    "Added history integration test utilizing real HistoryManager to lock in correct 'last_operation' status updates."
+  ],
+  "results": "All tests pass. Reviewer approved. Merged fix to dev and published dev release v0.3.0."
+}
