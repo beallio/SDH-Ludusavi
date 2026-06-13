@@ -132,7 +132,7 @@ export function BackupBrowserModal({
                           justifyContent: "space-between",
                         }}
                       >
-                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px", flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: "bold" }}>{title}</div>
                           <div style={{ fontSize: "14px", color: "#cbd5e1" }}>
                             {sizeText}
@@ -147,6 +147,7 @@ export function BackupBrowserModal({
                         <DialogButton
                           preferredFocus={idx === 0}
                           onClick={() => onRestore(b.id, timestampStr)}
+                          style={{ width: "120px", flexShrink: 0, marginLeft: "12px" }}
                         >
                           Restore
                         </DialogButton>
