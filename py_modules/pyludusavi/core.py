@@ -1,7 +1,7 @@
 import subprocess
 import json
 import logging
-from typing import Any, Optional, Literal, TypeVar, Generic, Mapping
+from typing import Any, Optional, Literal, TypeVar, Generic, Mapping, overload
 from dataclasses import dataclass
 from ._environment import resolve_environment
 
@@ -33,6 +33,12 @@ class LudusaviContractError(LudusaviError):
     pass
 
 
+class LudusaviTimeoutError(LudusaviError):
+    """Raised when the Ludusavi process exceeds its timeout."""
+
+    pass
+
+
 @dataclass
 class LudusaviResponse(Generic[T]):
     """Container for Ludusavi command responses."""
@@ -49,6 +55,28 @@ class LudusaviExecutor:
     def __init__(self, command_prefix: list[str], env: Optional[Mapping[str, str]] = None):
         self.command_prefix = command_prefix
         self.env = resolve_environment(env)
+
+    @overload
+    def execute(
+        self,
+        args: list[str],
+        mode: Literal["JSON", "TEXT", "STDIN_JSON"] = ...,
+        input_data: Optional[Any] = ...,
+        timeout: Optional[float] = ...,
+        env: Optional[Mapping[str, str]] = ...,
+        auto_api: bool = ...,
+    ) -> LudusaviResponse: ...
+
+    @overload
+    def execute(
+        self,
+        args: list[str],
+        mode: Literal["SPAWN"],
+        input_data: Optional[Any] = ...,
+        timeout: Optional[float] = ...,
+        env: Optional[Mapping[str, str]] = ...,
+        auto_api: bool = ...,
+    ) -> None: ...
 
     def execute(
         self,
@@ -106,7 +134,9 @@ class LudusaviExecutor:
                 env=subprocess_env,
             )
         except subprocess.TimeoutExpired as e:
-            raise LudusaviError(f"Ludusavi command timed out after {timeout}s: {full_cmd}") from e
+            raise LudusaviTimeoutError(
+                f"Ludusavi command timed out after {timeout}s: {full_cmd}"
+            ) from e
 
         if result.returncode != 0:
             raise LudusaviExecutionError(full_cmd, result.returncode, result.stdout, result.stderr)

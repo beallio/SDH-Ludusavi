@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: pyludusavi
-Version: 0.2.4
+Version: 0.2.5
 Summary: A robust, type-safe Python wrapper for the Ludusavi game backup tool.
 Project-URL: Homepage, https://github.com/beallio/pyludusavi
 Project-URL: Repository, https://github.com/beallio/pyludusavi
@@ -15,6 +15,7 @@ Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3.12
 Classifier: Topic :: Games/Entertainment
 Classifier: Topic :: System :: Archiving :: Backup
+Classifier: Typing :: Typed
 Requires-Python: >=3.12
 Description-Content-Type: text/markdown
 
@@ -145,13 +146,51 @@ lud.wrap(["steam", "-applaunch", "292030"], infer="steam", force=True)
 ```
 
 #### Game Aliases
-`add_game_alias()` updates Ludusavi's `customGames` configuration using only the Python standard library. It writes the updated config as JSON, which Ludusavi can read as YAML, but this does not preserve existing comments or formatting in `config.yaml`.
+`add_game_alias()` maps a custom name to an existing manifest title by updating
+Ludusavi's `customGames` configuration using only the Python standard library. It is
+**idempotent** (no write occurs if the alias already exists unchanged), updates the
+target in place if the same name already points at a different alias, and writes
+**atomically** (via a temporary file and rename) so an interrupted write cannot corrupt
+`config.yaml`. The config is written as JSON, which Ludusavi reads as YAML; this does not
+preserve existing comments or formatting. Use `get_game_alias()` to read back the alias
+for a custom name (returns `None` if not found).
+
+```python
+lud.add_game_alias("My Game", "The Witcher 3")
+lud.get_game_alias("My Game")  # -> "The Witcher 3"
+```
+
+#### Timeouts
+Quick, bounded commands (`version`, `find`, `config_*`, `backups_list`, `schema`,
+`complete`) default to a 30-second timeout. Long-running operations — `backup`,
+`restore`, `wrap`, `cloud_upload`, `cloud_download`, `manifest_update`, and `bulk_api` —
+default to **no timeout** (`timeout=None`) so a long game session or large transfer is
+not killed. Every one of these accepts an explicit `timeout=<seconds>` override. A
+timeout raises `LudusaviTimeoutError`.
+
+```python
+# Wrap a game launch with no time limit (default)
+lud.wrap(["./game.exe"], name="The Witcher 3")
+
+# Cap a cloud upload at 5 minutes
+lud.cloud_upload(games=["The Witcher 3"], timeout=300)
+```
+
+#### Reading Logs
+Inspect Ludusavi's log directory and current log file:
+
+```python
+lud.log_dir()   # -> "/home/user/.config/ludusavi"
+lud.log_show()  # -> contents of ludusavi_rCURRENT.log, or "" if it does not exist
+```
 
 ## Error Handling
 
 - `LudusaviNotFoundError`: Raised if the executable or Flatpak isn't found.
 - `LudusaviExecutionError`: Raised if the process exits with a non-zero code.
 - `LudusaviContractError`: Raised if the CLI output is malformed or non-JSON when expected.
+- `LudusaviTimeoutError`: Raised if the process exceeds its timeout. Subclass of
+  `LudusaviError`, so existing `except LudusaviError` handlers still catch it.
 
 ## Dependency Requirements
 
