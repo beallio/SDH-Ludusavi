@@ -1,0 +1,41 @@
+{
+  "date": "2026-06-12",
+  "task_objective": "Four user-reported items after the backup-browser feature shipped: (1) root-cause and fix multiple plugin backend PIDs persisting after a self-update; (2) make the Browse Backups modal open scrolled to the top instead of the bottom; (3) remove the now-redundant QAM Force Restore button (Browse Backups covers restore); (4) recolor snapshot cards to match the Restore button fill. Plus a follow-up request: update the vendored pyludusavi dependency to 0.2.4.",
+  "branches": [
+    "fix/backup-browser-ux (off dev) — items 2, 3, 4",
+    "fix/duplicate-backend-instances (off dev) — item 1",
+    "chore/update-pyludusavi-0.2.4 (off dev) — pyludusavi bump",
+    "all merged --no-ff into dev"
+  ],
+  "files_modified": [
+    "src/components/modals/BackupBrowserModal.tsx (open-at-top via scrollRef + reset effect; first snapshot Restore takes preferredFocus via Focusable; card backgroundColor #43464c)",
+    "src/components/qam/GameSettingsSection.tsx (drop Force Restore SpinnerButton row and onForceRestore prop)",
+    "src/components/qam/LudusaviContent.tsx (stop passing onForceRestore; remove unused forceRestoreCall import)",
+    "src/components/qam/NotificationSettingsSection.tsx (description references snapshot restore)",
+    "README.md (Manual Control feature bullet: restore is via Backup Browser)",
+    "main.py (call enforce_single_instance before service startup in _main)",
+    "py_modules/sdh_ludusavi/singleton.py (new)",
+    "scripts/package_plugin.py (strip debug flag from release plugin.json; dist-info ref 0.2.3 -> 0.2.4)",
+    "scripts/validate_plugin_zip.py (dist-info ref 0.2.4)",
+    "pyproject.toml (pyludusavi >=0.2.4)",
+    "uv.lock (pyludusavi 0.2.4 + per-package exclude-newer override)",
+    "py_modules/pyludusavi/* (re-vendored 0.2.4; discovery.py timeout patch re-applied)",
+    "py_modules/pyludusavi-0.2.4.dist-info/ (replaces 0.2.3.dist-info)",
+    "tests/test_singleton.py (new), tests/test_main.py, tests/test_package_plugin.py, tests/test_ludusavi.py, tests/test_protocol.py, tests/test_validate_plugin_zip.py",
+    "docs/plans/backup_browser_ux_followups.md (new), docs/plans/duplicate_backend_instances.md (new)"
+  ],
+  "tests_added": [
+    "test_singleton.py: strictly-older identical-cmdline+uid match; ignore newer/self/other-plugin/other-uid; equal-start-ticks tie-break by pid; tolerate vanished/malformed /proc entries; SIGTERM-first then SIGKILL escalation; zombie treated as exited; never signal pid<=1; enforce_single_instance terminates+logs, is quiet without siblings, and never raises (injected kill_fn/sleep_fn, fake /proc tree under tmp_path)",
+    "test_main.py: _main runs enforce_single_instance before service startup; _main survives a guard exception and still reconciles",
+    "test_package_plugin.py: release zip strips debug flag while source keeps it; local (non-release) zip keeps debug flag; REQUIRED_DIRECTORIES uses 0.2.4 dist-info",
+    "Frontend items (modal scroll/focus/color, Force Restore removal) are markup/style-only with no extractable logic; covered by vitest+tsc passing, no new component tests (matches the original backup-browser feature's test posture)"
+  ],
+  "design_decisions": [
+    "Duplicate-PID root cause (from Deck ps + decky journal, Decky v3.2.4): the shipped plugin.json carries the 'debug' flag, so after browser._install re-enables the file watcher, zip-extraction file events trigger a hot-reload storm (~9 stop/start cycles in 2s). Decky's import_plugin awaits between its duplicate check and self.plugins[name]=plugin.start(), so two racing tasks both start a backend; the second dict insert orphans the first (PID 6270 got 'Loaded' but never 'Shutting down'; 6278 is the one Decky owns).",
+    "Two independent defenses: (a) packaging drops the debug flag from RELEASE zips only, removing the reload-storm trigger for updater-installed builds while local push-to-deck keeps watchdog hot-reload; (b) a startup singleton guard so the symptom is fixed regardless of loader-race variant and prior leaks are reaped on next start.",
+    "Singleton policy is 'newest survives': the youngest instance is always Decky's dict winner (last insert), so the new instance terminates strictly-older siblings (start ticks then pid tie-break) with byte-identical /proc cmdline (Decky setproctitle gives all instances of one plugin the same title) and same uid. Guard never raises and never blocks startup; runs via the RPC executor in _main.",
+    "pyludusavi 0.2.4 did NOT upstream the local discovery.py 15s verify-timeout patch (confirmed by diff), so it was re-applied on top of the new vendor; discovery.py now differs from upstream only by that patch. 0.2.4's core.py change merges call-time env over instance env ({**self.env, **env}); the backend only passes env at construction, so it is behavior-neutral here.",
+    "0.2.4 is newer than this machine's global uv exclude-newer (7-day minimum release age in ~/.config/uv/uv.toml). Used `uv lock --exclude-newer-package pyludusavi=2026-06-14T00:00:00Z` to override for just this first-party package; the override is recorded in uv.lock so CI (no global cutoff) resolves normally. Local commits/merges must run with UV_FROZEN=1 until the cutoff naturally passes (~2026-06-20); pre_commit.sh/post_commit.sh were intentionally NOT modified."
+  ],
+  "results": "All three feature branches merged --no-ff into dev with no conflicts (ort handled disjoint regions of package_plugin.py and test_package_plugin.py). Integrated dev: ruff check + ruff format clean, ty clean, pytest 572 passed @ 85.65% coverage, vitest 162 passed, tsc clean. Integrated release-zip sanity: plugin.json flags=[] (debug stripped), 0.2.4 dist-info present, 0.2.3 absent, discovery.py timeout patch intact. PID fix is verifiable on the user's next self-update; prior orphans (PIDs 6270/6278) will also be reaped on the next plugin start."
+}
