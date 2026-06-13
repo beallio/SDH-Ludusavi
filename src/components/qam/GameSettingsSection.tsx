@@ -29,7 +29,6 @@ type GameSettingsSectionProps = {
   selectedHistory: GameOperationHistoryEntry | null;
   onGameChange: (data: SingleDropdownOption | string | null | undefined) => void;
   onForceBackup: () => void;
-  onForceRestore: () => void;
   onBrowseBackups: () => void;
 };
 
@@ -46,7 +45,6 @@ export function GameSettingsSection({
   selectedHistory,
   onGameChange,
   onForceBackup,
-  onForceRestore,
   onBrowseBackups
 }: GameSettingsSectionProps) {
   return (
@@ -163,18 +161,6 @@ export function GameSettingsSection({
           onClick={onForceBackup}
         >
           Force Backup
-        </SpinnerButton>
-      </PanelSectionRow>
-
-      <PanelSectionRow>
-        <SpinnerButton
-          layout="below"
-          highlightOnFocus={true}
-          disabled={isBusy || selectedStatus?.status !== "has_backup"}
-          loading={busyLabel === "Restore running"}
-          onClick={onForceRestore}
-        >
-          Force Restore
         </SpinnerButton>
       </PanelSectionRow>
 
