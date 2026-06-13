@@ -1,7 +1,7 @@
 import subprocess
 import json
 import logging
-from typing import Any, Optional, Literal, Dict, TypeVar, Generic, Mapping
+from typing import Any, Optional, Literal, TypeVar, Generic, Mapping
 from dataclasses import dataclass
 from ._environment import resolve_environment
 
@@ -56,7 +56,7 @@ class LudusaviExecutor:
         mode: Literal["JSON", "TEXT", "SPAWN", "STDIN_JSON"] = "JSON",
         input_data: Optional[Any] = None,
         timeout: Optional[float] = 30.0,
-        env: Optional[Dict[str, str]] = None,
+        env: Optional[Mapping[str, str]] = None,
         auto_api: bool = True,
     ) -> Optional[LudusaviResponse]:
         """
@@ -67,7 +67,7 @@ class LudusaviExecutor:
             mode: Execution mode (JSON, TEXT, SPAWN, STDIN_JSON).
             input_data: Dictionary to be sent via stdin (only for STDIN_JSON).
             timeout: Maximum time to wait for the process.
-            env: Environment variables for the subprocess.
+            env: Environment overrides applied after instance-level overrides.
             auto_api: If True, automatically appends --api to JSON/STDIN_JSON modes.
 
         Returns:
@@ -81,7 +81,12 @@ class LudusaviExecutor:
 
         logger.debug(f"Executing Ludusavi command: {full_cmd}")
 
-        subprocess_env = self.env if env is None else resolve_environment(env)
+        if env is None:
+            subprocess_env = self.env
+        elif self.env is None:
+            subprocess_env = resolve_environment(env)
+        else:
+            subprocess_env = {**self.env, **env}
 
         if mode == "SPAWN":
             subprocess.Popen(full_cmd, env=subprocess_env)
