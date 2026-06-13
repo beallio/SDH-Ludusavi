@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: pyludusavi
-Version: 0.2.5
+Version: 0.2.6
 Summary: A robust, type-safe Python wrapper for the Ludusavi game backup tool.
 Project-URL: Homepage, https://github.com/beallio/pyludusavi
 Project-URL: Repository, https://github.com/beallio/pyludusavi
@@ -167,6 +167,8 @@ Quick, bounded commands (`version`, `find`, `config_*`, `backups_list`, `schema`
 default to **no timeout** (`timeout=None`) so a long game session or large transfer is
 not killed. Every one of these accepts an explicit `timeout=<seconds>` override. A
 timeout raises `LudusaviTimeoutError`.
+
+*Note: The automatic background probe that verifies the Ludusavi executable during discovery has a fixed, non-configurable 15-second timeout. Timeout expiration rejects the candidate (falling back or raising `LudusaviNotFoundError`) rather than surfacing a timeout error.*
 
 ```python
 # Wrap a game launch with no time limit (default)

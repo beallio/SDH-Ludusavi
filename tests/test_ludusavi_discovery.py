@@ -90,7 +90,7 @@ def test_verify_passes_timeout_to_subprocess_run(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(discovery.subprocess, "run", fake_run)
     assert discovery._verify(["ludusavi"]) is True
-    assert captured["timeout"] == discovery._VERIFY_TIMEOUT_SECONDS
+    assert captured["timeout"] == discovery._DISCOVERY_VERIFY_TIMEOUT_SECONDS
     assert captured["timeout"] is not None
 
 
