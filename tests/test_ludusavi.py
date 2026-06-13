@@ -24,7 +24,7 @@ def test_flatpak_id_is_required_ludusavi_flatpak() -> None:
 
 
 def test_pyludusavi_version_is_current() -> None:
-    assert pyludusavi.__version__ == "0.2.3"
+    assert pyludusavi.__version__ == "0.2.4"
 
 
 def test_adapter_passes_upstream_env_to_pyludusavi_constructor(
