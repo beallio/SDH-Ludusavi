@@ -13,6 +13,8 @@ from sdh_ludusavi.singleton import (
     find_stale_siblings,
     terminate_stale_siblings,
 )
+import pytest
+from sdh_ludusavi import singleton
 
 PLUGIN_TITLE = b"SDH-Ludusavi (/home/deck/homebrew/plugins/SDH-Ludusavi/main.py)\x00"
 OTHER_TITLE = b"CSS Loader (/home/deck/homebrew/plugins/SDH-CssLoader/main.py)\x00"
@@ -143,9 +145,9 @@ def test_pid_reused_between_sigterm_and_sigkill(tmp_path: Path) -> None:
         [sibling], kill_fn=kill, sleep_fn=sleep_and_reuse, proc_root=tmp_path
     )
 
-    assert report["terminated"] == [6270]
+    assert report["skipped"] == [6270]
     assert report["killed"] == []
-    assert report["skipped"] == []
+    assert report["terminated"] == []
     # SIGTERM sent to original, but SIGKILL not sent because it changed during wait
     assert kill.calls == [(6270, signal.SIGTERM)]
 
@@ -167,7 +169,7 @@ def test_uid_changes_while_waiting(tmp_path: Path) -> None:
     ]  # Sends term, wait loop notices change and treats it as gone?
     # Wait, if UID changes between TERM and KILL, we should treat it as gone, so it goes in "terminated" ?
     # Let's verify report expectations. "terminated: original identity disappeared after SIGTERM"
-    assert report["terminated"] == [6270]
+    assert report["skipped"] == [6270]
 
 
 def test_cmdline_changes_while_waiting(tmp_path: Path) -> None:
@@ -388,3 +390,202 @@ def test_duplicate_identities_do_not_consume_limit_twice(tmp_path: Path) -> None
     )
     assert not report.get("refused")
     assert len(report["killed"] + report["terminated"]) == 8
+
+
+class ExplodingKill:
+    def __call__(self, pid: int, sig: int) -> None:
+        raise RuntimeError("kill_fn should not be called")
+
+
+def exploding_sleep(duration: float) -> None:
+    raise RuntimeError("sleep_fn should not be called")
+
+
+def test_cmdline_changes_after_sigterm(tmp_path: Path) -> None:
+    write_proc_entry(tmp_path, 6270, start_ticks=500)
+    kill = FakeKill(tmp_path)
+
+    def sleep_and_change_cmdline(_s: float) -> None:
+        write_proc_entry(tmp_path, 6270, cmdline=OTHER_TITLE, start_ticks=500)
+
+    sibling = SiblingProcess(pid=6270, uid=1000, start_ticks=500, cmdline=PLUGIN_TITLE)
+    report = terminate_stale_siblings(
+        [sibling], kill_fn=kill, sleep_fn=sleep_and_change_cmdline, proc_root=tmp_path
+    )
+    assert report["skipped"] == [6270]
+    assert report["terminated"] == []
+    assert report["killed"] == []
+    assert kill.calls == [(6270, signal.SIGTERM)]
+
+
+def test_start_ticks_changes_after_sigterm(tmp_path: Path) -> None:
+    write_proc_entry(tmp_path, 6270, start_ticks=500)
+    kill = FakeKill(tmp_path)
+
+    def sleep_and_change_ticks(_s: float) -> None:
+        write_proc_entry(tmp_path, 6270, start_ticks=900)
+
+    sibling = SiblingProcess(pid=6270, uid=1000, start_ticks=500, cmdline=PLUGIN_TITLE)
+    report = terminate_stale_siblings(
+        [sibling], kill_fn=kill, sleep_fn=sleep_and_change_ticks, proc_root=tmp_path
+    )
+    assert report["skipped"] == [6270]
+    assert report["terminated"] == []
+    assert report["killed"] == []
+    assert kill.calls == [(6270, signal.SIGTERM)]
+
+
+def test_malformed_identity_data_after_sigterm(tmp_path: Path) -> None:
+    write_proc_entry(tmp_path, 6270, start_ticks=500)
+    kill = FakeKill(tmp_path)
+
+    def sleep_and_corrupt(_s: float) -> None:
+        (tmp_path / "6270" / "stat").write_text("garbage", encoding="utf-8")
+
+    sibling = SiblingProcess(pid=6270, uid=1000, start_ticks=500, cmdline=PLUGIN_TITLE)
+    report = terminate_stale_siblings(
+        [sibling], kill_fn=kill, sleep_fn=sleep_and_corrupt, proc_root=tmp_path
+    )
+    assert report["skipped"] == [6270]
+    assert report["terminated"] == []
+    assert report["killed"] == []
+    assert kill.calls == [(6270, signal.SIGTERM)]
+
+
+def test_identity_changes_during_post_sigkill_wait(tmp_path: Path) -> None:
+    write_proc_entry(tmp_path, 6270, start_ticks=500)
+    kill = FakeKill(tmp_path)
+    poll_count = 0
+
+    def sleep_and_change(_s: float) -> None:
+        nonlocal poll_count
+        poll_count += 1
+        if poll_count > 30:  # Roughly after TERM timeout
+            write_proc_entry(tmp_path, 6270, start_ticks=900)
+
+    sibling = SiblingProcess(pid=6270, uid=1000, start_ticks=500, cmdline=PLUGIN_TITLE)
+    report = terminate_stale_siblings(
+        [sibling], kill_fn=kill, sleep_fn=sleep_and_change, proc_root=tmp_path
+    )
+    assert report["skipped"] == [6270]
+    assert report["terminated"] == []
+    assert report["killed"] == []
+    assert (6270, signal.SIGTERM) in kill.calls
+    assert (6270, signal.SIGKILL) in kill.calls
+
+
+def test_discovery_reads_ticks_differently(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write_proc_entry(tmp_path, 6270, start_ticks=500)
+    write_proc_entry(tmp_path, 6278, start_ticks=600)
+
+    ticks_returns = [500, 900]
+    original_read = singleton._read_start_ticks
+
+    def fake_read(proc_root, pid):
+        if pid == 6270:
+            return ticks_returns.pop(0)
+        return original_read(proc_root, pid)
+
+    monkeypatch.setattr(singleton, "_read_start_ticks", fake_read)
+
+    siblings = find_stale_siblings(proc_root=tmp_path, pid=6278)
+    assert not siblings
+
+
+def test_discovery_reads_ticks_consistently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_proc_entry(tmp_path, 6270, start_ticks=500)
+    write_proc_entry(tmp_path, 6278, start_ticks=600)
+
+    ticks_returns = [500, 500]
+    original_read = singleton._read_start_ticks
+
+    def fake_read(proc_root, pid):
+        if pid == 6270:
+            return ticks_returns.pop(0)
+        return original_read(proc_root, pid)
+
+    monkeypatch.setattr(singleton, "_read_start_ticks", fake_read)
+
+    siblings = find_stale_siblings(proc_root=tmp_path, pid=6278)
+    assert len(siblings) == 1
+    assert siblings[0].pid == 6270
+
+
+def test_discovery_ignores_zombies(tmp_path: Path) -> None:
+    write_proc_entry(tmp_path, 6270, start_ticks=500, state="Z")
+    write_proc_entry(tmp_path, 6278, start_ticks=600)
+    siblings = find_stale_siblings(proc_root=tmp_path, pid=6278)
+    assert not siblings
+
+
+def test_discovery_own_process_ticks_differ(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_proc_entry(tmp_path, 6270, start_ticks=500)
+    write_proc_entry(tmp_path, 6278, start_ticks=600)
+
+    ticks_returns = [600, 700]
+    original_read = singleton._read_start_ticks
+
+    def fake_read(proc_root, pid):
+        if pid == 6278:
+            return ticks_returns.pop(0)
+        return original_read(proc_root, pid)
+
+    monkeypatch.setattr(singleton, "_read_start_ticks", fake_read)
+
+    siblings = find_stale_siblings(proc_root=tmp_path, pid=6278)
+    assert not siblings
+
+
+def test_limit_ignores_incomplete_identities(tmp_path: Path) -> None:
+    kill = FakeKill(tmp_path)
+    for i in range(1000, 1008):
+        write_proc_entry(tmp_path, i, start_ticks=500)
+    write_proc_entry(tmp_path, 1008, start_ticks=500, cmdline=b"")
+    write_proc_entry(tmp_path, 1009, start_ticks=500, cmdline=b"")
+    write_proc_entry(tmp_path, -5, start_ticks=500)
+    write_proc_entry(tmp_path, 2000, start_ticks=600)
+
+    siblings = [
+        SiblingProcess(pid=i, uid=1000, start_ticks=500, cmdline=PLUGIN_TITLE)
+        for i in range(1000, 1008)
+    ]
+    siblings.append(SiblingProcess(pid=1008, uid=1000, start_ticks=500, cmdline=b""))
+    siblings.append(SiblingProcess(pid=1009, uid=1000, start_ticks=500, cmdline=b""))
+    siblings.append(SiblingProcess(pid=-5, uid=1000, start_ticks=500, cmdline=PLUGIN_TITLE))
+
+    report = terminate_stale_siblings(
+        siblings, kill_fn=kill, sleep_fn=lambda _s: None, proc_root=tmp_path
+    )
+    assert not report.get("refused")
+    assert len(report["terminated"] + report["killed"]) == 8
+    assert sorted(report["skipped"]) == [1008, 1009]
+
+
+def test_nine_complete_triggers_refusal(tmp_path: Path) -> None:
+    siblings = [
+        SiblingProcess(pid=i, uid=1000, start_ticks=500, cmdline=PLUGIN_TITLE)
+        for i in range(1000, 1009)
+    ]
+    report = terminate_stale_siblings(
+        siblings, kill_fn=ExplodingKill(), sleep_fn=exploding_sleep, proc_root=tmp_path
+    )
+    assert report["refused"] == list(range(1000, 1009))
+
+
+def test_refusal_logging_contains_list_and_count(tmp_path: Path) -> None:
+    logger = FakeLogger()
+    for i in range(1000, 1009):
+        write_proc_entry(tmp_path, i, start_ticks=500)
+    write_proc_entry(tmp_path, 2000, start_ticks=600)
+
+    report = enforce_single_instance(
+        logger, proc_root=tmp_path, pid=2000, kill_fn=ExplodingKill(), sleep_fn=exploding_sleep
+    )
+    assert report["status"] == "failed"
+    assert report["reason"] == "too_many_stale_siblings"
+    assert any("count=9" in err for err in logger.errors)
+    assert any(str(list(range(1000, 1009))) in err for err in logger.errors)
