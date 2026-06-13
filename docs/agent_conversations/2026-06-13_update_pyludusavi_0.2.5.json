@@ -1,0 +1,25 @@
+{
+  "date": "2026-06-13",
+  "task_objective": "Wait for pyludusavi 0.2.5 to publish, re-vendor it into the plugin, check whether the local discovery.py verify-timeout patch was incorporated upstream, and confirm all tests pass with no regressions against the earlier fixes (backup-browser UX, duplicate-PID singleton guard, debug-flag strip).",
+  "branch": "chore/update-pyludusavi-0.2.5 (off dev) -> merged --no-ff into dev",
+  "files_modified": [
+    "pyproject.toml (pyludusavi >=0.2.5)",
+    "uv.lock (pyludusavi 0.2.5 + per-package exclude-newer override; required --refresh-package to clear the stale 0.2.4-era index cache)",
+    "py_modules/pyludusavi/* (re-vendored 0.2.5; new py.typed marker added; discovery.py timeout patch re-applied)",
+    "py_modules/pyludusavi-0.2.5.dist-info/ (replaces 0.2.4.dist-info)",
+    "scripts/package_plugin.py, scripts/validate_plugin_zip.py (dist-info ref 0.2.4 -> 0.2.5)",
+    "tests/test_ludusavi.py (version assertion 0.2.5), tests/test_package_plugin.py, tests/test_protocol.py, tests/test_validate_plugin_zip.py (dist-info refs)",
+    "docs/agent_conversations/2026-06-13_update_pyludusavi_0.2.5.json (this log)"
+  ],
+  "tests_added": [
+    "No new tests; this is a dependency re-vendor. Existing tests updated for the 0.2.5 version/dist-info name and run green."
+  ],
+  "design_decisions": [
+    "Timeout-patch check (the explicit ask): NOT incorporated upstream in 0.2.5. Its discovery._verify still calls subprocess.run with no timeout= and now catches a bare `except OSError`. Re-applied the local 15s verify-timeout patch; because TimeoutExpired is NOT an OSError subclass, the except was widened to `(OSError, subprocess.TimeoutExpired)`. discovery.py now differs from upstream 0.2.5 only by this patch (verified by diff).",
+    "0.2.5 upstream changes are additive and behavior-neutral for the backend: new LudusaviTimeoutError(LudusaviError) subclass (the backend's existing `except LudusaviError` handlers still catch timeouts), @overload typing for execute(), optional per-call timeout= params (default None) on backup/restore/cloud/bulk_api/manifest_update/run_wrapped (backend never passes them), atomic temp+replace write for custom-game config, NotRequired model fields, and a py.typed marker. Confirmed the backend imports only LudusaviError + LudusaviNotFoundError and calls methods without timeout/env at call time.",
+    "py.typed is auto-included by package_plugin.py's recursive glob of py_modules/pyludusavi; no packaging change needed and the exact-archive-name test stays consistent.",
+    "Stale uv index cache: the .uv_cache from the 0.2.4 work had a pyludusavi index predating 0.2.5, so `uv lock` reported 0.2.5 unavailable until `--refresh-package pyludusavi` was added alongside the exclude-newer override. See [[uv-exclude-newer-local-commits]].",
+    "Release/publish intentionally NOT done: protocol section 14 gates release dispatch on explicit user instruction, and this turn's request was limited to updating + validating. Work is committed and merged to dev; offered a dev release rather than cutting one."
+  ],
+  "results": "chore/update-pyludusavi-0.2.5 merged --no-ff into dev with no conflicts. Integrated dev: ruff clean, ty clean, pytest 572 passed @ 85.65% coverage, vitest 162 passed. Release-zip sanity: plugin.json flags=[] (debug stripped), 0.2.5 dist-info present, 0.2.4 absent, py.typed bundled, discovery.py timeout patch (constant + TimeoutExpired) intact. No regressions in the earlier fixes."
+}
