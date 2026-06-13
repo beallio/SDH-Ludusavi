@@ -33,8 +33,8 @@ export function BackupBrowserModal({
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Gamepad focus lands on the footer Close button when the modal mounts,
-  // dragging the list to the bottom; reset to the top once content settles.
+  // Reset scroll to the top once content settles to ensure newest backups
+  // and the header are visible, avoiding bottom-anchor behaviors.
   useEffect(() => {
     if (loading) return;
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 }));
@@ -91,7 +91,6 @@ export function BackupBrowserModal({
             display: "flex",
             flexDirection: "column",
             gap: "10px",
-            padding: "16px",
           }}
         >
           {loading && <DialogBodyText>Loading backups...</DialogBodyText>}
