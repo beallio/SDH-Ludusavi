@@ -6,7 +6,6 @@ import { IoMdRefresh } from "react-icons/io";
 
 import {
   forceBackupCall,
-  forceRestoreCall,
   getGameHistoryCall,
   getLudusaviCommandCall,
   getLudusaviLogs,
@@ -796,7 +795,6 @@ export function LudusaviContent({
         selectedHistory={selectedHistory}
         onGameChange={onGameChange}
         onForceBackup={() => void runForceOperation("Backup", forceBackupCall)}
-        onForceRestore={() => void runForceOperation("Restore", forceRestoreCall)}
         onBrowseBackups={() => {
           if (!selectedGame) return;
           showModal(
