@@ -387,3 +387,41 @@ a product failure.
     a later review note ends with `STATUS: APPROVED`.
 
 STATUS: CHANGES_REQUESTED
+
+## Resolution
+Findings 1, 2, 3, 4, and 5 have been fully addressed:
+
+### Finding 1
+- **Fix**: Re-implemented `_is_complete_identity` to explicitly validate exact runtime types (`type(pid) is int`, `type(uid) is int`, `type(start_ticks) is int`, `isinstance(cmdline, bytes)`) and prevent malformed data from being treated as a valid process or consuming the safety limit.
+- **Tests Added**: `test_malformed_runtime_identity`
+- **RED Command**: `UV_FROZEN=1 ./run.sh uv run pytest -o addopts="" tests/test_singleton.py -k "malformed_runtime_identity or duplicate" > /tmp/sdh_ludusavi/2026-06-13_review_findings_remediation_review_round_2_red.log`
+- **Failure Reason**: Tests failed because malformed identity properties caused `TypeError`s during comparisons, and some skipped assertions failed because duplicates were reported incorrectly (Finding 2).
+- **GREEN Command**: `UV_FROZEN=1 ./run.sh uv run pytest -o addopts="" tests/test_singleton.py -k "malformed_runtime_identity or duplicate"`
+- **Validation Result**: Full sequential validation passed successfully. 603 passed Python tests at 85.82% coverage and 162 frontend tests.
+- **Commit SHA**: `7f570ce`
+
+### Finding 2
+- **Fix**: Introduced `_record_pid` helper to ensure each PID appears at most once in a given report list and preserves first-seen order. Changed all `.append()` and `.extend()` calls in `terminate_stale_siblings` to use this helper.
+- **Tests Added**:
+  - `test_duplicate_skipped_entries_are_prevented`
+  - `test_incomplete_and_complete_do_not_duplicate_skipped`
+  - `test_duplicate_pid_outcomes_are_prevented`
+- **RED Command**: (Included in Finding 1 RED command)
+- **Failure Reason**: Tests asserted uniqueness of PIDs in `skipped` and `terminated` arrays, which previously failed because the same PID could be inserted multiple times across status changes or incomplete identity evaluations.
+- **GREEN Command**: (Included in Finding 1 GREEN command)
+- **Validation Result**: (Included in Finding 1 Validation Result)
+- **Commit SHA**: `7f570ce`
+
+### Finding 3
+- **Fix**: Replaced uncertain/debating comments in `test_uid_changes_while_waiting` with strict contract assertions ensuring `skipped == [6270]` and `terminated == []`, `killed == []`.
+- **Commit SHA**: `7f570ce`
+
+### Finding 4
+- **Fix**: Appended the exact `STATUS: CHANGES_REQUESTED` line to the bottom of the round 1 review document below the resolution block.
+- **Commit SHA**: `d62a8e0`
+
+### Finding 5
+- **Fix**: Updated `docs/agent_conversations/2026-06-13_review_findings_remediation.json` to expand wildcard `files_modified` using `git diff --name-only`, corrected the name of `test_pid_reused_between_sigterm_and_sigkill`, and updated final validation test counts. Recorded round 1 docs commit `d62a8e0`.
+- **Commit SHA**: `d62a8e0`
+
+STATUS: CHANGES_REQUESTED
