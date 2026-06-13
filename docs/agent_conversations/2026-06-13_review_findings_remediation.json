@@ -7,6 +7,7 @@
     "docs/plans/2026-06-13_review_findings_remediation.md",
     "docs/review/2026-06-13_review_findings_remediation_review_round_1.md",
     "docs/review/2026-06-13_review_findings_remediation_review_round_2.md",
+    "docs/review/2026-06-13_review_findings_remediation_review_round_3.md",
     "py_modules/pyludusavi-0.2.6.dist-info/METADATA",
     "py_modules/pyludusavi-0.2.6.dist-info/RECORD",
     "py_modules/pyludusavi-0.2.6.dist-info/WHEEL",
@@ -57,14 +58,21 @@
       "Review Round 1 RED command: UV_FROZEN=1 ./run.sh uv run pytest -o addopts=\"\" tests/test_singleton.py -k \"identity or reused or changes or differently or zombies or incomplete or trigger or refusal\" > /tmp/sdh_ludusavi/2026-06-13_review_findings_remediation_review_round_1_red.log",
       "Review Round 2 RED command: UV_FROZEN=1 ./run.sh uv run pytest -o addopts=\"\" tests/test_singleton.py -k \"malformed_runtime_identity or duplicate\" > /tmp/sdh_ludusavi/2026-06-13_review_findings_remediation_review_round_2_red.log"
     ],
-    "green_commands": "UV_FROZEN=1 ./run.sh uv run pytest tests/test_singleton.py",
+    "green_commands": [
+      "UV_FROZEN=1 ./run.sh uv run pytest -o addopts=\"\" tests/test_singleton.py -k \"identity or reused or changes or differently or zombies or incomplete or trigger or refusal\"",
+      "UV_FROZEN=1 ./run.sh uv run pytest -o addopts=\"\" tests/test_singleton.py -k \"malformed_runtime_identity or duplicate\"",
+      "UV_FROZEN=1 ./run.sh uv run pytest"
+    ],
     "validation": "Passed all linting, typechecking, python and pnpm tests successfully. 603 passed Python tests with 85.82% coverage. 162 passed frontend tests.",
     "commit_shas": [
       "e5e9706 docs(plans): add review findings remediation plan",
       "5e8deb7 fix(singleton): bind cleanup signals to process identities and refuse oversized match sets",
       "2ac00c4 chore(deps): re-vendor pyludusavi 0.2.6",
       "ae8d4f1 docs(agent): record review findings remediation session",
-      "25673a0 fix(singleton): exact identity tracking and valid safety cap"
+      "25673a0 fix(singleton): exact identity tracking and valid safety cap",
+      "d62a8e0 docs(review): record round 1 resolution and update session log",
+      "7f570ce fix(singleton): exact runtime type validation and duplicate pid prevention",
+      "pending/current documentation commit"
     ]
   }
 }
