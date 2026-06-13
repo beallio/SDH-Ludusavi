@@ -130,7 +130,7 @@ export function PluginUpdateSection({
     if (isChecking) {
       return (
         <>
-          <Spinner size="small" />
+          <Spinner size="small" style={{ color: "#1a9fff" }} />
           <span>Checking...</span>
         </>
       );
@@ -237,7 +237,7 @@ export function PluginUpdateSection({
                 {isInstalling ? (
                   <>
                     <div style={spinnerSlotStyle}>
-                      <Spinner size="small" />
+                      <Spinner size="small" style={{ color: "#1a9fff" }} />
                     </div>
                     <span>{isHandoffPending ? "Waiting for Decky..." : "Preparing..."}</span>
                   </>
@@ -269,7 +269,11 @@ export function PluginUpdateSection({
             disabled={isChecking || isInstalling}
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
-              <IoMdRefresh />
+              {isChecking ? (
+                <Spinner style={{ width: "16px", height: "16px", color: "#1a9fff" }} />
+              ) : (
+                <IoMdRefresh />
+              )}
               <span>Check now</span>
             </div>
           </ButtonItem>
