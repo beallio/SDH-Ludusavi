@@ -239,3 +239,47 @@ def test_package_script_dev_prerelease(tmp_path: Path) -> None:
     assert manifest_data["tag"] == "v0.2.1-dev.55d87c6"
     assert manifest_data["channel"] == "dev"
     assert manifest_data["assetName"] == "SDH-Ludusavi-v0.2.1-dev.55d87c6.zip"
+
+
+def test_release_zip_strips_debug_flag(tmp_path: Path) -> None:
+    plugin_src = json.loads(Path("plugin.json").read_text(encoding="utf-8"))
+    assert "debug" in plugin_src.get("flags", []), "precondition: repo keeps debug for dev"
+
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/package_plugin.py",
+            "--release",
+            "--release-version",
+            "0.3.0",
+            "--release-tag",
+            "v0.3.0",
+            "--versioned-output",
+            "--output-dir",
+            str(tmp_path),
+        ],
+        check=True,
+    )
+
+    with zipfile.ZipFile(tmp_path / "SDH-Ludusavi-v0.3.0.zip") as archive:
+        zip_plugin = json.loads(archive.read("SDH-Ludusavi/plugin.json"))
+
+    # Shipping the debug flag makes Decky hot-reload the plugin on every file
+    # event after install, which races import_plugin and orphans backend
+    # processes (observed on Decky v3.2.4, 2026-06-12).
+    assert "debug" not in zip_plugin.get("flags", [])
+    # Source file stays untouched so the local push-to-deck dev loop keeps
+    # watchdog hot-reload.
+    assert "debug" in json.loads(Path("plugin.json").read_text(encoding="utf-8"))["flags"]
+
+
+def test_local_zip_keeps_debug_flag(tmp_path: Path) -> None:
+    subprocess.run(
+        [sys.executable, "scripts/package_plugin.py", "--output-dir", str(tmp_path)],
+        check=True,
+    )
+
+    with zipfile.ZipFile(tmp_path / "SDH-Ludusavi.zip") as archive:
+        zip_plugin = json.loads(archive.read("SDH-Ludusavi/plugin.json"))
+
+    assert "debug" in zip_plugin.get("flags", [])
