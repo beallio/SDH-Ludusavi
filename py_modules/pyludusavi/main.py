@@ -21,8 +21,8 @@ class Ludusavi:
 
     def __init__(
         self,
-        explicit_path: Optional[str] = None,
-        config_dir: Optional[str] = None,
+        explicit_path: Optional[Union[str, Path]] = None,
+        config_dir: Optional[Union[str, Path]] = None,
         no_manifest_update: bool = False,
         flatpak_id: Optional[str] = None,
         env: Optional[Mapping[str, str]] = None,
@@ -47,7 +47,7 @@ class Ludusavi:
         # Add global options to prefix if they apply to the binary call
         # Note: --config and --no-manifest-update are global flags
         if config_dir:
-            self.command_prefix.extend(["--config", config_dir])
+            self.command_prefix.extend(["--config", str(config_dir)])
         if no_manifest_update:
             self.command_prefix.append("--no-manifest-update")
 
@@ -63,7 +63,6 @@ class Ludusavi:
             str: The version string (e.g., "ludusavi 0.31.0").
         """
         response = self.executor.execute(["--version"], mode="TEXT")
-        assert response is not None
         return response.data.strip()
 
     def schema(
@@ -85,7 +84,6 @@ class Ludusavi:
         response = self.executor.execute(
             ["schema", "--format", format, category], mode=mode, auto_api=False
         )
-        assert response is not None
         return response.data
 
     def manifest_show(self) -> LudusaviResponse[ApiManifest]:
@@ -96,16 +94,19 @@ class Ludusavi:
             LudusaviResponse[ApiManifest]: The JSON response containing the manifest data.
         """
         response = self.executor.execute(["manifest", "show"], mode="JSON")
-        assert response is not None
         return response
 
-    def manifest_update(self, force: bool = False) -> LudusaviResponse[str]:
+    def manifest_update(
+        self, force: bool = False, timeout: Optional[float] = None
+    ) -> LudusaviResponse[str]:
         """
         Check for any manifest updates and download if available.
         By default, does nothing if the most recent check was within the last 24 hours.
 
         Args:
             force: Check again even if the most recent check was within the last 24 hours.
+            timeout: Maximum time to wait for the process; None means no limit
+                (downloading the manifest can take a while).
 
         Returns:
             LudusaviResponse[str]: The raw text response from the update check.
@@ -113,8 +114,7 @@ class Ludusavi:
         args = ["manifest", "update"]
         if force:
             args.append("--force")
-        response = self.executor.execute(args, mode="TEXT")
-        assert response is not None
+        response = self.executor.execute(args, mode="TEXT", timeout=timeout)
         return response
 
     def config_show(self, default: bool = False) -> LudusaviResponse[ApiConfig]:
@@ -131,7 +131,6 @@ class Ludusavi:
         if default:
             args.append("--default")
         response = self.executor.execute(args, mode="JSON")
-        assert response is not None
         return response
 
     def config_path(self) -> str:
@@ -142,7 +141,6 @@ class Ludusavi:
             str: The absolute path to Ludusavi's config.yaml.
         """
         response = self.executor.execute(["config", "path"], mode="TEXT")
-        assert response is not None
         return response.data.strip()
 
     # --- Data Group ---
@@ -244,7 +242,6 @@ class Ludusavi:
             args.extend(games)
 
         response = self.executor.execute(args, mode="JSON", timeout=timeout)
-        assert response is not None
         return response
 
     def restore(
@@ -320,7 +317,6 @@ class Ludusavi:
             args.extend(games)
 
         response = self.executor.execute(args, mode="JSON", timeout=timeout)
-        assert response is not None
         return response
 
     def backups_list(
@@ -343,7 +339,6 @@ class Ludusavi:
         if games:
             args.extend(games)
         response = self.executor.execute(args, mode="JSON")
-        assert response is not None
         return response
 
     def backups_edit(
@@ -385,12 +380,11 @@ class Ludusavi:
             args.append("--lock")
         if unlock:
             args.append("--unlock")
-        if comment:
+        if comment is not None:
             args.extend(["--comment", comment])
         if game:
             args.append(game)
         response = self.executor.execute(args, mode="TEXT")
-        assert response is not None
         return response
 
     # --- Integration Group ---
@@ -470,7 +464,6 @@ class Ludusavi:
         if games:
             args.extend(games)
         response = self.executor.execute(args, mode="JSON")
-        assert response is not None
         return response
 
     def cloud_upload(
@@ -481,6 +474,7 @@ class Ludusavi:
         force: bool = False,
         preview: bool = False,
         gui: bool = False,
+        timeout: Optional[float] = None,
     ) -> LudusaviResponse[LudusaviApiOutput]:
         """
         Upload your local backups to the cloud, overwriting any existing cloud backups.
@@ -492,6 +486,8 @@ class Ludusavi:
             force: Don't ask for confirmation.
             preview: Check what would change, but don't actually apply the changes.
             gui: Use GUI dialogs for prompts and some information.
+            timeout: Maximum time to wait for the process; None means no limit
+                (cloud transfers can take a while).
 
         Returns:
             LudusaviResponse: The JSON response confirming the upload.
@@ -509,8 +505,7 @@ class Ludusavi:
             args.append("--gui")
         if games:
             args.extend(games)
-        response = self.executor.execute(args, mode="JSON")
-        assert response is not None
+        response = self.executor.execute(args, mode="JSON", timeout=timeout)
         return response
 
     def cloud_download(
@@ -521,6 +516,7 @@ class Ludusavi:
         force: bool = False,
         preview: bool = False,
         gui: bool = False,
+        timeout: Optional[float] = None,
     ) -> LudusaviResponse[LudusaviApiOutput]:
         """
         Download your cloud backups, overwriting any existing local backups.
@@ -532,6 +528,8 @@ class Ludusavi:
             force: Don't ask for confirmation.
             preview: Check what would change, but don't actually apply the changes.
             gui: Use GUI dialogs for prompts and some information.
+            timeout: Maximum time to wait for the process; None means no limit
+                (cloud transfers can take a while).
 
         Returns:
             LudusaviResponse: The JSON response confirming the download.
@@ -549,8 +547,7 @@ class Ludusavi:
             args.append("--gui")
         if games:
             args.extend(games)
-        response = self.executor.execute(args, mode="JSON")
-        assert response is not None
+        response = self.executor.execute(args, mode="JSON", timeout=timeout)
         return response
 
     def cloud_set(
@@ -582,24 +579,26 @@ class Ludusavi:
         if options:
             args.extend(options)
         response = self.executor.execute(args, mode="TEXT")
-        assert response is not None
         return response
 
-    def bulk_api(self, input_data: Dict[str, Any]) -> LudusaviResponse[LudusaviApiOutput]:
+    def bulk_api(
+        self, input_data: Dict[str, Any], timeout: Optional[float] = None
+    ) -> LudusaviResponse[LudusaviApiOutput]:
         """
         Execute bulk requests using JSON input.
 
         Args:
             input_data: JSON data containing the bulk requests.
                 Use the `schema('api-input')` command to see the format.
+            timeout: Maximum time to wait for the process; None means no limit
+                (bulk requests may include long-running backups).
 
         Returns:
             LudusaviResponse: The JSON response containing the results for each request.
         """
         response = self.executor.execute(
-            ["api"], mode="STDIN_JSON", input_data=input_data, auto_api=False
+            ["api"], mode="STDIN_JSON", input_data=input_data, auto_api=False, timeout=timeout
         )
-        assert response is not None
         return response
 
     def wrap(
@@ -624,6 +623,7 @@ class Ludusavi:
         cloud_sync: bool = False,
         no_cloud_sync: bool = False,
         ask_downgrade: bool = False,
+        timeout: Optional[float] = None,
     ) -> LudusaviResponse[str]:
         """
         Wrap restore/backup around game execution.
@@ -649,6 +649,8 @@ class Ludusavi:
             cloud_sync: Upload any changes to the cloud when the backup is complete.
             no_cloud_sync: Don't perform any cloud checks or synchronization.
             ask_downgrade: Ask what to do when a backup is older/newer than live data.
+            timeout: Maximum time to wait for the process; None means no limit
+                (the wrapped process runs for as long as the game runs).
 
         Returns:
             LudusaviResponse: The raw text response confirming the wrap operation.
@@ -697,8 +699,7 @@ class Ludusavi:
 
         args.append("--")
         args.extend(command)
-        response = self.executor.execute(args, mode="TEXT")
-        assert response is not None
+        response = self.executor.execute(args, mode="TEXT", timeout=timeout)
         return response
 
     # --- Utilities ---
@@ -714,7 +715,6 @@ class Ludusavi:
             str: The generated completion script.
         """
         response = self.executor.execute(["complete", shell], mode="TEXT")
-        assert response is not None
         return response.data
 
     def open_gui(self, custom_game: Optional[str] = None) -> None:
@@ -763,24 +763,32 @@ class Ludusavi:
             alias: The official title of the game as it appears in the manifest.
         """
         path = Path(self.config_path())
-        response = self.config_show()
-        config = response.data
+        config = self.config_show().data
 
-        new_custom = {
-            "name": name,
-            "alias": alias,
-            "files": [],
-            "registry": [],
-            "installDir": [],
-            "winePrefix": [],
-        }
-
-        # Avoid duplicates
         custom_games = config.setdefault("customGames", [])
-        if not any(g.get("name") == name for g in custom_games):
-            custom_games.append(new_custom)
+        existing = next((g for g in custom_games if g.get("name") == name), None)
 
-        path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        if existing is None:
+            custom_games.append(
+                {
+                    "name": name,
+                    "alias": alias,
+                    "files": [],
+                    "registry": [],
+                    "installDir": [],
+                    "winePrefix": [],
+                }
+            )
+        elif existing.get("alias") != alias:
+            existing["alias"] = alias
+        else:
+            # Already present with the same alias; nothing to do.
+            return
+
+        # Write atomically so a crash mid-write cannot corrupt the user's config.
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        tmp.replace(path)
 
     def get_game_alias(self, name: str) -> Optional[str]:
         """
