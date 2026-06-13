@@ -4,10 +4,8 @@ import {
   DialogBody,
   DialogBodyText,
   DialogButton,
-  DialogFooter,
   DialogHeader,
   Field,
-  Focusable,
   ModalRoot,
   showModal,
 } from "@decky/ui";
@@ -117,29 +115,31 @@ export function BackupBrowserModal({
                 {listResult.backups.map((b, idx) => {
                   const timestampStr = formatTimestamp(b.when);
                   const title = `${timestampStr}${b.locked ? " (Locked)" : ""}`;
-                  
-                  let desc = "";
-                  if (b.file_count !== null) desc += `${b.file_count} files `;
-                  if (b.size_bytes !== null) desc += formatBytes(b.size_bytes);
-                  if (b.comment) desc += `\nComment: ${b.comment}`;
+                  const sizeText =
+                    `${b.file_count !== null ? `${b.file_count} files ` : ""}` +
+                    `${b.size_bytes !== null ? formatBytes(b.size_bytes) : ""}`.trim();
+                  const description = (
+                    <>
+                      {sizeText}
+                      {b.comment && (<><br />Comment: {b.comment}</>)}
+                    </>
+                  );
 
                   return (
-                    <Focusable
+                    <Field
                       key={b.id}
-                      ref={idx === 0 ? firstRowRef : undefined}
-                      preferredFocus={idx === 0}
+                      label={title}
+                      description={description}
+                      bottomSeparator="standard"
                     >
-                      <Field
-                        focusable={true}
-                        label={title}
-                        description={desc}
-                        bottomSeparator="standard"
+                      <DialogButton
+                        ref={idx === 0 ? firstRowRef : undefined}
+                        preferredFocus={idx === 0}
+                        onClick={() => onRestore(b.id, timestampStr)}
                       >
-                        <DialogButton onClick={() => onRestore(b.id, timestampStr)}>
-                          Restore
-                        </DialogButton>
-                      </Field>
-                    </Focusable>
+                        Restore
+                      </DialogButton>
+                    </Field>
                   );
                 })}
               </div>
@@ -147,9 +147,6 @@ export function BackupBrowserModal({
           </>
         )}
       </DialogBody>
-      <DialogFooter>
-        <DialogButton onClick={closeModal}>Close</DialogButton>
-      </DialogFooter>
     </ModalRoot>
   );
 }
