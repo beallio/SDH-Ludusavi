@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { ButtonItem, ConfirmModal, ModalRoot, showModal } from "@decky/ui";
+import { useEffect, useRef, useState } from "react";
+import { ButtonItem, ConfirmModal, Focusable, ModalRoot, showModal } from "@decky/ui";
 import { formatBytes } from "../../formatting/bytes";
 import { formatTimestamp } from "../../formatting/dateTime";
 import type { BackupListResult } from "../../types";
@@ -23,6 +23,13 @@ export function BackupBrowserModal({
   const [loading, setLoading] = useState(true);
   const [listResult, setListResult] = useState<BackupListResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Gamepad focus lands on the footer Close button when the modal mounts,
+  // dragging the list to the bottom; reset to the top once content settles.
+  useEffect(() => {
+    if (!loading) scrollRef.current?.scrollTo({ top: 0 });
+  }, [loading]);
 
   useEffect(() => {
     let mounted = true;
@@ -69,7 +76,10 @@ export function BackupBrowserModal({
         <div style={{ padding: "16px", borderBottom: "1px solid #333", fontSize: "1.2em" }}>
           Backups: {gameName}
         </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+        <div
+          ref={scrollRef}
+          style={{ flex: 1, overflowY: "auto", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}
+        >
           {loading && <div>Loading backups...</div>}
           {error && <div style={{ color: "red" }}>Error: {error}</div>}
           {!loading && !error && listResult && (
@@ -87,12 +97,14 @@ export function BackupBrowserModal({
                 <div>No backups found.</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "10px" }}>
-                  {listResult.backups.map((b) => (
+                  {listResult.backups.map((b, idx) => (
                     <div
                       key={b.id}
                       style={{
                         padding: "12px",
-                        backgroundColor: "rgba(255, 255, 255, 0.05)",
+                        // Matches the Steam DialogButton fill so cards and
+                        // their Restore buttons read as one surface.
+                        backgroundColor: "#43464c",
                         borderRadius: "8px",
                       }}
                     >
@@ -110,11 +122,15 @@ export function BackupBrowserModal({
                           Comment: {b.comment}
                         </div>
                       )}
-                      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                      <Focusable
+                        style={{ display: "flex", justifyContent: "flex-end" }}
+                        preferredFocus={idx === 0}
+                        noFocusRing={true}
+                      >
                         <ButtonItem layout="below" onClick={() => onRestore(b.id, formatTimestamp(b.when))}>
                           Restore
                         </ButtonItem>
-                      </div>
+                      </Focusable>
                     </div>
                   ))}
                 </div>
