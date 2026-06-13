@@ -465,13 +465,11 @@ class GameLifecycleManager:
         # Intentionally broad: record history and re-raise on point in time restore failure
         except Exception as exc:
             self.dependencies.history.record_history(
-                game.name, "restore", "point_in_time_restore", "failed", message=str(exc)
+                game.name, "restore", "manual_restore", "failed", message=str(exc)
             )
             raise
 
-        self.dependencies.history.record_history(
-            game.name, "restore", "point_in_time_restore", "restored"
-        )
+        self.dependencies.history.record_history(game.name, "restore", "manual_restore", "restored")
         self.dependencies.registry.refresh_after_operation(game.name)
         self.dependencies.log(
             "info",
