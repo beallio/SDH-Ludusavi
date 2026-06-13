@@ -32,3 +32,9 @@ export function formatConflictTime(value?: string | null) {
 export function formatTimestamp(value?: string | null) {
   return formatConflictTime(value);
 }
+
+export function formatHistoryTimestamp(value?: string | null, opts?: { timeZone?: string }): string {
+  if (!value) return "";
+  if (opts) return "not-implemented";
+  return "not-implemented";
+}
