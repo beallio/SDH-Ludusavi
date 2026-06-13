@@ -9,7 +9,7 @@ import {
 import type { ReactNode } from "react";
 
 import type { GameOperationHistoryEntry, GameStatus } from "../../types";
-import { formatDateMDY, formatTime12h } from "../../formatting/dateTime";
+import { formatHistoryTimestamp } from "../../formatting/dateTime";
 import { getLastOperationText } from "../../formatting/operationText";
 import { SpinnerButton } from "./SpinnerButton";
 
@@ -125,25 +125,18 @@ export function GameSettingsSection({
                       selectedHistory.message
                     )}
                   </div>
-                  {(() => {
-                    if (!selectedHistory.timestamp) return null;
-                    const parts = selectedHistory.timestamp.split(/[T ]/);
-                    const timePart = parts[1]?.split(".")[0];
-                    if (!timePart) return null;
-
-                    return (
-                      <div
-                        style={{
-                          fontSize: "12px",
-                          opacity: 0.65,
-                          marginTop: "2px",
-                          fontVariantNumeric: "tabular-nums"
-                        }}
-                      >
-                        ({formatDateMDY(selectedHistory.timestamp)} {formatTime12h(timePart)})
-                      </div>
-                    );
-                  })()}
+                  {selectedHistory.timestamp && (
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        opacity: 0.65,
+                        marginTop: "2px",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      ({formatHistoryTimestamp(selectedHistory.timestamp)})
+                    </div>
+                  )}
                 </div>
               </div>
             )}
