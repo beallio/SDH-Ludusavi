@@ -44,6 +44,22 @@ def test_history_manual_restore_success(tmp_path: Path) -> None:
     assert history["last_restore"]["status"] == "restored"
 
 
+def test_history_point_in_time_restore_records_restored(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+    service.refresh_games()
+
+    result = service.restore_backup_version("Hades", "backup-123")
+    assert result["status"] == "restored"
+
+    refresh = service.refresh_games()
+    history = refresh["history"]["Hades"]
+    assert history["last_restore"] is not None
+    assert history["last_restore"]["trigger"] == "manual_restore"
+    assert history["last_restore"]["status"] == "restored"
+    assert history["last_operation"]["status"] == "restored"
+    assert history["last_operation"]["operation"] == "restore"
+
+
 def test_history_auto_start_skip_records_last_skip(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
     service.set_auto_sync_enabled(True)

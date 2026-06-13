@@ -86,6 +86,10 @@ class FakeAdapter:
         self.restores.append(game_name)
         return {"ok": True, "game": game_name}
 
+    def restore_backup(self, game_name: str, backup_id: str) -> dict[str, object]:
+        self.restores.append(game_name)
+        return {"ok": True, "game": game_name}
+
     def get_conflict_metadata(self, game_name: str) -> dict[str, object]:
         return dict(self.conflict_metadata)
 

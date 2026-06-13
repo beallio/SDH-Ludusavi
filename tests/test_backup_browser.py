@@ -223,9 +223,7 @@ def test_lifecycle_restore_backup_version_success() -> None:
         "backup_id": "123",
         "result": {"success": True},
     }
-    deps.history.record_history.assert_called_with(
-        "Hades", "restore", "point_in_time_restore", "restored"
-    )
+    deps.history.record_history.assert_called_with("Hades", "restore", "manual_restore", "restored")
     deps.registry.refresh_after_operation.assert_called_with("Hades")
 
 
@@ -245,7 +243,7 @@ def test_lifecycle_restore_backup_version_failure() -> None:
         manager.restore_backup_version("Hades", "123")
 
     deps.history.record_history.assert_called_with(
-        "Hades", "restore", "point_in_time_restore", "failed", message="failed"
+        "Hades", "restore", "manual_restore", "failed", message="failed"
     )
 
 
