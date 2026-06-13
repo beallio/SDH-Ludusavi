@@ -666,11 +666,15 @@ export function LudusaviContent({
       const refreshed = await refreshGamesCall(false);
       const operationStatus = await getOperationStatus();
       const recentLogs = await getRecentLogs();
+      const refreshedHistory = await getGameHistoryCall();
 
       applyRefreshResult(refreshed);
       if (isMounted.current) {
         setOperation(operationStatus);
         setLogs(recentLogs);
+        if (!isRpcStatus(refreshedHistory)) {
+          ludusaviStore.setGameHistory(refreshedHistory);
+        }
       }
     } catch (error) {
       logUiEvent(
@@ -740,11 +744,15 @@ export function LudusaviContent({
       const refreshed = await refreshGamesCall(false);
       const operationStatus = await getOperationStatus();
       const recentLogs = await getRecentLogs();
+      const refreshedHistory = await getGameHistoryCall();
 
       applyRefreshResult(refreshed);
       if (isMounted.current) {
         setOperation(operationStatus);
         setLogs(recentLogs);
+        if (!isRpcStatus(refreshedHistory)) {
+          ludusaviStore.setGameHistory(refreshedHistory);
+        }
       }
     } catch (error) {
       logUiEvent(
