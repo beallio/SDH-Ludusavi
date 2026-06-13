@@ -58,7 +58,7 @@ def main() -> None:
             required_dirs = [
                 "py_modules/sdh_ludusavi/",
                 "py_modules/pyludusavi/",
-                "py_modules/pyludusavi-0.2.3.dist-info/",
+                "py_modules/pyludusavi-0.2.4.dist-info/",
             ]
             for dir_prefix in required_dirs:
                 full_dir_prefix = f"{prefix}{dir_prefix}"

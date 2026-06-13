@@ -6,6 +6,9 @@ requires-python = ">=3.12"
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P7D"
 
+[options.exclude-newer-package]
+pyludusavi = "2026-06-14T00:00:00Z"
+
 [[package]]
 name = "colorama"
 version = "0.4.6"
@@ -137,11 +140,11 @@ wheels = [
 
 [[package]]
 name = "pyludusavi"
-version = "0.2.3"
+version = "0.2.4"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d9/ab/15e5a7ea011e5486cb4a0837b8d3dcf7e1dbc2be55bbe7efc3b98595e6ea/pyludusavi-0.2.3.tar.gz", hash = "sha256:82e28a0dd052aa7281a176f69fa9a5a644aee3cb9987087c4d445cf7a20d7ea8", size = 12095, upload-time = "2026-05-15T05:29:03.483Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/23/01/dfa66e195bca1ef27616fdc1b40fbccc06bd052a6b356f1f5fb1fec66373/pyludusavi-0.2.4.tar.gz", hash = "sha256:d763d4cc6e81eb654a6db12767dab677a3bff9616070e905f9b8a4623c98f8cb", size = 12118, upload-time = "2026-06-13T01:44:36.899Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/dc/f9beed04820327dd5491f019c4e756bc3369557682917e0265dfbc9a5444/pyludusavi-0.2.3-py3-none-any.whl", hash = "sha256:4e8623739ba3d0ee3162f88e3a8f34a2693e9825b007637f9dff0f103bbc934f", size = 14272, upload-time = "2026-05-15T05:29:04.549Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/64/6f2579225ef0502b5675cc6825b6eb3e1378abcc5f5f9023a7b43abf034c/pyludusavi-0.2.4-py3-none-any.whl", hash = "sha256:331259e535ff3d82c0c5944dfa9f873f895b6f00ee06791c25646ea010f6381b", size = 14301, upload-time = "2026-06-13T01:44:37.717Z" },
 ]
 
 [[package]]
@@ -229,7 +232,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pyludusavi", specifier = ">=0.2.3" }]
+requires-dist = [{ name = "pyludusavi", specifier = ">=0.2.4" }]
 
 [package.metadata.requires-dev]
 dev = [
