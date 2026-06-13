@@ -1,0 +1,16 @@
+{
+  "date": "2026-06-12",
+  "task_objective": "Fix the syncthing_pending_upload status icon rendering visually smaller than sibling icons in the auto-sync status bar.",
+  "files_modified": [
+    "src/surfaces/autoSyncStatusRenderer.tsx",
+    "src/surfaces/autoSyncStatusSurface.test.ts"
+  ],
+  "tests_added": [
+    "autoSyncStatusSurface.test.ts: 'tightens the pending icon viewBox so the ring fills the box like sibling icons'"
+  ],
+  "design_decisions": [
+    "Root cause: the pending icon's Ionicons-derived paths bake in 64 units of padding per side of a 512-unit viewBox, so the ring filled only ~81% of its 18px box versus 90-95% for sibling icons.",
+    "Chose viewBox cropping ('48 48 416 416', the ring's outer extent including stroke, centered on 256,256) over a scale transform so path coordinates stay unchanged and the spin animation's transform-origin (256px 256px) keeps working without re-derivation."
+  ],
+  "results": "All 162 frontend tests pass plus tsc typecheck. Committed on fix/pending-icon-size, merged to dev, pushed, and dev release requested via workflow dispatch."
+}
