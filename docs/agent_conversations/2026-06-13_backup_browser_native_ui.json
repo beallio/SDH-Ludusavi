@@ -1,0 +1,23 @@
+{
+  "date": "2026-06-13",
+  "objective": "Rebuild the Backup Browser modal using native @decky/ui components and fix open-at-bottom behavior",
+  "files_modified": [
+    "src/components/modals/BackupBrowserModal.tsx",
+    "docs/plans/backup_browser_native_ui.md",
+    "docs/review/backup_browser_native_ui_review_1.md",
+    "docs/review/backup_browser_native_ui_review_2.md"
+  ],
+  "tests_added": [],
+  "design_decisions": [
+    "Replaced custom hardcoded div layout and hex colors with @decky/ui Dialog primitives (DialogHeader, DialogBody, DialogButton, Field).",
+    "Collapsed double focus stops into a single focus stop by using a presentational Field wrapping a focusable DialogButton for each backup item.",
+    "Added a firstRowRef on the newest snapshot's Restore button and used double requestAnimationFrame after data loads to explicitly focus it, fixing the open-at-bottom issue.",
+    "Used a ReactNode for the description prop in Field to ensure multi-line comments render properly via <br />.",
+    "Removed the footer Close button, relying entirely on the native built-in top-right close icon."
+  ],
+  "results": [
+    "Modal refactored to native Decky UI, resolving visual inconsistencies.",
+    "All unit tests pass.",
+    "Passed code review successfully, though specific scrolling edge cases require on-device validation in the dev build."
+  ]
+}
