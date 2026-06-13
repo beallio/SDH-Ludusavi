@@ -1,0 +1,22 @@
+{
+  "date": "2026-06-13",
+  "task_objective": "Fix Last Operation timestamp to show in local timezone instead of UTC.",
+  "files_modified": [
+    "src/formatting/dateTime.ts",
+    "src/formatting/dateTime.test.ts",
+    "src/components/qam/GameSettingsSection.tsx",
+    "tests/test_last_operation_date_display.py"
+  ],
+  "tests_added": [
+    "src/formatting/dateTime.test.ts: formatHistoryTimestamp converts a UTC ISO timestamp to the given local timezone",
+    "src/formatting/dateTime.test.ts: formatHistoryTimestamp converts to a US west-coast zone (UTC-7)",
+    "src/formatting/dateTime.test.ts: formatHistoryTimestamp returns the raw value when unparseable",
+    "src/formatting/dateTime.test.ts: formatHistoryTimestamp returns empty string for null/undefined"
+  ],
+  "design_decisions": [
+    "Added a dedicated `formatHistoryTimestamp` that leverages `new Date()` combined with `.toLocaleDateString` and `.toLocaleTimeString` to respect local timezones or a configured timezone.",
+    "Removed `formatTime12h` and `formatDateMDY` as they manually substringed UTC strings without timezone conversions.",
+    "Deleted the python backend test `test_last_operation_date_display.py` as its structural assertions enforcing the removed formatters were now obsolete."
+  ],
+  "results": "Successfully verified via vitest and merged to dev branch. Dev release dispatched."
+}
