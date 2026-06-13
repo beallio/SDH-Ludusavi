@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { ButtonItem, ConfirmModal, Focusable, ModalRoot, showModal } from "@decky/ui";
+import {
+  ConfirmModal,
+  DialogBody,
+  DialogBodyText,
+  DialogButton,
+  DialogFooter,
+  DialogHeader,
+  Field,
+  Focusable,
+  ModalRoot,
+  showModal,
+} from "@decky/ui";
 import { formatBytes } from "../../formatting/bytes";
 import { formatTimestamp } from "../../formatting/dateTime";
 import type { BackupListResult } from "../../types";
@@ -24,12 +35,24 @@ export function BackupBrowserModal({
   const [listResult, setListResult] = useState<BackupListResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const firstRowRef = useRef<HTMLDivElement | null>(null);
 
   // Gamepad focus lands on the footer Close button when the modal mounts,
   // dragging the list to the bottom; reset to the top once content settles.
   useEffect(() => {
-    if (!loading) scrollRef.current?.scrollTo({ top: 0 });
-  }, [loading]);
+    if (loading || error) {
+      scrollRef.current?.scrollTo({ top: 0 });
+      return;
+    }
+    if (!listResult?.backups.length) {
+      scrollRef.current?.scrollTo({ top: 0 });
+      return;
+    }
+    const id = requestAnimationFrame(() =>
+      requestAnimationFrame(() => firstRowRef.current?.focus())
+    );
+    return () => cancelAnimationFrame(id);
+  }, [loading, error, listResult]);
 
   useEffect(() => {
     let mounted = true;
@@ -72,78 +95,61 @@ export function BackupBrowserModal({
 
   return (
     <ModalRoot onCancel={closeModal} bHideBuiltInClose={false}>
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", background: "#212224" }}>
-        <div style={{ padding: "16px", borderBottom: "1px solid #333", fontSize: "1.2em" }}>
-          Backups: {gameName}
-        </div>
-        <div
-          ref={scrollRef}
-          style={{ flex: 1, overflowY: "auto", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}
-        >
-          {loading && <div>Loading backups...</div>}
-          {error && <div style={{ color: "red" }}>Error: {error}</div>}
-          {!loading && !error && listResult && (
-            <>
-              <div>
-                <strong>Path:</strong> {listResult.backup_path || "Unknown"}
-                <br />
-                <strong>Total Size:</strong>{" "}
-                {listResult.total_size_bytes !== null
-                  ? formatBytes(listResult.total_size_bytes)
-                  : "Unknown"}{" "}
-                ({listResult.backups.length} snapshots)
-              </div>
-              {listResult.backups.length === 0 ? (
-                <div>No backups found.</div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "10px" }}>
-                  {listResult.backups.map((b, idx) => (
-                    <div
+      <DialogHeader>Backups: {gameName}</DialogHeader>
+      <DialogBody ref={scrollRef}>
+        {loading && <DialogBodyText>Loading backups...</DialogBodyText>}
+        {error && <DialogBodyText style={{ color: "red" }}>Error: {error}</DialogBodyText>}
+        {!loading && !error && listResult && (
+          <>
+            <DialogBodyText>
+              <strong>Path:</strong> {listResult.backup_path || "Unknown"}
+              <br />
+              <strong>Total Size:</strong>{" "}
+              {listResult.total_size_bytes !== null
+                ? formatBytes(listResult.total_size_bytes)
+                : "Unknown"}{" "}
+              ({listResult.backups.length} snapshots)
+            </DialogBodyText>
+            {listResult.backups.length === 0 ? (
+              <DialogBodyText>No backups found.</DialogBodyText>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "10px" }}>
+                {listResult.backups.map((b, idx) => {
+                  const timestampStr = formatTimestamp(b.when);
+                  const title = `${timestampStr}${b.locked ? " (Locked)" : ""}`;
+                  
+                  let desc = "";
+                  if (b.file_count !== null) desc += `${b.file_count} files `;
+                  if (b.size_bytes !== null) desc += formatBytes(b.size_bytes);
+                  if (b.comment) desc += `\nComment: ${b.comment}`;
+
+                  return (
+                    <Focusable
                       key={b.id}
-                      style={{
-                        padding: "12px",
-                        // Matches the Steam DialogButton fill so cards and
-                        // their Restore buttons read as one surface.
-                        backgroundColor: "#43464c",
-                        borderRadius: "8px",
-                      }}
+                      ref={idx === 0 ? firstRowRef : undefined}
+                      preferredFocus={idx === 0}
                     >
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
-                        <div>
-                          <strong>{formatTimestamp(b.when)}</strong> {b.locked ? "(Locked)" : ""}
-                        </div>
-                        <div style={{ fontSize: "14px", opacity: 0.8 }}>
-                          {b.file_count !== null ? `${b.file_count} files ` : ""}
-                          {b.size_bytes !== null ? formatBytes(b.size_bytes) : ""}
-                        </div>
-                      </div>
-                      {b.comment && (
-                        <div style={{ fontSize: "14px", marginBottom: "8px" }}>
-                          Comment: {b.comment}
-                        </div>
-                      )}
-                      <Focusable
-                        style={{ display: "flex", justifyContent: "flex-end" }}
-                        preferredFocus={idx === 0}
-                        noFocusRing={true}
+                      <Field
+                        focusable={true}
+                        label={title}
+                        description={desc}
+                        bottomSeparator="standard"
                       >
-                        <ButtonItem layout="below" onClick={() => onRestore(b.id, formatTimestamp(b.when))}>
+                        <DialogButton onClick={() => onRestore(b.id, timestampStr)}>
                           Restore
-                        </ButtonItem>
-                      </Focusable>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-        <div style={{ padding: "16px", borderTop: "1px solid #333", display: "flex", justifyContent: "flex-end" }}>
-          <ButtonItem layout="below" onClick={closeModal}>
-            Close
-          </ButtonItem>
-        </div>
-      </div>
+                        </DialogButton>
+                      </Field>
+                    </Focusable>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </DialogBody>
+      <DialogFooter>
+        <DialogButton onClick={closeModal}>Close</DialogButton>
+      </DialogFooter>
     </ModalRoot>
   );
 }
