@@ -1,0 +1,21 @@
+{
+  "date": "2026-06-13",
+  "objective": "Address review findings: singleton PID reuse, oversized match sets, and re-vendor pyludusavi 0.2.6",
+  "branch": "fix/review-findings-remediation",
+  "design_decisions": {
+    "process_identity_design": "Introduced a frozen SiblingProcess dataclass encapsulating PID, UID, start_ticks, and cmdline. The identities are captured before any signaling. A process is re-verified right before SIGTERM and SIGKILL. A zombie or vanished process is classified as 'gone' and properly handled as terminated. A process whose identity changes is 'changed' and skipped.",
+    "safety_limit_behavior": "Enforced the maximum limit of 8 stale siblings. If the valid deduplicated count exceeds 8, all identities are refused with no signals sent, the complete list is logged, and plugin startup continues safely.",
+    "pyludusavi_override": "Used the explicit `exclude-newer-package` option exclusively for `pyludusavi=2026-06-14T00:00:00Z` to download version 0.2.6 while preserving the global 7-day UV policy. The dependency rule was updated to `>=0.2.6` and the local timeout patch was removed naturally.",
+    "local_discovery_patch": "Removed the old local timeout patch and its related tests in favor of the upstream timeout behavior in 0.2.6, asserting that it functions correctly."
+  },
+  "results": {
+    "red_commands": "UV_FROZEN=1 ./run.sh uv run pytest tests/test_singleton.py > /tmp/sdh_ludusavi/2026-06-13_review_findings_remediation_red.log",
+    "green_commands": "UV_FROZEN=1 ./run.sh uv run pytest tests/test_singleton.py",
+    "validation": "Passed all linting, typechecking, python and pnpm tests successfully.",
+    "commit_shas": [
+      "e5e9706 docs(plans): add review findings remediation plan",
+      "5e8deb7 fix(singleton): bind cleanup signals to process identities and refuse oversized match sets",
+      "2ac00c4 chore(deps): re-vendor pyludusavi 0.2.6"
+    ]
+  }
+}
