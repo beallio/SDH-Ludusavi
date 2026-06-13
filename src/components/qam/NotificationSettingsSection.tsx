@@ -28,7 +28,7 @@ export function NotificationSettingsSection({
       <PanelSectionRow>
         <ToggleField
           label="Manual Operations"
-          description="Shows toasts for Force Backup and Force Restore results."
+          description="Shows toasts for Force Backup and snapshot restore results."
           bottomSeparator="standard"
           checked={settings.notifications.manual_operations}
           disabled={!settings.notifications.enabled || isBusy}
