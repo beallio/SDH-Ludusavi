@@ -1,4 +1,4 @@
-from typing import TypedDict, Dict, List, Optional, Literal, Any
+from typing import TypedDict, Dict, List, Optional, Literal, Any, NotRequired
 
 # Hybrid Policy:
 # - Top-level envelopes are Total (strict).
@@ -91,9 +91,9 @@ class ApiGame(TypedDict, total=False):
 
 class LudusaviApiOutput(TypedDict):
     games: Dict[str, ApiGame]
-    errors: Optional[ApiErrorDetails]
-    overall: Optional[OperationStatus]
-    cloud: Optional[Dict[str, Dict]]
+    errors: NotRequired[Optional[ApiErrorDetails]]
+    overall: NotRequired[Optional[OperationStatus]]
+    cloud: NotRequired[Optional[Dict[str, Dict]]]
 
 
 # --- Configuration ---

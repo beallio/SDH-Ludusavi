@@ -103,5 +103,5 @@ def _verify(prefix: list[str], env: Optional[dict[str, str]] = None) -> bool:
                 timeout=_VERIFY_TIMEOUT_SECONDS,
             )
         return result.returncode == 0
-    except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
         return False
