@@ -187,6 +187,116 @@ def test_history_cache_hit_returns_cached_history(tmp_path: Path) -> None:
     assert "Hades" in refresh["history"]
 
 
+def test_force_backup_no_changes_records_skip(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter=adapter)
+    service.refresh_games()
+    original_backup = adapter.backup
+
+    def backup_same(game_name: str, preview: bool = False) -> dict[str, object]:
+        if preview:
+            return original_backup(game_name, preview=True)
+        adapter.backups.append(game_name)
+        return {
+            "overall": {"changedGames": {"new": 0, "different": 0, "same": 1}},
+            "games": {game_name: {"change": "Same", "decision": "Processed"}},
+        }
+
+    adapter.backup = backup_same
+
+    result = service.force_backup("Hades")
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "local_current"
+    history = service.refresh_games()["history"]["Hades"]
+    assert history["last_skip"]["status"] == "skipped"
+    assert history["last_skip"]["reason"] == "local_current"
+    assert history["last_skip"]["operation"] == "backup"
+    assert history["last_skip"]["trigger"] == "manual_backup"
+    assert history["last_backup"] is None
+    assert history["last_operation"]["status"] == "skipped"
+
+
+def test_force_backup_different_records_backed_up(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter=adapter)
+    service.refresh_games()
+    original_backup = adapter.backup
+
+    def backup_different(game_name: str, preview: bool = False) -> dict[str, object]:
+        if preview:
+            return original_backup(game_name, preview=True)
+        adapter.backups.append(game_name)
+        return {"games": {game_name: {"change": "Different", "decision": "Processed"}}}
+
+    adapter.backup = backup_different
+
+    result = service.force_backup("Hades")
+
+    assert result["status"] == "backed_up"
+    history = service.refresh_games()["history"]["Hades"]
+    assert history["last_backup"]["status"] == "backed_up"
+
+
+def test_force_backup_missing_change_defaults_backed_up(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+    service.refresh_games()
+
+    result = service.force_backup("Hades")
+
+    assert result["status"] == "backed_up"
+    history = service.refresh_games()["history"]["Hades"]
+    assert history["last_backup"]["status"] == "backed_up"
+
+
+def test_force_restore_no_changes_records_skip(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter=adapter)
+    service.refresh_games()
+    original_restore = adapter.restore
+
+    def restore_same(game_name: str, preview: bool = False) -> dict[str, object]:
+        if preview:
+            return original_restore(game_name, preview=True)
+        adapter.restores.append(game_name)
+        return {"games": {game_name: {"change": "Same", "decision": "Processed"}}}
+
+    adapter.restore = restore_same
+
+    result = service.force_restore("Hades")
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "local_current"
+    history = service.refresh_games()["history"]["Hades"]
+    assert history["last_skip"]["status"] == "skipped"
+    assert history["last_skip"]["reason"] == "local_current"
+    assert history["last_skip"]["operation"] == "restore"
+    assert history["last_skip"]["trigger"] == "manual_restore"
+    assert history["last_restore"] is None
+    assert history["last_operation"]["status"] == "skipped"
+
+
+def test_force_restore_different_records_restored(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter=adapter)
+    service.refresh_games()
+    original_restore = adapter.restore
+
+    def restore_different(game_name: str, preview: bool = False) -> dict[str, object]:
+        if preview:
+            return original_restore(game_name, preview=True)
+        adapter.restores.append(game_name)
+        return {"games": {game_name: {"change": "Different", "decision": "Processed"}}}
+
+    adapter.restore = restore_different
+
+    result = service.force_restore("Hades")
+
+    assert result["status"] == "restored"
+    history = service.refresh_games()["history"]["Hades"]
+    assert history["last_restore"]["status"] == "restored"
+
+
 def test_history_does_not_alter_cache_markers(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
     # Give it an installed_app_ids to persist
