@@ -521,6 +521,15 @@ class GameLifecycleManager:
                     game.name, backup_id
                 ),
             )
+            change = self._result_change(result, game.name)
+            if change == "Same":
+                self.dependencies.history.record_history(
+                    game.name, "restore", "manual_restore", "skipped", reason="local_current"
+                )
+            else:
+                self.dependencies.history.record_history(
+                    game.name, "restore", "manual_restore", "restored"
+                )
         except OperationLockedError:
             raise
         # Intentionally broad: record history and re-raise on point in time restore failure
@@ -530,8 +539,21 @@ class GameLifecycleManager:
             )
             raise
 
-        self.dependencies.history.record_history(game.name, "restore", "manual_restore", "restored")
         self.dependencies.registry.refresh_after_operation(game.name)
+        if change == "Same":
+            self.dependencies.log(
+                "info",
+                f"Restore skipped for {game.name} from backup {backup_id}: local save already matches backup",
+                "restore",
+                game.name,
+            )
+            return {
+                "status": "skipped",
+                "reason": "local_current",
+                "game": game.name,
+                "backup_id": backup_id,
+                "result": result,
+            }
         self.dependencies.log(
             "info",
             f"Restored {game.name} from backup {backup_id}",
