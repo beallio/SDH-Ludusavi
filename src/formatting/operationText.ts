@@ -3,46 +3,68 @@ import type { LifecycleCheckResult, OperationResult } from "../types";
 export function getLastOperationText(
   status: string,
   reason: string | null,
-  message: string | null = null
+  message: string | null = null,
+  operation: string | null = null
 ): string {
   switch (status) {
     case "backed_up":
       return "Backup complete";
     case "restored":
       return "Restore complete";
-    case "failed":
+    case "failed": {
       const err = message || reason;
       return err ? `Failed — ${err}` : "Failed — check logs";
-    case "skipped":
+    }
+    case "skipped": {
+      const isRestore = operation === "restore" || operation === "start";
+      const isBackup = operation === "backup" || operation === "exit";
+      const label = isRestore ? "Restore skipped" : isBackup ? "Backup skipped" : "Skipped";
+
+      let detail: string | null = null;
       if (reason) {
         switch (reason) {
           case "local_current":
-            return "Skipped — local save is already current";
+            detail = isRestore ? "local save already matches backup" : "local save is already current";
+            break;
           case "remote_current":
-            return "Skipped — cloud save is already current";
+            detail = "cloud save is already current";
+            break;
           case "not_processed":
-            return "Skipped — game is deselected in Ludusavi";
+            detail = "game is deselected in Ludusavi";
+            break;
           case "no_backup":
-            return "Skipped — no backup found";
+            detail = "no backup found";
+            break;
           case "ambiguous_recency":
-            return "Skipped — recency is ambiguous";
+            detail = "recency is ambiguous";
+            break;
           case "conflict_unresolved":
-            return "Skipped — save conflict was not resolved";
+            detail = "save conflict was not resolved";
+            break;
           case "no_files_found":
-            return "Skipped — no files found";
+            detail = "no files found";
+            break;
           case "preview_failed":
-            return "Skipped — preview failed";
+            detail = "preview failed";
+            break;
           case "auto_sync_disabled":
-            return "Skipped — feature disabled";
+            detail = "feature disabled";
+            break;
           case "operation_running":
-            return "Skipped — another operation is running";
+            detail = "another operation is running";
+            break;
           case "unmatched_game":
-            return "Skipped — could not match game name";
+            detail = "could not match game name";
+            break;
           default:
-            return `Skipped — ${reason.replace(/_/g, " ")}`;
+            detail = reason.replace(/_/g, " ");
         }
+      } else if (message) {
+        detail = message;
       }
-      return message ? `Skipped — ${message}` : "Skipped";
+
+      return detail ? `${label} — ${detail}` : label;
+    }
     default:
       return "No operation yet";
   }
