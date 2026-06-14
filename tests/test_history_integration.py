@@ -60,6 +60,59 @@ def test_history_point_in_time_restore_records_restored(tmp_path: Path) -> None:
     assert history["last_operation"]["operation"] == "restore"
 
 
+def test_restore_backup_version_no_changes_records_skip(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter=adapter)
+    service.refresh_games()
+
+    def restore_backup_same(game_name: str, backup_id: str) -> dict[str, object]:
+        adapter.restores.append(game_name)
+        return {"games": {game_name: {"change": "Same", "decision": "Processed"}}}
+
+    adapter.restore_backup = restore_backup_same
+
+    result = service.restore_backup_version("Hades", "backup-123")
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "local_current"
+    history = service.refresh_games()["history"]["Hades"]
+    assert history["last_skip"]["status"] == "skipped"
+    assert history["last_skip"]["reason"] == "local_current"
+    assert history["last_skip"]["operation"] == "restore"
+    assert history["last_skip"]["trigger"] == "manual_restore"
+    assert history.get("last_restore") is None
+    assert history["last_operation"]["status"] == "skipped"
+
+
+def test_restore_backup_version_different_records_restored(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter=adapter)
+    service.refresh_games()
+
+    def restore_backup_different(game_name: str, backup_id: str) -> dict[str, object]:
+        adapter.restores.append(game_name)
+        return {"games": {game_name: {"change": "Different", "decision": "Processed"}}}
+
+    adapter.restore_backup = restore_backup_different
+
+    result = service.restore_backup_version("Hades", "backup-123")
+
+    assert result["status"] == "restored"
+    history = service.refresh_games()["history"]["Hades"]
+    assert history["last_restore"]["status"] == "restored"
+
+
+def test_restore_backup_version_missing_change_defaults_restored(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+    service.refresh_games()
+
+    result = service.restore_backup_version("Hades", "backup-123")
+
+    assert result["status"] == "restored"
+    history = service.refresh_games()["history"]["Hades"]
+    assert history["last_restore"]["status"] == "restored"
+
+
 def test_history_auto_start_skip_records_last_skip(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
     service.set_auto_sync_enabled(True)
