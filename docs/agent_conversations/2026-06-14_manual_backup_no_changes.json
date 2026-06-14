@@ -1,0 +1,40 @@
+{
+  "date": "2026-06-14",
+  "task_objective": "Report manual backup and restore no-ops as skipped/local_current when Ludusavi returns change=Same.",
+  "files_modified": [
+    "docs/plans/elegant-swinging-bengio.md",
+    "docs/plans/manual_backup_no_changes.md",
+    "docs/review/elegant-swinging-bengio/APPROVED",
+    "docs/review/elegant-swinging-bengio/round-01.md",
+    "py_modules/sdh_ludusavi/lifecycle.py",
+    "tests/test_history_integration.py"
+  ],
+  "tests_added": [
+    "test_force_backup_no_changes_records_skip",
+    "test_force_backup_different_records_backed_up",
+    "test_force_backup_missing_change_defaults_backed_up",
+    "test_force_restore_no_changes_records_skip",
+    "test_force_restore_different_records_restored"
+  ],
+  "design_decisions": [
+    "Treat only the exact per-game change value Same as skipped/local_current.",
+    "Preserve backed_up/restored behavior when change data is missing or malformed.",
+    "Refresh registry state after both skipped and successful manual operations.",
+    "Leave point-in-time restore and frontend rendering unchanged."
+  ],
+  "results": {
+    "tdd_red": "Backup Same returned backed_up and restore Same returned restored before implementation.",
+    "quality_gates": {
+      "ruff_check": "passed",
+      "ruff_format": "passed",
+      "ty": "passed",
+      "pytest": "608 passed; 85.86% coverage",
+      "frontend_pre_commit": "166 unit tests passed; typecheck, build, packaging, and supply-chain checks passed"
+    },
+    "review": "Approved after round 01 verified a clean uv.lock and fresh quality-gate evidence.",
+    "merge_commit": "37b15f7e7857dd29c4ad316b5f1ac2f415b2743a",
+    "dev_push": "origin/dev updated to merge commit before release dispatch",
+    "dev_release_workflow": "https://github.com/beallio/SDH-Ludusavi/actions/runs/27514915711",
+    "device_testing": "Deferred until the v0.3.0 development prerelease is published."
+  }
+}
