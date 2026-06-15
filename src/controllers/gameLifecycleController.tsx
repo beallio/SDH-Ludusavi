@@ -428,7 +428,7 @@ export function createGameLifecycleController(
         log("info", `backup_game_on_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
 
         if (result.status === "backed_up") {
-          statusSurface.publish("has_backup", {
+          publishAutoSyncStatus("has_backup", {
             source: "lifecycle_exit",
             gameName: name,
             appID,
