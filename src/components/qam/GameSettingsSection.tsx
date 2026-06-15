@@ -122,7 +122,8 @@ export function GameSettingsSection({
                     {getLastOperationText(
                       selectedHistory.status,
                       selectedHistory.reason,
-                      selectedHistory.message
+                      selectedHistory.message,
+                      selectedHistory.operation
                     )}
                   </div>
                   {selectedHistory.timestamp && (
