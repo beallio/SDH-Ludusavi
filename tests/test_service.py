@@ -1319,13 +1319,17 @@ def test_force_restore_calls_refresh_after_operation(tmp_path: Path) -> None:
 def test_global_operation_lock_blocks_new_operations(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
     service.refresh_games()
-    service._coordinator._operation.is_running = True
-    service._coordinator._operation.name = "refresh"
+    service._coordinator._operation_lock.acquire()
+    try:
+        service._coordinator._operation.is_running = True
+        service._coordinator._operation.name = "refresh"
 
-    with pytest.raises(OperationLockedError):
-        service.force_backup("Hades")
+        with pytest.raises(OperationLockedError):
+            service.force_backup("Hades")
 
-    assert service.get_operation_status()["name"] == "refresh"
+        assert service.get_operation_status()["name"] == "refresh"
+    finally:
+        service._coordinator._operation_lock.release()
 
 
 def test_concurrent_operations_are_rejected_by_thread_safe_lock(tmp_path: Path) -> None:
