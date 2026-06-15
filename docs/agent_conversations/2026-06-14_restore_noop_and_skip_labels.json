@@ -1,0 +1,21 @@
+{
+  "date": "2026-06-14",
+  "task_objective": "Fix restore no-op reporting and make 'Last Operation' skip text operation-aware.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/lifecycle.py",
+    "src/formatting/operationText.ts",
+    "src/components/qam/GameSettingsSection.tsx",
+    "docs/plans/restore-noop-and-skip-labels.md"
+  ],
+  "tests_added": [
+    "tests/test_history_integration.py (3 tests for restore_backup_version)",
+    "src/formatting/operationText.test.ts (11 tests for getLastOperationText)"
+  ],
+  "design_decisions": [
+    "Used existing _result_change() helper in lifecycle.py to inspect the ludusavi change payload for point-in-time restores.",
+    "Made getLastOperationText() in the frontend accept an optional operation argument to emit operation-aware skip labels.",
+    "Ensured backward compatibility when operation is null.",
+    "Delegated Steam Deck testing until after dev release is built."
+  ],
+  "results": "All tests and quality gates passed (coverage 85.91%, test:unit passed). Working branch merged to dev and dev release dispatched."
+}
