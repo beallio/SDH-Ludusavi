@@ -62,7 +62,7 @@ def test_match_by_steam_id(tmp_path: Path) -> None:
     service.refresh_games()
 
     # Matching by exact ID should work
-    game = service._match_game("Some Name", app_id="413150")
+    game = service._registry.match_game("Some Name", app_id="413150")
     assert game is not None
     assert game.name == "Hades"
 
@@ -72,11 +72,11 @@ def test_match_by_alias(tmp_path: Path) -> None:
     service.refresh_games()
 
     # Matching by Ludusavi alias
-    game = service._match_game("Custom Alias")
+    game = service._registry.match_game("Custom Alias")
     assert game is not None
     assert game.name == "Hades"
 
-    game2 = service._match_game("Shortcut Name")
+    game2 = service._registry.match_game("Shortcut Name")
     assert game2 is not None
     assert game2.name == "The Witcher 3: Wild Hunt"
 
@@ -86,12 +86,12 @@ def test_match_by_fuzzy_substring(tmp_path: Path) -> None:
     service.refresh_games()
 
     # Matching by substring (Steam has shorter name)
-    game = service._match_game("The Witcher 3")
+    game = service._registry.match_game("The Witcher 3")
     assert game is not None
     assert game.name == "The Witcher 3: Wild Hunt"
 
     # Matching by reverse substring (Steam has longer name)
-    game2 = service._match_game("Hades: Battle Out of Hell")
+    game2 = service._registry.match_game("Hades: Battle Out of Hell")
     assert game2 is not None
     assert game2.name == "Hades"
 
@@ -100,7 +100,7 @@ def test_short_configured_game_name_matches_boundary_safe_launcher_name(tmp_path
     service = service_with_state(tmp_path)
     service.refresh_games()
 
-    game = service._match_game("Doom v1.0")
+    game = service._registry.match_game("Doom v1.0")
 
     assert game is not None
     assert game.name == "Doom"
