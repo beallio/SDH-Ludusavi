@@ -53,6 +53,15 @@ The following files are excluded from the date-based archive:
 The conflict-flow HTML is read directly by the test suite. The two retained plans are
 referenced by post-cutoff review or session records that remain active.
 
+Full-suite validation after creating the archive snapshot identified one additional
+test-consumed document:
+
+- `docs/review/npm_known_potential_vulnerability.md`
+
+That review remains active because `tests/test_npm_supply_chain.py` reads it directly.
+It is also present in the 220-file archive snapshot, so the active tree removes 219 of
+the manifested paths.
+
 All `docs/specs/`, `docs/archive/`, and post-cutoff files remain in the active tree.
 
 ## Public Interfaces
@@ -85,7 +94,9 @@ continue to run through `./run.sh`, with caches under `/tmp/sdh_ludusavi`.
    blob matches the source blob before committing the archive snapshot.
 6. Remove the temporary worktree and prune stale worktree metadata. The
    `docs-archive` branch and its new commit remain.
-7. Delete the manifest paths from the feature branch only after archive verification.
+7. Delete the manifest paths from the feature branch only after archive verification,
+   except for `docs/review/npm_known_potential_vulnerability.md`, which remains active
+   for the supply-chain documentation test.
 8. Add `docs/ARCHIVE.md`, update `docs/agent_conversations/README.md`, and add the
    required session log.
 9. Run the full repository quality gates, commit the active-tree cleanup, and
@@ -103,7 +114,7 @@ Validation must include:
 2. Verify every archived path has the same blob object ID before active deletion.
 3. Verify `docs/plans/cloud_sync_conflict_resolution_flow.html` remains present.
 4. Verify retained post-cutoff documentation references resolve.
-5. Verify the expected active documentation count after adding this plan,
+5. Verify the expected active documentation count is 88 after adding this plan,
    `docs/ARCHIVE.md`, and the session log.
 6. Run:
 
