@@ -24,7 +24,7 @@ describe("resolveQamOpenSelection", () => {
     ).toBe("wait");
   });
 
-  it("returns consume when no games are present", () => {
+  it("returns wait when no games are present", () => {
     expect(
       resolveQamOpenSelection({
         isQuickAccessVisible: true,
@@ -32,7 +32,7 @@ describe("resolveQamOpenSelection", () => {
         gameCount: 0,
         operationInProgress: false,
       })
-    ).toBe("consume");
+    ).toBe("wait");
   });
 
   it("returns consume when operation is in progress", () => {
