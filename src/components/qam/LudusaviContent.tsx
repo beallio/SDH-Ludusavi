@@ -55,6 +55,7 @@ import { LudusaviLauncherSection } from "./LudusaviLauncherSection";
 import { NotificationSettingsSection } from "./NotificationSettingsSection";
 import { QamStyles } from "./QamStyles";
 import { LogsSection, VersionsSection } from "./VersionAndLogsSection";
+import { resolveRefreshedSelection } from "./refreshSelection";
 
 const EMPTY_GAMES: readonly GameStatus[] = Object.freeze([]);
 
@@ -409,13 +410,13 @@ export function LudusaviContent({
     });
 
     if (cacheCurrent && ludusaviState.games) {
-      applyCachedRefreshResult(preferredGame);
+      applyCachedRefreshResult(preferredGame, true);
       logUiEvent("game_list_loaded_from_cache", {
         game_count: ludusaviState.games.length,
       }, "info");
     } else {
       const refreshed = await refreshGamesCall(false, installedAppIds);
-      if (applyRefreshResult(refreshed, preferredGame)) {
+      if (applyRefreshResult(refreshed, preferredGame, true)) {
         ludusaviStore.setInstalledAppIds(installedAppIds);
         logUiEvent("game_list_refreshed", {
           game_count: isRpcStatus(refreshed) ? 0 : refreshed.games.length,
@@ -425,7 +426,7 @@ export function LudusaviContent({
     }
   };
 
-  const applyCachedRefreshResult = (preferredGame?: string): boolean => {
+  const applyCachedRefreshResult = (preferredGame?: string, allowSteamContextSelection = false): boolean => {
     const cachedGames = ludusaviState.games;
     if (!cachedGames) {
       return false;
@@ -433,25 +434,25 @@ export function LudusaviContent({
 
     const cachedAliases = ludusaviState.gameAliases;
 
-    if (selectCurrentSteamGameIfAvailable(cachedGames, cachedAliases)) {
+    if (allowSteamContextSelection && selectCurrentSteamGameIfAvailable(cachedGames, cachedAliases)) {
       return true;
     }
 
-    const target = preferredGame || selectedGame;
-    if (target && cachedGames.some((game) => game.name === target)) {
-      ludusaviStore.setSelectedGame(target);
-      syncSelectedGameCache(target);
-    } else {
-      const firstGame = cachedGames[0]?.name ?? "";
-      ludusaviStore.setSelectedGame(firstGame);
-      syncSelectedGameCache(firstGame);
-    }
+    const outcome = resolveRefreshedSelection({
+      games: cachedGames,
+      preferredGame,
+      currentSelectedGame: selectedGame,
+    });
+    ludusaviStore.setSelectedGame(outcome.game);
+    syncSelectedGameCache(outcome.game);
+
     return true;
   };
 
   const applyRefreshResult = (
     result: RpcResult<RefreshResult>,
-    preferredGame?: string
+    preferredGame?: string,
+    allowSteamContextSelection = false
   ): boolean => {
     if (isRpcStatus(result)) {
       logRpcStatus(result, "refresh");
@@ -477,20 +478,23 @@ export function LudusaviContent({
     ludusaviStore.applyRefreshResult(result);
     log("info", `Tracked ${ludusaviStore.getSnapshot().trackedNames.size} game names/aliases`);
 
-    if (selectCurrentSteamGameIfAvailable(result.games, result.aliases || {})) {
+    if (
+      allowSteamContextSelection &&
+      selectCurrentSteamGameIfAvailable(result.games, result.aliases || {})
+    ) {
       return true;
     }
 
-    const target = preferredGame || selectedGame;
-    if (target && result.games.some((game: GameStatus) => game.name === target)) {
-      ludusaviStore.setSelectedGame(target);
-      syncSelectedGameCache(target);
-    } else {
-      const firstGame = result.games[0]?.name ?? "";
-      log("debug", `Defaulting selected game to ${firstGame}`);
-      ludusaviStore.setSelectedGame(firstGame);
-      syncSelectedGameCache(firstGame);
+    const outcome = resolveRefreshedSelection({
+      games: result.games,
+      preferredGame,
+      currentSelectedGame: selectedGame,
+    });
+    if (outcome.source === "first") {
+      log("debug", `Defaulting selected game to ${outcome.game}`);
     }
+    ludusaviStore.setSelectedGame(outcome.game);
+    syncSelectedGameCache(outcome.game);
 
     return true;
   };
@@ -668,7 +672,7 @@ export function LudusaviContent({
       const recentLogs = await getRecentLogs();
       const refreshedHistory = await getGameHistoryCall();
 
-      applyRefreshResult(refreshed);
+      applyRefreshResult(refreshed, selectedGame);
       if (isMounted.current) {
         setOperation(operationStatus);
         setLogs(recentLogs);
@@ -746,7 +750,7 @@ export function LudusaviContent({
       const recentLogs = await getRecentLogs();
       const refreshedHistory = await getGameHistoryCall();
 
-      applyRefreshResult(refreshed);
+      applyRefreshResult(refreshed, selectedGame);
       if (isMounted.current) {
         setOperation(operationStatus);
         setLogs(recentLogs);
