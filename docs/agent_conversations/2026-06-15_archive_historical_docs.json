@@ -1,0 +1,27 @@
+{
+  "date": "2026-06-15",
+  "task_objective": "Archive historical plans, reviews, and session logs through June 11, 2026 while preserving current documentation and exact source contents.",
+  "files_modified": [
+    "docs/ARCHIVE.md",
+    "docs/agent_conversations/2026-06-15_archive_historical_docs.json",
+    "docs/agent_conversations/README.md",
+    "docs/plans/2026-06-15_archive_historical_docs.md",
+    "219 active-tree paths removed from the 220 entries listed in docs-archive:ARCHIVE_MANIFEST.txt"
+  ],
+  "tests_added": [],
+  "design_decisions": [
+    "Extended the existing docs-archive orphan branch instead of creating another archive branch.",
+    "Pinned the archive source to dev@29ca44bc79e9c8e66d840491aadef5b560647a79 and recorded source blob IDs in ARCHIVE_MANIFEST.txt.",
+    "Preserved historical files byte-for-byte, including pre-existing whitespace, so every archived blob matches its source.",
+    "Retained durable specs, the conflict-flow HTML consumed by tests, post-cutoff records, and pre-cutoff plans referenced by retained June 12 records.",
+    "Retained docs/review/npm_known_potential_vulnerability.md after full-suite validation proved tests/test_npm_supply_chain.py reads it directly; its verified snapshot remains in the archive.",
+    "Removed the temporary archive worktree after committing; docs-archive remains at 3f83b00242c1f459c97677138659e3f76497c2b4."
+  ],
+  "results": [
+    "Archived and verified 220 files totaling 1,284,057 bytes.",
+    "Removed 219 historical files from the active tree and retained 88 tracked documentation files.",
+    "Archive manifest SHA-256: e12f91ac222e6ac0f717eb5611e5cb13a173731ca8568df19e2990c0e6de5d52.",
+    "Validation passed: 612 Python tests at 85.88% coverage and 187 frontend tests, plus Ruff, formatting, ty, build, supply-chain, TDD, and diff checks.",
+    "No release, tag, or remote push was performed."
+  ]
+}
