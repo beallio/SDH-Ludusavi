@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import functools
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal, Mapping
 from typing import cast
 
@@ -133,62 +133,3 @@ def parse_release_manifest(payload: object) -> ReleaseManifest | None:
         sha256=sha256,
         generated_at=generated_at,
     )
-
-
-@dataclass
-class UpdaterCacheModel:
-    last_checked_at: str | None = None
-    last_checked_channel: str | None = None
-    last_checked_version: str | None = None
-    last_available_tag: str | None = None
-    last_notified_tag: str | None = None
-    last_result: Mapping[str, object] | None = None
-    pending_update_install: Mapping[str, object] | None = None
-    extras: dict[str, object] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, payload: object) -> UpdaterCacheModel:
-        record = as_string_key_mapping(payload)
-        if not record:
-            return cls()
-
-        m = cls()
-        for k, v in record.items():
-            if k == "last_checked_at":
-                m.last_checked_at = v if isinstance(v, str) else None
-            elif k == "last_checked_channel":
-                m.last_checked_channel = (
-                    v if isinstance(v, str) and v in ("stable", "development") else None
-                )
-            elif k == "last_checked_version":
-                m.last_checked_version = v if isinstance(v, str) else None
-            elif k == "last_available_tag":
-                m.last_available_tag = v if isinstance(v, str) else None
-            elif k == "last_notified_tag":
-                m.last_notified_tag = v if isinstance(v, str) else None
-            elif k == "last_result":
-                m.last_result = as_string_key_mapping(v) if isinstance(v, dict) else None
-            elif k == "pending_update_install":
-                m.pending_update_install = as_string_key_mapping(v) if isinstance(v, dict) else None
-            else:
-                m.extras[k] = v
-        return m
-
-    def to_dict(self) -> dict[str, object]:
-        res: dict[str, object] = {}
-        if self.last_checked_at is not None:
-            res["last_checked_at"] = self.last_checked_at
-        if self.last_checked_channel is not None:
-            res["last_checked_channel"] = self.last_checked_channel
-        if self.last_checked_version is not None:
-            res["last_checked_version"] = self.last_checked_version
-        if self.last_available_tag is not None:
-            res["last_available_tag"] = self.last_available_tag
-        if self.last_notified_tag is not None:
-            res["last_notified_tag"] = self.last_notified_tag
-        if self.last_result is not None:
-            res["last_result"] = self.last_result
-        if self.pending_update_install is not None:
-            res["pending_update_install"] = self.pending_update_install
-        res.update(self.extras)
-        return res
