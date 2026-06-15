@@ -251,7 +251,3 @@ def _process_tree(pid: int) -> list[int]:
         ordered.append(target_pid)
         stack.extend(sorted(children_by_parent.get(target_pid, []), reverse=True))
     return ordered
-
-
-def _child_pids(pid: int) -> list[int]:
-    return _process_tree(pid)[1:]
