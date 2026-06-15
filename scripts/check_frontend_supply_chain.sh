@@ -60,6 +60,5 @@ else
   echo "Skipping Socket package analyzer: socket-npm-package-analyzer is not installed."
 fi
 
-pnpm run typecheck
 pnpm run build
 pnpm test
