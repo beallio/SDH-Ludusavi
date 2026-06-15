@@ -157,6 +157,9 @@ describe("GameLifecycleController", () => {
     await vi.runAllTimersAsync();
 
     expect(mockStatusSurface.publish).toHaveBeenCalledWith("syncthing_pending_upload", expect.any(Object));
+    const kinds = mockStatusSurface.publish.mock.calls.map((c: any) => c[0]);
+    expect(kinds.indexOf("has_backup")).toBeGreaterThanOrEqual(0);
+    expect(kinds.indexOf("has_backup")).toBeLessThan(kinds.indexOf("syncthing_pending_upload"));
   });
 
   it("starts the buffered post-game watch when the frontend tracking cache is stale", async () => {
