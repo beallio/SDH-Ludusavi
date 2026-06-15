@@ -72,3 +72,16 @@ def test_setup_logging_removes_old_handlers(tmp_path) -> None:
     assert not any("Test routing" in entry["message"] for entry in recent1)
     # Check that it DID go to svc2
     assert any("Test routing" in entry["message"] for entry in recent2)
+
+
+def test_decky_log_fallback_debug_has_no_prefix(monkeypatch, tmp_path):
+    import sys
+    from tests.test_main import fake_decky_module
+    from sdh_ludusavi.log_buffer import _decky_log_fallback
+
+    decky, logger = fake_decky_module(tmp_path)
+    monkeypatch.setitem(sys.modules, "decky", decky)
+    _decky_log_fallback("debug", "refresh: hello")
+
+    assert logger.infos == ["refresh: hello"]
+    assert all("[DEBUG]" not in m for m in logger.infos)
