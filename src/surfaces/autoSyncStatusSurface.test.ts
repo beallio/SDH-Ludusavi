@@ -131,7 +131,7 @@ describe("AutoSyncStatusSurface No Connected Peers", () => {
     
     const icon = iconSvgForAutoSyncStatus("syncthing_unavailable");
     expect(icon).toContain("M403.002 217.001");
-    expect(icon).toContain("M214 250 298 334");
+    expect(icon).toContain("M196 232 316 352");
     expect(icon).not.toContain('r="8.8"');
     expect(iconSvgForAutoSyncStatus("syncthing_no_peers")).toBe(icon);
     expect(iconSvgForAutoSyncStatus("syncthing_folder_not_found")).toBe(icon);
