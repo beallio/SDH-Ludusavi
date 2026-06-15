@@ -1766,7 +1766,7 @@ def test_match_game_serializes_lazy_refresh_for_concurrent_callers(tmp_path: Pat
 
     def match() -> None:
         try:
-            game = service._match_game("Hades")
+            game = service._registry.match_game("Hades")
             matches.append(game.name if game else None)
         except BaseException as exc:  # pragma: no cover - asserted below.
             errors.append(exc)

@@ -12,7 +12,7 @@ from .coordinator import OperationLockedError, OperationCoordinator
 
 from .constants import DEFAULT_NOTIFICATION_SETTINGS
 from .updater import PluginUpdater
-from .types import LudusaviAdapter, GameStatus
+from .types import LudusaviAdapter
 from sdh_ludusavi.game_names import sanitize_game_name
 
 __all__ = ["SDHLudusaviService", "OperationLockedError", "DEFAULT_NOTIFICATION_SETTINGS"]
@@ -373,9 +373,6 @@ class SDHLudusaviService:
                 **self._updater.cache_payload(),
             }
             self._persistence.save_cache(cache_payload)
-
-    def _match_game(self, game_name: str, app_id: str | None = None) -> GameStatus | None:
-        return self._registry.match_game(game_name, app_id)
 
     # Updater helper methods
     def set_update_channel(self, channel: str) -> dict[str, Any]:
