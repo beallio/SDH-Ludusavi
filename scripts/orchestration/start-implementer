@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+slug="${1:-}"
+
+root="$(repo_root)"
+cd "$root"
+
+ensure_dirs
+
+command -v agy >/dev/null 2>&1 || die "agy not found on PATH"
+
+session_name="$(tmux_session_name "$slug")"
+
+goal='/goal wait for a new plan file, then implement it. further instructions regarding agents and loops will be provided in the implementation plan'
+
+run_foreground() {
+  exec agy \
+    --add-dir /tmp \
+    --print-timeout "${AGY_PRINT_TIMEOUT:-60m}" \
+    --print "$goal"
+}
+
+if [[ "${ORCH_FOREGROUND:-0}" == "1" ]]; then
+  run_foreground
+fi
+
+command -v tmux >/dev/null 2>&1 || {
+  echo "tmux not found; falling back to foreground mode." >&2
+  echo "Install tmux or rerun with ORCH_FOREGROUND=1 to make this explicit." >&2
+  run_foreground
+}
+
+if tmux has-session -t "$session_name" 2>/dev/null; then
+  echo "implementer session already running: $session_name"
+  exit 0
+fi
+
+tmux new-session -d \
+  -s "$session_name" \
+  -c "$root" \
+  "AGY_PRINT_TIMEOUT='${AGY_PRINT_TIMEOUT:-60m}' bash -lc 'exec agy --add-dir /tmp --print-timeout \"\$AGY_PRINT_TIMEOUT\" --print \"$goal\"'"
+
+echo "started implementer in tmux session: $session_name"
+echo "repo: $root"

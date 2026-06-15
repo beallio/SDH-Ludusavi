@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Convert a human-readable title into a lowercase filesystem-safe slug.
+#
+# Usage:
+#   scripts/orchestration/slugify-title "Increase Cloud X Icon Size"
+#
+# Output:
+#   increase-cloud-x-icon-size
+
+title="${*:-}"
+
+if [[ -z "$title" ]]; then
+  echo "usage: $0 <title>" >&2
+  exit 1
+fi
+
+printf '%s\n' "$title" \
+  | tr '[:upper:]' '[:lower:]' \
+  | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//; s/-+/-/g'

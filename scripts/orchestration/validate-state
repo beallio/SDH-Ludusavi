@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+slug="${1:-}"
+
+root="$(repo_root)"
+cd "$root"
+
+ensure_dirs
+
+echo "repo: $root"
+echo "branch: $(current_branch)"
+echo "tmp root: $(tmp_root)"
+
+scripts/orchestration/check-review-notes-not-deleted
+
+if [[ -n "$slug" ]]; then
+  require_slug "$slug"
+
+  finished="$(finished_marker "$slug")"
+  finalized="$(finalized_marker "$slug")"
+
+  echo "slug: $slug"
+  echo "round-complete marker: $finished"
+  [[ -f "$finished" ]] && echo "round-complete marker: present" || echo "round-complete marker: absent"
+
+  echo "finalized marker: $finalized"
+  [[ -f "$finalized" ]] && echo "finalized marker: present" || echo "finalized marker: absent"
+
+  status="$(scripts/orchestration/review-status "$slug")"
+  echo "review status: $status"
+
+  if latest_plan_file "$slug" >/dev/null 2>&1; then
+    echo "latest plan: $(latest_plan_file "$slug")"
+  else
+    echo "latest plan: not found"
+  fi
+
+  if command -v tmux >/dev/null 2>&1; then
+    session_name="$(tmux_session_name "$slug")"
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+      echo "implementer session: running ($session_name)"
+    else
+      echo "implementer session: not running ($session_name)"
+    fi
+  fi
+fi
+
+git status --short

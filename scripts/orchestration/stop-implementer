@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+slug="${1:-}"
+
+session_name="$(tmux_session_name "$slug")"
+
+command -v tmux >/dev/null 2>&1 || die "tmux not found on PATH"
+
+if tmux has-session -t "$session_name" 2>/dev/null; then
+  tmux kill-session -t "$session_name"
+  echo "stopped implementer session: $session_name"
+else
+  echo "implementer session not running: $session_name"
+fi
