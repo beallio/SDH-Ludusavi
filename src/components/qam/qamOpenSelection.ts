@@ -1,16 +1,20 @@
-export function resolveQamOpenSelection({
-  isQuickAccessVisible,
-  pendingSelection,
-  gameCount,
-  operationInProgress
-}: {
+export type QamOpenSelectionAction = "wait" | "consume" | "select";
+
+export interface QamOpenSelectionInput {
   isQuickAccessVisible: boolean;
   pendingSelection: boolean;
   gameCount: number;
   operationInProgress: boolean;
-}): "select" | "wait" | "consume" {
-  if (!isQuickAccessVisible) return "wait";
-  if (!pendingSelection) return "wait";
-  if (gameCount === 0 || operationInProgress) return "consume";
+}
+
+export function resolveQamOpenSelection(
+  input: QamOpenSelectionInput,
+): QamOpenSelectionAction {
+  if (!input.isQuickAccessVisible || !input.pendingSelection || input.gameCount === 0) {
+    return "wait";
+  }
+  if (input.operationInProgress) {
+    return "consume";
+  }
   return "select";
 }
