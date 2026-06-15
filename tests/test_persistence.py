@@ -1,11 +1,11 @@
 from __future__ import annotations
+from sdh_ludusavi.persistence import JsonSettingsStore
 
 import fcntl
-import json
 import threading
 from pathlib import Path
 
-from sdh_ludusavi.persistence import PersistenceManager, JsonSettingsStore
+from sdh_ludusavi.persistence import PersistenceManager
 
 
 def test_persistence_manager_split_storage(tmp_path: Path) -> None:
@@ -101,24 +101,3 @@ def test_locked_serializes_other_threads(tmp_path: Path) -> None:
         thread.join(timeout=10)
 
     assert order == ["holder-in", "holder-out", "contender-in"]
-
-
-def test_persistence_manager_combined_storage(tmp_path: Path) -> None:
-    combined_file = tmp_path / "state.json"
-    pm = PersistenceManager(state_path=combined_file)
-
-    data = pm.load_all()
-    assert data["settings"] == {}
-    assert data["cache"] == {}
-
-    pm.save_settings({"auto_sync_enabled": True})
-    assert combined_file.exists()
-
-    # Verify both are written to the same file
-    raw = json.loads(combined_file.read_text(encoding="utf-8"))
-    assert raw["auto_sync_enabled"] is True
-
-    pm.save_cache({"games": [{"name": "Celeste"}]})
-    raw_updated = json.loads(combined_file.read_text(encoding="utf-8"))
-    assert raw_updated["auto_sync_enabled"] is True
-    assert raw_updated["games"] == [{"name": "Celeste"}]

@@ -156,7 +156,8 @@ def test_settings_do_not_initialize_ludusavi_adapter(tmp_path: Path) -> None:
 
     service = SDHLudusaviService(
         adapter_factory=fail_factory,
-        state_path=tmp_path / "state.json",
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
     )
 
     assert service.get_settings() == expected_settings()
@@ -224,7 +225,8 @@ def test_refresh_reports_ludusavi_adapter_initialization_failure(tmp_path: Path)
 
     service = SDHLudusaviService(
         adapter_factory=fail_factory,
-        state_path=tmp_path / "state.json",
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
     )
 
     result = service.refresh_games()
@@ -249,7 +251,8 @@ def test_ludusavi_adapter_factory_is_reused_after_success(tmp_path: Path) -> Non
 
     service = SDHLudusaviService(
         adapter_factory=factory,
-        state_path=tmp_path / "state.json",
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
     )
 
     service.refresh_games()
@@ -298,7 +301,8 @@ def test_ludusavi_adapter_initialization_is_thread_safe(tmp_path: Path) -> None:
 
     service = SDHLudusaviService(
         adapter_factory=factory,
-        state_path=tmp_path / "state.json",
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
     )
     adapters: list[FakeAdapter] = []
     errors: list[BaseException] = []

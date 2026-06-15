@@ -122,16 +122,14 @@ class PersistenceManager:
 
     def __init__(
         self,
-        state_path: Path | None = None,
         settings_store: SettingsStore | None = None,
         cache_path: Path | None = None,
     ) -> None:
-        self._combined_state_path = state_path
         self._settings_store = settings_store or JsonSettingsStore(
-            state_path or Path("/tmp/sdh_ludusavi/settings.json")
+            Path("/tmp/sdh_ludusavi/settings.json")
         )
-        self._cache_path = cache_path or state_path or Path("/tmp/sdh_ludusavi/cache.json")
-        lock_anchor = self._combined_state_path or self._cache_path
+        self._cache_path = cache_path or Path("/tmp/sdh_ludusavi/cache.json")
+        lock_anchor = self._cache_path
         self._lock = _InterProcessLock(lock_anchor.with_name(".sdh_ludusavi.state.lock"))
 
     @property
@@ -154,25 +152,6 @@ class PersistenceManager:
     def _load_all_locked(self) -> dict[str, dict[str, Any]]:
         settings = {}
         cache = {}
-
-        if self._combined_state_path is not None:
-            if self._combined_state_path.exists():
-                try:
-                    raw_state = self._combined_state_path.read_text(encoding="utf-8")
-                    if not raw_state.strip():
-                        self._warn_load("empty state file")
-                    else:
-                        data = json.loads(raw_state)
-                        if isinstance(data, dict):
-                            settings = cast(dict[str, Any], dict(data))
-                            cache = cast(dict[str, Any], dict(data))
-                        else:
-                            self._warn_load("state file must contain a JSON object")
-                except OSError as exc:
-                    self._warn_load(f"unreadable state file: {exc}")
-                except json.JSONDecodeError as exc:
-                    self._warn_load(f"invalid JSON: {exc}")
-            return {"settings": settings, "cache": cache}
 
         # Load separate settings
         try:
@@ -202,26 +181,13 @@ class PersistenceManager:
         return {"settings": settings, "cache": cache}
 
     def save_settings(self, settings_data: dict[str, Any]) -> None:
-        """Save settings payload.
-
-        If combined state path is in use, saves the combined file (updating settings fields).
-        """
+        """Save settings payload."""
         with self._lock:
-            if self._combined_state_path is not None:
-                self._save_combined(settings_data, self._load_combined_cache())
-                return
             self._settings_store.write(settings_data)
 
     def save_cache(self, cache_data: dict[str, Any]) -> None:
-        """Save cache payload.
-
-        If combined state path is in use, saves the combined file (updating cache fields).
-        """
+        """Save cache payload."""
         with self._lock:
-            if self._combined_state_path is not None:
-                self._save_combined(self._load_combined_settings(), cache_data)
-                return
-
             self._cache_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
             temp_path = self._cache_path.with_name(f".{self._cache_path.name}.tmp")
             try:
@@ -234,35 +200,6 @@ class PersistenceManager:
                 temp_path.unlink(missing_ok=True)
                 raise
 
-    def _load_combined_settings(self) -> dict[str, Any]:
-        data = self.load_all()
-        # Filter settings keys from combined loaded dict
-        from .constants import SETTINGS_KEYS
-
-        return {k: v for k, v in data["settings"].items() if k in SETTINGS_KEYS}
-
-    def _load_combined_cache(self) -> dict[str, Any]:
-        data = self.load_all()
-        from .constants import SETTINGS_KEYS
-
-        return {k: v for k, v in data["cache"].items() if k not in SETTINGS_KEYS}
-
-    def _save_combined(self, settings_data: dict[str, Any], cache_data: dict[str, Any]) -> None:
-        if self._combined_state_path is None:
-            raise RuntimeError("_save_combined called without a combined state path")
-        data = {**settings_data, **cache_data}
-        self._combined_state_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-        temp_path = self._combined_state_path.with_name(f".{self._combined_state_path.name}.tmp")
-        try:
-            temp_path.write_text(
-                json.dumps(data, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
-            os.replace(temp_path, self._combined_state_path)
-        except OSError:
-            temp_path.unlink(missing_ok=True)
-            raise
-
     def _warn_load(self, reason: str) -> None:
-        state_path = self._combined_state_path or self._cache_path
-        LOGGER.warning("Ignoring SDH-ludusavi state at %s: %s", state_path, reason)
+        state_file_path = self._cache_path
+        LOGGER.warning("Ignoring SDH-ludusavi state at %s: %s", state_file_path, reason)
