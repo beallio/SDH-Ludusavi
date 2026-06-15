@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SDH-Ludusavi — Auto-Sync Status Icons Reference</title>
+<style>
+  :root {
+    --blue: #1a9fff;
+    --amber: #f59e0b;
+    --red: #ef4444;
+    --ink: #0b151f;
+  }
+  html, body {
+    margin: 0;
+    background: #0e1620;
+    color: #e6edf5;
+    font-family: "Motiva Sans", system-ui, Arial, sans-serif;
+  }
+  .page { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 {
+    font-size: 16px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #9fb3c8;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 8px;
+    margin: 40px 0 18px;
+  }
+  .subtitle { color: #9fb3c8; margin: 0 0 6px; font-size: 14px; }
+  .source-note { color: #6b7d91; font-size: 12px; margin: 0 0 24px; }
+  code { background: rgba(255, 255, 255, 0.07); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+
+  /* The real on-screen overlay strip, reproduced for context. */
+  .strip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: rgba(0, 0, 0, 0.34);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 800;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: #f8fafc;
+  }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+  .card {
+    background: #131e2b;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    gap: 14px;
+  }
+  .preview {
+    flex: 0 0 auto;
+    width: 64px;
+    height: 64px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; }
+  .preview .icon { width: 42px; height: 42px; }
+  .preview .icon svg { width: 100%; height: 100%; }
+  .strip .icon svg { width: 18px; height: 18px; }
+
+  .color-blue { color: var(--blue); }
+  .color-amber { color: var(--amber); }
+  .color-red { color: var(--red); }
+
+  .meta { flex: 1 1 auto; min-width: 0; }
+  .label { font-weight: 800; text-transform: uppercase; font-size: 13px; letter-spacing: 0.02em; }
+  .kind { font-family: ui-monospace, monospace; font-size: 11px; color: #6b7d91; margin: 2px 0 8px; }
+  .when { font-size: 13px; color: #c3d2e2; line-height: 1.45; }
+  .tags { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #9fb3c8;
+  }
+  .tag.anim { border-color: rgba(26, 159, 255, 0.5); color: #7cc4ff; }
+  .tag.persist { border-color: rgba(245, 158, 11, 0.5); color: #f5c06b; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 22px; margin: 8px 0 8px; font-size: 13px; color: #c3d2e2; }
+  .legend .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; }
+  .timing { background: #131e2b; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 14px 18px; margin-top: 14px; }
+  .timing li { margin: 5px 0; font-size: 13px; color: #c3d2e2; }
+
+  /* ---- Animation keyframes copied verbatim from autoSyncStatusRenderer.tsx ---- */
+  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  .icon-spin svg { animation: spin 1s linear infinite; transform-origin: 50% 50%; }
+  .icon-spin-ring .spinner-ring { animation: spin 1s linear infinite; transform-origin: 256px 256px; }
+  @keyframes arrow-fill-up { 0% { transform: translateY(176px); } 75% { transform: translateY(0); } 100% { transform: translateY(0); } }
+  .upload-arrow-fill { animation: arrow-fill-up 1.6s ease-out infinite; }
+  @keyframes backup-arrow-fill-up { 0% { transform: translateY(10.4px); } 75% { transform: translateY(0); } 100% { transform: translateY(0); } }
+  .backup-arrow-fill { animation: backup-arrow-fill-up 1.6s ease-out infinite; }
+  @keyframes arrow-fill-down { 0% { transform: translateY(-176px); } 75% { transform: translateY(0); } 100% { transform: translateY(0); } }
+  .download-arrow-fill { animation: arrow-fill-down 1.6s ease-out infinite; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Auto-Sync Status Icons</h1>
+  <p class="subtitle">The icon + label that appear in the bottom status strip during auto-sync. Each state below renders with its real SVG and live animation.</p>
+  <p class="source-note">Source of truth: <code>src/surfaces/autoSyncStatusRenderer.tsx</code> (icons &amp; CSS), <code>src/controllers/gameLifecycleController.tsx</code> &amp; <code>syncthingMonitorMachine.ts</code> (triggers). Generated reference — keep in sync if those change.</p>
+
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--blue)"></span>Blue — in&nbsp;progress / OK</span>
+    <span><span class="swatch" style="background:var(--amber)"></span>Amber — saved locally, attention</span>
+    <span><span class="swatch" style="background:var(--red)"></span>Red — failure</span>
+  </div>
+
+  <h2>Animated states (operation in progress)</h2>
+  <div class="grid">
+
+    <!-- checking -->
+    <div class="card">
+      <div class="preview"><span class="icon color-blue icon-spin"><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="3" opacity="0.8"/><path d="M10 2a8 8 0 0 1 8 8" fill="none" stroke="#0b151f" stroke-width="3" stroke-linecap="round"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Verifying Game Save</div>
+        <div class="kind">checking</div>
+        <div class="when">Shown on <strong>game launch and game exit</strong>, before the auto-sync RPC check runs, while Ludusavi compares the local save against the backup. Only appears when the status bar is enabled for the tracked game.</div>
+        <div class="tags"><span class="tag anim">spin</span><span class="tag">auto-hide ~15.5&nbsp;min ceiling</span></div>
+      </div>
+    </div>
+
+    <!-- restoring -->
+    <div class="card">
+      <div class="preview"><span class="icon color-blue"><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" style="transform: rotate(180deg); transform-origin: 50% 50%;"><defs><clipPath id="restore-arrow-clip"><path d="M11.6 15.2h-3.2v-4.8H5.9L10 4.8l4.1 5.6h-2.5z"/></clipPath></defs><path d="M10 1.2a8.8 8.8 0 1 0 0 17.6 8.8 8.8 0 0 0 0-17.6zM11.6 15.2h-3.2v-4.8H5.9L10 4.8l4.1 5.6h-2.5z" fill="currentColor" fill-rule="evenodd"/><rect class="backup-arrow-fill" x="5.5" y="4.8" width="9" height="10.4" fill="#f8fafc" clip-path="url(#restore-arrow-clip)"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Restoring Backup Save</div>
+        <div class="kind">restoring</div>
+        <div class="when">On <strong>launch</strong>, when the pre-check returns <code>needed / restore</code> and the launch was paused at the gate. The backup save is being written down to local. Same arrow as backing-up, rotated 180° (points down).</div>
+        <div class="tags"><span class="tag anim">fill ↓</span><span class="tag">auto-hide ~15.5&nbsp;min ceiling</span></div>
+      </div>
+    </div>
+
+    <!-- backing_up -->
+    <div class="card">
+      <div class="preview"><span class="icon color-blue"><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><defs><clipPath id="backup-arrow-clip"><path d="M11.6 15.2h-3.2v-4.8H5.9L10 4.8l4.1 5.6h-2.5z"/></clipPath></defs><path d="M10 1.2a8.8 8.8 0 1 0 0 17.6 8.8 8.8 0 0 0 0-17.6zM11.6 15.2h-3.2v-4.8H5.9L10 4.8l4.1 5.6h-2.5z" fill="currentColor" fill-rule="evenodd"/><rect class="backup-arrow-fill" x="5.5" y="4.8" width="9" height="10.4" fill="#f8fafc" clip-path="url(#backup-arrow-clip)"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Backing Up Local Save</div>
+        <div class="kind">backing_up</div>
+        <div class="when">On <strong>exit</strong>, when the pre-check returns <code>needed / backup</code>. The local save is being copied up into the backup. Up-arrow fills repeatedly while <code>backup_game_on_exit</code> runs.</div>
+        <div class="tags"><span class="tag anim">fill ↑</span><span class="tag">auto-hide ~15.5&nbsp;min ceiling</span></div>
+      </div>
+    </div>
+
+    <!-- syncthing_pending_upload -->
+    <div class="card">
+      <div class="preview"><span class="icon color-blue icon-spin-ring"><svg viewBox="48 48 416 416" width="18" height="18" aria-hidden="true"><g class="spinner-ring"><path d="M448 256c0-106-86-192-192-192S64 150 64 256s86 192 192 192 192-86 192-192z" fill="none" stroke="currentColor" stroke-miterlimit="10" stroke-width="32" opacity="0.8"/><path d="M256 64a192 192 0 0 1 192 192" fill="none" stroke="#0b151f" stroke-width="32" stroke-linecap="round"/></g><path d="M333.88 240.59a8 8 0 0 1-6.66-6.66C320.68 192.78 290.82 168 256 168c-32.37 0-53.93 21.22-62.48 43.58a7.92 7.92 0 0 1-6.16 5c-27.67 4.35-50.82 22.56-51.35 54.3-.52 31.53 25.51 57.11 57 57.11H326c27.5 0 50-13.72 50-44 0-27.22-22-40.41-42.12-43.4z" fill="currentColor"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Syncthing Preparing</div>
+        <div class="kind">syncthing_pending_upload</div>
+        <div class="when">After a successful backup-on-exit, the strip briefly shows <strong>Game Save Up To Date</strong>, then <strong>Syncthing Preparing</strong> while the hand-off confirms — waiting for Syncthing to notice the changed files before it starts pushing them to peers.</div>
+        <div class="tags"><span class="tag anim">ring spin</span><span class="tag persist">stays until next status</span></div>
+      </div>
+    </div>
+
+    <!-- syncthing_uploading -->
+    <div class="card">
+      <div class="preview"><span class="icon color-blue"><svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><defs><clipPath id="upload-arrow-clip"><path d="M288 276v76h-64v-76h-68l100-100 100 100h-68z"/></clipPath></defs><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999zM288 276v76h-64v-76h-68l100-100 100 100h-68z" fill="currentColor"/><rect class="upload-arrow-fill" x="156" y="176" width="200" height="176" fill="#f8fafc" clip-path="url(#upload-arrow-clip)"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Syncthing Uploading</div>
+        <div class="kind">syncthing_uploading</div>
+        <div class="when">Post-game, Syncthing is <strong>actively uploading</strong> the backed-up save to peers (hand-off reports <code>uploading</code>, or the monitor observes an upload). Cloud arrow fills upward.</div>
+        <div class="tags"><span class="tag anim">fill ↑</span><span class="tag persist">stays until next status</span></div>
+      </div>
+    </div>
+
+    <!-- syncthing_downloading -->
+    <div class="card">
+      <div class="preview"><span class="icon color-blue"><svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><defs><clipPath id="download-arrow-clip"><path d="M224 268v-76h64v76h68L256 368 156 268h68z"/></clipPath></defs><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999zM224 268v-76h64v76h68L256 368 156 268h68z" fill="currentColor"/><rect class="download-arrow-fill" x="156" y="192" width="200" height="176" fill="#f8fafc" clip-path="url(#download-arrow-clip)"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Syncthing Downloading</div>
+        <div class="kind">syncthing_downloading</div>
+        <div class="when">Post-game monitor sees Syncthing <strong>pulling</strong> save data down from peers. Cloud arrow fills downward.</div>
+        <div class="tags"><span class="tag anim">fill ↓</span><span class="tag persist">stays until next status</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <h2>Terminal / passive states (static icons)</h2>
+  <div class="grid">
+
+    <!-- syncthing_complete -->
+    <div class="card">
+      <div class="preview"><span class="icon color-blue"><svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999zM213.333 362.667L138.667 288l29.864-29.864 44.802 44.802L324.271 192l29.865 29.864-140.803 140.803z" fill="currentColor"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Syncthing Complete</div>
+        <div class="kind">syncthing_complete</div>
+        <div class="when">Syncthing finished transferring the save to/from peers. Terminal success for the Syncthing phase.</div>
+        <div class="tags"><span class="tag">static</span><span class="tag">auto-hide 2s</span></div>
+      </div>
+    </div>
+
+    <!-- has_backup -->
+    <div class="card">
+      <div class="preview"><span class="icon color-blue"><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 10.2 8.5 12.7 14.2 7" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Game Save Up To Date</div>
+        <div class="kind">has_backup</div>
+        <div class="when">Terminal success: a backup or restore completed, <em>or</em> the operation was skipped because the local save is already current (<code>local_current</code>).</div>
+        <div class="tags"><span class="tag">static</span><span class="tag">auto-hide 2s</span></div>
+      </div>
+    </div>
+
+    <!-- conflict -->
+    <div class="card">
+      <div class="preview"><span class="icon color-amber"><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="8.8" fill="currentColor"/><path d="M10 5.3v8.3" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/><path d="M6.8 8.4 10 5.2l3.2 3.2" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Save Conflict</div>
+        <div class="kind">conflict</div>
+        <div class="when">The pre-check found the local and backup saves have <strong>diverged</strong>; auto-sync stops and waits for the user to resolve which copy wins.</div>
+        <div class="tags"><span class="tag">static</span><span class="tag">auto-hide 2s</span></div>
+      </div>
+    </div>
+
+    <!-- unknown -->
+    <div class="card">
+      <div class="preview"><span class="icon color-amber"><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 5h7l2 2v8H6z" fill="#0b151f"/><path d="M8 5h5v4H8z" fill="currentColor"/><path d="M8 12h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Unknown</div>
+        <div class="kind">unknown</div>
+        <div class="when">Operation was skipped for an <strong>unrecognized reason</strong> (not one of the known success/error/silent cases). Amber.</div>
+        <div class="tags"><span class="tag">static</span><span class="tag">auto-hide 2s</span></div>
+      </div>
+    </div>
+
+    <!-- error -->
+    <div class="card">
+      <div class="preview"><span class="icon color-red"><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M10 5.2v6.4" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/><circle cx="10" cy="15" r="1.2" fill="#0b151f"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Unable To Sync</div>
+        <div class="kind">error</div>
+        <div class="when">Operation <strong>failed</strong>, restore couldn't run (launch gate unavailable), or skipped for a hard reason: <code>ambiguous_recency</code>, <code>game_error</code>, or <code>preview_failed</code>. Red.</div>
+        <div class="tags"><span class="tag">static</span><span class="tag">auto-hide 2s</span></div>
+      </div>
+    </div>
+
+    <!-- syncthing_unavailable -->
+    <div class="card">
+      <div class="preview"><span class="icon color-amber"><svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999z" fill="currentColor"/><path d="M214 250 298 334M298 250 214 334" fill="none" stroke="#0b151f" stroke-width="34" stroke-linecap="round"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Local Backup Saved — Syncthing Unavailable</div>
+        <div class="kind">syncthing_unavailable</div>
+        <div class="when">Local backup succeeded, but the Syncthing API was <strong>unreachable</strong> (<code>api_unavailable</code>), so nothing was pushed to peers. Amber.</div>
+        <div class="tags"><span class="tag">static</span><span class="tag">auto-hide 2s</span></div>
+      </div>
+    </div>
+
+    <!-- syncthing_folder_not_found -->
+    <div class="card">
+      <div class="preview"><span class="icon color-amber"><svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999z" fill="currentColor"/><path d="M214 250 298 334M298 250 214 334" fill="none" stroke="#0b151f" stroke-width="34" stroke-linecap="round"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Local Backup Saved — Path Not Shared</div>
+        <div class="kind">syncthing_folder_not_found</div>
+        <div class="when">Local backup succeeded, but the backup path <strong>isn't inside a shared Syncthing folder</strong> (<code>folder_not_found</code> / <code>folder_not_shared</code>). Amber.</div>
+        <div class="tags"><span class="tag">static</span><span class="tag">auto-hide 2s</span></div>
+      </div>
+    </div>
+
+    <!-- syncthing_no_peers -->
+    <div class="card">
+      <div class="preview"><span class="icon color-amber"><svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999z" fill="currentColor"/><path d="M214 250 298 334M298 250 214 334" fill="none" stroke="#0b151f" stroke-width="34" stroke-linecap="round"/></svg></span></div>
+      <div class="meta">
+        <div class="label">Local Backup Saved — No Syncthing Peers Online</div>
+        <div class="kind">syncthing_no_peers</div>
+        <div class="when">Local backup succeeded, but <strong>no Syncthing peers are connected</strong> (<code>no_connected_peers</code>), so the save can't replicate yet. Amber.</div>
+        <div class="tags"><span class="tag">static</span><span class="tag">auto-hide 2s</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <h2>In context — the status strip</h2>
+  <div class="strip"><span class="icon color-blue icon-spin"><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="3" opacity="0.8"/><path d="M10 2a8 8 0 0 1 8 8" fill="none" stroke="#0b151f" stroke-width="3" stroke-linecap="round"/></svg></span>Verifying Game Save</div>
+
+  <h2>Hide / persistence timing</h2>
+  <div class="timing">
+    <ul>
+      <li><strong>Running states</strong> (<code>checking</code>, <code>backing_up</code>, <code>restoring</code>) — stay visible until the result arrives; safety ceiling auto-hides at <code>RUNNING_STATUS_HIDE_CEILING_MS</code> = 930&nbsp;000&nbsp;ms (~15.5&nbsp;min). If they time out, the final result is suppressed.</li>
+      <li><strong>Active Syncthing states</strong> (<code>syncthing_pending_upload</code>, <code>syncthing_downloading</code>, <code>syncthing_uploading</code>) — do <em>not</em> auto-hide; they stay up until a newer status replaces them.</li>
+      <li><strong>All other result states</strong> — auto-hide after <code>RESULT_HIDE_DELAY_MS</code> = 2&nbsp;000&nbsp;ms.</li>
+    </ul>
+  </div>
+
+  <p class="source-note" style="margin-top:24px">Note: QAM action buttons (Back up / Restore now) show Decky's built-in <code>&lt;Spinner&gt;</code> while their operation runs — that is a separate component (<code>src/components/qam/SpinnerButton.tsx</code>), not part of this status-strip icon set.</p>
+</div>
+</body>
+</html>

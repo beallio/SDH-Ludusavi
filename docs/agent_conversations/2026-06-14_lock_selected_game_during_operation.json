@@ -1,0 +1,14 @@
+{
+  "date": "2026-06-14",
+  "task_objective": "Lock selected game to the acted-on game during operations",
+  "files_modified": [
+    "src/components/qam/LudusaviContent.tsx",
+    "src/components/qam/qamOpenSelection.ts",
+    "src/components/qam/qamOpenSelection.test.ts"
+  ],
+  "tests_added": [
+    "resolveQamOpenSelection (returns wait when not visible, returns consume when operation is in progress, returns select otherwise)"
+  ],
+  "design_decisions": "Created a pure helper resolveQamOpenSelection to decide what the deferred selection effect should do when the QAM opens. If an operation is running, the effect clears the pendingSelection flag but does not route-select ('consume'). The operation in progress status is tracked using a ref that is synchronously set and cleared around force operations.",
+  "results": "Effect is successfully gated. Tests are passing and the validation suite is green."
+}

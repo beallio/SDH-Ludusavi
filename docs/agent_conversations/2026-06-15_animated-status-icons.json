@@ -1,0 +1,25 @@
+{
+  "date": "2026-06-15",
+  "task_objective": "Implement animated-status-icons plan (has_backup state in post-backup sequence, animated download icon, consistent amber warning cloud-X icons, amber conflict icon, updated HTML reference)",
+  "files_modified": [
+    "src/controllers/gameLifecycleController.tsx",
+    "src/controllers/gameLifecycleController.test.ts",
+    "src/surfaces/autoSyncStatusRenderer.tsx",
+    "src/surfaces/autoSyncStatusSurface.test.ts",
+    "docs/animated-status-icons-reference.html"
+  ],
+  "tests_added": [
+    "Added RED test for has_backup state publishing in post-backup sequence",
+    "Added download-arrow-fill assertions for downloading status",
+    "Updated amber warning style test with new icon assertions",
+    "Added test for conflict amber color"
+  ],
+  "design_decisions": [
+    "Implemented has_backup status to bridge the gap between backing up and syncthing preparing phase",
+    "Replaced static Syncthing Download icon with animated version similar to upload, but pointing down",
+    "Updated warning icons to uniformly use an amber cloud-with-X",
+    "Save Conflict status now uses amber to denote attention needed",
+    "HTML reference explicitly updated with new keyframes, SVG paths, and wording to serve as a pure visual snapshot of changes"
+  ],
+  "results": "All tests pass. Pre-commit hooks and build succeed. Ready for handoff."
+}
