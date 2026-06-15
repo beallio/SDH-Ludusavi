@@ -103,6 +103,8 @@ describe("AutoSyncStatusSurface Uploading Arrow Animation", () => {
       source: "rpc_result",
     });
     expect(downloadingHtml).not.toContain('class="upload-arrow-fill"');
+    expect(downloadingHtml).toContain('class="download-arrow-fill"');
+    expect(downloadingHtml).toContain("@keyframes arrow-fill-down");
   });
 });
 
@@ -118,7 +120,7 @@ describe("AutoSyncStatusSurface No Connected Peers", () => {
     expect(shouldAutoHideStatus("syncthing_no_peers")).toBe(true);
   });
 
-  it("uses the amber warning style and fallback icon treatment", () => {
+  it("uses the amber warning style and cloud-with-X icon treatment", () => {
     const html = renderAutoSyncStatusHtml({
       status: "syncthing_no_peers",
       visible: true,
@@ -126,9 +128,13 @@ describe("AutoSyncStatusSurface No Connected Peers", () => {
     });
     expect(html).toContain("LOCAL BACKUP SAVED - NO SYNCTHING PEERS ONLINE");
     expect(html).toContain("#f59e0b");
-    expect(iconSvgForAutoSyncStatus("syncthing_no_peers")).toBe(
-      iconSvgForAutoSyncStatus("syncthing_unavailable"),
-    );
+    
+    const icon = iconSvgForAutoSyncStatus("syncthing_unavailable");
+    expect(icon).toContain("M403.002 217.001");
+    expect(icon).toContain("M214 250 298 334");
+    expect(icon).not.toContain('r="8.8"');
+    expect(iconSvgForAutoSyncStatus("syncthing_no_peers")).toBe(icon);
+    expect(iconSvgForAutoSyncStatus("syncthing_folder_not_found")).toBe(icon);
   });
 });
 
@@ -167,5 +173,10 @@ describe("AutoSyncStatusSurface Local Backup Arrow Animation", () => {
     });
     expect(backingUpHtml).toContain("@keyframes backup-arrow-fill-up");
     expect(backingUpHtml).toContain(".backup-arrow-fill");
+  });
+
+  it("renders the save-conflict status in amber", () => {
+    const html = renderAutoSyncStatusHtml({ status: "conflict", visible: true, source: "rpc_result" });
+    expect(html).toContain("#f59e0b");
   });
 });
