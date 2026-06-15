@@ -71,7 +71,7 @@ def _decky_log_fallback(level: str, message: str) -> None:
             }
             logger_level = logger_level_map.get(level, getattr(logger, "info", None))
             if logger_level:
-                logger_level(f"[DEBUG] {message}" if level == "debug" else message)
+                logger_level(message)
     except ImportError:
         pass
 
