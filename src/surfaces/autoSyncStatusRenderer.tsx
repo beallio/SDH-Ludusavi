@@ -173,7 +173,7 @@ export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
     status === "syncthing_folder_not_found" ||
     status === "syncthing_no_peers"
   ) {
-    return '<svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999z" fill="currentColor"/><path d="M214 250 298 334M298 250 214 334" fill="none" stroke="#0b151f" stroke-width="34" stroke-linecap="round"/></svg>';
+    return '<svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999z" fill="currentColor"/><path d="M196 232 316 352M316 232 196 352" fill="none" stroke="#0b151f" stroke-width="40" stroke-linecap="round"/></svg>';
   }
 
   if (status === "backing_up" || status === "restoring") {
