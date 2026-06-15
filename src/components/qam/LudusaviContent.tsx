@@ -56,6 +56,7 @@ import { NotificationSettingsSection } from "./NotificationSettingsSection";
 import { QamStyles } from "./QamStyles";
 import { LogsSection, VersionsSection } from "./VersionAndLogsSection";
 import { resolveRefreshedSelection } from "./refreshSelection";
+import { resolveQamOpenSelection } from "./qamOpenSelection";
 
 const EMPTY_GAMES: readonly GameStatus[] = Object.freeze([]);
 
@@ -87,6 +88,7 @@ export function LudusaviContent({
   const wasQuickAccessVisible = useRef(false);
   const pendingCurrentGameSelection = useRef(false);
   const isMounted = useRef(true);
+  const operationInProgress = useRef(false);
   const styleElement = useMemo(
     () => <QamStyles cssText={dropdownCssText} />,
     [dropdownCssText]
@@ -233,10 +235,19 @@ export function LudusaviContent({
   }, [isQuickAccessVisible]);
 
   useEffect(() => {
-    if (!isQuickAccessVisible || !pendingCurrentGameSelection.current || games.length === 0) {
+    const action = resolveQamOpenSelection({
+      isQuickAccessVisible,
+      pendingSelection: pendingCurrentGameSelection.current,
+      gameCount: games.length,
+      operationInProgress: operationInProgress.current,
+    });
+    if (action === "wait") {
       return;
     }
-
+    if (action === "consume") {
+      pendingCurrentGameSelection.current = false;
+      return;
+    }
     selectCurrentSteamGameIfAvailable(games, gameAliases);
     pendingCurrentGameSelection.current = false;
   }, [gameAliases, games, isQuickAccessVisible]);
@@ -633,6 +644,7 @@ export function LudusaviContent({
       logUiEvent("manual_operation_skipped", { reason: "no_selected_game", type: label }, "warning");
       return;
     }
+    operationInProgress.current = true;
     const startedAt = performance.now();
     logUiEvent("manual_operation_started", { type: label }, "info", label, selectedGame);
     setBusyLabel(`${label} running`);
@@ -701,6 +713,7 @@ export function LudusaviContent({
         <FaExclamationTriangle />
       );
     } finally {
+      operationInProgress.current = false;
       if (isMounted.current) {
         setBusyLabel(null);
       }
@@ -709,6 +722,7 @@ export function LudusaviContent({
 
   const runSnapshotRestore = async (backupId: string, whenLabel: string) => {
     if (!selectedGame) return;
+    operationInProgress.current = true;
     const label = "Restore";
     const startedAt = performance.now();
     logUiEvent("manual_operation_started", { type: label, backup_id: backupId }, "info", label, selectedGame);
@@ -780,6 +794,7 @@ export function LudusaviContent({
         <FaExclamationTriangle />
       );
     } finally {
+      operationInProgress.current = false;
       if (isMounted.current) {
         setBusyLabel(null);
       }
