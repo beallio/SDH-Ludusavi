@@ -189,246 +189,187 @@ export function createSettingsMutationRuntime() {
       );
     };
 
-    const toggleAutoSync = (enabled: boolean) => {
-      const updateSeq = ++autoSyncSeq;
-      logSettingsEvent("settings_change_requested", "auto_sync_enabled", {
-        sequence: updateSeq,
-        value: enabled,
-      });
-      ludusaviStore.setAutoSyncEnabled(enabled);
+
+    type MutateOptions<T, V> = {
+      updateSeq: number;
+      readSeq: () => number;
+      settingKey: string;
+      settingValue?: any;
+      settingPreviousValue?: any;
+      gameName?: string;
+      logExecute: string;
+      logLateResolution: string;
+      logLateFailure: string;
+      logError: string;
+      timeoutMessage: string;
+      fallbackValue: V;
+      logFallbackValue?: any;
+      optimisticUpdate: () => void;
+      rpcCall: () => Promise<T | import("../types").RpcStatus>;
+      applyResult: (res: T) => void;
+      rollbackUpdate: (fallback: V) => void;
+      getPersistedValue: (res: T) => any;
+    };
+
+    const mutateSetting = <T extends Settings, V>({
+      updateSeq,
+      readSeq,
+      settingKey,
+      settingValue,
+      settingPreviousValue,
+      gameName,
+      logExecute,
+      logLateResolution,
+      logLateFailure,
+      logError,
+      timeoutMessage,
+      fallbackValue,
+      logFallbackValue,
+      optimisticUpdate,
+      rpcCall,
+      applyResult,
+      rollbackUpdate,
+      getPersistedValue
+    }: MutateOptions<T, V>) => {
+      const logFields: LogFields = { sequence: updateSeq };
+      if (settingValue !== undefined) logFields.value = settingValue;
+      if (settingPreviousValue !== undefined) logFields.previous_value = settingPreviousValue;
+
+      logSettingsEvent("settings_change_requested", settingKey, logFields, gameName ? "info" : undefined, gameName);
+      optimisticUpdate();
       markBusy();
 
       enqueueSettingsUpdate(async () => {
-        log("info", `Executing toggle auto-sync to ${enabled}`);
+        log("info", logExecute);
         let awaitFailed = false;
-        const originalPromise = setAutoSyncEnabled(enabled).then((res) => {
+        const originalPromise = rpcCall().then((res) => {
           if (awaitFailed) {
-            log("info", `Late resolution of setAutoSyncEnabled to ${enabled} succeeded`);
-            if (updateSeq === autoSyncSeq && !isRpcStatus(res)) {
-              applySettings(ludusaviStore, res);
+            log("info", logLateResolution);
+            if (updateSeq === readSeq() && !isRpcStatus(res)) {
+              applyResult(res as T);
             }
           }
           return res;
         }).catch((err) => {
           if (awaitFailed) {
-            log("error", `Late failure of setAutoSyncEnabled to ${enabled}: ${err}`);
+            log("error", `${logLateFailure}: ${err}`);
           }
           throw err;
         });
 
         try {
-          const result = await withTimeout(originalPromise, 10000, "Setting auto-sync timed out");
+          const result = await withTimeout(originalPromise, 10000, timeoutMessage);
           if (isRpcStatus(result)) {
             throw new Error(result.message || result.status);
           }
-          if (updateSeq === autoSyncSeq) {
-            applySettings(ludusaviStore, result);
-            logSettingsEvent("settings_change_persisted", "auto_sync_enabled", {
+          if (updateSeq === readSeq()) {
+            applyResult(result as T);
+            logSettingsEvent("settings_change_persisted", settingKey, {
               sequence: updateSeq,
-              value: result.auto_sync_enabled,
-            });
+              value: getPersistedValue(result as T),
+            }, gameName ? "info" : undefined, gameName);
           } else {
-            logSettingsEvent("settings_change_superseded", "auto_sync_enabled", {
+            logSettingsEvent("settings_change_superseded", settingKey, {
               sequence: updateSeq,
-            }, "debug");
+            }, "debug", gameName);
           }
         } catch (error) {
           awaitFailed = true;
-          log("error", `Failed to toggle auto-sync: ${error}`);
-          if (updateSeq === autoSyncSeq) {
-            const fallback = lastPersistedAutoSync ?? false;
-            ludusaviStore.setAutoSyncEnabled(fallback);
-            logSettingsEvent("settings_change_rolled_back", "auto_sync_enabled", {
-              fallback,
+          log("error", `${logError}: ${error}`);
+          if (updateSeq === readSeq()) {
+            rollbackUpdate(fallbackValue);
+            logSettingsEvent("settings_change_rolled_back", settingKey, {
+              fallback: logFallbackValue !== undefined ? logFallbackValue : fallbackValue,
               message: error instanceof Error ? error.message : String(error),
               sequence: updateSeq,
-            }, "error");
+            }, "error", gameName);
             reportSettingsFailure(error);
           }
         }
       });
     };
 
-    const toggleNotificationSetting = (key: keyof NotificationSettings, enabled: boolean) => {
-      const updateSeq = ++notificationSeq;
-      logSettingsEvent("settings_change_requested", `notifications.${String(key)}`, {
-        sequence: updateSeq,
-        value: enabled,
+    const toggleAutoSync = (enabled: boolean) => {
+      mutateSetting<Settings, boolean>({
+        updateSeq: ++autoSyncSeq,
+        readSeq: () => autoSyncSeq,
+        settingKey: "auto_sync_enabled",
+        settingValue: enabled,
+        logExecute: `Executing toggle auto-sync to ${enabled}`,
+        logLateResolution: `Late resolution of setAutoSyncEnabled to ${enabled} succeeded`,
+        logLateFailure: `Late failure of setAutoSyncEnabled to ${enabled}`,
+        logError: `Failed to toggle auto-sync`,
+        timeoutMessage: "Setting auto-sync timed out",
+        fallbackValue: lastPersistedAutoSync ?? false,
+        optimisticUpdate: () => ludusaviStore.setAutoSyncEnabled(enabled),
+        rpcCall: () => setAutoSyncEnabled(enabled),
+        applyResult: (res) => applySettings(ludusaviStore, res),
+        rollbackUpdate: (fallback) => ludusaviStore.setAutoSyncEnabled(fallback),
+        getPersistedValue: (res) => res.auto_sync_enabled
       });
+    };
+
+    const toggleNotificationSetting = (key: keyof NotificationSettings, enabled: boolean) => {
       const previousNotifications = ludusaviStore.getSnapshot().settings?.notifications ?? defaultNotificationSettings;
       const nextNotifications = { ...previousNotifications, [key]: enabled };
-      ludusaviStore.setNotificationSettings(nextNotifications);
-      markBusy();
-
-      enqueueSettingsUpdate(async () => {
-        log("info", `Executing toggle notification setting ${String(key)} to ${enabled}`);
-        let awaitFailed = false;
-        const originalPromise = setNotificationSettings(nextNotifications).then((res) => {
-          if (awaitFailed) {
-            log("info", `Late resolution of setNotificationSettings to ${JSON.stringify(nextNotifications)} succeeded`);
-            if (updateSeq === notificationSeq && !isRpcStatus(res)) {
-              applySettings(ludusaviStore, res);
-            }
-          }
-          return res;
-        }).catch((err) => {
-          if (awaitFailed) {
-            log("error", `Late failure of setNotificationSettings to ${JSON.stringify(nextNotifications)}: ${err}`);
-          }
-          throw err;
-        });
-
-        try {
-          const result = await withTimeout(originalPromise, 10000, "Setting notifications timed out");
-          if (isRpcStatus(result)) {
-            throw new Error(result.message || result.status);
-          }
-          if (updateSeq === notificationSeq) {
-            applySettings(ludusaviStore, result);
-            logSettingsEvent("settings_change_persisted", `notifications.${String(key)}`, {
-              sequence: updateSeq,
-              value: result.notifications?.[key],
-            });
-          } else {
-            logSettingsEvent("settings_change_superseded", `notifications.${String(key)}`, {
-              sequence: updateSeq,
-            }, "debug");
-          }
-        } catch (error) {
-          awaitFailed = true;
-          log("error", `Failed to update notification settings: ${error}`);
-          if (updateSeq === notificationSeq) {
-            const fallback = lastPersistedNotifications ?? defaultNotificationSettings;
-            ludusaviStore.setNotificationSettings(fallback);
-            logSettingsEvent("settings_change_rolled_back", `notifications.${String(key)}`, {
-              fallback: fallback[key],
-              message: error instanceof Error ? error.message : String(error),
-              sequence: updateSeq,
-            }, "error");
-            reportSettingsFailure(error);
-          }
-        }
+      mutateSetting<Settings, NotificationSettings>({
+        updateSeq: ++notificationSeq,
+        readSeq: () => notificationSeq,
+        settingKey: `notifications.${String(key)}`,
+        settingValue: enabled,
+        logExecute: `Executing toggle notification setting ${String(key)} to ${enabled}`,
+        logLateResolution: `Late resolution of setNotificationSettings to ${JSON.stringify(nextNotifications)} succeeded`,
+        logLateFailure: `Late failure of setNotificationSettings to ${JSON.stringify(nextNotifications)}`,
+        logError: `Failed to update notification settings`,
+        timeoutMessage: "Setting notifications timed out",
+        fallbackValue: lastPersistedNotifications ?? defaultNotificationSettings,
+        logFallbackValue: (lastPersistedNotifications ?? defaultNotificationSettings)[key],
+        optimisticUpdate: () => ludusaviStore.setNotificationSettings(nextNotifications),
+        rpcCall: () => setNotificationSettings(nextNotifications),
+        applyResult: (res) => applySettings(ludusaviStore, res),
+        rollbackUpdate: (fallback) => ludusaviStore.setNotificationSettings(fallback),
+        getPersistedValue: (res) => res.notifications?.[key]
       });
     };
 
     const toggleUpdateChannel = (enabled: boolean) => {
       const channel = enabled ? "development" : "stable";
-      const updateSeq = ++updateChannelSeq;
-      logSettingsEvent("settings_change_requested", "update_channel", {
-        sequence: updateSeq,
-        value: channel,
-      });
-      ludusaviStore.setUpdateChannel(channel);
-      markBusy();
-
-      enqueueSettingsUpdate(async () => {
-        log("info", `Executing toggle update channel to ${channel}`);
-        let awaitFailed = false;
-        const originalPromise = setUpdateChannelCall(channel).then((res) => {
-          if (awaitFailed) {
-            log("info", `Late resolution of setUpdateChannel to ${channel} succeeded`);
-            if (updateSeq === updateChannelSeq && !isRpcStatus(res)) {
-              applySettings(ludusaviStore, res);
-            }
-          }
-          return res;
-        }).catch((err) => {
-          if (awaitFailed) {
-            log("error", `Late failure of setUpdateChannel to ${channel}: ${err}`);
-          }
-          throw err;
-        });
-
-        try {
-          const result = await withTimeout(originalPromise, 10000, "Setting update channel timed out");
-          if (isRpcStatus(result)) {
-            throw new Error(result.message || result.status);
-          }
-          if (updateSeq === updateChannelSeq) {
-            applySettings(ludusaviStore, result);
-            logSettingsEvent("settings_change_persisted", "update_channel", {
-              sequence: updateSeq,
-              value: result.update_channel,
-            });
-          } else {
-            logSettingsEvent("settings_change_superseded", "update_channel", {
-              sequence: updateSeq,
-            }, "debug");
-          }
-        } catch (error) {
-          awaitFailed = true;
-          log("error", `Failed to toggle update channel: ${error}`);
-          if (updateSeq === updateChannelSeq) {
-            const fallback = lastPersistedUpdateChannel ?? "stable";
-            ludusaviStore.setUpdateChannel(fallback);
-            logSettingsEvent("settings_change_rolled_back", "update_channel", {
-              fallback,
-              message: error instanceof Error ? error.message : String(error),
-              sequence: updateSeq,
-            }, "error");
-            reportSettingsFailure(error);
-          }
-        }
+      mutateSetting<Settings, UpdateChannel>({
+        updateSeq: ++updateChannelSeq,
+        readSeq: () => updateChannelSeq,
+        settingKey: "update_channel",
+        settingValue: channel,
+        logExecute: `Executing toggle update channel to ${channel}`,
+        logLateResolution: `Late resolution of setUpdateChannel to ${channel} succeeded`,
+        logLateFailure: `Late failure of setUpdateChannel to ${channel}`,
+        logError: `Failed to toggle update channel`,
+        timeoutMessage: "Setting update channel timed out",
+        fallbackValue: lastPersistedUpdateChannel ?? "stable",
+        optimisticUpdate: () => ludusaviStore.setUpdateChannel(channel),
+        rpcCall: () => setUpdateChannelCall(channel),
+        applyResult: (res) => applySettings(ludusaviStore, res),
+        rollbackUpdate: (fallback) => ludusaviStore.setUpdateChannel(fallback),
+        getPersistedValue: (res) => res.update_channel
       });
     };
 
     const toggleAutomaticUpdateChecks = (enabled: boolean) => {
-      const updateSeq = ++automaticUpdateChecksSeq;
-      logSettingsEvent("settings_change_requested", "automatic_update_checks", {
-        sequence: updateSeq,
-        value: enabled,
-      });
-      ludusaviStore.setAutomaticUpdateChecks(enabled);
-      markBusy();
-
-      enqueueSettingsUpdate(async () => {
-        log("info", `Executing toggle automatic update checks to ${enabled}`);
-        let awaitFailed = false;
-        const originalPromise = setAutomaticUpdateChecksCall(enabled).then((res) => {
-          if (awaitFailed) {
-            log("info", `Late resolution of setAutomaticUpdateChecks to ${enabled} succeeded`);
-            if (updateSeq === automaticUpdateChecksSeq && !isRpcStatus(res)) {
-              applySettings(ludusaviStore, res);
-            }
-          }
-          return res;
-        }).catch((err) => {
-          if (awaitFailed) {
-            log("error", `Late failure of setAutomaticUpdateChecks to ${enabled}: ${err}`);
-          }
-          throw err;
-        });
-
-        try {
-          const result = await withTimeout(originalPromise, 10000, "Setting automatic checks timed out");
-          if (isRpcStatus(result)) {
-            throw new Error(result.message || result.status);
-          }
-          if (updateSeq === automaticUpdateChecksSeq) {
-            applySettings(ludusaviStore, result);
-            logSettingsEvent("settings_change_persisted", "automatic_update_checks", {
-              sequence: updateSeq,
-              value: result.automatic_update_checks,
-            });
-          } else {
-            logSettingsEvent("settings_change_superseded", "automatic_update_checks", {
-              sequence: updateSeq,
-            }, "debug");
-          }
-        } catch (error) {
-          awaitFailed = true;
-          log("error", `Failed to toggle automatic checks: ${error}`);
-          if (updateSeq === automaticUpdateChecksSeq) {
-            const fallback = lastPersistedAutomaticUpdateChecks ?? true;
-            ludusaviStore.setAutomaticUpdateChecks(fallback);
-            logSettingsEvent("settings_change_rolled_back", "automatic_update_checks", {
-              fallback,
-              message: error instanceof Error ? error.message : String(error),
-              sequence: updateSeq,
-            }, "error");
-            reportSettingsFailure(error);
-          }
-        }
+      mutateSetting<Settings, boolean>({
+        updateSeq: ++automaticUpdateChecksSeq,
+        readSeq: () => automaticUpdateChecksSeq,
+        settingKey: "automatic_update_checks",
+        settingValue: enabled,
+        logExecute: `Executing toggle automatic update checks to ${enabled}`,
+        logLateResolution: `Late resolution of setAutomaticUpdateChecks to ${enabled} succeeded`,
+        logLateFailure: `Late failure of setAutomaticUpdateChecks to ${enabled}`,
+        logError: `Failed to toggle automatic checks`,
+        timeoutMessage: "Setting automatic checks timed out",
+        fallbackValue: lastPersistedAutomaticUpdateChecks ?? true,
+        optimisticUpdate: () => ludusaviStore.setAutomaticUpdateChecks(enabled),
+        rpcCall: () => setAutomaticUpdateChecksCall(enabled),
+        applyResult: (res) => applySettings(ludusaviStore, res),
+        rollbackUpdate: (fallback) => ludusaviStore.setAutomaticUpdateChecks(fallback),
+        getPersistedValue: (res) => res.automatic_update_checks
       });
     };
 
@@ -449,65 +390,30 @@ export function createSettingsMutationRuntime() {
         }, "debug", value);
         return;
       }
-      const updateSeq = ++selectedGameSeq;
-      logSettingsEvent("settings_change_requested", "selected_game", {
-        previous_value: lastQueued,
-        sequence: updateSeq,
-        value,
-      }, "info", value);
+      const previousValue = lastQueued;
       lastQueuedSelectedGame = value;
-      ludusaviStore.setSelectedGame(value);
-      markBusy();
 
-      enqueueSettingsUpdate(async () => {
-        log("info", `Executing selected game change to ${value}`);
-        let awaitFailed = false;
-        const originalPromise = setSelectedGameCall(value).then((res) => {
-          if (awaitFailed) {
-            log("info", `Late resolution of setSelectedGameCall to ${value} succeeded`);
-            if (updateSeq === selectedGameSeq && !isRpcStatus(res)) {
-              applySettings(ludusaviStore, res);
-            }
-          }
-          return res;
-        }).catch((err) => {
-          if (awaitFailed) {
-            log("error", `Late failure of setSelectedGameCall to ${value}: ${err}`);
-          }
-          throw err;
-        });
-
-        try {
-          const result = await withTimeout(originalPromise, 10000, "Selecting game timed out");
-          if (isRpcStatus(result)) {
-            throw new Error(result.message || result.status);
-          }
-          if (updateSeq === selectedGameSeq) {
-            applySettings(ludusaviStore, result);
-            logSettingsEvent("settings_change_persisted", "selected_game", {
-              sequence: updateSeq,
-              value: result.selected_game,
-            }, "info", value);
-          } else {
-            logSettingsEvent("settings_change_superseded", "selected_game", {
-              sequence: updateSeq,
-            }, "debug", value);
-          }
-        } catch (error) {
-          awaitFailed = true;
-          log("error", `Failed to persist selected game: ${error}`);
-          if (updateSeq === selectedGameSeq) {
-            const fallback = lastPersistedSelectedGame ?? "";
-            ludusaviStore.setSelectedGame(fallback);
-            lastQueuedSelectedGame = fallback;
-            logSettingsEvent("settings_change_rolled_back", "selected_game", {
-              fallback,
-              message: error instanceof Error ? error.message : String(error),
-              sequence: updateSeq,
-            }, "error", value);
-            reportSettingsFailure(error);
-          }
-        }
+      mutateSetting<Settings, string>({
+        updateSeq: ++selectedGameSeq,
+        readSeq: () => selectedGameSeq,
+        settingKey: "selected_game",
+        settingValue: value,
+        settingPreviousValue: previousValue,
+        gameName: value,
+        logExecute: `Executing selected game change to ${value}`,
+        logLateResolution: `Late resolution of setSelectedGameCall to ${value} succeeded`,
+        logLateFailure: `Late failure of setSelectedGameCall to ${value}`,
+        logError: `Failed to persist selected game`,
+        timeoutMessage: "Selecting game timed out",
+        fallbackValue: lastPersistedSelectedGame ?? "",
+        optimisticUpdate: () => ludusaviStore.setSelectedGame(value),
+        rpcCall: () => setSelectedGameCall(value),
+        applyResult: (res) => applySettings(ludusaviStore, res),
+        rollbackUpdate: (fallback) => {
+          ludusaviStore.setSelectedGame(fallback);
+          lastQueuedSelectedGame = fallback;
+        },
+        getPersistedValue: (res) => res.selected_game
       });
     };
 
