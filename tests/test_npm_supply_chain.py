@@ -33,7 +33,6 @@ def test_package_json_uses_pnpm_and_exact_dependency_versions() -> None:
     dev_dependencies = package["devDependencies"]
     assert isinstance(dependencies, dict)
     assert isinstance(dev_dependencies, dict)
-    assert "react-router" in dependencies
     assert "@types/webpack" not in dev_dependencies
 
     for dependency_set in (dependencies, dev_dependencies):

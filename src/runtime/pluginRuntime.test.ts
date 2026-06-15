@@ -6,7 +6,6 @@ vi.mock("@decky/api", () => ({
 }));
 
 vi.mock("@decky/ui", () => ({
-  Router: {},
 }));
 
 vi.mock("react", () => ({
