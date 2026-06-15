@@ -1,0 +1,17 @@
+{
+  "date": "2026-06-14",
+  "task_objective": "Fix selection jumping away after backup/restore operations and drop redundant [DEBUG] prefix on forwarded debug logs.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/log_buffer.py",
+    "tests/test_log_buffer.py",
+    "src/components/qam/LudusaviContent.tsx",
+    "src/components/qam/refreshSelection.ts",
+    "src/components/qam/refreshSelection.test.ts"
+  ],
+  "tests_added": [
+    "test_decky_log_fallback_debug_has_no_prefix",
+    "resolveRefreshedSelection test suite (returns preferred game, current selection, first game, none)"
+  ],
+  "design_decisions": "Extracted selection logic into pure helper resolveRefreshedSelection. Updated applyRefreshResult and applyCachedRefreshResult to only allow Steam context selection on initial load, defaulting to preserving the current selected game for manual operations.",
+  "results": "Both bugs fixed. Tests added and passing. Quality gates passed."
+}
