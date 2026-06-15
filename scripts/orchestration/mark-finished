@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+slug="${1:-}"
+
+require_slug "$slug"
+
+root="$(repo_root)"
+cd "$root"
+
+ensure_dirs
+require_clean_worktree
+
+marker="$(finished_marker "$slug")"
+: > "$marker"
+
+echo "wrote round-complete marker: $marker"

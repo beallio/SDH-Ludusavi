@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+slug="${1:-}"
+timeout_secs="${2:-0}"
+poll_secs="${POLL_SECS:-5}"
+
+require_slug "$slug"
+
+marker="$(finalized_marker "$slug")"
+start="$(date +%s)"
+
+echo "waiting for finalized marker: $marker"
+
+while [[ ! -f "$marker" ]]; do
+  sleep "$poll_secs"
+
+  if [[ "$timeout_secs" != "0" ]]; then
+    now="$(date +%s)"
+    elapsed=$((now - start))
+
+    if (( elapsed >= timeout_secs )); then
+      die "timed out waiting for finalized marker: $marker"
+    fi
+  fi
+done
+
+echo "finalized marker present: $marker"

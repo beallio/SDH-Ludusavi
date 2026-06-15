@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+slug="${1:-}"
+
+require_slug "$slug"
+
+root="$(repo_root)"
+cd "$root"
+
+shopt -s nullglob
+files=(docs/review/"${slug}"-review-*.md)
+shopt -u nullglob
+
+if (( ${#files[@]} == 0 )); then
+  echo "NO_REVIEW"
+  exit 0
+fi
+
+for f in "${files[@]}"; do
+  count="$(grep -E '^STATUS: (CHANGES_REQUESTED|APPROVED)$' "$f" | wc -l | tr -d ' ')"
+
+  if [[ "$count" != "1" ]]; then
+    echo "INVALID"
+    echo "invalid or missing STATUS trailer in: $f" >&2
+    exit 2
+  fi
+done
+
+latest="$(printf '%s\n' "${files[@]}" | sort | tail -n 1)"
+status="$(grep -E '^STATUS: (CHANGES_REQUESTED|APPROVED)$' "$latest" | sed 's/^STATUS: //')"
+
+echo "$status"
