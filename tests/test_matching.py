@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sdh_ludusavi.persistence import JsonSettingsStore
 
 from pathlib import Path
 
@@ -54,7 +55,11 @@ class FakeAdapter:
 
 
 def service_with_state(tmp_path: Path) -> SDHLudusaviService:
-    return SDHLudusaviService(adapter=FakeAdapter(), state_path=tmp_path / "state.json")
+    return SDHLudusaviService(
+        adapter=FakeAdapter(),
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
+    )
 
 
 def test_match_by_steam_id(tmp_path: Path) -> None:

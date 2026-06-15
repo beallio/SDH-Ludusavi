@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sdh_ludusavi.persistence import JsonSettingsStore
 
 import json
 from pathlib import Path
@@ -26,7 +27,11 @@ class FakeAdapter:
 
 
 def service_with_state(tmp_path: Path) -> SDHLudusaviService:
-    return SDHLudusaviService(adapter=FakeAdapter(), state_path=tmp_path / "state.json")
+    return SDHLudusaviService(
+        adapter=FakeAdapter(),
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
+    )
 
 
 def test_selected_game_persistence(tmp_path: Path) -> None:
@@ -44,7 +49,7 @@ def test_selected_game_persistence(tmp_path: Path) -> None:
     assert reloaded.get_settings()["selected_game"] == "Hades"
 
     # File check
-    state = json.loads((tmp_path / "state.json").read_text())
+    state = json.loads((tmp_path / "settings.json").read_text())
     assert state["selected_game"] == "Hades"
 
 

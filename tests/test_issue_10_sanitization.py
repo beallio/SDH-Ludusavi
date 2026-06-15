@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sdh_ludusavi.persistence import JsonSettingsStore
 from sdh_ludusavi.service import SDHLudusaviService
 
 
@@ -24,7 +25,11 @@ class FakeAdapter:
 
 def test_game_name_sanitization(tmp_path):
     state_file = tmp_path / "state.json"
-    service = SDHLudusaviService(adapter=FakeAdapter(), state_path=state_file)
+    service = SDHLudusaviService(
+        adapter=FakeAdapter(),
+        settings_store=JsonSettingsStore(state_file.with_name("settings.json")),
+        cache_path=state_file.with_name("cache.json"),
+    )
 
     malicious_name = "Hades\n[ERROR] Spoofed error"
 

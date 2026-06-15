@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sdh_ludusavi.persistence import JsonSettingsStore
 
 from pathlib import Path
 from sdh_ludusavi.service import SDHLudusaviService
@@ -41,7 +42,11 @@ class FakeAdapter:
 
 
 def service_with_state(tmp_path: Path, adapter: FakeAdapter) -> SDHLudusaviService:
-    return SDHLudusaviService(adapter=adapter, state_path=tmp_path / "state.json")
+    return SDHLudusaviService(
+        adapter=adapter,
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
+    )
 
 
 def test_get_game_history_empty_by_default(tmp_path: Path) -> None:

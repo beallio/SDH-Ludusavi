@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sdh_ludusavi.persistence import JsonSettingsStore
 from sdh_ludusavi.service import SDHLudusaviService
 from sdh_ludusavi.types import GameStatus
 
@@ -25,7 +26,11 @@ class FakeAdapter:
 
 def test_fuzzy_matching_length_check(tmp_path):
     state_file = tmp_path / "state.json"
-    service = SDHLudusaviService(adapter=FakeAdapter(), state_path=state_file)
+    service = SDHLudusaviService(
+        adapter=FakeAdapter(),
+        settings_store=JsonSettingsStore(state_file.with_name("settings.json")),
+        cache_path=state_file.with_name("cache.json"),
+    )
 
     # Manually populate _games for testing _match_game
     service._registry._games = {

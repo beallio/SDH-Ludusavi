@@ -108,7 +108,6 @@ def test_facade_method_signatures(tmp_path: Path) -> None:
     init_sig = inspect.signature(SDHLudusaviService.__init__)
     assert "adapter" in init_sig.parameters
     assert "adapter_factory" in init_sig.parameters
-    assert "state_path" in init_sig.parameters
     assert "settings_store" in init_sig.parameters
     assert "cache_path" in init_sig.parameters
     assert "log_limit" in init_sig.parameters
