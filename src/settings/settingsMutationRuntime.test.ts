@@ -176,4 +176,75 @@ describe("SettingsMutationRuntime", () => {
 
     expect(busyStatus).toBe(false);
   });
+  it("superseded RPC result does not clobber newer value", async () => {
+    const store = createLudusaviStateStore();
+    const runtime = createSettingsMutationRuntime();
+    const rpc = await import("../api/ludusaviRpc");
+
+    runtime.setActiveStore(store, vi.fn());
+    const controller = runtime.createController({
+      ludusaviStore: store,
+      isMounted: { current: true },
+      setBusyLabel: vi.fn(),
+      notifyFailure: vi.fn()
+    });
+
+    let resolveFirst: any;
+    let resolveSecond: any;
+    vi.mocked(rpc.setAutoSyncEnabled)
+      .mockReturnValueOnce(new Promise(r => resolveFirst = r))
+      .mockReturnValueOnce(new Promise(r => resolveSecond = r));
+
+    controller.toggleAutoSync(true); // updateSeq 1
+    controller.toggleAutoSync(false); // updateSeq 2
+
+    expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(false);
+
+    // Resolve first (superseded)
+    resolveFirst({ auto_sync_enabled: true } as any);
+    await vi.runAllTimersAsync();
+
+    // Still false
+    expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(false);
+
+    // Resolve second
+    resolveSecond({ auto_sync_enabled: false } as any);
+    await vi.runAllTimersAsync();
+
+    expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(false);
+  });
+  it("superseded RPC result does not clobber newer value for update_channel", async () => {
+    const store = createLudusaviStateStore();
+    const runtime = createSettingsMutationRuntime();
+    const rpc = await import("../api/ludusaviRpc");
+
+    runtime.setActiveStore(store, vi.fn());
+    const controller = runtime.createController({
+      ludusaviStore: store,
+      isMounted: { current: true },
+      setBusyLabel: vi.fn(),
+      notifyFailure: vi.fn()
+    });
+
+    let resolveFirst: any;
+    let resolveSecond: any;
+    vi.mocked(rpc.setUpdateChannelCall)
+      .mockReturnValueOnce(new Promise(r => resolveFirst = r))
+      .mockReturnValueOnce(new Promise(r => resolveSecond = r));
+
+    controller.toggleUpdateChannel(true); // update_channel: development
+    controller.toggleUpdateChannel(false); // update_channel: stable
+
+    expect(store.getSnapshot().settings?.update_channel).toBe("stable");
+
+    resolveFirst({ update_channel: "development" } as any);
+    await vi.runAllTimersAsync();
+
+    expect(store.getSnapshot().settings?.update_channel).toBe("stable");
+
+    resolveSecond({ update_channel: "stable" } as any);
+    await vi.runAllTimersAsync();
+
+    expect(store.getSnapshot().settings?.update_channel).toBe("stable");
+  });
 });
