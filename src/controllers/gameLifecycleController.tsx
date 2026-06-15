@@ -428,6 +428,12 @@ export function createGameLifecycleController(
         log("info", `backup_game_on_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
 
         if (result.status === "backed_up") {
+          statusSurface.publish("has_backup", {
+            source: "lifecycle_exit",
+            gameName: name,
+            appID,
+            tracked,
+          });
           const handoff = postGameWatch === null
             ? { status: "unavailable" as const, reason: "watch_not_started" }
             : await postGameWatch.activatePostGameHandoff(

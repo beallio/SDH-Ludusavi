@@ -1,4 +1,4 @@
-import { IoMdCloudDownload, IoMdCloudDone } from "react-icons/io";
+import { IoMdCloudDone } from "react-icons/io";
 import type { AutoSyncStatusKind, AutoSyncStatusState } from "../types";
 import { log } from "../utils/logging";
 
@@ -129,9 +129,7 @@ function getSerializedIcon(status: AutoSyncStatusKind): string {
   }
 
   let icon: any;
-  if (status === "syncthing_downloading") {
-    icon = IoMdCloudDownload;
-  } else if (status === "syncthing_complete") {
+  if (status === "syncthing_complete") {
     icon = IoMdCloudDone;
   } else {
     return "";
@@ -163,11 +161,19 @@ export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
   if (status === "syncthing_uploading") {
     return '<svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><defs><clipPath id="upload-arrow-clip"><path d="M288 276v76h-64v-76h-68l100-100 100 100h-68z"/></clipPath></defs><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999zM288 276v76h-64v-76h-68l100-100 100 100h-68z" fill="currentColor"/><rect class="upload-arrow-fill" x="156" y="176" width="200" height="176" fill="#f8fafc" clip-path="url(#upload-arrow-clip)"/></svg>';
   }
-  if (
-    status === "syncthing_downloading" ||
-    status === "syncthing_complete"
-  ) {
+  if (status === "syncthing_downloading") {
+    return '<svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><defs><clipPath id="download-arrow-clip"><path d="M224 268v-76h64v76h68L256 368 156 268h68z"/></clipPath></defs><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999zM224 268v-76h64v76h68L256 368 156 268h68z" fill="currentColor"/><rect class="download-arrow-fill" x="156" y="192" width="200" height="176" fill="#f8fafc" clip-path="url(#download-arrow-clip)"/></svg>';
+  }
+  if (status === "syncthing_complete") {
     return getSerializedIcon(status);
+  }
+
+  if (
+    status === "syncthing_unavailable" ||
+    status === "syncthing_folder_not_found" ||
+    status === "syncthing_no_peers"
+  ) {
+    return '<svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999z" fill="currentColor"/><path d="M214 250 298 334M298 250 214 334" fill="none" stroke="#0b151f" stroke-width="34" stroke-linecap="round"/></svg>';
   }
 
   if (status === "backing_up" || status === "restoring") {
@@ -209,7 +215,7 @@ body {
   box-sizing: border-box;
 }
 .text { display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; min-width: 245px; }
-.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" ? "#f59e0b" : state.status === "syncthing_unavailable" || state.status === "syncthing_folder_not_found" || state.status === "syncthing_no_peers" ? "#f59e0b" : "#1a9fff"}; }
+.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" || state.status === "conflict" || state.status === "syncthing_unavailable" || state.status === "syncthing_folder_not_found" || state.status === "syncthing_no_peers" ? "#f59e0b" : "#1a9fff"}; }
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
@@ -237,6 +243,14 @@ body {
 }
 .backup-arrow-fill {
   animation: backup-arrow-fill-up 1.6s ease-out infinite;
+}
+@keyframes arrow-fill-down {
+  0% { transform: translateY(-176px); }
+  75% { transform: translateY(0); }
+  100% { transform: translateY(0); }
+}
+.download-arrow-fill {
+  animation: arrow-fill-down 1.6s ease-out infinite;
 }
 </style>
 </head>
