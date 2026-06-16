@@ -72,6 +72,10 @@ jobs:
             echo "Error: Tag v${{ env.DEV_VERSION }} already exists." >&2
             exit 1
           fi
+          if git rev-parse "v${{ env.BASE_VERSION }}" >/dev/null 2>&1; then
+            echo "Error: v${{ env.BASE_VERSION }} is already released as a stable tag; a dev release must target the next unreleased version (bump package.json/plugin.json)." >&2
+            exit 1
+          fi
 
       - name: Setup Toolchain
         uses: ./.github/actions/setup-toolchain

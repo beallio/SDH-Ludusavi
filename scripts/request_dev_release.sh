@@ -31,6 +31,15 @@ if ! FULL_SHA=$(git rev-parse --verify "$COMMIT" 2>/dev/null); then
     exit 1
 fi
 
+# Refuse if the base version already shipped as a stable tag. A dev prerelease
+# vX.Y.Z-dev.SHA targets the upcoming X.Y.Z, so X.Y.Z must not be released yet.
+# Uses local tags (best-effort fast feedback); the workflow re-checks against
+# origin authoritatively. Run after a fetch/pull for freshness (finalize does).
+if [ -n "$(git tag --list "v${BASE_VERSION}" 2>/dev/null)" ]; then
+    echo "Error: v${BASE_VERSION} is already a released stable tag. A dev release must target the next unreleased version; bump package.json/plugin.json first." >&2
+    exit 1
+fi
+
 echo "Requesting dev release for base version: $BASE_VERSION at commit: $FULL_SHA"
 gh workflow run dev-release.yml \
   -f commit="$FULL_SHA" \
