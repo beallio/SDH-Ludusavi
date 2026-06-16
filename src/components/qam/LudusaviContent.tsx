@@ -281,7 +281,7 @@ export function LudusaviContent({
 
     fetchMetadata();
 
-    const currentInit = runtime.contentLoad.getInitPromise();
+    const currentInit = runtime.contentLoad.initPromise;
     if (!currentInit) {
       log("debug", `Creating new initialization promise (warmed=${isWarmed})`);
       const newInitP = (async () => {
@@ -289,13 +289,13 @@ export function LudusaviContent({
         await synchronizeGameList(isWarmed, loadedSettings);
         return getOperationStatus();
       })();
-      runtime.contentLoad.setInitPromise(newInitP);
+      runtime.contentLoad.initPromise = newInitP;
     } else {
       log("debug", "Reusing in-flight initialization promise");
     }
 
     try {
-      const activeInit = runtime.contentLoad.getInitPromise()!;
+      const activeInit = runtime.contentLoad.initPromise!;
       const loadedOperation = await activeInit;
       if (isMounted.current) {
         setOperation(loadedOperation);
@@ -321,7 +321,7 @@ export function LudusaviContent({
       );
       log("error", `Initial load failed: ${error}`);
     } finally {
-      runtime.contentLoad.setInitPromise(null);
+      runtime.contentLoad.initPromise = null;
       if (isMounted.current) {
         setBackgroundRefreshBusy(false);
         setBusyLabel(null);
@@ -334,7 +334,7 @@ export function LudusaviContent({
     if (snapshot.versions !== null && snapshot.ludusaviCommand !== null) {
       return;
     }
-    if (runtime.contentLoad.getMetadataPromise()) {
+    if (runtime.contentLoad.metadataPromise) {
       return;
     }
     // Load versions and commands in the background asynchronously.
@@ -373,10 +373,10 @@ export function LudusaviContent({
       } catch (err) {
         log("error", `fetchMetadata failed: ${err}`);
       } finally {
-        runtime.contentLoad.setMetadataPromise(null);
+        runtime.contentLoad.metadataPromise = null;
       }
     })();
-    runtime.contentLoad.setMetadataPromise(metaP);
+    runtime.contentLoad.metadataPromise = metaP;
   };
 
   const fetchInitialState = async (): Promise<RpcResult<Settings>> => {

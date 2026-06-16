@@ -53,10 +53,6 @@ class OperationCoordinator:
         if not self._operation_lock.acquire(blocking=False):
             raise OperationLockedError(f"{self._operation.name or 'operation'} is already running")
 
-        if self._operation.is_running:
-            self._operation_lock.release()
-            raise OperationLockedError(f"{self._operation.name or 'operation'} is already running")
-
         log("info", f"Starting {operation}")
         self._operation.is_running = True
         self._operation.name = operation

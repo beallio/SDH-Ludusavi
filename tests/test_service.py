@@ -156,7 +156,8 @@ def test_settings_do_not_initialize_ludusavi_adapter(tmp_path: Path) -> None:
 
     service = SDHLudusaviService(
         adapter_factory=fail_factory,
-        state_path=tmp_path / "state.json",
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
     )
 
     assert service.get_settings() == expected_settings()
@@ -224,7 +225,8 @@ def test_refresh_reports_ludusavi_adapter_initialization_failure(tmp_path: Path)
 
     service = SDHLudusaviService(
         adapter_factory=fail_factory,
-        state_path=tmp_path / "state.json",
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
     )
 
     result = service.refresh_games()
@@ -249,7 +251,8 @@ def test_ludusavi_adapter_factory_is_reused_after_success(tmp_path: Path) -> Non
 
     service = SDHLudusaviService(
         adapter_factory=factory,
-        state_path=tmp_path / "state.json",
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
     )
 
     service.refresh_games()
@@ -298,7 +301,8 @@ def test_ludusavi_adapter_initialization_is_thread_safe(tmp_path: Path) -> None:
 
     service = SDHLudusaviService(
         adapter_factory=factory,
-        state_path=tmp_path / "state.json",
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
     )
     adapters: list[FakeAdapter] = []
     errors: list[BaseException] = []
@@ -1319,13 +1323,17 @@ def test_force_restore_calls_refresh_after_operation(tmp_path: Path) -> None:
 def test_global_operation_lock_blocks_new_operations(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
     service.refresh_games()
-    service._coordinator._operation.is_running = True
-    service._coordinator._operation.name = "refresh"
+    service._coordinator._operation_lock.acquire()
+    try:
+        service._coordinator._operation.is_running = True
+        service._coordinator._operation.name = "refresh"
 
-    with pytest.raises(OperationLockedError):
-        service.force_backup("Hades")
+        with pytest.raises(OperationLockedError):
+            service.force_backup("Hades")
 
-    assert service.get_operation_status()["name"] == "refresh"
+        assert service.get_operation_status()["name"] == "refresh"
+    finally:
+        service._coordinator._operation_lock.release()
 
 
 def test_concurrent_operations_are_rejected_by_thread_safe_lock(tmp_path: Path) -> None:
@@ -1762,7 +1770,7 @@ def test_match_game_serializes_lazy_refresh_for_concurrent_callers(tmp_path: Pat
 
     def match() -> None:
         try:
-            game = service._match_game("Hades")
+            game = service._registry.match_game("Hades")
             matches.append(game.name if game else None)
         except BaseException as exc:  # pragma: no cover - asserted below.
             errors.append(exc)

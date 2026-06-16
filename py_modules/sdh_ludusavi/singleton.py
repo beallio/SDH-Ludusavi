@@ -135,12 +135,6 @@ def find_stale_siblings(
     return stale
 
 
-def find_stale_sibling_pids(
-    *, proc_root: Path = Path("/proc"), pid: int | None = None
-) -> list[int]:
-    return sorted(sibling.pid for sibling in find_stale_siblings(proc_root=proc_root, pid=pid))
-
-
 def _wait_until_gone(
     siblings: list[SiblingProcess],
     *,
