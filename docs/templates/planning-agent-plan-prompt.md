@@ -1,4 +1,6 @@
-/plan write a detailed and thorough implementation plan for your findings.
+/plan write a detailed and thorough implementation plan for the following:
+
+{plan_details}
 
 Include in the plan where work should be combined and where work should be done separately.
 
