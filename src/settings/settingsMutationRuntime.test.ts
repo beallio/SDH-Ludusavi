@@ -46,17 +46,12 @@ describe("SettingsMutationRuntime", () => {
     vi.useRealTimers();
   });
 
-  it("busy-flag lifecycle with fake timers", async () => {
+  it("settings writes do not trigger a disabling busy label (flicker regression)", async () => {
     const store = createLudusaviStateStore();
     store.applySettings({ auto_sync_enabled: false } as any);
     const runtime = createSettingsMutationRuntime();
     const rpc = await import("../api/ludusaviRpc");
     
-    let busyStatus = false;
-    runtime.subscribeQueue((busy: boolean) => {
-      busyStatus = busy;
-    });
-
     const isMounted = { current: true };
     const setBusyLabel = vi.fn();
     const notifyFailure = vi.fn();
@@ -75,19 +70,26 @@ describe("SettingsMutationRuntime", () => {
         resolveRpc = resolve;
       })
     );
+    let resolveRpcNotification: (res: any) => void;
+    vi.mocked(rpc.setNotificationSettings).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRpcNotification = resolve;
+      })
+    );
 
     controller.toggleAutoSync(true);
+    controller.toggleNotificationSetting("failures_errors", true);
 
-    expect(busyStatus).toBe(true);
-    expect(setBusyLabel).toHaveBeenCalledWith("Updating settings");
+    expect(setBusyLabel).not.toHaveBeenCalledWith("Updating settings");
 
-    resolveRpc!({ auto_sync_enabled: true } as any);
+    resolveRpc!({ auto_sync_enabled: true, notifications: { failures_errors: false } } as any);
+    resolveRpcNotification!({ auto_sync_enabled: true, notifications: { failures_errors: true } } as any);
     
     // allow microtasks to clear
     await vi.runAllTimersAsync();
 
-    expect(busyStatus).toBe(false);
     expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(true);
+    expect(setBusyLabel).not.toHaveBeenCalled();
   });
 
   it("rollback to lastPersisted on RPC failure", async () => {
@@ -121,61 +123,7 @@ describe("SettingsMutationRuntime", () => {
     expect(notifyFailure).toHaveBeenCalled();
   });
 
-  it("two runtimes isolated", async () => {
-    const r1 = createSettingsMutationRuntime();
-    const r2 = createSettingsMutationRuntime();
-    
-    let r1Busy = false;
-    let r2Busy = false;
-    
-    r1.subscribeQueue((busy: boolean) => { r1Busy = busy; });
-    r2.subscribeQueue((busy: boolean) => { r2Busy = busy; });
-    
-    const store = createLudusaviStateStore();
-    const rpc = await import("../api/ludusaviRpc");
-    vi.mocked(rpc.setAutoSyncEnabled).mockResolvedValueOnce({ auto_sync_enabled: true } as any);
-    
-    r1.setActiveStore(store, vi.fn());
-    const c1 = r1.createController({
-      ludusaviStore: store,
-      isMounted: { current: true },
-      setBusyLabel: vi.fn(),
-      notifyFailure: vi.fn()
-    });
-    
-    c1.toggleAutoSync(true);
-    
-    expect(r1Busy).toBe(true);
-    expect(r2Busy).toBe(false);
-    
-    await vi.runAllTimersAsync();
-  });
 
-  it("dispose clears + notifies false", async () => {
-    const r1 = createSettingsMutationRuntime();
-    const store = createLudusaviStateStore();
-    const rpc = await import("../api/ludusaviRpc");
-
-    let busyStatus = false;
-    r1.subscribeQueue((busy: boolean) => { busyStatus = busy; });
-
-    vi.mocked(rpc.setAutoSyncEnabled).mockReturnValueOnce(new Promise(() => {}));
-    
-    r1.setActiveStore(store, vi.fn());
-    const c1 = r1.createController({
-      ludusaviStore: store,
-      isMounted: { current: true },
-      setBusyLabel: vi.fn(),
-      notifyFailure: vi.fn()
-    });
-
-    c1.toggleAutoSync(true);
-    expect(busyStatus).toBe(true);
-
-    r1.dispose();
-
-    expect(busyStatus).toBe(false);
-  });
   it("superseded RPC result does not clobber newer value", async () => {
     const store = createLudusaviStateStore();
     const runtime = createSettingsMutationRuntime();

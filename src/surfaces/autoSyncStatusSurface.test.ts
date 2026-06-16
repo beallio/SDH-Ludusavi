@@ -78,6 +78,16 @@ describe("AutoSyncStatusSurface Status Pending Upload", () => {
       "LOCAL BACKUP SAVED - PATH NOT SHARED",
     );
   });
+
+  it("renders a 22px filling icon box", () => {
+    const html = renderAutoSyncStatusHtml({
+      status: "checking",
+      visible: true,
+      source: "rpc_result",
+    });
+    expect(html).toContain("width: 22px; height: 22px;");
+    expect(html).toContain(".icon svg { width: 100%; height: 100%; display: block; }");
+  });
 });
 
 describe("AutoSyncStatusSurface Uploading Arrow Animation", () => {
