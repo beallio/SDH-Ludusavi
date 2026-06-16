@@ -122,19 +122,19 @@ This writes:
 /tmp/sdh_ludusavi/REPLACE_WITH_SLUG_finished
 ```
 
-Then continue polling for review notes.
+Then either continue watching for review notes or exit cleanly. If this process exits, the orchestrator will resume you with `agy -c -p` through `scripts/orchestration/continue-implementer REPLACE_WITH_SLUG`.
 
 ---
 
 ## Review Polling Loop
 
-After marking the round complete, poll for review notes:
+After marking the round complete, check existing review notes first, then poll for new review notes if you remain active:
 
 ```text
 docs/review/REPLACE_WITH_SLUG-review-*.md
 ```
 
-When a new review note appears:
+When a review note exists or a new review note appears:
 
 1. Read the full review note.
 2. If the note ends with:
@@ -173,7 +173,7 @@ When a new review note appears:
    scripts/orchestration/mark-finished REPLACE_WITH_SLUG
    ```
 
-9. Continue polling.
+9. Either continue polling or exit cleanly. If you exit, the orchestrator will resume you with `scripts/orchestration/continue-implementer REPLACE_WITH_SLUG` after the next review note is created.
 
 ---
 
@@ -260,3 +260,18 @@ Leave both markers in place after finalization:
 ```
 
 Steam Deck/user testing is deferred until after `dev` is pushed to GitHub and the dev release is requested.
+
+
+## Orchestrator Resume Ordering
+
+The orchestrator resumes the implementer only after review notes are written and committed.
+
+Correct order:
+
+```bash
+scripts/orchestration/add-review-note <SLUG> CHANGES_REQUESTED
+# edit and commit docs/review/<SLUG>-review-NN.md
+scripts/orchestration/continue-implementer <SLUG>
+```
+
+Do not require the implementer to rely on a future review-note file creation event. On resume, it must scan existing review notes first.

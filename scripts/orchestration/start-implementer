@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-slug="${1:-}"
+requested_slug="${1:-}"
 
 root="$(repo_root)"
 cd "$root"
@@ -14,9 +14,39 @@ ensure_dirs
 
 command -v agy >/dev/null 2>&1 || die "agy not found on PATH"
 
+# Important:
+# Do not tell the implementer to wait only for a future plan-create event.
+# In normal usage the plan often already exists before the implementer starts.
+# Resolve the plan path now and give it explicitly to the implementer.
+
+if [[ -n "$requested_slug" ]]; then
+  require_slug "$requested_slug"
+  plan_path="$(scripts/orchestration/latest-plan "$requested_slug")"
+  slug="$requested_slug"
+else
+  plan_path="$(scripts/orchestration/latest-plan)"
+  slug="$(scripts/orchestration/infer-slug-from-plan "$plan_path")"
+  require_slug "$slug"
+fi
+
 session_name="$(tmux_session_name "$slug")"
 
-goal='/goal wait for a new plan file, then implement it. further instructions regarding agents and loops will be provided in the implementation plan'
+goal="$(cat <<EOF
+/goal implement the existing implementation plan at ${plan_path}.
+
+Do not wait for a new plan file creation event. The plan already exists.
+
+Start by reading ${plan_path}. Follow the plan exactly. Use the implementer skill if available. Work from the repository root. Follow the plan's branch, quality gate, review polling, round-complete marker, approval, finalization, and exit instructions.
+
+When a round is complete, write the round-complete marker by running the mark-finished command specified in the plan.
+
+If you remain active, continue watching the plan's docs/review/<slug>-review-*.md review-note path for follow-up review notes. If the process exits after marking the round complete, that is acceptable; the orchestrator will resume you later with agy -c -p via scripts/orchestration/continue-implementer.
+
+When resumed, always scan existing review notes before waiting for new file events.
+
+When an APPROVED review note appears, finalize exactly as the plan instructs, write the finalized marker, stop polling, and exit cleanly.
+EOF
+)"
 
 run_foreground() {
   exec agy \
@@ -37,13 +67,19 @@ command -v tmux >/dev/null 2>&1 || {
 
 if tmux has-session -t "$session_name" 2>/dev/null; then
   echo "implementer session already running: $session_name"
+  echo "plan: $plan_path"
   exit 0
 fi
+
+goal_file="$(mktemp "$(tmp_root)/${slug}_agy_goal.XXXXXX")"
+printf '%s\n' "$goal" > "$goal_file"
 
 tmux new-session -d \
   -s "$session_name" \
   -c "$root" \
-  "AGY_PRINT_TIMEOUT='${AGY_PRINT_TIMEOUT:-60m}' bash -lc 'exec agy --add-dir /tmp --print-timeout \"\$AGY_PRINT_TIMEOUT\" --print \"$goal\"'"
+  "AGY_PRINT_TIMEOUT='${AGY_PRINT_TIMEOUT:-60m}' bash -lc 'exec agy --add-dir /tmp --print-timeout \"\$AGY_PRINT_TIMEOUT\" --print \"\$(cat \"$goal_file\")\"'"
 
 echo "started implementer in tmux session: $session_name"
 echo "repo: $root"
+echo "plan: $plan_path"
+echo "goal file: $goal_file"

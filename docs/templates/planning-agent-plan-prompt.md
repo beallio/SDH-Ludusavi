@@ -94,13 +94,15 @@ When the implementing agent completes an implementation or review round, it must
    scripts/orchestration/mark-finished <SLUG>
    ```
 
-Then it must continue polling for review notes in:
+Then it must either continue polling for review notes or exit cleanly. If it exits, the orchestrator will resume it with `agy -c -p` through `scripts/orchestration/continue-implementer <SLUG>`.
+
+If it remains active, it must continue polling for review notes in:
 
 ```text
 docs/review/<SLUG>-review-*.md
 ```
 
-Review notes are the trigger for the implementing agent to resume work.
+Review notes are the trigger for the implementing agent to resume work. On every resume, the implementing agent must scan existing review notes before waiting for future file events.
 
 When a review note with `STATUS: CHANGES_REQUESTED` appears, the implementing agent must:
 
@@ -121,7 +123,7 @@ When a review note with `STATUS: CHANGES_REQUESTED` appears, the implementing ag
    scripts/orchestration/mark-finished <SLUG>
    ```
 
-8. continue polling for more review notes.
+8. either continue polling for more review notes or exit cleanly so the orchestrator can resume it again later.
 
 When a review note with `STATUS: APPROVED` appears, the implementing agent must:
 
@@ -152,3 +154,18 @@ Finalization must include:
 Also note that Steam Deck/user testing is deferred until after the dev push to GitHub.
 
 Make the plan concrete: include exact files to inspect, tests to add or update, commands to run, expected verification, and known risks.
+
+
+## Orchestrator Resume Ordering
+
+The orchestrator resumes the implementer only after review notes are written and committed.
+
+Correct order:
+
+```bash
+scripts/orchestration/add-review-note <SLUG> CHANGES_REQUESTED
+# edit and commit docs/review/<SLUG>-review-NN.md
+scripts/orchestration/continue-implementer <SLUG>
+```
+
+Do not require the implementer to rely on a future review-note file creation event. On resume, it must scan existing review notes first.

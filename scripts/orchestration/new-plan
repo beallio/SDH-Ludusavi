@@ -173,19 +173,19 @@ This writes:
 ${finished}
 \`\`\`
 
-Then continue polling for review notes.
+Then either continue watching for review notes or exit cleanly. If this process exits, the orchestrator will resume you with `agy -c -p` through `scripts/orchestration/continue-implementer ${slug}`.
 
 ---
 
 ## Review Polling Loop
 
-After marking the round complete, poll for review notes:
+After marking the round complete, check existing review notes first, then poll for new review notes if you remain active:
 
 \`\`\`text
 docs/review/${slug}-review-*.md
 \`\`\`
 
-When a new review note appears:
+When a review note exists or a new review note appears:
 
 1. Read the full review note.
 2. If the note ends with:
@@ -224,7 +224,7 @@ When a new review note appears:
    scripts/orchestration/mark-finished ${slug}
    \`\`\`
 
-9. Continue polling.
+9. Either continue polling or exit cleanly. If you exit, the orchestrator will resume you with `scripts/orchestration/continue-implementer ${slug}` after the next review note is created.
 
 ---
 
