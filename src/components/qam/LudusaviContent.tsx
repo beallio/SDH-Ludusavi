@@ -122,7 +122,6 @@ export function LudusaviContent({
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [backgroundRefreshBusy, setBackgroundRefreshBusy] = useState(false);
-  const [queueBusy, setQueueBusy] = useState(runtime.settings.getQueueBusy());
   const ludusaviCommand = ludusaviState.ludusaviCommand;
   const notifySettingsFailure = useCallback(
     (title: string, body: string) => {
@@ -134,23 +133,12 @@ export function LudusaviContent({
     () =>
       runtime.settings.createController({
         ludusaviStore,
-        isMounted,
-        setBusyLabel,
         notifyFailure: notifySettingsFailure
       }),
     [runtime.settings, ludusaviStore, notifySettingsFailure]
   );
 
-  useEffect(() => {
-    return runtime.settings.subscribeQueue((busy) => {
-      if (isMounted.current) {
-        setQueueBusy(busy);
-        if (!busy) {
-          setBusyLabel((prev) => (prev === "Updating settings" ? null : prev));
-        }
-      }
-    });
-  }, []);
+
 
   const syncSelectedGameCache = (nextSelectedGame: string) => {
     ludusaviStore.syncSelectedGameCache(nextSelectedGame);
@@ -164,7 +152,7 @@ export function LudusaviContent({
     const history = gameHistory[selectedGame];
     return history?.last_operation ?? null;
   }, [gameHistory, selectedGame]);
-  const isBusy = operation.is_running || busyLabel !== null || backgroundRefreshBusy || queueBusy;
+  const isBusy = operation.is_running || busyLabel !== null || backgroundRefreshBusy;
 
   function selectCurrentSteamGameIfAvailable(
     currentGames: readonly GameStatus[],

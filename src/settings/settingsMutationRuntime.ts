@@ -24,8 +24,8 @@ type NotifyFailure = (title: string, body: string) => void;
 
 type SettingsMutationControllerOptions = {
   ludusaviStore: LudusaviStateStore;
-  isMounted: MountedRef;
-  setBusyLabel: (label: string | null) => void;
+  isMounted?: MountedRef;
+  setBusyLabel?: (label: string | null) => void;
   notifyFailure: NotifyFailure;
 };
 
@@ -34,8 +34,6 @@ export type SettingsMutationRuntime = ReturnType<typeof createSettingsMutationRu
 export function createSettingsMutationRuntime() {
   const settingsQueue: (() => Promise<void>)[] = [];
   let settingsProcessing = false;
-  const queueListeners = new Set<(busy: boolean) => void>();
-
   let autoSyncSeq = 0;
   let notificationSeq = 0;
   let selectedGameSeq = 0;
@@ -50,37 +48,9 @@ export function createSettingsMutationRuntime() {
   let activeLudusaviStore: LudusaviStateStore | null = null;
   let activeFailureNotifier: NotifyFailure | null = null;
 
-  function getQueueBusy() {
-    return settingsProcessing || settingsQueue.length > 0;
-  }
-
-  function subscribeQueue(listener: (busy: boolean) => void) {
-    queueListeners.add(listener);
-    try {
-      listener(getQueueBusy());
-    } catch (err) {
-      log("error", `Initial queue listener call failed: ${err}`);
-    }
-    return () => {
-      queueListeners.delete(listener);
-    };
-  }
-
-  function notifyQueueListeners() {
-    const busy = getQueueBusy();
-    queueListeners.forEach((listener) => {
-      try {
-        listener(busy);
-      } catch (err) {
-        log("error", `Queue listener notification failed: ${err}`);
-      }
-    });
-  }
-
   async function processSettingsQueue() {
     if (settingsProcessing) return;
     settingsProcessing = true;
-    notifyQueueListeners();
     try {
       while (settingsQueue.length > 0) {
         const task = settingsQueue.shift();
@@ -97,18 +67,15 @@ export function createSettingsMutationRuntime() {
             }
           }
         }
-        notifyQueueListeners();
       }
     } finally {
       settingsProcessing = false;
-      notifyQueueListeners();
     }
   }
 
   function enqueueSettingsUpdate(task: () => Promise<void>) {
     settingsQueue.push(task);
     logUiEvent("settings_update_queued", { queue_depth: settingsQueue.length }, "debug", "ui_settings");
-    notifyQueueListeners();
     void processSettingsQueue();
   }
 
@@ -160,8 +127,6 @@ export function createSettingsMutationRuntime() {
 
   function createController({
     ludusaviStore,
-    isMounted,
-    setBusyLabel,
     notifyFailure
   }: SettingsMutationControllerOptions) {
     setActiveStore(ludusaviStore, notifyFailure);
@@ -174,12 +139,6 @@ export function createSettingsMutationRuntime() {
       gameName?: string,
     ) => {
       logUiEvent(event, { setting, ...fields }, level, "ui_settings", gameName);
-    };
-
-    const markBusy = () => {
-      if (isMounted.current) {
-        setBusyLabel("Updating settings");
-      }
     };
 
     const reportSettingsFailure = (error: unknown) => {
@@ -237,7 +196,6 @@ export function createSettingsMutationRuntime() {
 
       logSettingsEvent("settings_change_requested", settingKey, logFields, gameName ? "info" : undefined, gameName);
       optimisticUpdate();
-      markBusy();
 
       enqueueSettingsUpdate(async () => {
         log("info", logExecute);
@@ -429,8 +387,6 @@ export function createSettingsMutationRuntime() {
   function dispose() {
     settingsQueue.length = 0;
     settingsProcessing = false;
-    notifyQueueListeners();
-    queueListeners.clear();
     autoSyncSeq = 0;
     notificationSeq = 0;
     selectedGameSeq = 0;
@@ -447,8 +403,6 @@ export function createSettingsMutationRuntime() {
   }
 
   return {
-    getQueueBusy,
-    subscribeQueue,
     applySettings,
     syncLastQueuedSelectedGame,
     clearLastQueuedSelectedGame,
