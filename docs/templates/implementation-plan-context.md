@@ -68,6 +68,19 @@ STATUS: APPROVED
 
 ---
 
+## Scope discipline
+
+- Implement only the units the plan lists. Do not modify files outside the plan's scope.
+- Do not change runtime behavior beyond what the plan specifies. A `refactor` or
+  `cleanup` commit must preserve observable behavior.
+- Never edit a test's expected value to make a behavior change pass. If a test
+  legitimately must change, that change must be required by the plan or a review
+  note, and you must record the rationale in the session log.
+- If you spot an unrelated improvement, do not make it here — note it in the
+  session log for a separate plan.
+
+---
+
 ## Setup
 
 Start from `dev`:
