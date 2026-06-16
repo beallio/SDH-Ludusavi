@@ -133,13 +133,27 @@ The plan must instruct the implementer to:
 
 ### 4. Start or ensure implementer session
 
-After the plan is ready:
+After the plan is ready, start the implementer with the slug:
 
 ```bash
 scripts/orchestration/start-implementer "$SLUG"
 ```
 
+This command resolves the existing plan path before launching the implementer. It must not rely on a future `docs/plans/` create event, because the plan commonly already exists before the implementer starts.
+
 This command is idempotent. If the session already exists, do not create a duplicate.
+
+After the first implementation round, the implementer may stop and exit after writing the round-complete marker. That is normal.
+
+For follow-up review notes or approval, first write and commit the review note, then resume the implementer:
+
+```bash
+scripts/orchestration/continue-implementer "$SLUG"
+```
+
+Do not resume the implementer before the review note exists. The durable trigger is the committed review note.
+
+`continue-implementer` resumes the previous agent context with `agy -c -p` and instructs it to scan existing review notes before waiting for future file events.
 
 ### 5. Wait for round completion
 
@@ -196,10 +210,10 @@ git add docs/review/${SLUG}-review-*.md
 git commit -m "docs(review): request ${SLUG} changes"
 ```
 
-Ensure the implementer is running after the review note is committed:
+After the review note is written and committed, resume the implementer:
 
 ```bash
-scripts/orchestration/start-implementer "$SLUG"
+scripts/orchestration/continue-implementer "$SLUG"
 ```
 
 ### 7. Repeat review cycles
@@ -245,10 +259,10 @@ git add docs/review/${SLUG}-review-*.md
 git commit -m "docs(review): approve ${SLUG} implementation"
 ```
 
-Ensure the implementer is running so it can observe approval and finalize:
+After the approval review note is written and committed, resume the implementer so it can observe approval and finalize:
 
 ```bash
-scripts/orchestration/start-implementer "$SLUG"
+scripts/orchestration/continue-implementer "$SLUG"
 ```
 
 ### 9. Wait for finalization
@@ -286,5 +300,26 @@ Stopping the implementer is the orchestrator’s responsibility.
 - Do not delete review notes.
 - Do not allow the implementer to write its own review.
 - Do not finalize without an approved review note.
-- If the implementer session exits early, restart it with `scripts/orchestration/start-implementer "$SLUG"`.
+- If the implementer session exits after marking a round complete, that is acceptable. After creating a CHANGES_REQUESTED or APPROVED review note, resume it with `scripts/orchestration/continue-implementer "$SLUG"`, which uses `agy -c -p`.
+
+If the implementer exits early before writing the round-complete marker, restart the initial plan run with `scripts/orchestration/start-implementer "$SLUG"`. Do not regenerate the plan or depend on a new file-create event.
 - If finalization fails, report the exact failure and do not stop the implementer unless the failure leaves no running work to preserve.
+
+
+## Ordering constraints
+
+### Plan startup
+
+Write the implementation plan before starting the implementer. This is safe because `start-implementer` passes the existing plan path to `agy`; it does not depend on a future create event.
+
+Do not start the implementer before the plan exists unless explicitly recovering from an unusual state.
+
+### Review resume
+
+Write and commit review notes before calling:
+
+```bash
+scripts/orchestration/continue-implementer "$SLUG"
+```
+
+Do not start `continue-implementer` before the review note exists. The resume prompt is designed to scan existing review notes first.
