@@ -93,7 +93,15 @@ latest_plan_file() {
   require_slug "$slug"
 
   shopt -s nullglob
-  local files=(docs/plans/*_"${slug}".md docs/plans/"${slug}".md)
+  # Prefer the dated form docs/plans/<date>_<slug>.md. Its '*' forces bash to use
+  # readdir, which is reliable. The bare docs/plans/<slug>.md literal is only a
+  # fallback: on some filesystems (e.g. Dropbox) bash's glob-stat can report a
+  # stale/non-existent literal path as present, so only consult it when no dated
+  # plan exists.
+  local files=(docs/plans/*_"${slug}".md)
+  if (( ${#files[@]} == 0 )); then
+    files=(docs/plans/"${slug}".md)
+  fi
   shopt -u nullglob
 
   if (( ${#files[@]} == 0 )); then
