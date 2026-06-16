@@ -2,6 +2,14 @@
 
 set -euo pipefail
 
+# Make every git operation run by these orchestration scripts non-interactive.
+# Without this, finalize's `git merge --no-ff` opens $EDITOR (e.g. nano) on
+# .git/MERGE_MSG and hangs forever in `agy --print` mode, where the editor runs
+# on a pty the orchestrator cannot reach. `true` exits 0 immediately, so git
+# keeps the default commit message.
+export GIT_EDITOR=true
+export GIT_SEQUENCE_EDITOR=true
+
 die() {
   echo "error: $*" >&2
   exit 1
