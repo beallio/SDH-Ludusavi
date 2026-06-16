@@ -45,7 +45,7 @@ fi
 git fetch origin
 git checkout dev
 git pull --ff-only origin dev
-git merge --no-ff "$feature_branch"
+git merge --no-ff --no-edit "$feature_branch"
 git push origin dev
 git branch -d "$feature_branch"
 
