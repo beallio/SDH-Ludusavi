@@ -6,7 +6,6 @@ vi.mock("@decky/api", () => ({
 }));
 
 vi.mock("@decky/ui", () => ({
-  Router: {},
 }));
 
 vi.mock("react", () => ({
@@ -27,22 +26,22 @@ describe("PluginRuntime", () => {
       const initP = Promise.resolve({ is_running: false, name: null, game_name: null, last_result: null, last_error: null });
       const metaP = Promise.resolve();
 
-      expect(runtime.contentLoad.getInitPromise()).toBeNull();
-      runtime.contentLoad.setInitPromise(initP);
-      expect(runtime.contentLoad.getInitPromise()).toBe(initP);
+      expect(runtime.contentLoad.initPromise).toBeNull();
+      runtime.contentLoad.initPromise = initP;
+      expect(runtime.contentLoad.initPromise).toBe(initP);
 
-      expect(runtime.contentLoad.getMetadataPromise()).toBeNull();
-      runtime.contentLoad.setMetadataPromise(metaP);
-      expect(runtime.contentLoad.getMetadataPromise()).toBe(metaP);
+      expect(runtime.contentLoad.metadataPromise).toBeNull();
+      runtime.contentLoad.metadataPromise = metaP;
+      expect(runtime.contentLoad.metadataPromise).toBe(metaP);
     });
 
     it("dispose nulls promises", () => {
       const runtime = createPluginRuntime();
-      runtime.contentLoad.setInitPromise(Promise.resolve({ is_running: false, name: null, game_name: null, last_result: null, last_error: null }));
-      runtime.contentLoad.setMetadataPromise(Promise.resolve());
+      runtime.contentLoad.initPromise = Promise.resolve({ is_running: false, name: null, game_name: null, last_result: null, last_error: null });
+      runtime.contentLoad.metadataPromise = Promise.resolve();
       runtime.dispose();
-      expect(runtime.contentLoad.getInitPromise()).toBeNull();
-      expect(runtime.contentLoad.getMetadataPromise()).toBeNull();
+      expect(runtime.contentLoad.initPromise).toBeNull();
+      expect(runtime.contentLoad.metadataPromise).toBeNull();
     });
 
     it("two runtimes are independent", () => {
@@ -50,9 +49,9 @@ describe("PluginRuntime", () => {
       const r2 = createPluginRuntime();
       const p = Promise.resolve();
       
-      r1.contentLoad.setMetadataPromise(p);
-      expect(r1.contentLoad.getMetadataPromise()).toBe(p);
-      expect(r2.contentLoad.getMetadataPromise()).toBeNull();
+      r1.contentLoad.metadataPromise = p;
+      expect(r1.contentLoad.metadataPromise).toBe(p);
+      expect(r2.contentLoad.metadataPromise).toBeNull();
     });
   });
 
@@ -62,7 +61,6 @@ describe("PluginRuntime", () => {
 
       const statusSurfaceDispose = vi.fn(() => { order.push("statusSurface"); });
       const settingsDispose = vi.fn(() => { order.push("settings"); });
-      const contentLoadDispose = vi.fn(() => { order.push("contentLoad"); });
 
       const overrides = {
         statusSurface: {
@@ -75,11 +73,8 @@ describe("PluginRuntime", () => {
           dispose: settingsDispose
         } as any,
         contentLoad: {
-          getInitPromise: () => null,
-          setInitPromise: () => {},
-          getMetadataPromise: () => null,
-          setMetadataPromise: () => {},
-          dispose: contentLoadDispose
+          initPromise: null,
+          metadataPromise: null,
         }
       };
       
@@ -88,7 +83,7 @@ describe("PluginRuntime", () => {
       
       runtime.dispose();
       
-      expect(order).toEqual(["statusSurface", "settings", "contentLoad"]);
+      expect(order).toEqual(["statusSurface", "settings"]);
     });
   });
 });

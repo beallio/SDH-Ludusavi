@@ -58,6 +58,9 @@ describe("AutoSyncStatusSurface Status Pending Upload", () => {
       source: "rpc_result",
     });
     expect(completeHtml).not.toContain('class="icon icon-spin-ring"');
+    
+    const completeIcon = iconSvgForAutoSyncStatus("syncthing_complete");
+    expect(completeIcon).toContain("<svg");
   });
 
   it("keeps active Syncthing states visible until the monitor replaces them", () => {

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sdh_ludusavi.persistence import JsonSettingsStore
 
 import logging
 from collections import deque
@@ -52,9 +53,17 @@ def test_setup_logging_removes_old_handlers(tmp_path) -> None:
     mock_adapter.get_diagnostics.return_value = {"version": "0.31.0"}
 
     # Create first service
-    svc1 = SDHLudusaviService(adapter=mock_adapter, state_path=tmp_path / "state1.json")
+    svc1 = SDHLudusaviService(
+        adapter=mock_adapter,
+        settings_store=JsonSettingsStore(tmp_path / "settings1.json"),
+        cache_path=tmp_path / "cache1.json",
+    )
     # Create second service
-    svc2 = SDHLudusaviService(adapter=mock_adapter, state_path=tmp_path / "state2.json")
+    svc2 = SDHLudusaviService(
+        adapter=mock_adapter,
+        settings_store=JsonSettingsStore(tmp_path / "settings2.json"),
+        cache_path=tmp_path / "cache2.json",
+    )
 
     # Now get active handlers for "sdh_ludusavi" logger
     logger = logging.getLogger("sdh_ludusavi")

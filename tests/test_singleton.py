@@ -11,7 +11,6 @@ from pathlib import Path
 from sdh_ludusavi.singleton import (
     SiblingProcess,
     enforce_single_instance,
-    find_stale_sibling_pids,
     find_stale_siblings,
     terminate_stale_siblings,
 )
@@ -83,7 +82,7 @@ def test_finds_strictly_older_identical_sibling(tmp_path: Path) -> None:
     assert siblings[0].cmdline == PLUGIN_TITLE
 
     # Wrapper compatibility
-    assert find_stale_sibling_pids(proc_root=tmp_path, pid=6278) == [6270]
+    assert sorted(s.pid for s in find_stale_siblings(proc_root=tmp_path, pid=6278)) == [6270]
 
 
 def test_ignores_newer_siblings_self_and_other_processes(tmp_path: Path) -> None:
@@ -95,15 +94,15 @@ def test_ignores_newer_siblings_self_and_other_processes(tmp_path: Path) -> None
     (tmp_path / "self").mkdir()
 
     assert find_stale_siblings(proc_root=tmp_path, pid=6270) == []
-    assert find_stale_sibling_pids(proc_root=tmp_path, pid=6278) == [6270]
+    assert sorted(s.pid for s in find_stale_siblings(proc_root=tmp_path, pid=6278)) == [6270]
 
 
 def test_equal_start_ticks_breaks_tie_by_pid(tmp_path: Path) -> None:
     write_proc_entry(tmp_path, 6270, start_ticks=500)
     write_proc_entry(tmp_path, 6278, start_ticks=500)
 
-    assert find_stale_sibling_pids(proc_root=tmp_path, pid=6278) == [6270]
-    assert find_stale_sibling_pids(proc_root=tmp_path, pid=6270) == []
+    assert sorted(s.pid for s in find_stale_siblings(proc_root=tmp_path, pid=6278)) == [6270]
+    assert sorted(s.pid for s in find_stale_siblings(proc_root=tmp_path, pid=6270)) == []
 
 
 def test_tolerates_vanished_and_malformed_entries(tmp_path: Path) -> None:
@@ -112,7 +111,7 @@ def test_tolerates_vanished_and_malformed_entries(tmp_path: Path) -> None:
     write_proc_entry(tmp_path, 8888, start_ticks=500)
     (tmp_path / "8888" / "stat").write_text("garbage", encoding="utf-8")
 
-    assert find_stale_sibling_pids(proc_root=tmp_path, pid=6278) == []
+    assert sorted(s.pid for s in find_stale_siblings(proc_root=tmp_path, pid=6278)) == []
 
 
 def test_pid_reused_before_sigterm(tmp_path: Path) -> None:

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sdh_ludusavi.persistence import JsonSettingsStore
 from sdh_ludusavi.service import SDHLudusaviService
 
 
@@ -43,7 +44,11 @@ class MalformedAdapter:
 
 def test_refresh_robustness_with_non_mapping(tmp_path):
     state_file = tmp_path / "state.json"
-    service = SDHLudusaviService(adapter=MalformedAdapter(), state_path=state_file)
+    service = SDHLudusaviService(
+        adapter=MalformedAdapter(),
+        settings_store=JsonSettingsStore(state_file.with_name("settings.json")),
+        cache_path=state_file.with_name("cache.json"),
+    )
 
     # This should not crash despite the 'None' in the games list
     service.refresh_games(force=True)

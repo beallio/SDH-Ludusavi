@@ -176,11 +176,14 @@ def test_workflows_use_node24_action_runtime_and_current_action_majors() -> None
             f"{path} must opt GitHub JavaScript actions into the Node 24 runtime"
         )
         assert "uses: actions/checkout@v6" in content
-        assert "uses: actions/setup-node@v6" in content
-        assert "uses: pnpm/action-setup@v6" in content
-        assert "uses: actions/cache@v5" in content
-        assert "uses: actions/setup-python@v6" in content
-        assert "uses: astral-sh/setup-uv@v8.1.0" in content
+        assert "uses: ./.github/actions/setup-toolchain" in content
+
+    action_content = Path(".github/actions/setup-toolchain/action.yml").read_text(encoding="utf-8")
+    assert "uses: actions/setup-node@v6" in action_content
+    assert "uses: pnpm/action-setup@v6" in action_content
+    assert "uses: actions/cache@v5" in action_content
+    assert "uses: actions/setup-python@v6" in action_content
+    assert "uses: astral-sh/setup-uv@v8.1.0" in action_content
 
     assert "uses: actions/upload-artifact@v7" in workflows[".github/workflows/ci.yml"]
     assert "uses: softprops/action-gh-release@v3" in workflows[".github/workflows/release.yml"]

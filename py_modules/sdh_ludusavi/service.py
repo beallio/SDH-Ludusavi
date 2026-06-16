@@ -12,7 +12,7 @@ from .coordinator import OperationLockedError, OperationCoordinator
 
 from .constants import DEFAULT_NOTIFICATION_SETTINGS
 from .updater import PluginUpdater
-from .types import LudusaviAdapter, GameStatus
+from .types import LudusaviAdapter
 from sdh_ludusavi.game_names import sanitize_game_name
 
 __all__ = ["SDHLudusaviService", "OperationLockedError", "DEFAULT_NOTIFICATION_SETTINGS"]
@@ -30,15 +30,12 @@ class SDHLudusaviService:
         self,
         adapter: LudusaviAdapter | None = None,
         adapter_factory: Callable[[], LudusaviAdapter] | None = None,
-        state_path: Path | None = None,
         settings_store: SettingsStore | None = None,
         cache_path: Path | None = None,
         log_limit: int = 100,
     ) -> None:
         if adapter is not None and adapter_factory is not None:
             raise ValueError("adapter and adapter_factory cannot both be provided")
-        if state_path is not None and (settings_store is not None or cache_path is not None):
-            raise ValueError("state_path cannot be combined with split settings/cache storage")
 
         # 1. Local settings properties
         self._auto_sync_enabled = False
@@ -88,7 +85,6 @@ class SDHLudusaviService:
 
         # 3. Persistence Layer
         self._persistence = PersistenceManager(
-            state_path=state_path,
             settings_store=settings_store,
             cache_path=cache_path,
         )
@@ -373,9 +369,6 @@ class SDHLudusaviService:
                 **self._updater.cache_payload(),
             }
             self._persistence.save_cache(cache_payload)
-
-    def _match_game(self, game_name: str, app_id: str | None = None) -> GameStatus | None:
-        return self._registry.match_game(game_name, app_id)
 
     # Updater helper methods
     def set_update_channel(self, channel: str) -> dict[str, Any]:
