@@ -31,7 +31,7 @@ export function LogsSection({
         </ButtonItem>
       </PanelSectionRow>
       <PanelSectionRow>
-        <ButtonItem layout="below" bottomSeparator="standard" onClick={onShowLudusaviLogs}>
+        <ButtonItem layout="below" bottomSeparator="none" onClick={onShowLudusaviLogs}>
           View Ludusavi Logs
         </ButtonItem>
       </PanelSectionRow>
@@ -39,7 +39,7 @@ export function LogsSection({
         <ToggleField
           label="Debug Logging"
           description="Enables verbose logging for troubleshooting."
-          bottomSeparator="none"
+          bottomSeparator="standard"
           checked={debugLogging}
           disabled={isBusy}
           onChange={(enabled: boolean) => onToggleDebugLogging(enabled)}
