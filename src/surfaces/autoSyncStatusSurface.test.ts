@@ -1,9 +1,12 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   autoSyncStatusText,
   isSyncthingActiveStatus,
   iconSvgForAutoSyncStatus,
   shouldAutoHideStatus,
+  createAutoSyncStatusSurface,
+  HAS_BACKUP_MIN_DWELL_MS,
+  RESULT_HIDE_DELAY_MS,
 } from "./autoSyncStatusSurface";
 import { renderAutoSyncStatusHtml } from "./autoSyncStatusRenderer";
 
@@ -191,5 +194,89 @@ describe("AutoSyncStatusSurface Local Backup Arrow Animation", () => {
   it("renders the save-conflict status in amber", () => {
     const html = renderAutoSyncStatusHtml({ status: "conflict", visible: true, source: "rpc_result" });
     expect(html).toContain("#f59e0b");
+  });
+});
+
+describe("AutoSyncStatusSurface Dwell Time", () => {
+  let mockStatusView: any;
+  let surface: any;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", {
+      setTimeout: setTimeout,
+      clearTimeout: clearTimeout,
+    });
+    mockStatusView = {
+      setContext: vi.fn(),
+      sync: vi.fn(),
+      destroy: vi.fn(),
+    };
+    surface = createAutoSyncStatusSurface(mockStatusView);
+  });
+
+  afterEach(() => {
+    surface.dispose();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("delays syncthing_pending_upload behind has_backup dwell time", () => {
+    surface.publish("has_backup", { source: "rpc_result", resultStatus: "backed_up" });
+    expect(mockStatusView.sync).toHaveBeenCalledWith(expect.objectContaining({ status: "has_backup" }));
+    
+    mockStatusView.sync.mockClear();
+    surface.publish("syncthing_pending_upload", { source: "test" });
+    expect(mockStatusView.sync).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(HAS_BACKUP_MIN_DWELL_MS);
+    expect(mockStatusView.sync).toHaveBeenCalledWith(expect.objectContaining({ status: "syncthing_pending_upload" }));
+  });
+
+  it("coalesces multiple syncthing publishes during the dwell time", () => {
+    surface.publish("has_backup", { source: "rpc_result", resultStatus: "backed_up" });
+    mockStatusView.sync.mockClear();
+
+    surface.publish("syncthing_pending_upload", { source: "test" });
+    surface.publish("syncthing_uploading", { source: "test" });
+
+    vi.advanceTimersByTime(HAS_BACKUP_MIN_DWELL_MS);
+    expect(mockStatusView.sync).toHaveBeenCalledTimes(1);
+    expect(mockStatusView.sync).toHaveBeenCalledWith(expect.objectContaining({ status: "syncthing_uploading" }));
+  });
+
+  it("applies error immediately and cancels deferral", () => {
+    surface.publish("has_backup", { source: "rpc_result", resultStatus: "backed_up" });
+    mockStatusView.sync.mockClear();
+
+    surface.publish("syncthing_pending_upload", { source: "test" });
+    surface.publish("error", { source: "rpc_result" });
+    expect(mockStatusView.sync).toHaveBeenCalledWith(expect.objectContaining({ status: "error" }));
+
+    mockStatusView.sync.mockClear();
+    vi.advanceTimersByTime(HAS_BACKUP_MIN_DWELL_MS);
+    expect(mockStatusView.sync).not.toHaveBeenCalled();
+  });
+
+  it("cancels deferral on hide", () => {
+    surface.publish("has_backup", { source: "rpc_result", resultStatus: "backed_up" });
+    mockStatusView.sync.mockClear();
+
+    surface.publish("syncthing_pending_upload", { source: "test" });
+    surface.hide();
+
+    mockStatusView.sync.mockClear();
+    vi.advanceTimersByTime(HAS_BACKUP_MIN_DWELL_MS);
+    expect(mockStatusView.sync).not.toHaveBeenCalled();
+  });
+
+  it("auto-hides has_backup after RESULT_HIDE_DELAY_MS if no syncthing syncs occur", () => {
+    surface.publish("has_backup", { source: "rpc_result", resultStatus: "backed_up" });
+    expect(mockStatusView.sync).toHaveBeenCalledWith(expect.objectContaining({ status: "has_backup", visible: true }));
+
+    mockStatusView.sync.mockClear();
+    vi.advanceTimersByTime(RESULT_HIDE_DELAY_MS);
+    expect(mockStatusView.sync).toHaveBeenCalledWith(expect.objectContaining({ status: "has_backup", visible: false }));
   });
 });
