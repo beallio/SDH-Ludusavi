@@ -1,0 +1,34 @@
+{
+  "date": "2026-06-18",
+  "objective": "Implement Auto-Sync Status Handoff and Debug Logging Fixes",
+  "files_modified": [
+    "src/surfaces/autoSyncStatusSurface.tsx",
+    "src/surfaces/autoSyncStatusSurface.test.ts",
+    "src/controllers/syncthingMonitorMachine.ts",
+    "src/controllers/syncthingMonitorMachine.test.ts",
+    "py_modules/sdh_ludusavi/log_buffer.py",
+    "py_modules/sdh_ludusavi/constants.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "tests/test_service.py",
+    "tests/test_compatibility.py",
+    "src/api/ludusaviRpc.ts",
+    "src/types/index.ts",
+    "src/state/ludusaviState.tsx",
+    "src/settings/settingsMutationRuntime.ts",
+    "src/components/qam/AutoSyncSettingsSection.tsx",
+    "src/components/qam/LudusaviContent.tsx",
+    "src/runtime/startupHydration.test.ts",
+    "README.md"
+  ],
+  "tests_added": [
+    "src/surfaces/autoSyncStatusSurface.test.ts: minimum dwell, coalescing, cancellation via error, hide/dispose tests",
+    "src/controllers/syncthingMonitorMachine.test.ts: post-game completion via mutation, pending_activity_timeout updates",
+    "tests/test_service.py: debug_logging updates in persist tests"
+  ],
+  "design_decisions": [
+    "Workstream A: Added HAS_BACKUP_MIN_DWELL_MS (900ms). Used surface-local state inside createAutoSyncStatusSurface to defer Syncthing statuses and coalesce updates if they arrive during the minimum dwell of 'has_backup'. Preserved existing syncAutoSyncStatusBrowserViewDeferred behavior.",
+    "Workstream B: Added mutationObserved boolean to WatchMachineState. During post_game phase, scanning/activity statuses trigger mutationObserved. Settling logic now arms completion from mutationObserved. Updated pending_activity_timeout backstop to work for all non-uploaded states, enforcing a reliable 30-second completion even for tiny saves.",
+    "Workstream C: Added a backend setting '_debug_logging', registered 'set_debug_logging' RPC method, and updated logger fallback map to emit real logging.DEBUG level events when configured. Plumbed this through to the frontend via settingsMutationRuntime and exposed a ToggleField under the AutoSyncSettingsSection in the GLOBAL panel. Updated README."
+  ],
+  "results": "All three workstreams are fully implemented. Unit tests run locally pass without errors. Typechecks successfully pass. Code successfully committed and round marked as complete."
+}
