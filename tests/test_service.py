@@ -2004,3 +2004,27 @@ def test_service_syncthing_watch(tmp_path: Path) -> None:
 
     service.stop()
     service._syncthing_watch_manager.stop_all.assert_called_once()
+
+
+def test_apply_log_level(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    from tests.test_main import fake_decky_module
+
+    decky, logger = fake_decky_module(tmp_path)
+    monkeypatch.setitem(sys.modules, "decky", decky)
+
+    service = service_with_state(tmp_path)
+    # The initialization already calls _apply_log_level (which defaults to True based on previous change)
+    assert logging.DEBUG in logger.levels
+
+    logger.levels.clear()
+
+    # Toggle it to False
+    service.set_debug_logging(False)
+    assert logging.INFO in logger.levels
+
+    logger.levels.clear()
+
+    # Toggle it to True
+    service.set_debug_logging(True)
+    assert logging.DEBUG in logger.levels
