@@ -8,7 +8,6 @@ type AutoSyncSettingsSectionProps = {
   isBusy: boolean;
   refreshLoading: boolean;
   onToggleAutoSync: (enabled: boolean) => void;
-  onToggleDebugLogging: (enabled: boolean) => void;
   onRefreshGames: () => void;
 };
 
@@ -17,7 +16,6 @@ export function AutoSyncSettingsSection({
   isBusy,
   refreshLoading,
   onToggleAutoSync,
-  onToggleDebugLogging,
   onRefreshGames
 }: AutoSyncSettingsSectionProps) {
   return (
@@ -30,17 +28,6 @@ export function AutoSyncSettingsSection({
           checked={settings.auto_sync_enabled}
           disabled={isBusy}
           onChange={(enabled: boolean) => onToggleAutoSync(enabled)}
-        />
-      </PanelSectionRow>
-
-      <PanelSectionRow>
-        <ToggleField
-          label="Debug Logging"
-          description="Enables verbose logging for troubleshooting."
-          bottomSeparator="none"
-          checked={settings.debug_logging}
-          disabled={isBusy}
-          onChange={(enabled: boolean) => onToggleDebugLogging(enabled)}
         />
       </PanelSectionRow>
 
