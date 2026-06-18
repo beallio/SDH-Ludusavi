@@ -6,7 +6,8 @@ import {
   setAutoSyncEnabled,
   setNotificationSettings,
   setSelectedGameCall,
-  setUpdateChannelCall
+  setUpdateChannelCall,
+  setDebugLoggingCall
 } from "../api/ludusaviRpc";
 import {
   defaultNotificationSettings,
@@ -39,10 +40,12 @@ export function createSettingsMutationRuntime() {
   let selectedGameSeq = 0;
   let updateChannelSeq = 0;
   let automaticUpdateChecksSeq = 0;
+  let debugLoggingSeq = 0;
   let lastPersistedAutoSync: boolean | null = null;
   let lastPersistedNotifications: NotificationSettings | null = null;
   let lastPersistedUpdateChannel: UpdateChannel | null = null;
   let lastPersistedAutomaticUpdateChecks: boolean | null = null;
+  let lastPersistedDebugLogging: boolean | null = null;
   let lastPersistedSelectedGame: string | null = null;
   let lastQueuedSelectedGame: string | null = null;
   let activeLudusaviStore: LudusaviStateStore | null = null;
@@ -108,6 +111,9 @@ export function createSettingsMutationRuntime() {
     }
     if (normalized.automatic_update_checks !== undefined) {
       lastPersistedAutomaticUpdateChecks = normalized.automatic_update_checks;
+    }
+    if (normalized.debug_logging !== undefined) {
+      lastPersistedDebugLogging = normalized.debug_logging;
     }
     return normalized;
   }
@@ -267,6 +273,26 @@ export function createSettingsMutationRuntime() {
       });
     };
 
+    const toggleDebugLogging = (enabled: boolean) => {
+      mutateSetting<Settings, boolean>({
+        updateSeq: ++debugLoggingSeq,
+        readSeq: () => debugLoggingSeq,
+        settingKey: "debug_logging",
+        settingValue: enabled,
+        logExecute: `Executing toggle debug logging to ${enabled}`,
+        logLateResolution: `Late resolution of setDebugLogging to ${enabled} succeeded`,
+        logLateFailure: `Late failure of setDebugLogging to ${enabled}`,
+        logError: `Failed to toggle debug logging`,
+        timeoutMessage: "Setting debug logging timed out",
+        fallbackValue: lastPersistedDebugLogging ?? true,
+        optimisticUpdate: () => ludusaviStore.setDebugLogging(enabled),
+        rpcCall: () => setDebugLoggingCall(enabled),
+        applyResult: (res) => applySettings(ludusaviStore, res),
+        rollbackUpdate: (fallback) => ludusaviStore.setDebugLogging(fallback),
+        getPersistedValue: (res) => res.debug_logging
+      });
+    };
+
     const toggleNotificationSetting = (key: keyof NotificationSettings, enabled: boolean) => {
       const previousNotifications = ludusaviStore.getSnapshot().settings?.notifications ?? defaultNotificationSettings;
       const nextNotifications = { ...previousNotifications, [key]: enabled };
@@ -380,7 +406,8 @@ export function createSettingsMutationRuntime() {
       toggleAutoSync,
       toggleAutomaticUpdateChecks,
       toggleNotificationSetting,
-      toggleUpdateChannel
+      toggleUpdateChannel,
+      toggleDebugLogging
     };
   }
 
@@ -392,10 +419,12 @@ export function createSettingsMutationRuntime() {
     selectedGameSeq = 0;
     updateChannelSeq = 0;
     automaticUpdateChecksSeq = 0;
+    debugLoggingSeq = 0;
     lastPersistedAutoSync = null;
     lastPersistedNotifications = null;
     lastPersistedUpdateChannel = null;
     lastPersistedAutomaticUpdateChecks = null;
+    lastPersistedDebugLogging = null;
     lastPersistedSelectedGame = null;
     lastQueuedSelectedGame = null;
     activeFailureNotifier = null;

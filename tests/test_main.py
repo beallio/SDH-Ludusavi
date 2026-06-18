@@ -17,10 +17,15 @@ from sdh_ludusavi.service import OperationLockedError
 
 class FakeLogger:
     def __init__(self) -> None:
+        self.debugs: list[str] = []
         self.infos: list[str] = []
         self.warnings: list[str] = []
         self.exceptions: list[str] = []
         self.errors: list[str] = []
+        self.levels: list[int] = []
+
+    def debug(self, message: str, *args: object) -> None:
+        self.debugs.append(_format_log(message, args))
 
     def info(self, message: str, *args: object) -> None:
         self.infos.append(_format_log(message, args))
@@ -33,6 +38,9 @@ class FakeLogger:
 
     def exception(self, message: str, *args: object) -> None:
         self.exceptions.append(_format_log(message, args))
+
+    def setLevel(self, level: int) -> None:
+        self.levels.append(level)
 
 
 def _format_log(message: str, args: tuple[object, ...]) -> str:
