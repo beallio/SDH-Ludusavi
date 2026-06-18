@@ -40,11 +40,11 @@ Start by reading ${plan_path}. Follow the plan exactly. Use the implementer skil
 
 When a round is complete, write the round-complete marker by running the mark-finished command specified in the plan.
 
-If you remain active, continue watching the plan's docs/review/<slug>-review-*.md review-note path for follow-up review notes. If the process exits after marking the round complete, that is acceptable; the orchestrator will resume you later with agy -c -p via scripts/orchestration/continue-implementer.
+After writing the round-complete marker, exit cleanly. Do not poll or watch docs/review/<slug>-review-*.md in-session; the orchestrator resumes you with agy -c -p via scripts/orchestration/continue-implementer once the next review note is committed.
 
-When resumed, always scan existing review notes before waiting for new file events.
+When resumed, always scan existing committed review notes before doing anything else. Read the latest review note's committed content (for example via git show HEAD:docs/review/<slug>-review-*.md), not the working-tree file, so a half-written or uncommitted note is never acted upon.
 
-When an APPROVED review note appears, finalize exactly as the plan instructs, write the finalized marker, stop polling, and exit cleanly.
+When an APPROVED review note appears, finalize exactly as the plan instructs, write the finalized marker, and exit cleanly.
 EOF
 )"
 

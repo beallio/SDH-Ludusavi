@@ -153,7 +153,9 @@ scripts/orchestration/continue-implementer "$SLUG"
 
 Do not resume the implementer before the review note exists. The durable trigger is the committed review note.
 
-`continue-implementer` resumes the previous agent context with `agy -c -p` and instructs it to scan existing review notes before waiting for future file events.
+`continue-implementer` resumes the previous agent context with `agy -c -p` and instructs it to scan existing committed review notes before waiting for future file events.
+
+The implementer exits cleanly after marking each round complete; it does not stay alive polling for review notes. The committed review note — not an in-session file watch — is the durable trigger, and `continue-implementer` is how the orchestrator drives the next round. Because the implementer always exits, `continue-implementer` will not hit a "session already running" no-op.
 
 ### 5. Wait for round completion
 
@@ -170,6 +172,21 @@ The marker is:
 ```text
 /tmp/sdh_ludusavi/${SLUG}_finished
 ```
+
+The marker is stamped with the implementer’s HEAD sha at the time it finished.
+After the first round the marker persists, so to wait specifically for a *new*
+round to complete, capture `git rev-parse HEAD` before resuming and pass it as
+`ORCH_FINISHED_SINCE`:
+
+```bash
+since="$(git rev-parse HEAD)"
+scripts/orchestration/continue-implementer "$SLUG"
+ORCH_FINISHED_SINCE="$since" scripts/orchestration/wait-for-finished "$SLUG"
+```
+
+`wait-for-finished` then blocks until the marker’s stamped sha differs from
+`$since`, so a stale marker from the previous round is not mistaken for the new
+one.
 
 ### 6. Review
 
