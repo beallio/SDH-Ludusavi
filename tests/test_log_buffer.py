@@ -83,7 +83,7 @@ def test_setup_logging_removes_old_handlers(tmp_path) -> None:
     assert any("Test routing" in entry["message"] for entry in recent2)
 
 
-def test_decky_log_fallback_debug_has_no_prefix(monkeypatch, tmp_path):
+def test_decky_log_fallback_debug_routes_to_logger_debug(monkeypatch, tmp_path):
     import sys
     from tests.test_main import fake_decky_module
     from sdh_ludusavi.log_buffer import _decky_log_fallback
@@ -92,5 +92,21 @@ def test_decky_log_fallback_debug_has_no_prefix(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "decky", decky)
     _decky_log_fallback("debug", "refresh: hello")
 
-    assert logger.infos == ["refresh: hello"]
-    assert all("[DEBUG]" not in m for m in logger.infos)
+    assert logger.debugs == ["refresh: hello"]
+    assert logger.infos == []
+    assert all("[DEBUG]" not in m for m in logger.debugs)
+
+
+def test_setup_logging_level(monkeypatch, tmp_path):
+    import sys
+    from tests.test_main import fake_decky_module
+    from sdh_ludusavi.log_buffer import DiagnosticLogBuffer
+
+    decky, logger = fake_decky_module(tmp_path)
+    monkeypatch.setitem(sys.modules, "decky", decky)
+
+    svc = DummyService()
+    buf = DiagnosticLogBuffer(svc)
+    buf.setup_logging()
+
+    assert logging.DEBUG in logger.levels
