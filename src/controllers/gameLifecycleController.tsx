@@ -322,6 +322,19 @@ export function createGameLifecycleController(
           activeMonitorEpoch = epoch;
           preGameWatch = syncthingMonitor.start("pre_game", name, appID);
         }
+        // Mirror the non-conflict auto paths: show the in-progress animation that
+        // matches the chosen resolution. keep_local runs a backup; restore_backup
+        // runs a restore. Without this the strip stays on the static "conflict"
+        // icon until the result and never animates.
+        publishAutoSyncStatus(
+          resolution === "restore_backup" ? "restoring" : "backing_up",
+          {
+            source: "lifecycle_start",
+            gameName: name,
+            appID,
+            tracked,
+          },
+        );
         const result = await resolveGameStartConflictCall(
           checkResult.game ?? name,
           appID,
