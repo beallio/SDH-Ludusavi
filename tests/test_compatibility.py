@@ -58,6 +58,7 @@ EXPECTED_METHODS: dict[str, list[str]] = {
     "set_auto_sync_enabled": ["enabled"],
     "set_selected_game": ["game_name"],
     "set_notification_settings": ["settings"],
+    "set_debug_logging": ["enabled"],
     "log": ["level", "message", "operation", "game_name"],
     "set_update_channel": ["channel"],
     "set_automatic_update_checks": ["enabled"],

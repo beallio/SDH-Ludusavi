@@ -40,12 +40,22 @@ export type UpdateCheckResult =
       retry_after?: string;
     };
 
+export interface LudusaviSettings {
+  auto_sync_enabled: boolean;
+  selected_game: string;
+  debug_logging: boolean;
+  notifications: NotificationSettings;
+  update_channel: UpdateChannel;
+  automatic_update_checks: boolean;
+};
+
 export type Settings = {
   auto_sync_enabled: boolean;
   selected_game: string;
   notifications: NotificationSettings;
   update_channel: UpdateChannel;
   automatic_update_checks: boolean;
+  debug_logging: boolean;
 };
 
 export type GameOperationHistoryEntry = {

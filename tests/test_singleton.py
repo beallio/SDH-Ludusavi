@@ -263,6 +263,7 @@ class FakeLogger:
         self.infos: list[str] = []
         self.warnings: list[str] = []
         self.errors: list[str] = []
+        self.exceptions: list[str] = []
 
     def info(self, message: str, *args: object) -> None:
         self.infos.append(message % args if args else message)
@@ -272,6 +273,12 @@ class FakeLogger:
 
     def error(self, message: str, *args: object) -> None:
         self.errors.append(message % args if args else message)
+
+    def exception(self, message: str, *args: object) -> None:
+        self.exceptions.append(message % args if args else message)
+
+    def setLevel(self, level: int) -> None:
+        pass
 
 
 def test_enforce_single_instance_terminates_and_logs(tmp_path: Path) -> None:

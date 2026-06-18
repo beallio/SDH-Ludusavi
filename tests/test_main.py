@@ -34,6 +34,9 @@ class FakeLogger:
     def exception(self, message: str, *args: object) -> None:
         self.exceptions.append(_format_log(message, args))
 
+    def setLevel(self, level: int) -> None:
+        pass
+
 
 def _format_log(message: str, args: tuple[object, ...]) -> str:
     return message % args if args else message

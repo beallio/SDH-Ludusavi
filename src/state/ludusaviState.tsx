@@ -32,7 +32,8 @@ export const defaultSettings = (): Settings => ({
   selected_game: "",
   notifications: { ...defaultNotificationSettings },
   update_channel: "stable",
-  automatic_update_checks: true
+  automatic_update_checks: true,
+  debug_logging: false
 });
 
 export function normalizeNotificationSettings(
@@ -53,7 +54,8 @@ export function normalizeSettings(settings: Settings): Settings {
     ...settings,
     notifications: normalizeNotificationSettings(settings.notifications),
     update_channel: settings.update_channel === "development" ? "development" : "stable",
-    automatic_update_checks: typeof settings.automatic_update_checks === "boolean" ? settings.automatic_update_checks : true
+    automatic_update_checks: typeof settings.automatic_update_checks === "boolean" ? settings.automatic_update_checks : true,
+    debug_logging: typeof settings.debug_logging === "boolean" ? settings.debug_logging : false
   };
 }
 
@@ -153,6 +155,14 @@ export class LudusaviStateStore {
       settings,
       autoSyncNotificationsEnabled: enabled
     });
+  }
+
+  setDebugLogging(enabled: boolean) {
+    const settings = {
+      ...(this.snapshot.settings ?? defaultSettings()),
+      debug_logging: enabled
+    };
+    this.commit({ settings });
   }
 
   setNotificationSettings(notifications: NotificationSettings) {

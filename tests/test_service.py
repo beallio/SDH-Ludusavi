@@ -140,6 +140,7 @@ def expected_settings(
     notifications: dict[str, bool] | None = None,
     update_channel: str = "stable",
     automatic_update_checks: bool = True,
+    debug_logging: bool = False,
 ) -> dict[str, object]:
     return {
         "auto_sync_enabled": auto_sync_enabled,
@@ -147,6 +148,7 @@ def expected_settings(
         "notifications": notifications or dict(DEFAULT_NOTIFICATIONS),
         "update_channel": update_channel,
         "automatic_update_checks": automatic_update_checks,
+        "debug_logging": debug_logging,
     }
 
 
@@ -162,6 +164,9 @@ def test_settings_do_not_initialize_ludusavi_adapter(tmp_path: Path) -> None:
 
     assert service.get_settings() == expected_settings()
     assert service.set_auto_sync_enabled(True) == expected_settings(auto_sync_enabled=True)
+    assert service.set_debug_logging(True) == expected_settings(
+        auto_sync_enabled=True, debug_logging=True
+    )
 
 
 def test_notification_settings_default_to_enabled_and_persist(tmp_path: Path) -> None:
@@ -745,6 +750,7 @@ def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
         "notifications": DEFAULT_NOTIFICATIONS,
         "update_channel": "stable",
         "automatic_update_checks": True,
+        "debug_logging": False,
     }
 
 
@@ -765,6 +771,7 @@ def test_persists_settings_and_cache_separately(tmp_path: Path) -> None:
         "notifications": DEFAULT_NOTIFICATIONS,
         "update_channel": "stable",
         "automatic_update_checks": True,
+        "debug_logging": False,
     }
     assert "games" not in settings
     assert "ludusaviLauncherShortcutAppId" not in settings
