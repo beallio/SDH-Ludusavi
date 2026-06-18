@@ -396,7 +396,7 @@ export function logCurrentGameNoMatch(
   currentAliases: Record<string, string>
 ) {
   log(
-    session ? "warning" : "debug",
+    "debug",
     `QAM current game not selected: context=${session ? describeSteamGameSession(session) : "none"} games=${currentGames.length} aliasKeys=${Object.keys(currentAliases).length}`,
     "qam_context",
     session?.name
