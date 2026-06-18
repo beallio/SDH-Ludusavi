@@ -36,7 +36,7 @@ class DeckySettingsStore:
             ),
             "update_channel": self._manager.getSetting("update_channel", "stable"),
             "automatic_update_checks": self._manager.getSetting("automatic_update_checks", True),
-            "debug_logging": self._manager.getSetting("debug_logging", False),
+            "debug_logging": self._manager.getSetting("debug_logging", True),
         }
 
     def write(self, settings: dict[str, object]) -> None:

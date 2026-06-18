@@ -40,7 +40,7 @@ class SDHLudusaviService:
         # 1. Local settings properties
         self._auto_sync_enabled = False
         self._selected_game = ""
-        self._debug_logging = False
+        self._debug_logging = True
         self._notification_settings = _coerce_notification_settings(DEFAULT_NOTIFICATION_SETTINGS)
         self._ludusavi_launcher_shortcut_id = -1
         self._state_lock = threading.RLock()
@@ -353,7 +353,7 @@ class SDHLudusaviService:
 
         self._auto_sync_enabled = bool(settings.get("auto_sync_enabled", False))
         self._selected_game = str(settings.get("selected_game", ""))
-        self._debug_logging = bool(settings.get("debug_logging", False))
+        self._debug_logging = bool(settings.get("debug_logging", True))
         self._apply_log_level()
         self._notification_settings = _coerce_notification_settings(
             settings.get("notifications", {})

@@ -33,7 +33,7 @@ export const defaultSettings = (): Settings => ({
   notifications: { ...defaultNotificationSettings },
   update_channel: "stable",
   automatic_update_checks: true,
-  debug_logging: false
+  debug_logging: true
 });
 
 export function normalizeNotificationSettings(
@@ -55,7 +55,7 @@ export function normalizeSettings(settings: Settings): Settings {
     notifications: normalizeNotificationSettings(settings.notifications),
     update_channel: settings.update_channel === "development" ? "development" : "stable",
     automatic_update_checks: typeof settings.automatic_update_checks === "boolean" ? settings.automatic_update_checks : true,
-    debug_logging: typeof settings.debug_logging === "boolean" ? settings.debug_logging : false
+    debug_logging: typeof settings.debug_logging === "boolean" ? settings.debug_logging : true
   };
 }
 
