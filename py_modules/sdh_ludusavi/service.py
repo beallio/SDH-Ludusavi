@@ -137,10 +137,7 @@ class SDHLudusaviService:
         self._log_buffer.setup_logging()
         self.log("info", "SDH-ludusavi service initialized", "init")
 
-        import getpass
-
-        identity = f"uid={os.getuid()}, euid={os.geteuid()}, user={getpass.getuser()}"
-        self.log("debug", f"Process identity: {identity}", "init")
+        self.log("debug", f"Process identity: {_resolve_process_identity()}", "init")
 
         _allowed_env_keys = {
             "LANG",
@@ -476,6 +473,24 @@ def _skip(
             trigger = "unknown"
         service._history.record_history(game_name, operation, trigger, "skipped", reason=reason)
     return {"status": "skipped", "game": game_name, "reason": reason}
+
+
+def _resolve_process_identity() -> str:
+    uid = os.getuid()
+    euid = os.geteuid()
+    try:
+        import pwd
+
+        user = pwd.getpwuid(uid).pw_name
+    except (KeyError, ImportError):
+        import getpass
+
+        try:
+            user = getpass.getuser()
+        # Intentionally broad
+        except Exception:
+            user = "unknown"
+    return f"uid={uid}, euid={euid}, user={user}"
 
 
 def _coerce_notification_settings(settings: object) -> dict[str, bool]:
