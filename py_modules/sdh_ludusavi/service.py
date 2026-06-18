@@ -40,6 +40,7 @@ class SDHLudusaviService:
         # 1. Local settings properties
         self._auto_sync_enabled = False
         self._selected_game = ""
+        self._debug_logging = True
         self._notification_settings = _coerce_notification_settings(DEFAULT_NOTIFICATION_SETTINGS)
         self._ludusavi_launcher_shortcut_id = -1
         self._state_lock = threading.RLock()
@@ -191,6 +192,7 @@ class SDHLudusaviService:
         return {
             "auto_sync_enabled": self._auto_sync_enabled,
             "selected_game": self._selected_game,
+            "debug_logging": self._debug_logging,
             "notifications": dict(self._notification_settings),
             **self._updater.settings_payload(),
         }
@@ -219,6 +221,25 @@ class SDHLudusaviService:
         self._save_state()
         self.log("info", "Notification settings updated")
         return self.get_settings()
+
+    def set_debug_logging(self, enabled: bool) -> dict[str, Any]:
+        """Update the debug logging setting and persist it to disk."""
+        self._debug_logging = bool(enabled)
+        self._save_state()
+        self._apply_log_level()
+        self.log("info", f"Debug logging {'enabled' if enabled else 'disabled'}")
+        return self.get_settings()
+
+    def _apply_log_level(self) -> None:
+        try:
+            import decky
+
+            logger = getattr(decky, "logger", None)
+            if logger:
+                level = logging.DEBUG if self._debug_logging else logging.INFO
+                logger.setLevel(level)
+        except ImportError:
+            pass
 
     def get_ludusavi_launcher_shortcut_id(self) -> int:
         """Return the saved shortcut app ID, or -1 if none exists."""
@@ -332,6 +353,8 @@ class SDHLudusaviService:
 
         self._auto_sync_enabled = bool(settings.get("auto_sync_enabled", False))
         self._selected_game = str(settings.get("selected_game", ""))
+        self._debug_logging = bool(settings.get("debug_logging", True))
+        self._apply_log_level()
         self._notification_settings = _coerce_notification_settings(
             settings.get("notifications", {})
         )
@@ -354,6 +377,7 @@ class SDHLudusaviService:
             settings_payload = {
                 "auto_sync_enabled": self._auto_sync_enabled,
                 "selected_game": self._selected_game,
+                "debug_logging": self._debug_logging,
                 "notifications": dict(self._notification_settings),
                 **self._updater.settings_payload(),
             }

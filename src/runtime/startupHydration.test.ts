@@ -16,6 +16,7 @@ const SETTINGS: Settings = {
   },
   update_channel: "stable",
   automatic_update_checks: true,
+  debug_logging: true,
 };
 
 function makeDeps(overrides: Partial<StartupHydrationDeps> = {}): StartupHydrationDeps {

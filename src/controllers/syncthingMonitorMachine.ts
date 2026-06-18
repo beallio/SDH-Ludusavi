@@ -10,6 +10,7 @@ export type WatchMachineState = Readonly<{
   initialized: boolean;
   publicationEnabled: boolean;
   activityObserved: boolean;
+  mutationObserved: boolean;
   completionObserved: boolean; // sticky: survives later cancel
   settledCount: number;
   lastProcessedTimestamp: number | null;
@@ -61,6 +62,7 @@ export function createInitialWatchState(phase: WatchPhase): WatchMachineState {
     initialized: false,
     publicationEnabled: false,
     activityObserved: false,
+    mutationObserved: false,
     completionObserved: false,
     settledCount: 0,
     lastProcessedTimestamp: null,
@@ -170,6 +172,19 @@ export function transition(
             sample.status === "PREPARING" ||
             sample.status === "INDEXING_OR_SEQUENCE_UPDATE";
 
+      const postGameMutation =
+        sample.uploading ||
+        sample.update_in_progress ||
+        sample.status === "ACTIVE_TRANSFER" ||
+        sample.status === "SCANNING" ||
+        sample.status === "UPDATE_NEEDED" ||
+        sample.status === "PREPARING" ||
+        sample.status === "INDEXING_OR_SEQUENCE_UPDATE";
+      
+      if (state.phase === "post_game" && postGameMutation && !state.mutationObserved) {
+        nextState.mutationObserved = true;
+      }
+
       if (hasActivity && !state.activityObserved) {
         nextState.activityObserved = true;
       }
@@ -184,7 +199,7 @@ export function transition(
       } else if (sample.update_in_progress && state.phase !== "post_game") {
         newStatus = "downloading";
         nextState.settledCount = 0;
-      } else if (nextState.activityObserved && sample.settled) {
+      } else if (nextState.mutationObserved && sample.settled) {
         nextState.settledCount++;
         if (nextState.settledCount >= 3) {
           newStatus = "complete";
@@ -287,7 +302,7 @@ export function transition(
     }
 
     case "pending_activity_timeout": {
-      if (state.publicationEnabled && state.initialized && !state.activityObserved && state.step !== "cancelled") {
+      if (state.publicationEnabled && state.initialized && state.step !== "cancelled") {
         nextState.step = "cancelled";
         nextState.publicationEnabled = false;
         effects = {

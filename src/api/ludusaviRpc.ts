@@ -32,6 +32,9 @@ export const setNotificationSettings = callable<
   [settings: NotificationSettings],
   RpcResult<Settings>
 >("set_notification_settings");
+export const setDebugLoggingCall = callable<[enabled: boolean], RpcResult<Settings>>(
+  "set_debug_logging"
+);
 export const setSelectedGameCall = callable<[gameName: string], RpcResult<Settings>>(
   "set_selected_game"
 );

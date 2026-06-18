@@ -621,7 +621,8 @@ export function LudusaviContent({
     toggleAutoSync,
     toggleAutomaticUpdateChecks,
     toggleNotificationSetting,
-    toggleUpdateChannel
+    toggleUpdateChannel,
+    toggleDebugLogging
   } = settingsController;
 
   const runForceOperation = async (
@@ -798,6 +799,7 @@ export function LudusaviContent({
         isBusy={isBusy}
         refreshLoading={busyLabel === "Refreshing games"}
         onToggleAutoSync={(enabled) => void toggleAutoSync(enabled)}
+        onToggleDebugLogging={(enabled) => void toggleDebugLogging(enabled)}
         onRefreshGames={() => void refreshGames()}
       />
 

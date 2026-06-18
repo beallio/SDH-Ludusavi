@@ -140,6 +140,7 @@ def expected_settings(
     notifications: dict[str, bool] | None = None,
     update_channel: str = "stable",
     automatic_update_checks: bool = True,
+    debug_logging: bool = True,
 ) -> dict[str, object]:
     return {
         "auto_sync_enabled": auto_sync_enabled,
@@ -147,6 +148,7 @@ def expected_settings(
         "notifications": notifications or dict(DEFAULT_NOTIFICATIONS),
         "update_channel": update_channel,
         "automatic_update_checks": automatic_update_checks,
+        "debug_logging": debug_logging,
     }
 
 
@@ -162,6 +164,9 @@ def test_settings_do_not_initialize_ludusavi_adapter(tmp_path: Path) -> None:
 
     assert service.get_settings() == expected_settings()
     assert service.set_auto_sync_enabled(True) == expected_settings(auto_sync_enabled=True)
+    assert service.set_debug_logging(False) == expected_settings(
+        auto_sync_enabled=True, debug_logging=False
+    )
 
 
 def test_notification_settings_default_to_enabled_and_persist(tmp_path: Path) -> None:
@@ -745,6 +750,7 @@ def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
         "notifications": DEFAULT_NOTIFICATIONS,
         "update_channel": "stable",
         "automatic_update_checks": True,
+        "debug_logging": True,
     }
 
 
@@ -765,6 +771,7 @@ def test_persists_settings_and_cache_separately(tmp_path: Path) -> None:
         "notifications": DEFAULT_NOTIFICATIONS,
         "update_channel": "stable",
         "automatic_update_checks": True,
+        "debug_logging": True,
     }
     assert "games" not in settings
     assert "ludusaviLauncherShortcutAppId" not in settings
@@ -1997,3 +2004,27 @@ def test_service_syncthing_watch(tmp_path: Path) -> None:
 
     service.stop()
     service._syncthing_watch_manager.stop_all.assert_called_once()
+
+
+def test_apply_log_level(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    from tests.test_main import fake_decky_module
+
+    decky, logger = fake_decky_module(tmp_path)
+    monkeypatch.setitem(sys.modules, "decky", decky)
+
+    service = service_with_state(tmp_path)
+    # The initialization already calls _apply_log_level (which defaults to True based on previous change)
+    assert logging.DEBUG in logger.levels
+
+    logger.levels.clear()
+
+    # Toggle it to False
+    service.set_debug_logging(False)
+    assert logging.INFO in logger.levels
+
+    logger.levels.clear()
+
+    # Toggle it to True
+    service.set_debug_logging(True)
+    assert logging.DEBUG in logger.levels

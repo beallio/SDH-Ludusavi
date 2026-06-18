@@ -46,6 +46,7 @@ export type Settings = {
   notifications: NotificationSettings;
   update_channel: UpdateChannel;
   automatic_update_checks: boolean;
+  debug_logging: boolean;
 };
 
 export type GameOperationHistoryEntry = {

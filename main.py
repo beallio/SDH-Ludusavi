@@ -36,6 +36,7 @@ class DeckySettingsStore:
             ),
             "update_channel": self._manager.getSetting("update_channel", "stable"),
             "automatic_update_checks": self._manager.getSetting("automatic_update_checks", True),
+            "debug_logging": self._manager.getSetting("debug_logging", True),
         }
 
     def write(self, settings: dict[str, object]) -> None:
@@ -90,6 +91,11 @@ class Plugin:
         return await self._call(
             "set_notification_settings",
             lambda: self._service().set_notification_settings(settings),
+        )
+
+    async def set_debug_logging(self, enabled: bool) -> dict[str, Any]:
+        return await self._call(
+            "set_debug_logging", lambda: self._service().set_debug_logging(enabled)
         )
 
     async def set_update_channel(self, channel: str) -> dict[str, Any]:
