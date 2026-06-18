@@ -16,22 +16,33 @@ shopt -s nullglob
 files=(docs/review/"${slug}"-review-*.md)
 shopt -u nullglob
 
-if (( ${#files[@]} == 0 )); then
+# Only committed review notes count. The durable trigger is the committed note,
+# so read each note's content from HEAD (git show HEAD:<path>). A note that is
+# present in the working tree but not yet committed at HEAD is ignored, which
+# avoids acting on a half-written or uncommitted note.
+committed=()
+for f in "${files[@]}"; do
+  if git show "HEAD:$f" >/dev/null 2>&1; then
+    committed+=("$f")
+  fi
+done
+
+if (( ${#committed[@]} == 0 )); then
   echo "NO_REVIEW"
   exit 0
 fi
 
-for f in "${files[@]}"; do
-  count="$(grep -E '^STATUS: (CHANGES_REQUESTED|APPROVED)$' "$f" | wc -l | tr -d ' ')"
+for f in "${committed[@]}"; do
+  count="$(git show "HEAD:$f" | grep -E '^STATUS: (CHANGES_REQUESTED|APPROVED)$' | wc -l | tr -d ' ')"
 
   if [[ "$count" != "1" ]]; then
     echo "INVALID"
-    echo "invalid or missing STATUS trailer in: $f" >&2
+    echo "invalid or missing STATUS trailer in committed note: $f" >&2
     exit 2
   fi
 done
 
-latest="$(printf '%s\n' "${files[@]}" | sort | tail -n 1)"
-status="$(grep -E '^STATUS: (CHANGES_REQUESTED|APPROVED)$' "$latest" | sed 's/^STATUS: //')"
+latest="$(printf '%s\n' "${committed[@]}" | sort | tail -n 1)"
+status="$(git show "HEAD:$latest" | grep -E '^STATUS: (CHANGES_REQUESTED|APPROVED)$' | sed 's/^STATUS: //')"
 
 echo "$status"

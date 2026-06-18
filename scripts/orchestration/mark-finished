@@ -16,6 +16,9 @@ ensure_dirs
 require_clean_worktree
 
 marker="$(finished_marker "$slug")"
-: > "$marker"
+# Stamp the marker with the current HEAD sha so the orchestrator can tell a
+# fresh round-complete from a stale one (see wait-for-finished ORCH_FINISHED_SINCE).
+head_sha="$(git rev-parse HEAD)"
+printf '%s\n' "$head_sha" > "$marker"
 
-echo "wrote round-complete marker: $marker"
+echo "wrote round-complete marker: $marker ($head_sha)"

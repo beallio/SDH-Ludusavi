@@ -8,15 +8,27 @@ source "$SCRIPT_DIR/lib.sh"
 slug="${1:-}"
 timeout_secs="${2:-0}"
 poll_secs="${POLL_SECS:-5}"
+# Optional: a sha (typically the pre-resume HEAD). When set, a marker is only
+# considered "ready" once its stamped sha differs from this value, so a stale
+# marker left over from a previous round does not satisfy the wait.
+since="${ORCH_FINISHED_SINCE:-}"
 
 require_slug "$slug"
 
 marker="$(finished_marker "$slug")"
 start="$(date +%s)"
 
-echo "waiting for round-complete marker: $marker"
+marker_ready() {
+  [[ -f "$marker" ]] || return 1
+  if [[ -n "$since" ]]; then
+    [[ "$(cat "$marker" 2>/dev/null)" != "$since" ]] || return 1
+  fi
+  return 0
+}
 
-while [[ ! -f "$marker" ]]; do
+echo "waiting for round-complete marker: $marker${since:+ (since=$since)}"
+
+while ! marker_ready; do
   sleep "$poll_secs"
 
   if [[ "$timeout_secs" != "0" ]]; then

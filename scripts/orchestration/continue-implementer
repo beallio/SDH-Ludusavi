@@ -42,8 +42,9 @@ docs/review/${slug}-review-*.md
 Important:
 - First process review notes that already exist.
 - Do not block on inotifywait before checking existing review files.
-- The orchestrator normally writes and commits the review note before resuming you.
-- Treat the latest review note as the source of truth.
+- The orchestrator always writes and commits the review note before resuming you.
+- Read the latest review note's committed content (for example via git show HEAD:docs/review/${slug}-review-*.md), not the working-tree file, so a half-written or uncommitted note is never acted upon.
+- Treat the latest committed review note as the source of truth.
 
 If the latest applicable review note ends with STATUS: CHANGES_REQUESTED:
 1. Clear the round-complete marker using the command specified in the plan.
@@ -52,16 +53,16 @@ If the latest applicable review note ends with STATUS: CHANGES_REQUESTED:
 4. Commit code/docs fixes.
 5. Commit the review-note file itself if it has not already been committed.
 6. Recreate the round-complete marker.
-7. Continue watching for further review notes if the process remains active; otherwise exit cleanly so the orchestrator can resume you again.
+7. Exit cleanly. Do not poll for further review notes in-session; the orchestrator will resume you again once the next review note is committed.
 
 If the latest applicable review note ends with STATUS: APPROVED:
 1. Confirm review notes are committed.
 2. Confirm the working tree is clean.
 3. Finalize using the finalize command specified in the plan.
 4. Confirm the finalized marker exists.
-5. Stop watching and exit cleanly.
+5. Exit cleanly.
 
-If no review notes exist yet, continue watching docs/review/${slug}-review-*.md for new review notes. When one appears, follow the rules above.
+If no applicable review note exists yet, exit cleanly without polling; the orchestrator will resume you once the next review note is committed.
 EOF
 )"
 
