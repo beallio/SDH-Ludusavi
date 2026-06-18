@@ -1,0 +1,18 @@
+{
+  "date": "2026-06-17",
+  "objective": "Animate Status Bar During Conflict Resolution",
+  "files_modified": [
+    "src/controllers/gameLifecycleController.tsx",
+    "src/controllers/gameLifecycleController.test.ts"
+  ],
+  "tests_added": [
+    "conflict resolved with keep_local publishes the backing-up animation",
+    "conflict resolved with restore_backup publishes the restoring animation"
+  ],
+  "design_decisions": [
+    "Published the 'backing_up' or 'restoring' AutoSyncStatusKind immediately before `resolveGameStartConflictCall` in the conflict resolution branch.",
+    "Mapped 'keep_local' to 'backing_up' and 'restore_backup' to 'restoring'.",
+    "Did not modify any UI surface, reused existing animation capabilities."
+  ],
+  "results": "All tests pass, including the two new tests. Quality gates verified."
+}
