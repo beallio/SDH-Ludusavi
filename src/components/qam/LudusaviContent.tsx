@@ -799,7 +799,6 @@ export function LudusaviContent({
         isBusy={isBusy}
         refreshLoading={busyLabel === "Refreshing games"}
         onToggleAutoSync={(enabled) => void toggleAutoSync(enabled)}
-        onToggleDebugLogging={(enabled) => void toggleDebugLogging(enabled)}
         onRefreshGames={() => void refreshGames()}
       />
 
@@ -839,6 +838,9 @@ export function LudusaviContent({
       <LogsSection
         onShowPluginLogs={() => void showPluginLogs()}
         onShowLudusaviLogs={() => void showLudusaviLogs()}
+        debugLogging={settings.debug_logging}
+        isBusy={isBusy}
+        onToggleDebugLogging={(enabled) => void toggleDebugLogging(enabled)}
       />
 
       <PluginUpdateSection
