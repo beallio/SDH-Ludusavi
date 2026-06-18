@@ -284,7 +284,7 @@ export function createSettingsMutationRuntime() {
         logLateFailure: `Late failure of setDebugLogging to ${enabled}`,
         logError: `Failed to toggle debug logging`,
         timeoutMessage: "Setting debug logging timed out",
-        fallbackValue: lastPersistedDebugLogging ?? false,
+        fallbackValue: lastPersistedDebugLogging ?? true,
         optimisticUpdate: () => ludusaviStore.setDebugLogging(enabled),
         rpcCall: () => setDebugLoggingCall(enabled),
         applyResult: (res) => applySettings(ludusaviStore, res),
