@@ -5,6 +5,12 @@ vi.mock("@decky/api", () => ({
   callable: () => () => Promise.resolve(),
 }));
 
+vi.mock("../utils/logging", () => ({
+  log: vi.fn(),
+}));
+
+import { log } from "../utils/logging";
+
 describe("SyncthingMonitor", () => {
   let mockRpc: {
     startWatch: any;
@@ -25,6 +31,7 @@ describe("SyncthingMonitor", () => {
     };
     mockOnStatus = vi.fn();
     monitor = new SyncthingMonitor(mockRpc as unknown as SyncthingRpc, mockOnStatus);
+    (log as any).mockClear();
   });
   it("initialization failure resolves handoff unavailable", async () => {
     mockRpc.startWatch.mockResolvedValue({ status: "failed", reason: "watch_initialization_failed", message: "failed cursor" });
@@ -295,5 +302,30 @@ describe("SyncthingMonitor", () => {
     expect(handoffResult.status).toBe("unavailable");
 
     expect(contextsMap.has(generation)).toBe(false);
+  });
+
+  it("pre_game timeout is benign", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path", detection_grace_ms: 30000 });
+    mockRpc.pollWatch.mockResolvedValue({ status: "activity", watch_id: "w1", sample: { status: "idle", timestamp_unix: 1000 } });
+
+    monitor.start("pre_game", "Hades", "1145300");
+    await vi.advanceTimersByTimeAsync(121_000);
+
+    expect(log).not.toHaveBeenCalledWith("error", expect.any(String));
+    expect(mockRpc.stopWatch).toHaveBeenCalledWith("w1");
+  });
+
+  it("post_game timeout still errors", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path", detection_grace_ms: 30000 });
+    mockRpc.pollWatch
+      .mockResolvedValueOnce({ status: "activity", watch_id: "w1", sample: { status: "syncing", uploading: true, timestamp_unix: 1000 } })
+      .mockResolvedValue({ status: "activity", watch_id: "w1", sample: { status: "idle", timestamp_unix: 1001 } });
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+    await handle.activatePostGameHandoff(750);
+    await vi.advanceTimersByTimeAsync(121_000);
+
+    expect(log).toHaveBeenCalledWith("error", expect.stringContaining("watch_duration_timeout"));
+    expect(mockRpc.stopWatch).toHaveBeenCalledWith("w1");
   });
 });
