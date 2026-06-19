@@ -234,3 +234,26 @@ def test_workflows_use_node24_action_runtime_and_current_action_majors() -> None
     assert "uses: actions/upload-artifact@v7" in workflows[".github/workflows/ci.yml"]
     assert "uses: softprops/action-gh-release@v3" in workflows[".github/workflows/release.yml"]
     assert "uses: softprops/action-gh-release@v3" in workflows[".github/workflows/dev-release.yml"]
+
+
+def test_workflows_use_quality_gates_and_pin_uv() -> None:
+    workflows = {
+        ".github/workflows/ci.yml": Path(".github/workflows/ci.yml").read_text(encoding="utf-8"),
+        ".github/workflows/release.yml": Path(".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        ),
+        ".github/workflows/dev-release.yml": Path(".github/workflows/dev-release.yml").read_text(
+            encoding="utf-8"
+        ),
+    }
+
+    for path, content in workflows.items():
+        assert "./run.sh bash scripts/quality_gates.sh check" in content, (
+            f"{path} must use the shared quality_gates script"
+        )
+        assert "uv run ruff check ." not in content, (
+            f"{path} must not contain duplicated inline gate sequences"
+        )
+
+    action_content = Path(".github/actions/setup-toolchain/action.yml").read_text(encoding="utf-8")
+    assert 'version: "latest"' not in action_content, "setup-uv version must be pinned, not latest"

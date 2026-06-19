@@ -140,9 +140,7 @@ export function LudusaviContent({
 
 
 
-  const syncSelectedGameCache = (nextSelectedGame: string) => {
-    ludusaviStore.syncSelectedGameCache(nextSelectedGame);
-  };
+
 
   const selectedStatus = useMemo(
     () => games.find((game) => game.name === selectedGame) ?? null,
@@ -443,7 +441,6 @@ export function LudusaviContent({
       currentSelectedGame: selectedGame,
     });
     ludusaviStore.setSelectedGame(outcome.game);
-    syncSelectedGameCache(outcome.game);
 
     return true;
   };
@@ -493,7 +490,6 @@ export function LudusaviContent({
       log("debug", `Defaulting selected game to ${outcome.game}`);
     }
     ludusaviStore.setSelectedGame(outcome.game);
-    syncSelectedGameCache(outcome.game);
 
     return true;
   };

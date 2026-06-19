@@ -117,3 +117,35 @@ def test_warn_load_settings_read_failure_does_not_log_cache_path(tmp_path: Path,
 
     assert "cache.json" not in caplog.text
     assert "unreadable settings" in caplog.text
+
+
+def test_save_cache_raises_state_lock_timeout_error_on_contention(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from sdh_ludusavi.persistence import StateLockTimeoutError
+    import sdh_ludusavi.persistence
+
+    monkeypatch.setattr(sdh_ludusavi.persistence, "LOCK_ACQUIRE_TIMEOUT_SECONDS", 0.1)
+
+    cache_file = tmp_path / "cache.json"
+    cache_file.write_text('{"sentinel": true}', encoding="utf-8")
+
+    pm = PersistenceManager(
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=cache_file,
+    )
+
+    import pytest
+    import os
+
+    pm.lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(pm.lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        with pytest.raises(StateLockTimeoutError):
+            pm.save_cache({"new": "data"})
+
+        assert cache_file.read_text(encoding="utf-8") == '{"sentinel": true}'
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)

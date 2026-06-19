@@ -1,19 +1,15 @@
 from __future__ import annotations
 
 import time
-import threading
 from unittest.mock import MagicMock, patch
 
 from sdh_ludusavi.watchdog import ProcessWatchdog
 
 
-class DummyService:
-    def __init__(self) -> None:
-        self._paused_pids: dict[int, float] = {}
-        self._paused_pids_lock = threading.Lock()
-        self._watchdog_active = False
-        self._watchdog_thread = None
-        self._watchdog_stop = threading.Event()
+def mock_identity() -> object:
+    from sdh_ludusavi.watchdog import _ProcessIdentity
+
+    return _ProcessIdentity(12345, 1000)
 
 
 def test_process_watchdog_pause_resume() -> None:
@@ -21,10 +17,11 @@ def test_process_watchdog_pause_resume() -> None:
     with (
         patch("sdh_ludusavi.watchdog.os.kill") as mock_kill,
         patch("sdh_ludusavi.watchdog._process_tree", return_value=[4567]),
+        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
+        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
     ):
         is_op_running = MagicMock(return_value=False)
-        svc = DummyService()
-        wd = ProcessWatchdog(svc, log_callback=log_mock, is_operation_running=is_op_running)
+        wd = ProcessWatchdog(log_callback=log_mock, is_operation_running=is_op_running)
 
         # Pause pid 4567
         res = wd.pause(4567)
@@ -47,12 +44,13 @@ def test_process_watchdog_auto_resume_stuck_pids() -> None:
     with (
         patch("sdh_ludusavi.watchdog.os.kill") as mock_kill,
         patch("sdh_ludusavi.watchdog._process_tree", return_value=[9999]),
+        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
+        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
     ):
-        svc = DummyService()
-        wd = ProcessWatchdog(svc, log_callback=log_mock, is_operation_running=is_op_running)
+        wd = ProcessWatchdog(log_callback=log_mock, is_operation_running=is_op_running)
 
         with wd._paused_pids_lock:
-            wd._paused_pids[9999] = time.time() - 20.0
+            wd._paused_pids[9999] = (mock_identity(), time.time() - 20.0)
 
         wd._check_and_resume_stuck_pids()
 
@@ -66,12 +64,13 @@ def test_process_watchdog_failed_resume() -> None:
     is_op_running = MagicMock(return_value=False)
     with (
         patch("sdh_ludusavi.watchdog._send_signal_tree", return_value=False),
+        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
+        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
     ):
-        svc = DummyService()
-        wd = ProcessWatchdog(svc, log_callback=log_mock, is_operation_running=is_op_running)
+        wd = ProcessWatchdog(log_callback=log_mock, is_operation_running=is_op_running)
 
         with wd._paused_pids_lock:
-            wd._paused_pids[7777] = time.time()
+            wd._paused_pids[7777] = (mock_identity(), time.time())
 
         res = wd.resume(7777)
         assert res["status"] == "failed"
@@ -93,12 +92,13 @@ def test_watchdog_defers_resume_while_operation_running_within_ceiling() -> None
     with (
         patch("sdh_ludusavi.watchdog.os.kill") as mock_kill,
         patch("sdh_ludusavi.watchdog._process_tree", return_value=[8888]),
+        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
+        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
     ):
-        svc = DummyService()
-        wd = ProcessWatchdog(svc, log_callback=log_mock, is_operation_running=is_op_running)
+        wd = ProcessWatchdog(log_callback=log_mock, is_operation_running=is_op_running)
 
         with wd._paused_pids_lock:
-            wd._paused_pids[8888] = time.time() - 60.0
+            wd._paused_pids[8888] = (mock_identity(), time.time() - 60.0)
 
         wd._check_and_resume_stuck_pids()
 
@@ -119,12 +119,16 @@ def test_watchdog_resumes_past_absolute_ceiling_even_when_operation_running() ->
     with (
         patch("sdh_ludusavi.watchdog.os.kill") as mock_kill,
         patch("sdh_ludusavi.watchdog._process_tree", return_value=[7777]),
+        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
+        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
     ):
-        svc = DummyService()
-        wd = ProcessWatchdog(svc, log_callback=log_mock, is_operation_running=is_op_running)
+        wd = ProcessWatchdog(log_callback=log_mock, is_operation_running=is_op_running)
 
         with wd._paused_pids_lock:
-            wd._paused_pids[7777] = time.time() - (WATCHDOG_ABSOLUTE_RESUME_SECONDS + 1)
+            wd._paused_pids[7777] = (
+                mock_identity(),
+                time.time() - (WATCHDOG_ABSOLUTE_RESUME_SECONDS + 1),
+            )
 
         wd._check_and_resume_stuck_pids()
 
@@ -138,5 +142,48 @@ def test_watchdog_resumes_past_absolute_ceiling_even_when_operation_running() ->
                 called_with_absolute = True
                 break
         assert called_with_absolute, "Warning log must mention the absolute ceiling"
+
+        wd.stop()
+
+
+def test_watchdog_identity_mismatch() -> None:
+    log_mock = MagicMock()
+    is_op_running = MagicMock(return_value=False)
+
+    with (
+        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
+        patch("sdh_ludusavi.watchdog.os.kill"),
+        patch("sdh_ludusavi.watchdog._process_tree", return_value=[4567]),
+    ):
+        wd = ProcessWatchdog(log_callback=log_mock, is_operation_running=is_op_running)
+
+        # Identity is none
+        with patch("sdh_ludusavi.watchdog._read_process_identity", return_value=None):
+            res = wd.pause(4567)
+            assert res["status"] == "failed"
+            assert "verify process identity" in res["message"]
+
+        # Identity uid mismatch
+        from sdh_ludusavi.watchdog import _ProcessIdentity
+
+        with patch(
+            "sdh_ludusavi.watchdog._read_process_identity", return_value=_ProcessIdentity(123, 9999)
+        ):
+            res = wd.pause(4567)
+            assert res["status"] == "failed"
+            assert "verify process identity" in res["message"]
+
+        # Re-use mismatch
+        with patch(
+            "sdh_ludusavi.watchdog._read_process_identity", return_value=_ProcessIdentity(123, 1000)
+        ):
+            wd.pause(4567)
+
+        with patch(
+            "sdh_ludusavi.watchdog._read_process_identity", return_value=_ProcessIdentity(999, 1000)
+        ):
+            res = wd.resume(4567)
+            assert res["status"] == "failed"
+            assert "identity mismatch" in res["message"]
 
         wd.stop()

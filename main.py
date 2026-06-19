@@ -440,6 +440,8 @@ class Plugin:
             return {"status": "failed", "message": str(exc)}
         except asyncio.CancelledError:
             raise
+        except (SystemExit, KeyboardInterrupt):
+            raise
         except BaseException as exc:
             decky.logger.exception("%s failed", operation)
             return {"status": "failed", "message": str(exc)}
