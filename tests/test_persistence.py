@@ -3,6 +3,7 @@ from sdh_ludusavi.persistence import JsonSettingsStore
 
 import fcntl
 import threading
+import logging
 from pathlib import Path
 
 from sdh_ludusavi.persistence import PersistenceManager
@@ -101,3 +102,18 @@ def test_locked_serializes_other_threads(tmp_path: Path) -> None:
         thread.join(timeout=10)
 
     assert order == ["holder-in", "holder-out", "contender-in"]
+
+
+def test_warn_load_settings_read_failure_does_not_log_cache_path(tmp_path: Path, caplog) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+    settings_file.write_text("invalid json", encoding="utf-8")
+
+    store = JsonSettingsStore(settings_file)
+    pm = PersistenceManager(settings_store=store, cache_path=cache_file)
+
+    with caplog.at_level(logging.WARNING):
+        pm.load_all()
+
+    assert "cache.json" not in caplog.text
+    assert "unreadable settings" in caplog.text
