@@ -298,109 +298,114 @@ class SyncthingWatchManager:
                 "message": "Ludusavi backupPath is not configured.",
             }
 
+        # Discover Syncthing
+        try:
+            api_url, api_key, _ = resolve_api_credentials()
+            api = SyncthingAPI(api_url, api_key)
+        except SyncthingNotConfiguredError as exc:
+            return {"status": "skipped", "reason": "not_configured", "message": str(exc)}
+        # Intentionally broad
+        except Exception as exc:
+            return {"status": "skipped", "reason": "api_unavailable", "message": str(exc)}
+
+        # Identify the local device so configured folder devices are remote-only.
+        # Probe errors can echo response payloads holding device IDs, which must
+        # never travel through RPC or logs; record only the exception class.
+        try:
+            my_device_id = get_my_device_id(api)
+        # Intentionally broad
+        except Exception as exc:
+            logger.warning("Syncthing system status probe failed: %s", type(exc).__name__)
+            return {
+                "status": "skipped",
+                "reason": "api_unavailable",
+                "message": "Syncthing system status query failed.",
+            }
+
+        # Resolve containing folder
+        try:
+            folder = resolve_folder_by_path(api, backup_path, local_device_id=my_device_id)
+        # Intentionally broad
+        except Exception as exc:
+            if "No configured Syncthing folder contains path" in str(exc):
+                return {"status": "skipped", "reason": "folder_not_found", "message": str(exc)}
+            return {"status": "skipped", "reason": "api_unavailable", "message": str(exc)}
+
+        if not folder.device_ids:
+            return {
+                "status": "skipped",
+                "reason": "folder_not_shared",
+                "message": "The Syncthing folder has no configured remote devices.",
+            }
+
+        # Require at least one connected peer that shares the matched folder
+        try:
+            snapshot = get_connection_snapshot(api)
+        # Intentionally broad; sanitized for RPC and logs like the status probe
+        except Exception as exc:
+            logger.warning("Syncthing connections probe failed: %s", type(exc).__name__)
+            return {
+                "status": "skipped",
+                "reason": "api_unavailable",
+                "message": "Syncthing connections query failed.",
+            }
+
+        connected_count = len(set(folder.device_ids) & snapshot.connected_devices)
+        logger.info(
+            "Syncthing peer availability: phase=%s configured=%d connected=%d",
+            phase,
+            len(folder.device_ids),
+            connected_count,
+        )
+        if connected_count == 0:
+            return {
+                "status": "skipped",
+                "reason": "no_connected_peers",
+                "message": (
+                    f"None of the {len(folder.device_ids)} configured devices "
+                    "for the backup folder are connected."
+                ),
+            }
+
+        watch_id = str(uuid.uuid4())
+        watch = SyncthingWatch(
+            watch_id,
+            phase,
+            game_name,
+            app_id,
+            folder,
+            api,
+            initial_snapshot=snapshot,
+            on_expired=self._deregister_expired_watch,
+        )
+
+        watches_to_stop = []
         with self.lock:
-            # Stop existing watch with the same signature
+            # Check for existing watches with the same signature
             for old_id, old_watch in list(self.watches.items()):
                 if (
                     old_watch.phase == phase
                     and old_watch.game_name == game_name
                     and old_watch.app_id == app_id
                 ):
-                    old_watch.stop()
+                    watches_to_stop.append(old_watch)
                     self.watches.pop(old_id, None)
-
-            # Discover Syncthing
-            try:
-                api_url, api_key, _ = resolve_api_credentials()
-                api = SyncthingAPI(api_url, api_key)
-            except SyncthingNotConfiguredError as exc:
-                return {"status": "skipped", "reason": "not_configured", "message": str(exc)}
-            # Intentionally broad
-            except Exception as exc:
-                return {"status": "skipped", "reason": "api_unavailable", "message": str(exc)}
-
-            # Identify the local device so configured folder devices are remote-only.
-            # Probe errors can echo response payloads holding device IDs, which must
-            # never travel through RPC or logs; record only the exception class.
-            try:
-                my_device_id = get_my_device_id(api)
-            # Intentionally broad
-            except Exception as exc:
-                logger.warning("Syncthing system status probe failed: %s", type(exc).__name__)
-                return {
-                    "status": "skipped",
-                    "reason": "api_unavailable",
-                    "message": "Syncthing system status query failed.",
-                }
-
-            # Resolve containing folder
-            try:
-                folder = resolve_folder_by_path(api, backup_path, local_device_id=my_device_id)
-            # Intentionally broad
-            except Exception as exc:
-                if "No configured Syncthing folder contains path" in str(exc):
-                    return {"status": "skipped", "reason": "folder_not_found", "message": str(exc)}
-                return {"status": "skipped", "reason": "api_unavailable", "message": str(exc)}
-
-            if not folder.device_ids:
-                return {
-                    "status": "skipped",
-                    "reason": "folder_not_shared",
-                    "message": "The Syncthing folder has no configured remote devices.",
-                }
-
-            # Require at least one connected peer that shares the matched folder
-            try:
-                snapshot = get_connection_snapshot(api)
-            # Intentionally broad; sanitized for RPC and logs like the status probe
-            except Exception as exc:
-                logger.warning("Syncthing connections probe failed: %s", type(exc).__name__)
-                return {
-                    "status": "skipped",
-                    "reason": "api_unavailable",
-                    "message": "Syncthing connections query failed.",
-                }
-
-            connected_count = len(set(folder.device_ids) & snapshot.connected_devices)
-            logger.info(
-                "Syncthing peer availability: phase=%s configured=%d connected=%d",
-                phase,
-                len(folder.device_ids),
-                connected_count,
-            )
-            if connected_count == 0:
-                return {
-                    "status": "skipped",
-                    "reason": "no_connected_peers",
-                    "message": (
-                        f"None of the {len(folder.device_ids)} configured devices "
-                        "for the backup folder are connected."
-                    ),
-                }
-
-            watch_id = str(uuid.uuid4())
-            watch = SyncthingWatch(
-                watch_id,
-                phase,
-                game_name,
-                app_id,
-                folder,
-                api,
-                initial_snapshot=snapshot,
-                on_expired=self._deregister_expired_watch,
-            )
-            watch.start()
 
             self.watches[watch_id] = watch
 
-            return {
-                "status": "watching",
-                "watch_id": watch_id,
-                "folder_id": folder.folder_id,
-                "label": folder.label,
-                "path": folder.path,
-                "detection_grace_ms": detection_grace_ms(folder),
-            }
+        for old_watch in watches_to_stop:
+            old_watch.stop()
+
+        watch.start()
+
+        return {
+            "status": "watching",
+            "watch_id": watch_id,
+            "folder_id": folder.folder_id,
+            "label": folder.label,
+            "path": folder.path,
+            "detection_grace_ms": detection_grace_ms(folder),
+        }
 
     def _deregister_expired_watch(self, watch_id: str) -> None:
         # Lock-ordering note: stop_watch joins the thread with a timeout. If a TTL
@@ -424,13 +429,13 @@ class SyncthingWatchManager:
     def stop_watch(self, watch_id: str) -> dict[str, Any]:
         with self.lock:
             watch = self.watches.pop(watch_id, None)
-            if watch:
-                watch.stop()
-                return {"status": "stopped", "watch_id": watch_id}
-            return {"status": "stopped", "watch_id": watch_id}
+        if watch:
+            watch.stop()
+        return {"status": "stopped", "watch_id": watch_id}
 
     def stop_all(self) -> None:
         with self.lock:
-            for watch in self.watches.values():
-                watch.stop()
+            watches_to_stop = list(self.watches.values())
             self.watches.clear()
+        for watch in watches_to_stop:
+            watch.stop()
