@@ -52,15 +52,11 @@ describe("SettingsMutationRuntime", () => {
     const runtime = createSettingsMutationRuntime();
     const rpc = await import("../api/ludusaviRpc");
     
-    const isMounted = { current: true };
-    const setBusyLabel = vi.fn();
     const notifyFailure = vi.fn();
 
     runtime.setActiveStore(store, notifyFailure);
     const controller = runtime.createController({
       ludusaviStore: store,
-      isMounted,
-      setBusyLabel,
       notifyFailure
     });
 
@@ -80,7 +76,7 @@ describe("SettingsMutationRuntime", () => {
     controller.toggleAutoSync(true);
     controller.toggleNotificationSetting("failures_errors", true);
 
-    expect(setBusyLabel).not.toHaveBeenCalledWith("Updating settings");
+
 
     resolveRpc!({ auto_sync_enabled: true, notifications: { failures_errors: false } } as any);
     resolveRpcNotification!({ auto_sync_enabled: true, notifications: { failures_errors: true } } as any);
@@ -89,7 +85,7 @@ describe("SettingsMutationRuntime", () => {
     await vi.runAllTimersAsync();
 
     expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(true);
-    expect(setBusyLabel).not.toHaveBeenCalled();
+
   });
 
   it("rollback to lastPersisted on RPC failure", async () => {
@@ -101,8 +97,6 @@ describe("SettingsMutationRuntime", () => {
     runtime.setActiveStore(store, notifyFailure);
     const controller = runtime.createController({
       ludusaviStore: store,
-      isMounted: { current: true },
-      setBusyLabel: vi.fn(),
       notifyFailure
     });
 
@@ -132,8 +126,6 @@ describe("SettingsMutationRuntime", () => {
     runtime.setActiveStore(store, vi.fn());
     const controller = runtime.createController({
       ludusaviStore: store,
-      isMounted: { current: true },
-      setBusyLabel: vi.fn(),
       notifyFailure: vi.fn()
     });
 
@@ -169,8 +161,6 @@ describe("SettingsMutationRuntime", () => {
     runtime.setActiveStore(store, vi.fn());
     const controller = runtime.createController({
       ludusaviStore: store,
-      isMounted: { current: true },
-      setBusyLabel: vi.fn(),
       notifyFailure: vi.fn()
     });
 

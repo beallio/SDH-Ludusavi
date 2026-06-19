@@ -101,17 +101,21 @@ class JsonSettingsStore:
         return cast(dict[str, object], data)
 
     def write(self, settings: dict[str, object]) -> None:
-        self._path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-        temp_path = self._path.with_name(f".{self._path.name}.tmp")
-        try:
-            temp_path.write_text(
-                json.dumps(settings, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
-            os.replace(temp_path, self._path)
-        except OSError:
-            temp_path.unlink(missing_ok=True)
-            raise
+        _atomic_json_write(self._path, settings)
+
+
+def _atomic_json_write(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.tmp")
+    try:
+        temp_path.write_text(
+            json.dumps(data, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        os.replace(temp_path, path)
+    except OSError:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 class PersistenceManager:
@@ -188,18 +192,7 @@ class PersistenceManager:
     def save_cache(self, cache_data: dict[str, Any]) -> None:
         """Save cache payload."""
         with self._lock:
-            self._cache_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-            temp_path = self._cache_path.with_name(f".{self._cache_path.name}.tmp")
-            try:
-                temp_path.write_text(
-                    json.dumps(cache_data, indent=2, sort_keys=True),
-                    encoding="utf-8",
-                )
-                os.replace(temp_path, self._cache_path)
-            except OSError:
-                temp_path.unlink(missing_ok=True)
-                raise
+            _atomic_json_write(self._cache_path, cache_data)
 
     def _warn_load(self, reason: str) -> None:
-        state_file_path = self._cache_path
-        LOGGER.warning("Ignoring SDH-ludusavi state at %s: %s", state_file_path, reason)
+        LOGGER.warning("Ignoring SDH-ludusavi state: %s", reason)

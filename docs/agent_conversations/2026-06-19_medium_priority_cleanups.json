@@ -1,0 +1,23 @@
+{
+  "date": "2026-06-19",
+  "task objective": "Implement medium priority cleanups from the 2026-06-18 code-quality-fixes plan (Items 8-11).",
+  "files modified": [
+    "py_modules/sdh_ludusavi/coordinator.py",
+    "py_modules/sdh_ludusavi/log_buffer.py",
+    "py_modules/sdh_ludusavi/persistence.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "src/controllers/gameLifecycleController.tsx",
+    "src/settings/settingsMutationRuntime.test.ts",
+    "src/settings/settingsMutationRuntime.ts",
+    "src/surfaces/autoSyncStatusRenderer.tsx",
+    "src/surfaces/autoSyncStatusSurface.tsx",
+    "tests/test_coordinator.py",
+    "tests/test_log_buffer.py",
+    "tests/test_persistence.py"
+  ],
+  "tests added": [
+    "test_warn_load_settings_read_failure_does_not_log_cache_path"
+  ],
+  "design decisions": "Removed dead fields `isMounted` and `setBusyLabel` from the frontend mutation options since they were not used. Dropped `service: Any` params from Coordinator and LogBuffer as they were stored but never read. Consolidated duplicate syncthing predicates into `autoSyncStatusRenderer`. Extracted inline `SILENT_SKIPPED_REASONS` constant in the lifecycle controller.",
+  "results": "All tests (pytest, vitest), formatting (ruff format), and linting (ruff, ty) pass. Four atomic commits created for the fixes."
+}
