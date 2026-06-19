@@ -45,7 +45,6 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
     deferredAutoSyncStatusState = null;
   }
 
-
   function logAutoSyncStatusChange(state: AutoSyncStatusState) {
     log(
       "info",

@@ -20,12 +20,10 @@ import type {
 } from "../types";
 import { log, logUiEvent, type LogFields, type LogLevel } from "../utils/logging";
 
-
 type NotifyFailure = (title: string, body: string) => void;
 
 type SettingsMutationControllerOptions = {
   ludusaviStore: LudusaviStateStore;
-
   notifyFailure: NotifyFailure;
 };
 
