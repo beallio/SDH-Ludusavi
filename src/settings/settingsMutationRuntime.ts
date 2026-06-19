@@ -32,6 +32,7 @@ export type SettingsMutationRuntime = ReturnType<typeof createSettingsMutationRu
 export function createSettingsMutationRuntime() {
   const settingsQueue: (() => Promise<void>)[] = [];
   let settingsProcessing = false;
+  let mutationGeneration = 0;
   let autoSyncSeq = 0;
   let notificationSeq = 0;
   let selectedGameSeq = 0;
@@ -152,12 +153,12 @@ export function createSettingsMutationRuntime() {
     };
 
 
-    type MutateOptions<T, V> = {
+    type MutateOptions<T, V extends import("../utils/logging").LogFieldValue> = {
       updateSeq: number;
       readSeq: () => number;
       settingKey: string;
-      settingValue?: any;
-      settingPreviousValue?: any;
+      settingValue?: V;
+      settingPreviousValue?: V;
       gameName?: string;
       logExecute: string;
       logLateResolution: string;
@@ -165,15 +166,15 @@ export function createSettingsMutationRuntime() {
       logError: string;
       timeoutMessage: string;
       fallbackValue: V;
-      logFallbackValue?: any;
+      logFallbackValue?: V;
       optimisticUpdate: () => void;
       rpcCall: () => Promise<T | import("../types").RpcStatus>;
-      applyResult: (res: T) => void;
+      applyResult: (res: T, isLatestGeneration: boolean) => void;
       rollbackUpdate: (fallback: V) => void;
-      getPersistedValue: (res: T) => any;
+      getPersistedValue: (res: T) => V;
     };
 
-    const mutateSetting = <T extends Settings, V>({
+    const mutateSetting = <T extends Settings, V extends import("../utils/logging").LogFieldValue>({
       updateSeq,
       readSeq,
       settingKey,
@@ -200,6 +201,9 @@ export function createSettingsMutationRuntime() {
       logSettingsEvent("settings_change_requested", settingKey, logFields, gameName ? "info" : undefined, gameName);
       optimisticUpdate();
 
+      mutationGeneration++;
+      const startedGeneration = mutationGeneration;
+
       enqueueSettingsUpdate(async () => {
         log("info", logExecute);
         let awaitFailed = false;
@@ -207,7 +211,7 @@ export function createSettingsMutationRuntime() {
           if (awaitFailed) {
             log("info", logLateResolution);
             if (updateSeq === readSeq() && !isRpcStatus(res)) {
-              applyResult(res as T);
+              applyResult(res as T, startedGeneration >= mutationGeneration);
             }
           }
           return res;
@@ -224,7 +228,7 @@ export function createSettingsMutationRuntime() {
             throw new Error(result.message || result.status);
           }
           if (updateSeq === readSeq()) {
-            applyResult(result as T);
+            applyResult(result as T, startedGeneration >= mutationGeneration);
             logSettingsEvent("settings_change_persisted", settingKey, {
               sequence: updateSeq,
               value: getPersistedValue(result as T),
@@ -264,7 +268,13 @@ export function createSettingsMutationRuntime() {
         fallbackValue: lastPersistedAutoSync ?? false,
         optimisticUpdate: () => ludusaviStore.setAutoSyncEnabled(enabled),
         rpcCall: () => setAutoSyncEnabled(enabled),
-        applyResult: (res) => applySettings(ludusaviStore, res),
+        applyResult: (res, isLatest) => {
+          if (isLatest) applySettings(ludusaviStore, res);
+          else {
+            if (res.auto_sync_enabled !== undefined) lastPersistedAutoSync = res.auto_sync_enabled;
+            ludusaviStore.patchSettings({ auto_sync_enabled: res.auto_sync_enabled });
+          }
+        },
         rollbackUpdate: (fallback) => ludusaviStore.setAutoSyncEnabled(fallback),
         getPersistedValue: (res) => res.auto_sync_enabled
       });
@@ -284,7 +294,13 @@ export function createSettingsMutationRuntime() {
         fallbackValue: lastPersistedDebugLogging ?? true,
         optimisticUpdate: () => ludusaviStore.setDebugLogging(enabled),
         rpcCall: () => setDebugLoggingCall(enabled),
-        applyResult: (res) => applySettings(ludusaviStore, res),
+        applyResult: (res, isLatest) => {
+          if (isLatest) applySettings(ludusaviStore, res);
+          else {
+            if (res.debug_logging !== undefined) lastPersistedDebugLogging = res.debug_logging;
+            ludusaviStore.patchSettings({ debug_logging: res.debug_logging });
+          }
+        },
         rollbackUpdate: (fallback) => ludusaviStore.setDebugLogging(fallback),
         getPersistedValue: (res) => res.debug_logging
       });
@@ -293,7 +309,7 @@ export function createSettingsMutationRuntime() {
     const toggleNotificationSetting = (key: keyof NotificationSettings, enabled: boolean) => {
       const previousNotifications = ludusaviStore.getSnapshot().settings?.notifications ?? defaultNotificationSettings;
       const nextNotifications = { ...previousNotifications, [key]: enabled };
-      mutateSetting<Settings, NotificationSettings>({
+      mutateSetting<Settings, boolean>({
         updateSeq: ++notificationSeq,
         readSeq: () => notificationSeq,
         settingKey: `notifications.${String(key)}`,
@@ -303,13 +319,22 @@ export function createSettingsMutationRuntime() {
         logLateFailure: `Late failure of setNotificationSettings to ${JSON.stringify(nextNotifications)}`,
         logError: `Failed to update notification settings`,
         timeoutMessage: "Setting notifications timed out",
-        fallbackValue: lastPersistedNotifications ?? defaultNotificationSettings,
+        fallbackValue: (lastPersistedNotifications ?? defaultNotificationSettings)[key],
         logFallbackValue: (lastPersistedNotifications ?? defaultNotificationSettings)[key],
         optimisticUpdate: () => ludusaviStore.setNotificationSettings(nextNotifications),
         rpcCall: () => setNotificationSettings(nextNotifications),
-        applyResult: (res) => applySettings(ludusaviStore, res),
-        rollbackUpdate: (fallback) => ludusaviStore.setNotificationSettings(fallback),
-        getPersistedValue: (res) => res.notifications?.[key]
+        applyResult: (res, isLatest) => {
+          if (isLatest) applySettings(ludusaviStore, res);
+          else {
+            if (res.notifications) lastPersistedNotifications = res.notifications;
+            ludusaviStore.patchSettings({ notifications: res.notifications });
+          }
+        },
+        rollbackUpdate: (fallback) => {
+          const prev = ludusaviStore.getSnapshot().settings?.notifications ?? defaultNotificationSettings;
+          ludusaviStore.setNotificationSettings({ ...prev, [key]: fallback });
+        },
+        getPersistedValue: (res) => res.notifications?.[key] ?? false
       });
     };
 
@@ -328,7 +353,13 @@ export function createSettingsMutationRuntime() {
         fallbackValue: lastPersistedUpdateChannel ?? "stable",
         optimisticUpdate: () => ludusaviStore.setUpdateChannel(channel),
         rpcCall: () => setUpdateChannelCall(channel),
-        applyResult: (res) => applySettings(ludusaviStore, res),
+        applyResult: (res, isLatest) => {
+          if (isLatest) applySettings(ludusaviStore, res);
+          else {
+            if (res.update_channel !== undefined) lastPersistedUpdateChannel = res.update_channel;
+            ludusaviStore.patchSettings({ update_channel: res.update_channel });
+          }
+        },
         rollbackUpdate: (fallback) => ludusaviStore.setUpdateChannel(fallback),
         getPersistedValue: (res) => res.update_channel
       });
@@ -348,7 +379,13 @@ export function createSettingsMutationRuntime() {
         fallbackValue: lastPersistedAutomaticUpdateChecks ?? true,
         optimisticUpdate: () => ludusaviStore.setAutomaticUpdateChecks(enabled),
         rpcCall: () => setAutomaticUpdateChecksCall(enabled),
-        applyResult: (res) => applySettings(ludusaviStore, res),
+        applyResult: (res, isLatest) => {
+          if (isLatest) applySettings(ludusaviStore, res);
+          else {
+            if (res.automatic_update_checks !== undefined) lastPersistedAutomaticUpdateChecks = res.automatic_update_checks;
+            ludusaviStore.patchSettings({ automatic_update_checks: res.automatic_update_checks });
+          }
+        },
         rollbackUpdate: (fallback) => ludusaviStore.setAutomaticUpdateChecks(fallback),
         getPersistedValue: (res) => res.automatic_update_checks
       });
@@ -389,7 +426,13 @@ export function createSettingsMutationRuntime() {
         fallbackValue: lastPersistedSelectedGame ?? "",
         optimisticUpdate: () => ludusaviStore.setSelectedGame(value),
         rpcCall: () => setSelectedGameCall(value),
-        applyResult: (res) => applySettings(ludusaviStore, res),
+        applyResult: (res, isLatest) => {
+          if (isLatest) applySettings(ludusaviStore, res);
+          else {
+            if (res.selected_game !== undefined) lastPersistedSelectedGame = res.selected_game;
+            ludusaviStore.patchSettings({ selected_game: res.selected_game });
+          }
+        },
         rollbackUpdate: (fallback) => {
           ludusaviStore.setSelectedGame(fallback);
           lastQueuedSelectedGame = fallback;
@@ -411,6 +454,7 @@ export function createSettingsMutationRuntime() {
   function dispose() {
     settingsQueue.length = 0;
     settingsProcessing = false;
+    mutationGeneration = 0;
     autoSyncSeq = 0;
     notificationSeq = 0;
     selectedGameSeq = 0;
