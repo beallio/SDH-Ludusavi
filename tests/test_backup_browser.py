@@ -320,3 +320,64 @@ def test_plugin_restore_backup_version(tmp_path: Path, monkeypatch: pytest.Monke
     res = asyncio.run(plugin.restore_backup_version("Hades", "123"))
     assert res["status"] == "restored"
     assert res["backup_id"] == "123"
+
+
+def test_backup_disk_stats_budget_limit_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snap = tmp_path / "snap_huge"
+    snap.mkdir()
+    # Create 3 files, but limit budget to 2
+    (snap / "f1.txt").write_text("a", encoding="utf-8")
+    (snap / "f2.txt").write_text("b", encoding="utf-8")
+    (snap / "f3.txt").write_text("c", encoding="utf-8")
+
+    import sdh_ludusavi.ludusavi
+
+    monkeypatch.setattr(sdh_ludusavi.ludusavi, "BACKUP_STAT_MAX_ENTRIES", 2)
+
+    size, count = _backup_disk_stats(str(tmp_path), "snap_huge")
+    assert size is None
+    assert count is None
+
+
+def test_backup_disk_stats_budget_limit_zip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snap_zip = tmp_path / "snap_huge.zip"
+    with zipfile.ZipFile(snap_zip, "w") as z:
+        z.writestr("f1.txt", b"a")
+        z.writestr("f2.txt", b"b")
+        z.writestr("f3.txt", b"c")
+
+    import sdh_ludusavi.ludusavi
+
+    monkeypatch.setattr(sdh_ludusavi.ludusavi, "BACKUP_STAT_MAX_ENTRIES", 2)
+
+    size, count = _backup_disk_stats(str(tmp_path), "snap_huge.zip")
+    assert size is None
+    assert count is None
+
+
+def test_adapter_list_backups_prefers_api_size(tmp_path: Path) -> None:
+    adapter, client = adapter_with_backups(
+        backup_data={
+            "games": {
+                "Hades": {
+                    "backupPath": str(tmp_path),
+                    "backups": [
+                        {
+                            "name": "1",
+                            "when": "2026-05-10T00:00:00Z",
+                            "size": 12345,
+                            "file_count": 42,
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    res = adapter.list_backups("Hades")
+    # should NOT touch the filesystem (which doesn't exist/is empty anyway)
+    assert res["backups"][0]["size_bytes"] == 12345
+    assert res["backups"][0]["file_count"] == 42
