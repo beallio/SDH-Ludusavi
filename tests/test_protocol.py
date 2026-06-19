@@ -46,11 +46,8 @@ def test_template_only_files_are_removed():
 def test_tracked_pre_commit_hook_uses_current_project_checks():
     hook = Path("scripts/pre_commit.sh").read_text()
 
-    assert "./run.sh uv run ruff check . --fix" in hook
-    assert "./run.sh uv run ruff format ." in hook
+    assert "quality_gates.sh" in hook
     assert "git add -u" not in hook
     assert "git diff --cached --name-only --diff-filter=ACMR" in hook
     assert 'git add -- "${staged_paths[@]}"' in hook
-    assert "./run.sh uv run ty check py_modules/sdh_ludusavi/" in hook
-    assert "./run.sh uv run pytest" in hook
     assert "./run.sh bash scripts/check_tdd.sh" in hook

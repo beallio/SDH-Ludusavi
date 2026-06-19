@@ -76,25 +76,9 @@ jobs:
         run: |
           ./run.sh uv sync
 
-      - name: Run Ruff Linter
+      - name: Run Quality Gates
         run: |
-          ./run.sh uv run ruff check .
-
-      - name: Run Ruff Formatter Check
-        run: |
-          ./run.sh uv run ruff format --check .
-
-      - name: Run Python Type Checks
-        run: |
-          ./run.sh uv run ty check py_modules/sdh_ludusavi/
-
-      - name: Run Pytest Suite
-        run: |
-          ./run.sh uv run pytest
-
-      - name: Run Frontend Verify (Supply Chain & Bundle Build)
-        run: |
-          ./run.sh pnpm run verify
+          ./run.sh bash scripts/quality_gates.sh check
 
       - name: Package Plugin (Versioned Release)
         run: |

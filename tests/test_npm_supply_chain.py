@@ -128,9 +128,8 @@ def test_local_hooks_run_frontend_supply_chain_checks() -> None:
     pre_commit = (ROOT / "scripts" / "pre_commit.sh").read_text(encoding="utf-8")
     post_commit = (ROOT / "scripts" / "post_commit.sh").read_text(encoding="utf-8")
 
-    assert "pnpm run verify" in pre_commit
+    assert "quality_gates.sh" in pre_commit
     assert "pnpm run verify" in post_commit
-    assert "npm exec -- pnpm run verify" in post_commit
     assert "pnpm 10.23.0 is required on PATH before packaging." not in post_commit
     assert "./node_modules/.bin/rollup" not in post_commit
 
