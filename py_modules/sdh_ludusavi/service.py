@@ -97,7 +97,6 @@ class SDHLudusaviService:
         from .watchdog import ProcessWatchdog
 
         self._watchdog = ProcessWatchdog(
-            self,
             log_callback=self.log,
             is_operation_running=lambda: self._coordinator.is_running,
         )
