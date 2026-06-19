@@ -32,8 +32,7 @@ class OperationCoordinator:
     (such as backup, restore, check) on the Ludusavi adapter.
     """
 
-    def __init__(self, service: Any) -> None:
-        self._service = service
+    def __init__(self) -> None:
         self._operation = OperationState()
         self._operation_lock = threading.Lock()
 
