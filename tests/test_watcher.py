@@ -803,3 +803,123 @@ def test_watch_ttl_exceeds_frontend_cap() -> None:
     from sdh_ludusavi.syncthing.watcher import WATCH_TTL_SECONDS
 
     assert WATCH_TTL_SECONDS >= 120 + 30
+
+
+def test_start_watch_does_not_block_polling() -> None:
+    manager = SyncthingWatchManager()
+
+    # Setup pre-existing watch
+    watch_old = SyncthingWatch(
+        "old_watch",
+        "pre_game",
+        "Hades",
+        "1145300",
+        FolderSelection(folder_id="test-folder", label="Test", path="/path"),
+        None,
+    )
+    manager.watches["old_watch"] = watch_old
+
+    start_event = threading.Event()
+    proceed_event = threading.Event()
+
+    def slow_resolve_creds():
+        start_event.set()
+        proceed_event.wait(timeout=2.0)
+        return ("http://127.0.0.1:8384", "key", None)
+
+    def start_slow():
+        manager.start_watch("post_game", "Hades", "1145300", "/path")
+
+    with patch(
+        "sdh_ludusavi.syncthing.watcher.resolve_api_credentials", side_effect=slow_resolve_creds
+    ):
+        t = threading.Thread(target=start_slow)
+        t.start()
+
+        assert start_event.wait(timeout=2.0)
+        # Polling and stop_watch should complete instantly without waiting
+        poll_res = manager.poll_watch("old_watch")
+        stop_res = manager.stop_watch("old_watch")
+
+        proceed_event.set()
+        t.join(timeout=2.0)
+
+    assert poll_res is not None
+    assert stop_res["status"] == "stopped"
+
+
+def test_stop_all_does_not_hold_lock_while_joining() -> None:
+    manager = SyncthingWatchManager()
+
+    watch_old = SyncthingWatch(
+        "old_watch",
+        "pre_game",
+        "Hades",
+        "1145300",
+        FolderSelection(folder_id="test-folder", label="Test", path="/path"),
+        None,
+    )
+    # mock stop to block
+    stop_event = threading.Event()
+    proceed_event = threading.Event()
+
+    def slow_stop():
+        stop_event.set()
+        proceed_event.wait(timeout=2.0)
+
+    watch_old.stop = slow_stop
+    manager.watches["old_watch"] = watch_old
+
+    def stop_all_thread():
+        manager.stop_all()
+
+    t = threading.Thread(target=stop_all_thread)
+    t.start()
+
+    assert stop_event.wait(timeout=2.0)
+    # The lock must be acquirable here
+    acquirable = manager.lock.acquire(timeout=0.1)
+    if acquirable:
+        manager.lock.release()
+
+    proceed_event.set()
+    t.join(timeout=2.0)
+    assert acquirable is True
+
+
+def test_same_signature_replacement_leaves_exactly_one_registered() -> None:
+    manager = SyncthingWatchManager()
+
+    watch_old = SyncthingWatch(
+        "old_watch",
+        "pre_game",
+        "Hades",
+        "1145300",
+        FolderSelection(folder_id="test-folder", label="Test", path="/path"),
+        None,
+    )
+    manager.watches["old_watch"] = watch_old
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.resolve_api_credentials",
+            return_value=("http://127.0.0.1:8384", "key", None),
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.get_my_device_id", return_value="LOCAL"),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.resolve_folder_by_path",
+            return_value=_shared_folder(("DEV-A",)),
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+            return_value=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+        ),
+        patch.object(SyncthingWatch, "start"),
+        patch.object(SyncthingWatch, "stop") as mock_stop,
+    ):
+        res = manager.start_watch("pre_game", "Hades", "1145300", "/path")
+
+    assert res["status"] == "watching"
+    assert len(manager.watches) == 1
+    assert "old_watch" not in manager.watches
+    assert mock_stop.call_count == 1
