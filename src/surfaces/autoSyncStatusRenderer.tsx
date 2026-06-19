@@ -1,6 +1,4 @@
-import { IoMdCloudDone } from "react-icons/io";
 import type { AutoSyncStatusKind, AutoSyncStatusState } from "../types";
-import { log } from "../utils/logging";
 
 export const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
   checking: "VERIFYING GAME SAVE",
@@ -30,115 +28,20 @@ export function isSyncthingActiveStatus(status: AutoSyncStatusKind): boolean {
   );
 }
 
+export function isSyncthingStatus(status: AutoSyncStatusKind): boolean {
+  return (
+    status === "syncthing_pending_upload" ||
+    status === "syncthing_uploading" ||
+    status === "syncthing_downloading" ||
+    status === "syncthing_complete"
+  );
+}
+
 export function shouldAutoHideStatus(status: AutoSyncStatusKind): boolean {
   return !isSyncthingActiveStatus(status);
 }
 
-const svgAttributeMapping: Record<string, string> = {
-  fillRule: "fill-rule",
-  clipRule: "clip-rule",
-  strokeWidth: "stroke-width",
-  strokeLinecap: "stroke-linecap",
-  strokeLinejoin: "stroke-linejoin",
-};
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function serializeSvgNode(node: any): string {
-  if (!node || typeof node !== "object") {
-    return "";
-  }
-  const tag = node.type;
-  if (tag !== "path" && tag !== "g") {
-    log("warning", `Unsupported SVG tag: ${tag}`, "autosync_status");
-    return "";
-  }
-
-  const props = node.props || {};
-  let attributes = "";
-  const allowedAttributes = [
-    "d",
-    "fill",
-    "fillRule",
-    "clipRule",
-    "stroke",
-    "strokeWidth",
-    "strokeLinecap",
-    "strokeLinejoin",
-    "opacity",
-    "transform",
-  ];
-
-  for (const attr of allowedAttributes) {
-    if (props[attr] !== undefined && props[attr] !== null) {
-      const svgAttr = svgAttributeMapping[attr] || attr;
-      attributes += ` ${svgAttr}="${escapeHtml(String(props[attr]))}"`;
-    }
-  }
-
-  let childrenMarkup = "";
-  if (props.children) {
-    if (Array.isArray(props.children)) {
-      childrenMarkup = props.children.map(serializeSvgNode).join("");
-    } else {
-      childrenMarkup = serializeSvgNode(props.children);
-    }
-  }
-
-  return `<${tag}${attributes}>${childrenMarkup}</${tag}>`;
-}
-
-function serializeIcon(Icon: any): string {
-  try {
-    const element = Icon({
-      size: 18,
-      "aria-hidden": true,
-      focusable: false,
-    });
-    if (!element || typeof element !== "object" || !element.props) {
-      return "";
-    }
-    const viewBox = element.props.attr?.viewBox || "0 0 512 512";
-    let childrenMarkup = "";
-    const children = element.props.children;
-    if (children) {
-      if (Array.isArray(children)) {
-        childrenMarkup = children.map(serializeSvgNode).join("");
-      } else {
-        childrenMarkup = serializeSvgNode(children);
-      }
-    }
-    return `<svg viewBox="${escapeHtml(viewBox)}" width="18" height="18" fill="currentColor" aria-hidden="true" focusable="false">${childrenMarkup}</svg>`;
-  } catch (err) {
-    log("warning", `Failed to serialize icon: ${err}`, "autosync_status");
-    return '<svg viewBox="0 0 512 512" width="18" height="18" fill="currentColor" aria-hidden="true" focusable="false"></svg>';
-  }
-}
-
-const serializedIconsCache: Record<string, string> = {};
-
-function getSerializedIcon(status: AutoSyncStatusKind): string {
-  if (serializedIconsCache[status]) {
-    return serializedIconsCache[status];
-  }
-
-  let icon: any;
-  if (status === "syncthing_complete") {
-    icon = IoMdCloudDone;
-  } else {
-    return "";
-  }
-
-  const serialized = serializeIcon(icon);
-  serializedIconsCache[status] = serialized;
-  return serialized;
-}
 
 export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
   if (status === "has_backup") {
@@ -165,7 +68,7 @@ export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
     return '<svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><defs><clipPath id="download-arrow-clip"><path d="M224 268v-76h64v76h68L256 368 156 268h68z"/></clipPath></defs><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999zM224 268v-76h64v76h68L256 368 156 268h68z" fill="currentColor"/><rect class="download-arrow-fill" x="156" y="192" width="200" height="176" fill="#f8fafc" clip-path="url(#download-arrow-clip)"/></svg>';
   }
   if (status === "syncthing_complete") {
-    return getSerializedIcon(status);
+    return '<svg viewBox="0 0 512 512" width="18" height="18" fill="currentColor" aria-hidden="true" focusable="false"><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999zM213.333 362.667L138.667 288l29.864-29.864 44.802 44.802L324.271 192l29.865 29.864-140.803 140.803z"></path></svg>';
   }
 
   if (
@@ -215,7 +118,8 @@ body {
   box-sizing: border-box;
 }
 .text { display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; min-width: 245px; }
-.icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" || state.status === "conflict" || state.status === "syncthing_unavailable" || state.status === "syncthing_folder_not_found" || state.status === "syncthing_no_peers" ? "#f59e0b" : "#1a9fff"}; }
+.icon { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" || state.status === "conflict" || state.status === "syncthing_unavailable" || state.status === "syncthing_folder_not_found" || state.status === "syncthing_no_peers" ? "#f59e0b" : "#1a9fff"}; }
+.icon svg { width: 100%; height: 100%; display: block; }
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }

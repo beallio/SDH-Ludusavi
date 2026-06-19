@@ -11,7 +11,6 @@ from pathlib import Path
 from sdh_ludusavi.singleton import (
     SiblingProcess,
     enforce_single_instance,
-    find_stale_sibling_pids,
     find_stale_siblings,
     terminate_stale_siblings,
 )
@@ -83,7 +82,7 @@ def test_finds_strictly_older_identical_sibling(tmp_path: Path) -> None:
     assert siblings[0].cmdline == PLUGIN_TITLE
 
     # Wrapper compatibility
-    assert find_stale_sibling_pids(proc_root=tmp_path, pid=6278) == [6270]
+    assert sorted(s.pid for s in find_stale_siblings(proc_root=tmp_path, pid=6278)) == [6270]
 
 
 def test_ignores_newer_siblings_self_and_other_processes(tmp_path: Path) -> None:
@@ -95,15 +94,15 @@ def test_ignores_newer_siblings_self_and_other_processes(tmp_path: Path) -> None
     (tmp_path / "self").mkdir()
 
     assert find_stale_siblings(proc_root=tmp_path, pid=6270) == []
-    assert find_stale_sibling_pids(proc_root=tmp_path, pid=6278) == [6270]
+    assert sorted(s.pid for s in find_stale_siblings(proc_root=tmp_path, pid=6278)) == [6270]
 
 
 def test_equal_start_ticks_breaks_tie_by_pid(tmp_path: Path) -> None:
     write_proc_entry(tmp_path, 6270, start_ticks=500)
     write_proc_entry(tmp_path, 6278, start_ticks=500)
 
-    assert find_stale_sibling_pids(proc_root=tmp_path, pid=6278) == [6270]
-    assert find_stale_sibling_pids(proc_root=tmp_path, pid=6270) == []
+    assert sorted(s.pid for s in find_stale_siblings(proc_root=tmp_path, pid=6278)) == [6270]
+    assert sorted(s.pid for s in find_stale_siblings(proc_root=tmp_path, pid=6270)) == []
 
 
 def test_tolerates_vanished_and_malformed_entries(tmp_path: Path) -> None:
@@ -112,7 +111,7 @@ def test_tolerates_vanished_and_malformed_entries(tmp_path: Path) -> None:
     write_proc_entry(tmp_path, 8888, start_ticks=500)
     (tmp_path / "8888" / "stat").write_text("garbage", encoding="utf-8")
 
-    assert find_stale_sibling_pids(proc_root=tmp_path, pid=6278) == []
+    assert sorted(s.pid for s in find_stale_siblings(proc_root=tmp_path, pid=6278)) == []
 
 
 def test_pid_reused_before_sigterm(tmp_path: Path) -> None:
@@ -261,9 +260,15 @@ def test_terminate_never_signals_init_or_negative_pids(tmp_path: Path) -> None:
 
 class FakeLogger:
     def __init__(self) -> None:
+        self.debugs: list[str] = []
         self.infos: list[str] = []
         self.warnings: list[str] = []
         self.errors: list[str] = []
+        self.exceptions: list[str] = []
+        self.levels: list[int] = []
+
+    def debug(self, message: str, *args: object) -> None:
+        self.debugs.append(message % args if args else message)
 
     def info(self, message: str, *args: object) -> None:
         self.infos.append(message % args if args else message)
@@ -273,6 +278,12 @@ class FakeLogger:
 
     def error(self, message: str, *args: object) -> None:
         self.errors.append(message % args if args else message)
+
+    def exception(self, message: str, *args: object) -> None:
+        self.exceptions.append(message % args if args else message)
+
+    def setLevel(self, level: int) -> None:
+        self.levels.append(level)
 
 
 def test_enforce_single_instance_terminates_and_logs(tmp_path: Path) -> None:

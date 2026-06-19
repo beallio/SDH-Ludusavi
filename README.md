@@ -10,7 +10,7 @@ SDH-Ludusavi is a Decky Loader plugin that surfaces Ludusavi save backup and res
 - **Launch Gate**: Pauses game launch if a save conflict is detected, allowing you to choose which save to keep.
 - **Manual Control**: Force a backup for any Ludusavi-managed game at any time, and restore from any snapshot through the Backup Browser.
 - **Backup Browser**: View historical backup snapshots for a game directly in the plugin and selectively perform a point-in-time restore.
-- **Unified Logging**: View backend and frontend logs directly within the plugin's "View Logs" modal.
+- **Unified Logging**: View backend and frontend logs directly within the plugin's "View Logs" modal. Optionally enable **Debug Logging** for verbose diagnostics.
 - **In-Plugin Updates**: Automatically or manually check for newer GitHub Release builds, choose between Stable and Development channels, and perform one-click installations via Decky Loader.
 
 ## Installation (Early Access)

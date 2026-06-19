@@ -17,8 +17,7 @@ class DummyService:
 
 
 def test_operation_coordinator_locks() -> None:
-    svc = DummyService()
-    coord = OperationCoordinator(svc)
+    coord = OperationCoordinator()
 
     def callback():
         time.sleep(0.1)
@@ -33,8 +32,7 @@ def test_operation_coordinator_locks() -> None:
 
 
 def test_operation_coordinator_lock_contention() -> None:
-    svc = DummyService()
-    coord = OperationCoordinator(svc)
+    coord = OperationCoordinator()
     started = threading.Event()
     block = threading.Event()
 

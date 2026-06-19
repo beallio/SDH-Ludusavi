@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { toaster } from "@decky/api";
 import {
   PluginUpdateCandidate,
@@ -248,12 +248,15 @@ export function usePluginUpdateController({
     await checkForUpdates({ force: true, notify: true, source: "manual" });
   }, [checkForUpdates]);
 
-  const handleHandoffSuccess = React.useCallback(
+  const handleHandoffSuccess = useCallback(
     async (version: string, channel: UpdateChannel, traceId: string, handoffStart: number) => {
       enterPostInstallGuard(version, channel);
       // activeCheckId.current, setIsChecking(false), clearCheckTimeout
       try {
-        await confirmUpdateInstallHandoffCall(version);
+        const confirmRes = await confirmUpdateInstallHandoffCall(version);
+        if ("status" in confirmRes && (confirmRes.status === "failed" || confirmRes.status === "skipped")) {
+          throw new Error(confirmRes.message || "Failed to confirm handoff");
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         logUpdate(traceId, "handoff_confirm_failed", { message: msg });
@@ -295,9 +298,10 @@ export function usePluginUpdateController({
     let active = true;
     async function loadCache() {
       try {
-        const ctx = await getUpdateCheckContextCall();
+        const result = await getUpdateCheckContextCall();
         if (!active) return;
-        if (ctx) {
+        if (result && !("status" in result && (result.status === "failed" || result.status === "skipped"))) {
+          const ctx = result as import("../types").UpdateCheckContext;
           if (ctx.installed_release_published_at) {
             setInstalledReleasePublishedAt(ctx.installed_release_published_at);
           }
@@ -409,7 +413,10 @@ export function usePluginUpdateController({
 
       const recordStart = performance.now();
       logUpdate(updateTraceId, "record_install_start", { version: revalRes.version });
-      await recordUpdateInstallRequestedCall(payload);
+      const recordRes = await recordUpdateInstallRequestedCall(payload);
+      if ("status" in recordRes && (recordRes.status === "failed" || recordRes.status === "skipped")) {
+        throw new Error(recordRes.message || "Failed to record install request");
+      }
       logUpdate(updateTraceId, "record_install_success", { version: revalRes.version, elapsed_ms: Math.round(performance.now() - recordStart) });
 
       enterPostInstallGuard(revalRes.version, revalRes.channel as UpdateChannel);
@@ -449,7 +456,10 @@ export function usePluginUpdateController({
               const msg = err instanceof Error ? err.message : String(err);
               logUpdate(updateTraceId, "handoff_rejected", { message: msg, elapsed_ms: Math.round(performance.now() - handoffStart) });
               try {
-                await clearPendingUpdateInstallCall(revalRes.version);
+                const clearRes = await clearPendingUpdateInstallCall(revalRes.version);
+                if ("status" in clearRes && (clearRes.status === "failed" || clearRes.status === "skipped")) {
+                  throw new Error(clearRes.message || "Failed to clear pending install");
+                }
               } catch (clearErr) {
                 const clearMsg = clearErr instanceof Error ? clearErr.message : String(clearErr);
                 logUpdate(updateTraceId, "pending_clear_failed", { message: clearMsg });
@@ -474,7 +484,10 @@ export function usePluginUpdateController({
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       try {
-        await clearPendingUpdateInstallCall(targetCandidate.version);
+        const clearRes = await clearPendingUpdateInstallCall(targetCandidate.version);
+        if ("status" in clearRes && (clearRes.status === "failed" || clearRes.status === "skipped")) {
+          throw new Error(clearRes.message || "Failed to clear pending install");
+        }
       } catch (clearErr) {
         const clearMsg = clearErr instanceof Error ? clearErr.message : String(clearErr);
         logUpdate(updateTraceId, "pending_clear_failed", { message: clearMsg });

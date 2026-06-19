@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sdh_ludusavi.persistence import JsonSettingsStore
 import os
 from unittest.mock import patch
 from sdh_ludusavi.service import SDHLudusaviService
@@ -39,7 +40,11 @@ def test_env_variable_logging_redaction(tmp_path):
     }
 
     with patch.dict(os.environ, mock_env, clear=True):
-        service = SDHLudusaviService(adapter=FakeAdapter(), state_path=state_file)
+        service = SDHLudusaviService(
+            adapter=FakeAdapter(),
+            settings_store=JsonSettingsStore(state_file.with_name("settings.json")),
+            cache_path=state_file.with_name("cache.json"),
+        )
 
     # Check the log for environment variables
     # The log message starts with "Filtered environment variables:" (current)

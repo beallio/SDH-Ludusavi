@@ -19,6 +19,7 @@ describe("SyncthingMonitorMachine", () => {
         initialized: false,
         publicationEnabled: false,
         activityObserved: false,
+        mutationObserved: false,
         completionObserved: false,
         settledCount: 0,
         lastProcessedTimestamp: null,
@@ -152,6 +153,7 @@ describe("SyncthingMonitorMachine", () => {
           step: "watching" as const, 
           initialized: true, 
           activityObserved: true, 
+          mutationObserved: true,
           settledCount: 2, 
           lastProcessedTimestamp: 10 
         };
@@ -195,12 +197,35 @@ describe("SyncthingMonitorMachine", () => {
       });
       
       it("completes on settledCount >= 3", () => {
-        let state = { ...createInitialWatchState("post_game"), step: "watching" as const, initialized: true, activityObserved: true, settledCount: 2 };
+        let state = { ...createInitialWatchState("post_game"), step: "watching" as const, initialized: true, activityObserved: true, mutationObserved: true, settledCount: 2 };
         const res = transition(state, { type: "sample", sample: { timestamp_unix: 2, uploading: false, downloading: false, update_in_progress: false, status: "idle", settled: true } as any });
         expect(res.state.settledCount).toBe(3);
         expect(res.state.step).toBe("complete");
         expect(res.state.completionObserved).toBe(true);
         expect(res.effects.stopWatch).toBe(true);
+      });
+
+      it("completes post-game via mutation without uploading", () => {
+        let state = { ...createInitialWatchState("post_game"), step: "watching" as const, initialized: true, publicationEnabled: true, handoffActivated: true };
+        
+        let res = transition(state, { type: "sample", sample: { timestamp_unix: 1, status: "SCANNING", settled: false, uploading: false, downloading: false, update_in_progress: false, folder_state: "scanning" } as any });
+        expect(res.state.mutationObserved).toBe(true);
+        expect(res.state.activityObserved).toBe(false);
+
+        res = transition(res.state, { type: "sample", sample: { timestamp_unix: 2, status: "IDLE", settled: true, uploading: false, downloading: false, update_in_progress: false, folder_state: "idle" } as any });
+        res = transition(res.state, { type: "sample", sample: { timestamp_unix: 3, status: "IDLE", settled: true, uploading: false, downloading: false, update_in_progress: false, folder_state: "idle" } as any });
+        res = transition(res.state, { type: "sample", sample: { timestamp_unix: 4, status: "IDLE", settled: true, uploading: false, downloading: false, update_in_progress: false, folder_state: "idle" } as any });
+
+        expect(res.state.step).toBe("complete");
+        expect(res.state.completionObserved).toBe(true);
+        expect(res.effects.publish).toEqual({ status: "syncthing_complete", source: "context" });
+        expect(res.effects.stopWatch).toBe(true);
+      });
+
+      it("does not increment settledCount before mutationObserved in post-game", () => {
+        let state = { ...createInitialWatchState("post_game"), step: "watching" as const, initialized: true };
+        const res = transition(state, { type: "sample", sample: { timestamp_unix: 1, status: "IDLE", settled: true, uploading: false, downloading: false, update_in_progress: false, folder_state: "idle" } as any });
+        expect(res.state.settledCount).toBe(0);
       });
     });
 
@@ -242,6 +267,15 @@ describe("SyncthingMonitorMachine", () => {
         expect(res.state.step).toBe("cancelled");
         expect(res.state.publicationEnabled).toBe(false);
         expect(res.effects.publish).toEqual({ status: "has_backup", source: "timeout" });
+      });
+
+      it("cancels and publishes even if mutationObserved is true (timeout backstop)", () => {
+        const state = { ...createInitialWatchState("post_game"), step: "watching" as const, initialized: true, publicationEnabled: true, activityObserved: false, mutationObserved: true };
+        const res = transition(state, { type: "pending_activity_timeout" });
+        expect(res.state.step).toBe("cancelled");
+        expect(res.state.publicationEnabled).toBe(false);
+        expect(res.effects.publish).toEqual({ status: "has_backup", source: "timeout" });
+        expect(res.effects.stopWatch).toBe(true);
       });
       
       it("ignores if not publicationEnabled", () => {

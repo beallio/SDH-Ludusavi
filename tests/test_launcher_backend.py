@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sdh_ludusavi.persistence import JsonSettingsStore
 from pathlib import Path
 from sdh_ludusavi.service import SDHLudusaviService
 import pytest
@@ -17,7 +18,11 @@ class FakeAdapter:
 
 @pytest.fixture
 def service(tmp_path: Path):
-    return SDHLudusaviService(adapter=FakeAdapter(), state_path=tmp_path / "state.json")
+    return SDHLudusaviService(
+        adapter=FakeAdapter(),
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
+    )
 
 
 def test_launcher_shortcut_id_persistence(service, tmp_path):
@@ -29,7 +34,11 @@ def test_launcher_shortcut_id_persistence(service, tmp_path):
     assert service.get_ludusavi_launcher_shortcut_id() == 12345
 
     # Persistence check
-    reloaded = SDHLudusaviService(adapter=FakeAdapter(), state_path=tmp_path / "state.json")
+    reloaded = SDHLudusaviService(
+        adapter=FakeAdapter(),
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
+    )
     assert reloaded.get_ludusavi_launcher_shortcut_id() == 12345
 
     # Clear ID
@@ -38,7 +47,9 @@ def test_launcher_shortcut_id_persistence(service, tmp_path):
 
     # Persistence check after clear
     reloaded_after_clear = SDHLudusaviService(
-        adapter=FakeAdapter(), state_path=tmp_path / "state.json"
+        adapter=FakeAdapter(),
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
     )
     assert reloaded_after_clear.get_ludusavi_launcher_shortcut_id() == -1
 

@@ -663,6 +663,67 @@ describe("GameLifecycleController", () => {
     await vi.runAllTimersAsync();
   });
 
+  it("conflict resolved with keep_local publishes the backing-up animation", async () => {
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
+    mockResolveConflict.mockResolvedValue("keep_local");
+    mockRpc.resolveGameStartConflict.mockResolvedValue({ status: "backed_up" });
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.runAllTimersAsync();
+
+    expect(mockRpc.resolveGameStartConflict).toHaveBeenCalledWith(
+      "Hades",
+      "1145300",
+      "keep_local",
+    );
+    expect(mockStatusSurface.publish).toHaveBeenCalledWith(
+      "backing_up",
+      expect.objectContaining({ source: "lifecycle_start" }),
+    );
+    expect(mockStatusSurface.publish).not.toHaveBeenCalledWith(
+      "restoring",
+      expect.anything(),
+    );
+  });
+
+  it("conflict resolved with restore_backup publishes the restoring animation", async () => {
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
+    mockResolveConflict.mockResolvedValue("restore_backup");
+    mockRpc.resolveGameStartConflict.mockResolvedValue({ status: "restored" });
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.publish).toHaveBeenCalledWith(
+      "restoring",
+      expect.objectContaining({ source: "lifecycle_start" }),
+    );
+    expect(mockStatusSurface.publish).not.toHaveBeenCalledWith(
+      "backing_up",
+      expect.anything(),
+    );
+  });
+
   it("skipped backup result on exit does not notify failure", async () => {
     const controller = createGameLifecycleController({
       store: mockStore,

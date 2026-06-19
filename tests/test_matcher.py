@@ -50,3 +50,25 @@ def test_game_registry_matcher_fuzzy() -> None:
     # Short substring matching is blocked for unconfigured/too short matches
     res_short = matcher.match_game("Met", None, games, {}, {})
     assert res_short is None
+
+
+def test_game_registry_matcher_fuzzy_ambiguous() -> None:
+    matcher = GameRegistryMatcher()
+
+    # 2 ambiguous candidates
+    games = {
+        "Portal 2": GameStatus("Portal 2", True, True, False),
+        "Portal Stories: Mel": GameStatus("Portal Stories: Mel", True, True, False),
+    }
+
+    # Order 1
+    res1 = matcher.match_game("Portal", None, games, {}, {})
+    assert res1 is None
+
+    # Order 2
+    games_reversed = {
+        "Portal Stories: Mel": GameStatus("Portal Stories: Mel", True, True, False),
+        "Portal 2": GameStatus("Portal 2", True, True, False),
+    }
+    res2 = matcher.match_game("Portal", None, games_reversed, {}, {})
+    assert res2 is None

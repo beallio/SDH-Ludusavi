@@ -11,6 +11,7 @@ resurrected by a later save from the stale instance.
 from __future__ import annotations
 
 import json
+from sdh_ludusavi.persistence import JsonSettingsStore
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,10 @@ PENDING_TAG = "v9.9.9"
 
 
 def _make_service(state_path: Path) -> SDHLudusaviService:
-    return SDHLudusaviService(state_path=state_path)
+    return SDHLudusaviService(
+        settings_store=JsonSettingsStore(state_path.with_name("settings.json")),
+        cache_path=state_path.with_name("cache.json"),
+    )
 
 
 def _record_pending(service: SDHLudusaviService) -> None:
@@ -45,7 +49,7 @@ def _promotion_log_count(service: SDHLudusaviService) -> int:
 
 
 def _persisted_update_cache(state_path: Path) -> dict[str, Any]:
-    data = json.loads(state_path.read_text(encoding="utf-8"))
+    data = json.loads(state_path.with_name("cache.json").read_text(encoding="utf-8"))
     cache = data.get("update_check_cache", {})
     return cache if isinstance(cache, dict) else {}
 

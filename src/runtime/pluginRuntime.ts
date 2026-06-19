@@ -33,7 +33,8 @@ export function createPluginRuntime(overrides?: PluginRuntimeOverrides): PluginR
       // order mirrors old onDismount: statusSurface -> settings -> contentLoad
       statusSurface.dispose();
       settings.dispose();
-      contentLoad.dispose();
+      contentLoad.initPromise = null;
+      contentLoad.metadataPromise = null;
     }
   };
 }

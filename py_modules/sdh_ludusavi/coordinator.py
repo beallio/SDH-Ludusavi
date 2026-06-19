@@ -32,8 +32,7 @@ class OperationCoordinator:
     (such as backup, restore, check) on the Ludusavi adapter.
     """
 
-    def __init__(self, service: Any) -> None:
-        self._service = service
+    def __init__(self) -> None:
         self._operation = OperationState()
         self._operation_lock = threading.Lock()
 
@@ -51,10 +50,6 @@ class OperationCoordinator:
                 log_callback(level, msg, operation, game_name)
 
         if not self._operation_lock.acquire(blocking=False):
-            raise OperationLockedError(f"{self._operation.name or 'operation'} is already running")
-
-        if self._operation.is_running:
-            self._operation_lock.release()
             raise OperationLockedError(f"{self._operation.name or 'operation'} is already running")
 
         log("info", f"Starting {operation}")

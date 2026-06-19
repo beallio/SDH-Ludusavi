@@ -45,20 +45,14 @@ class LudusaviGateway:
 
     def get_adapter(self) -> LudusaviAdapter:
         """Lazily initialize and return the Ludusavi adapter."""
-        if self._adapter is None:
+        if self._adapter is None or not self._diagnostics_logged:
             with self._adapter_lock:
                 if self._adapter is None:
                     adapter = self._adapter_factory()
                     if adapter is None:
                         raise RuntimeError("Ludusavi adapter factory returned None")
                     self._adapter = adapter
-                    self._log_ludusavi_diagnostics(self._adapter)
-        if not self._diagnostics_logged:
-            with self._adapter_lock:
-                if not self._diagnostics_logged:
-                    self._log_ludusavi_diagnostics(self._adapter)
-        if self._adapter is None:
-            raise RuntimeError("Ludusavi adapter factory returned None")
+                self._log_ludusavi_diagnostics(self._adapter)
         return self._adapter
 
     def _log_ludusavi_diagnostics(self, adapter: LudusaviAdapter) -> None:

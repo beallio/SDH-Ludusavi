@@ -7,13 +7,14 @@ import type {
   RpcStatus
 } from "../types";
 import { log } from "../utils/logging";
-import { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus, isLudusaviRunningStatus } from "./autoSyncStatusRenderer";
+import { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus, isLudusaviRunningStatus, isSyncthingStatus } from "./autoSyncStatusRenderer";
 import type { AutoSyncStatusBrowserViewApi } from "./autoSyncStatusBrowserView";
 
 export { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus };
 
 export const RUNNING_STATUS_HIDE_CEILING_MS = 930000;
 export const RESULT_HIDE_DELAY_MS = 2000;
+export const HAS_BACKUP_MIN_DWELL_MS = 900;
 
 export type AutoSyncStatusPublishOptions = {
   source: AutoSyncStatusSource;
@@ -29,9 +30,20 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
     visible: false,
     source: "hide"
   };
+  let autoSyncStatusShownAt: number | null = null;
+  let deferredAutoSyncStatusState: AutoSyncStatusState | null = null;
+  let deferredAutoSyncStatusTimeoutID: number | null = null;
   let autoSyncStatusTimedOut = false;
   let autoSyncStatusHideTimeoutID: number | null = null;
   let autoSyncStatusSyncTimeoutID: number | null = null;
+
+  function clearDeferredAutoSyncStatus() {
+    if (deferredAutoSyncStatusTimeoutID !== null) {
+      window.clearTimeout(deferredAutoSyncStatusTimeoutID);
+      deferredAutoSyncStatusTimeoutID = null;
+    }
+    deferredAutoSyncStatusState = null;
+  }
 
   function logAutoSyncStatusChange(state: AutoSyncStatusState) {
     log(
@@ -119,11 +131,47 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       }
       statusView.sync(state);
       scheduleAutoSyncStatusHide(state);
+      autoSyncStatusShownAt = Date.now();
     }, 0);
   }
 
   const api = {
     publish(status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions) {
+      if (
+        isSyncthingStatus(status) &&
+        currentAutoSyncStatusState.status === "has_backup" &&
+        currentAutoSyncStatusState.visible &&
+        autoSyncStatusShownAt !== null &&
+        Date.now() - autoSyncStatusShownAt < HAS_BACKUP_MIN_DWELL_MS
+      ) {
+        deferredAutoSyncStatusState = {
+          status,
+          visible: true,
+          source: options.source,
+          gameName: options.gameName,
+          appID: options.appID,
+          tracked: options.tracked,
+          resultStatus: options.resultStatus
+        };
+        if (deferredAutoSyncStatusTimeoutID === null) {
+          const remaining = HAS_BACKUP_MIN_DWELL_MS - (Date.now() - autoSyncStatusShownAt);
+          deferredAutoSyncStatusTimeoutID = window.setTimeout(() => {
+            const stateToApply = deferredAutoSyncStatusState;
+            clearDeferredAutoSyncStatus();
+            if (!stateToApply) return;
+            currentAutoSyncStatusState = stateToApply;
+            statusView.setContext(currentAutoSyncStatusState);
+            logAutoSyncStatusChange(currentAutoSyncStatusState);
+            statusView.sync(currentAutoSyncStatusState);
+            scheduleAutoSyncStatusHide(currentAutoSyncStatusState);
+            autoSyncStatusShownAt = Date.now();
+          }, remaining);
+        }
+        return;
+      }
+
+      clearDeferredAutoSyncStatus();
+
       const shouldResetSurface = shouldResetStatusStripSurfaceBeforeVerification(status, options);
       if (isLudusaviRunningStatus(status)) {
         autoSyncStatusTimedOut = false;
@@ -152,9 +200,11 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       statusView.setContext(currentAutoSyncStatusState);
       statusView.sync(currentAutoSyncStatusState);
       scheduleAutoSyncStatusHide(currentAutoSyncStatusState);
+      autoSyncStatusShownAt = Date.now();
     },
 
     hide(options: Partial<AutoSyncStatusPublishOptions> = {}) {
+      clearDeferredAutoSyncStatus();
       clearAutoSyncStatusSyncTimeout();
       clearAutoSyncStatusHideTimeout();
       
@@ -250,6 +300,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
     },
 
     dispose() {
+      clearDeferredAutoSyncStatus();
       statusView.setContext(currentAutoSyncStatusState);
       currentAutoSyncStatusState = {
         status: "has_backup",

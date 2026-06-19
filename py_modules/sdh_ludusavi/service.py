@@ -12,7 +12,7 @@ from .coordinator import OperationLockedError, OperationCoordinator
 
 from .constants import DEFAULT_NOTIFICATION_SETTINGS
 from .updater import PluginUpdater
-from .types import LudusaviAdapter, GameStatus
+from .types import LudusaviAdapter
 from sdh_ludusavi.game_names import sanitize_game_name
 
 __all__ = ["SDHLudusaviService", "OperationLockedError", "DEFAULT_NOTIFICATION_SETTINGS"]
@@ -30,19 +30,17 @@ class SDHLudusaviService:
         self,
         adapter: LudusaviAdapter | None = None,
         adapter_factory: Callable[[], LudusaviAdapter] | None = None,
-        state_path: Path | None = None,
         settings_store: SettingsStore | None = None,
         cache_path: Path | None = None,
         log_limit: int = 100,
     ) -> None:
         if adapter is not None and adapter_factory is not None:
             raise ValueError("adapter and adapter_factory cannot both be provided")
-        if state_path is not None and (settings_store is not None or cache_path is not None):
-            raise ValueError("state_path cannot be combined with split settings/cache storage")
 
         # 1. Local settings properties
         self._auto_sync_enabled = False
         self._selected_game = ""
+        self._debug_logging = True
         self._notification_settings = _coerce_notification_settings(DEFAULT_NOTIFICATION_SETTINGS)
         self._ludusavi_launcher_shortcut_id = -1
         self._state_lock = threading.RLock()
@@ -66,7 +64,7 @@ class SDHLudusaviService:
         # 2. Sub-managers setup
         from .log_buffer import DiagnosticLogBuffer
 
-        self._log_buffer = DiagnosticLogBuffer(self, log_limit=log_limit)
+        self._log_buffer = DiagnosticLogBuffer(log_limit=log_limit)
 
         from .gateway import LudusaviGateway
 
@@ -74,7 +72,7 @@ class SDHLudusaviService:
             adapter=adapter, adapter_factory=adapter_factory, log_callback=self.log
         )
 
-        self._coordinator = OperationCoordinator(self)
+        self._coordinator = OperationCoordinator()
 
         from .registry import GameRegistry
 
@@ -88,7 +86,6 @@ class SDHLudusaviService:
 
         # 3. Persistence Layer
         self._persistence = PersistenceManager(
-            state_path=state_path,
             settings_store=settings_store,
             cache_path=cache_path,
         )
@@ -100,7 +97,6 @@ class SDHLudusaviService:
         from .watchdog import ProcessWatchdog
 
         self._watchdog = ProcessWatchdog(
-            self,
             log_callback=self.log,
             is_operation_running=lambda: self._coordinator.is_running,
         )
@@ -140,10 +136,7 @@ class SDHLudusaviService:
         self._log_buffer.setup_logging()
         self.log("info", "SDH-ludusavi service initialized", "init")
 
-        import getpass
-
-        identity = f"uid={os.getuid()}, euid={os.geteuid()}, user={getpass.getuser()}"
-        self.log("debug", f"Process identity: {identity}", "init")
+        self.log("debug", f"Process identity: {_resolve_process_identity()}", "init")
 
         _allowed_env_keys = {
             "LANG",
@@ -195,6 +188,7 @@ class SDHLudusaviService:
         return {
             "auto_sync_enabled": self._auto_sync_enabled,
             "selected_game": self._selected_game,
+            "debug_logging": self._debug_logging,
             "notifications": dict(self._notification_settings),
             **self._updater.settings_payload(),
         }
@@ -223,6 +217,25 @@ class SDHLudusaviService:
         self._save_state()
         self.log("info", "Notification settings updated")
         return self.get_settings()
+
+    def set_debug_logging(self, enabled: bool) -> dict[str, Any]:
+        """Update the debug logging setting and persist it to disk."""
+        self._debug_logging = bool(enabled)
+        self._save_state()
+        self._apply_log_level()
+        self.log("info", f"Debug logging {'enabled' if enabled else 'disabled'}")
+        return self.get_settings()
+
+    def _apply_log_level(self) -> None:
+        try:
+            import decky
+
+            logger = getattr(decky, "logger", None)
+            if logger:
+                level = logging.DEBUG if self._debug_logging else logging.INFO
+                logger.setLevel(level)
+        except ImportError:
+            pass
 
     def get_ludusavi_launcher_shortcut_id(self) -> int:
         """Return the saved shortcut app ID, or -1 if none exists."""
@@ -330,12 +343,21 @@ class SDHLudusaviService:
     # Internal persistence & matching coordination
     def _load_state(self) -> None:
         """Load plugin settings and runtime cache from persistent storage."""
-        data = self._persistence.load_all()
+        from .persistence import StateLockTimeoutError
+
+        try:
+            data = self._persistence.load_all()
+        except StateLockTimeoutError as exc:
+            self.log("warning", f"Failed to acquire state lock during startup: {exc}")
+            data = {"settings": {}, "cache": {}}
+
         settings = data["settings"]
         cache = data["cache"]
 
         self._auto_sync_enabled = bool(settings.get("auto_sync_enabled", False))
         self._selected_game = str(settings.get("selected_game", ""))
+        self._debug_logging = bool(settings.get("debug_logging", True))
+        self._apply_log_level()
         self._notification_settings = _coerce_notification_settings(
             settings.get("notifications", {})
         )
@@ -358,6 +380,7 @@ class SDHLudusaviService:
             settings_payload = {
                 "auto_sync_enabled": self._auto_sync_enabled,
                 "selected_game": self._selected_game,
+                "debug_logging": self._debug_logging,
                 "notifications": dict(self._notification_settings),
                 **self._updater.settings_payload(),
             }
@@ -373,9 +396,6 @@ class SDHLudusaviService:
                 **self._updater.cache_payload(),
             }
             self._persistence.save_cache(cache_payload)
-
-    def _match_game(self, game_name: str, app_id: str | None = None) -> GameStatus | None:
-        return self._registry.match_game(game_name, app_id)
 
     # Updater helper methods
     def set_update_channel(self, channel: str) -> dict[str, Any]:
@@ -412,11 +432,16 @@ class SDHLudusaviService:
         # so a reconcile racing another plugin instance (Decky's update reload
         # storm) never promotes from, or writes back, a stale snapshot.
         # Lock order matches _save_state: state lock, then persistence lock.
-        with self._state_lock:
-            with self._persistence.locked():
-                fresh = self._persistence.load_all()
-                self._updater.adopt_persisted_cache(fresh["cache"])
-                self._updater.reconcile_pending_install(current_version)
+        from .persistence import StateLockTimeoutError
+
+        try:
+            with self._state_lock:
+                with self._persistence.locked():
+                    fresh = self._persistence.load_all()
+                    self._updater.adopt_persisted_cache(fresh["cache"])
+                    self._updater.reconcile_pending_install(current_version)
+        except StateLockTimeoutError as exc:
+            self.log("warning", f"Skipping pending install reconcile due to lock timeout: {exc}")
 
     def revalidate_plugin_update(self, candidate: dict[str, Any]) -> dict[str, Any]:
         return self._updater.revalidate(candidate)
@@ -459,6 +484,24 @@ def _skip(
             trigger = "unknown"
         service._history.record_history(game_name, operation, trigger, "skipped", reason=reason)
     return {"status": "skipped", "game": game_name, "reason": reason}
+
+
+def _resolve_process_identity() -> str:
+    uid = os.getuid()
+    euid = os.geteuid()
+    try:
+        import pwd
+
+        user = pwd.getpwuid(uid).pw_name
+    except (KeyError, ImportError):
+        import getpass
+
+        try:
+            user = getpass.getuser()
+        # Intentionally broad
+        except Exception:
+            user = "unknown"
+    return f"uid={uid}, euid={euid}, user={user}"
 
 
 def _coerce_notification_settings(settings: object) -> dict[str, bool]:

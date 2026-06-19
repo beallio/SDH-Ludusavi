@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# SDH-ludusavi release step. Invoked by the orchestration engine's finalize AFTER
+# it has merged the feature branch into dev and pushed. Requests a dev release.
+set -euo pipefail
+
+version="${1:-}"
+
+if [[ -z "$version" ]]; then
+  if command -v node >/dev/null 2>&1 && [[ -f package.json ]]; then
+    version="$(node -p "require('./package.json').version")"
+  else
+    echo "error: release version not supplied and package.json/node unavailable" >&2
+    exit 1
+  fi
+fi
+
+[[ -x ./scripts/request_dev_release.sh ]] || {
+  echo "error: missing executable ./scripts/request_dev_release.sh" >&2
+  exit 1
+}
+
+if command -v gh >/dev/null 2>&1; then
+  gh auth status >/dev/null 2>&1 || { echo "error: gh auth missing; run gh auth login" >&2; exit 1; }
+else
+  echo "error: gh not found on PATH" >&2
+  exit 1
+fi
+
+./scripts/request_dev_release.sh "$version"

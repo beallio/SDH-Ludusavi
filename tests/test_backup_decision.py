@@ -1,3 +1,4 @@
+from sdh_ludusavi.persistence import JsonSettingsStore
 from pathlib import Path
 from sdh_ludusavi.service import SDHLudusaviService
 
@@ -32,7 +33,11 @@ class FakeAdapter:
 
 def test_handle_game_exit_respects_ignored_decision(tmp_path):
     adapter = FakeAdapter()
-    service = SDHLudusaviService(adapter=adapter, state_path=Path(tmp_path) / "state.json")
+    service = SDHLudusaviService(
+        adapter=adapter,
+        settings_store=JsonSettingsStore(Path(tmp_path) / "settings.json"),
+        cache_path=Path(tmp_path) / "cache.json",
+    )
     service.set_auto_sync_enabled(True)
     service.refresh_games()
 
