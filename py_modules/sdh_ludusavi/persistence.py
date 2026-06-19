@@ -17,6 +17,12 @@ LOCK_ACQUIRE_TIMEOUT_SECONDS = 5.0
 LOCK_RETRY_INTERVAL_SECONDS = 0.05
 
 
+class StateLockTimeoutError(RuntimeError):
+    """Raised when the inter-process state lock cannot be acquired."""
+
+    pass
+
+
 class _InterProcessLock:
     """Advisory file lock shared by all plugin processes touching one state set.
 
@@ -37,7 +43,12 @@ class _InterProcessLock:
         self._thread_lock.acquire()
         self._depth += 1
         if self._depth == 1:
-            self._fd = self._acquire_file_lock()
+            try:
+                self._fd = self._acquire_file_lock()
+            except BaseException:
+                self._depth -= 1
+                self._thread_lock.release()
+                raise
         return self
 
     def __exit__(self, *exc_info: object) -> None:
@@ -51,13 +62,13 @@ class _InterProcessLock:
         self._depth -= 1
         self._thread_lock.release()
 
-    def _acquire_file_lock(self) -> int | None:
+    def _acquire_file_lock(self) -> int:
         try:
             self.path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
             fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
         except OSError as exc:
             LOGGER.warning("State lock unavailable at %s: %s", self.path, exc)
-            return None
+            raise StateLockTimeoutError(f"State lock unavailable at {self.path}: {exc}")
 
         deadline = time.monotonic() + LOCK_ACQUIRE_TIMEOUT_SECONDS
         while True:
@@ -67,13 +78,12 @@ class _InterProcessLock:
             except OSError:
                 if time.monotonic() >= deadline:
                     LOGGER.warning(
-                        "Timed out acquiring state lock at %s after %.1fs; "
-                        "proceeding without inter-process exclusion",
+                        "Timed out acquiring state lock at %s after %.1fs",
                         self.path,
                         LOCK_ACQUIRE_TIMEOUT_SECONDS,
                     )
                     os.close(fd)
-                    return None
+                    raise StateLockTimeoutError(f"Timed out acquiring state lock at {self.path}")
                 time.sleep(LOCK_RETRY_INTERVAL_SECONDS)
 
 

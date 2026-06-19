@@ -344,7 +344,14 @@ class SDHLudusaviService:
     # Internal persistence & matching coordination
     def _load_state(self) -> None:
         """Load plugin settings and runtime cache from persistent storage."""
-        data = self._persistence.load_all()
+        from .persistence import StateLockTimeoutError
+
+        try:
+            data = self._persistence.load_all()
+        except StateLockTimeoutError as exc:
+            self.log("warning", f"Failed to acquire state lock during startup: {exc}")
+            data = {"settings": {}, "cache": {}}
+
         settings = data["settings"]
         cache = data["cache"]
 
@@ -426,11 +433,16 @@ class SDHLudusaviService:
         # so a reconcile racing another plugin instance (Decky's update reload
         # storm) never promotes from, or writes back, a stale snapshot.
         # Lock order matches _save_state: state lock, then persistence lock.
-        with self._state_lock:
-            with self._persistence.locked():
-                fresh = self._persistence.load_all()
-                self._updater.adopt_persisted_cache(fresh["cache"])
-                self._updater.reconcile_pending_install(current_version)
+        from .persistence import StateLockTimeoutError
+
+        try:
+            with self._state_lock:
+                with self._persistence.locked():
+                    fresh = self._persistence.load_all()
+                    self._updater.adopt_persisted_cache(fresh["cache"])
+                    self._updater.reconcile_pending_install(current_version)
+        except StateLockTimeoutError as exc:
+            self.log("warning", f"Skipping pending install reconcile due to lock timeout: {exc}")
 
     def revalidate_plugin_update(self, candidate: dict[str, Any]) -> dict[str, Any]:
         return self._updater.revalidate(candidate)
