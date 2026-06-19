@@ -105,6 +105,75 @@ class GameLifecycleManager:
         change = cast(dict[str, object], game_output).get("change")
         return change if isinstance(change, str) else None
 
+    def _execute_operation(
+        self,
+        *,
+        operation: str,
+        trigger: str,
+        game_name: str,
+        adapter_call: Callable[[], Any],
+        same_handling: bool,
+        refresh: bool,
+        record_order: Literal["before_log", "after_log"],
+        success_status: str,
+        success_log: str,
+        same_log: str | None = None,
+        result_extra: dict[str, object] | None = None,
+        skip_locked_history: bool = False,
+    ) -> dict[str, object]:
+        try:
+            result = self.dependencies.run_locked(operation, game_name, adapter_call)
+            change = self._result_change(result, game_name) if same_handling else None
+            is_same = same_handling and change == "Same"
+
+            if record_order == "before_log":
+                if is_same:
+                    self.dependencies.history.record_history(
+                        game_name, operation, trigger, "skipped", reason="local_current"
+                    )
+                else:
+                    self.dependencies.history.record_history(
+                        game_name, operation, trigger, success_status
+                    )
+        # Intentionally broad: record history and re-raise on adapter failure
+        except Exception as exc:
+            if skip_locked_history and isinstance(exc, OperationLockedError):
+                raise
+            self.dependencies.history.record_history(
+                game_name, operation, trigger, "failed", message=str(exc)
+            )
+            raise
+
+        if refresh:
+            self.dependencies.registry.refresh_after_operation(game_name)
+
+        if is_same:
+            if same_log:
+                self.dependencies.log("info", same_log, operation, game_name)
+            resp = {
+                "status": "skipped",
+                "reason": "local_current",
+                "game": game_name,
+                "result": result,
+            }
+            if result_extra:
+                resp.update(result_extra)
+            return resp
+
+        self.dependencies.log("info", success_log, operation, game_name)
+
+        if record_order == "after_log":
+            self.dependencies.history.record_history(game_name, operation, trigger, success_status)
+
+        resp = {
+            "status": success_status,
+            "game": game_name,
+            "result": result,
+        }
+        if result_extra:
+            resp.update(result_extra)
+        return resp
+
     def check_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Check whether a game launch needs a restore without changing local saves."""
         game_name = sanitize_game_name(game_name)
@@ -207,41 +276,32 @@ class GameLifecycleManager:
             return self.dependencies.skip("start", game.name, "game_error")
 
         if resolution == "keep_local":
-            try:
-                result = self.dependencies.run_locked(
-                    "backup",
-                    game.name,
-                    lambda: self.dependencies.gateway.get_adapter().backup(game.name),
-                )
-                self.dependencies.history.record_history(
-                    game.name, "backup", "auto_start", "backed_up"
-                )
-            # Intentionally broad: record history and re-raise on backup failure
-            except Exception as exc:
-                self.dependencies.history.record_history(
-                    game.name, "backup", "auto_start", "failed", message=str(exc)
-                )
-                raise
-            self.dependencies.log("info", f"Kept local save for {game.name}", "backup", game.name)
-            return {"status": "backed_up", "game": game.name, "result": result}
+            return self._execute_operation(
+                operation="backup",
+                trigger="auto_start",
+                game_name=game.name,
+                adapter_call=lambda: self.dependencies.gateway.get_adapter().backup(game.name),
+                same_handling=False,
+                refresh=False,
+                record_order="before_log",
+                success_status="backed_up",
+                success_log=f"Kept local save for {game.name}",
+            )
 
         if not game.has_backup:
             return self.dependencies.skip("start", game.name, "no_backup")
-        try:
-            result = self.dependencies.run_locked(
-                "restore",
-                game.name,
-                lambda: self.dependencies.gateway.get_adapter().restore(game.name),
-            )
-            self.dependencies.history.record_history(game.name, "restore", "auto_start", "restored")
-        # Intentionally broad: record history and re-raise on restore failure
-        except Exception as exc:
-            self.dependencies.history.record_history(
-                game.name, "restore", "auto_start", "failed", message=str(exc)
-            )
-            raise
-        self.dependencies.log("info", f"Restored backup save for {game.name}", "restore", game.name)
-        return {"status": "restored", "game": game.name, "result": result}
+
+        return self._execute_operation(
+            operation="restore",
+            trigger="auto_start",
+            game_name=game.name,
+            adapter_call=lambda: self.dependencies.gateway.get_adapter().restore(game.name),
+            same_handling=False,
+            refresh=False,
+            record_order="before_log",
+            success_status="restored",
+            success_log=f"Restored backup save for {game.name}",
+        )
 
     def restore_game_on_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Restore a game's backup during launch after a check reports it is needed."""
@@ -263,21 +323,17 @@ class GameLifecycleManager:
         if game.error:
             return self.dependencies.skip("start", game.name, "game_error")
 
-        try:
-            result = self.dependencies.run_locked(
-                "restore",
-                game.name,
-                lambda: self.dependencies.gateway.get_adapter().restore(game.name),
-            )
-        # Intentionally broad: record history and re-raise on launch restore failure
-        except Exception as exc:
-            self.dependencies.history.record_history(
-                game.name, "restore", "auto_start", "failed", message=str(exc)
-            )
-            raise
-        self.dependencies.log("info", f"Restored {game.name} before launch", "restore", game.name)
-        self.dependencies.history.record_history(game.name, "restore", "auto_start", "restored")
-        return {"status": "restored", "game": game.name, "result": result}
+        return self._execute_operation(
+            operation="restore",
+            trigger="auto_start",
+            game_name=game.name,
+            adapter_call=lambda: self.dependencies.gateway.get_adapter().restore(game.name),
+            same_handling=False,
+            refresh=False,
+            record_order="after_log",
+            success_status="restored",
+            success_log=f"Restored {game.name} before launch",
+        )
 
     def handle_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Compatibility wrapper for the original one-call launch autosync flow."""
@@ -365,23 +421,17 @@ class GameLifecycleManager:
         if game.error:
             return self.dependencies.skip("exit", game.name, "game_error")
 
-        try:
-            result = self.dependencies.run_locked(
-                "backup",
-                game.name,
-                lambda: self.dependencies.gateway.get_adapter().backup(game.name),
-            )
-            self.dependencies.history.record_history(game.name, "backup", "auto_exit", "backed_up")
-        # Intentionally broad: record history and re-raise on exit backup failure
-        except Exception as exc:
-            self.dependencies.history.record_history(
-                game.name, "backup", "auto_exit", "failed", message=str(exc)
-            )
-            raise
-
-        self.dependencies.registry.refresh_after_operation(game.name)
-        self.dependencies.log("info", f"Backed up {game.name} after exit", "backup", game.name)
-        return {"status": "backed_up", "game": game.name, "result": result}
+        return self._execute_operation(
+            operation="backup",
+            trigger="auto_exit",
+            game_name=game.name,
+            adapter_call=lambda: self.dependencies.gateway.get_adapter().backup(game.name),
+            same_handling=False,
+            refresh=True,
+            record_order="before_log",
+            success_status="backed_up",
+            success_log=f"Backed up {game.name} after exit",
+        )
 
     def handle_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Compatibility wrapper for the original one-call exit autosync flow."""
@@ -397,48 +447,18 @@ class GameLifecycleManager:
         if game is None:
             return self.dependencies.skip("backup", game_name, "unmatched_game")
 
-        try:
-            result = self.dependencies.run_locked(
-                "backup",
-                game.name,
-                lambda: self.dependencies.gateway.get_adapter().backup(game.name),
-            )
-            change = self._result_change(result, game.name)
-            if change == "Same":
-                self.dependencies.history.record_history(
-                    game.name,
-                    "backup",
-                    "manual_backup",
-                    "skipped",
-                    reason="local_current",
-                )
-            else:
-                self.dependencies.history.record_history(
-                    game.name, "backup", "manual_backup", "backed_up"
-                )
-        # Intentionally broad: record history and re-raise on manual backup failure
-        except Exception as exc:
-            self.dependencies.history.record_history(
-                game.name, "backup", "manual_backup", "failed", message=str(exc)
-            )
-            raise
-
-        self.dependencies.registry.refresh_after_operation(game.name)
-        if change == "Same":
-            self.dependencies.log(
-                "info",
-                f"Backup skipped for {game.name}: local save already current",
-                "backup",
-                game.name,
-            )
-            return {
-                "status": "skipped",
-                "reason": "local_current",
-                "game": game.name,
-                "result": result,
-            }
-        self.dependencies.log("info", f"Backed up {game.name}", "backup", game.name)
-        return {"status": "backed_up", "game": game.name, "result": result}
+        return self._execute_operation(
+            operation="backup",
+            trigger="manual_backup",
+            game_name=game.name,
+            adapter_call=lambda: self.dependencies.gateway.get_adapter().backup(game.name),
+            same_handling=True,
+            refresh=True,
+            record_order="before_log",
+            success_status="backed_up",
+            success_log=f"Backed up {game.name}",
+            same_log=f"Backup skipped for {game.name}: local save already current",
+        )
 
     def force_restore(self, game_name: str) -> dict[str, object]:
         """Trigger a manual restore for the specified game."""
@@ -449,47 +469,18 @@ class GameLifecycleManager:
         if not game.has_backup:
             return self.dependencies.skip("restore", game.name, "no_backup")
 
-        try:
-            result = self.dependencies.run_locked(
-                "restore",
-                game.name,
-                lambda: self.dependencies.gateway.get_adapter().restore(game.name),
-            )
-            change = self._result_change(result, game.name)
-            if change == "Same":
-                self.dependencies.history.record_history(
-                    game.name,
-                    "restore",
-                    "manual_restore",
-                    "skipped",
-                    reason="local_current",
-                )
-            else:
-                self.dependencies.history.record_history(
-                    game.name, "restore", "manual_restore", "restored"
-                )
-        # Intentionally broad: record history and re-raise on manual restore failure
-        except Exception as exc:
-            self.dependencies.history.record_history(
-                game.name, "restore", "manual_restore", "failed", message=str(exc)
-            )
-            raise
-        self.dependencies.registry.refresh_after_operation(game.name)
-        if change == "Same":
-            self.dependencies.log(
-                "info",
-                f"Restore skipped for {game.name}: local save already current",
-                "restore",
-                game.name,
-            )
-            return {
-                "status": "skipped",
-                "reason": "local_current",
-                "game": game.name,
-                "result": result,
-            }
-        self.dependencies.log("info", f"Restored {game.name}", "restore", game.name)
-        return {"status": "restored", "game": game.name, "result": result}
+        return self._execute_operation(
+            operation="restore",
+            trigger="manual_restore",
+            game_name=game.name,
+            adapter_call=lambda: self.dependencies.gateway.get_adapter().restore(game.name),
+            same_handling=True,
+            refresh=True,
+            record_order="before_log",
+            success_status="restored",
+            success_log=f"Restored {game.name}",
+            same_log=f"Restore skipped for {game.name}: local save already current",
+        )
 
     def list_backups(self, game_name: str) -> dict[str, object]:
         game_name = sanitize_game_name(game_name)
@@ -513,56 +504,19 @@ class GameLifecycleManager:
         if not backup_id or "/" in backup_id or "\\" in backup_id or ".." in backup_id:
             raise ValueError(f"Invalid backup ID: {backup_id}")
 
-        try:
-            result = self.dependencies.run_locked(
-                "restore",
-                game.name,
-                lambda: self.dependencies.gateway.get_adapter().restore_backup(
-                    game.name, backup_id
-                ),
-            )
-            change = self._result_change(result, game.name)
-            if change == "Same":
-                self.dependencies.history.record_history(
-                    game.name, "restore", "manual_restore", "skipped", reason="local_current"
-                )
-            else:
-                self.dependencies.history.record_history(
-                    game.name, "restore", "manual_restore", "restored"
-                )
-        except OperationLockedError:
-            raise
-        # Intentionally broad: record history and re-raise on point in time restore failure
-        except Exception as exc:
-            self.dependencies.history.record_history(
-                game.name, "restore", "manual_restore", "failed", message=str(exc)
-            )
-            raise
-
-        self.dependencies.registry.refresh_after_operation(game.name)
-        if change == "Same":
-            self.dependencies.log(
-                "info",
-                f"Restore skipped for {game.name} from backup {backup_id}: local save already matches backup",
-                "restore",
-                game.name,
-            )
-            return {
-                "status": "skipped",
-                "reason": "local_current",
-                "game": game.name,
-                "backup_id": backup_id,
-                "result": result,
-            }
-        self.dependencies.log(
-            "info",
-            f"Restored {game.name} from backup {backup_id}",
-            "restore",
-            game.name,
+        return self._execute_operation(
+            operation="restore",
+            trigger="manual_restore",
+            game_name=game.name,
+            adapter_call=lambda: self.dependencies.gateway.get_adapter().restore_backup(
+                game.name, backup_id
+            ),
+            same_handling=True,
+            refresh=True,
+            record_order="before_log",
+            success_status="restored",
+            success_log=f"Restored {game.name} from backup {backup_id}",
+            same_log=f"Restore skipped for {game.name} from backup {backup_id}: local save already matches backup",
+            result_extra={"backup_id": backup_id},
+            skip_locked_history=True,
         )
-        return {
-            "status": "restored",
-            "game": game.name,
-            "backup_id": backup_id,
-            "result": result,
-        }
