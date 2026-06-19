@@ -135,66 +135,33 @@ export class LudusaviStateStore {
     return normalized;
   }
 
-  setSelectedGame(selectedGame: string) {
-    this.commit({ selectedGame });
+  patchSettings(partial: Partial<Settings>) {
+    const next = { ...(this.snapshot.settings ?? defaultSettings()), ...partial };
+    this.applySettings(next);
   }
 
-  syncSelectedGameCache(selectedGame: string) {
-    const settings = this.snapshot.settings
-      ? { ...this.snapshot.settings, selected_game: selectedGame }
-      : { ...defaultSettings(), selected_game: selectedGame };
-    this.commit({ settings, selectedGame });
+  setSelectedGame(selectedGame: string) {
+    this.patchSettings({ selected_game: selectedGame });
   }
 
   setAutoSyncEnabled(enabled: boolean) {
-    const settings = {
-      ...(this.snapshot.settings ?? defaultSettings()),
-      auto_sync_enabled: enabled
-    };
-    this.commit({
-      settings,
-      autoSyncNotificationsEnabled: enabled
-    });
+    this.patchSettings({ auto_sync_enabled: enabled });
   }
 
   setDebugLogging(enabled: boolean) {
-    const settings = {
-      ...(this.snapshot.settings ?? defaultSettings()),
-      debug_logging: enabled
-    };
-    this.commit({ settings });
+    this.patchSettings({ debug_logging: enabled });
   }
 
   setNotificationSettings(notifications: NotificationSettings) {
-    const normalizedNotifications = normalizeNotificationSettings(notifications);
-    const settings = {
-      ...(this.snapshot.settings ?? defaultSettings()),
-      notifications: normalizedNotifications
-    };
-    this.commit({
-      settings,
-      notificationSettings: normalizedNotifications
-    });
+    this.patchSettings({ notifications });
   }
 
   setUpdateChannel(channel: UpdateChannel) {
-    const settings = {
-      ...(this.snapshot.settings ?? defaultSettings()),
-      update_channel: channel
-    };
-    this.commit({
-      settings
-    });
+    this.patchSettings({ update_channel: channel });
   }
 
   setAutomaticUpdateChecks(enabled: boolean) {
-    const settings = {
-      ...(this.snapshot.settings ?? defaultSettings()),
-      automatic_update_checks: enabled
-    };
-    this.commit({
-      settings
-    });
+    this.patchSettings({ automatic_update_checks: enabled });
   }
 
   setGameHistory(history: Record<string, GameOperationHistory>) {
