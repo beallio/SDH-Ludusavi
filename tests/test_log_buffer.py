@@ -14,8 +14,7 @@ class DummyService:
 
 
 def test_diagnostic_log_buffer_push_get() -> None:
-    svc = DummyService(limit=5)
-    buf = DiagnosticLogBuffer(svc)
+    buf = DiagnosticLogBuffer()
     buf.push_log_record("info", "Initialized", "init", "Hades")
     buf.push_log_record("error", "Failed backup", "backup", "Hades")
 
@@ -27,8 +26,7 @@ def test_diagnostic_log_buffer_push_get() -> None:
 
 
 def test_decky_log_handler_emit() -> None:
-    svc = DummyService(limit=5)
-    buf = DiagnosticLogBuffer(svc)
+    buf = DiagnosticLogBuffer()
     handler = DeckyLogHandler(buf)
     handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
     logger = logging.getLogger("test_srp_logger")
@@ -105,8 +103,7 @@ def test_setup_logging_level(monkeypatch, tmp_path):
     decky, logger = fake_decky_module(tmp_path)
     monkeypatch.setitem(sys.modules, "decky", decky)
 
-    svc = DummyService()
-    buf = DiagnosticLogBuffer(svc)
+    buf = DiagnosticLogBuffer()
     buf.setup_logging()
 
     assert logging.DEBUG in logger.levels

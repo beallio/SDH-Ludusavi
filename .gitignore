@@ -74,3 +74,6 @@ cli/decky
 .agents
 .claude
 CLAUDE.md
+
+# orchestration engine: machine/trial-only config override
+orchestration.conf.local
