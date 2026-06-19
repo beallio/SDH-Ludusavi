@@ -23,6 +23,13 @@ fi
 echo "Checking types..."
 ./run.sh uv run ty check py_modules/sdh_ludusavi/ || { echo "Type check failed."; exit 1; }
 
+# Install frontend deps before pytest: the packaging tests
+# (tests/test_package_plugin.py, tests/test_validate_plugin_zip.py) shell out to
+# `pnpm run build`, which needs node_modules/rollup. On a clean CI runner this is
+# absent until `pnpm run verify` below, so install it first.
+echo "Installing frontend dependencies (required by packaging tests)..."
+./run.sh pnpm install --frozen-lockfile || { echo "Frontend dependency install failed."; exit 1; }
+
 echo "Running tests..."
 ./run.sh uv run pytest || { echo "Pytest failed."; exit 1; }
 
