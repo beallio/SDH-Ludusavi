@@ -7,7 +7,7 @@ import type {
   RpcStatus
 } from "../types";
 import { log } from "../utils/logging";
-import { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus, isLudusaviRunningStatus } from "./autoSyncStatusRenderer";
+import { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus, isLudusaviRunningStatus, isSyncthingStatus } from "./autoSyncStatusRenderer";
 import type { AutoSyncStatusBrowserViewApi } from "./autoSyncStatusBrowserView";
 
 export { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus };
@@ -45,12 +45,6 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
     deferredAutoSyncStatusState = null;
   }
 
-  function isSyncthingStatus(status: AutoSyncStatusKind): boolean {
-    return status === "syncthing_pending_upload"
-      || status === "syncthing_uploading"
-      || status === "syncthing_downloading"
-      || status === "syncthing_complete";
-  }
 
   function logAutoSyncStatusChange(state: AutoSyncStatusState) {
     log(
