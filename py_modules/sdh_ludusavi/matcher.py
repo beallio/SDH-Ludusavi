@@ -82,12 +82,22 @@ class GameRegistryMatcher:
 
         # 4. Fuzzy Match (Substring)
         log("debug", f"Checking fuzzy substring match for '{normalized_input}'")
+        candidates = []
         for game in games.values():
             normalized_target = self.normalize(game.name)
             if normalized_input in normalized_target or normalized_target in normalized_input:
                 if self.fuzzy_match_allowed(normalized_input, normalized_target, game.configured):
-                    log("info", f"Matched '{game_name}' via fuzzy substring to '{game.name}'")
-                    return game
+                    candidates.append(game)
+
+        if len(candidates) == 1:
+            log("info", f"Matched '{game_name}' via fuzzy substring to '{candidates[0].name}'")
+            return candidates[0]
+        elif len(candidates) > 1:
+            log(
+                "info",
+                f"Ambiguous fuzzy match for '{game_name}' ({len(candidates)} candidates: {', '.join(g.name for g in candidates)}). Rejecting.",
+            )
+            return None
 
         log(
             "info",

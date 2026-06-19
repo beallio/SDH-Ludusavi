@@ -25,6 +25,9 @@ LOGGER = logging.getLogger(__name__)
 _ALIASES_INIT_LOCK = threading.Lock()
 _MONITORED_CONFIG_FILES = ("cache.yaml", "manifest.yaml")
 
+BACKUP_STAT_MAX_ENTRIES = 1000
+BACKUP_STAT_MAX_SNAPSHOTS = 10
+
 
 def _ludusavi_env() -> dict[str, str]:
     """
@@ -314,11 +317,14 @@ class PyludusaviAdapter:
         total_size = 0
         all_unknown = True
 
-        for b in api_backups:
+        for i, b in enumerate(api_backups):
             b_name = b.get("name")
-            size_bytes, file_count = (None, None)
-            if backup_path and b_name:
-                size_bytes, file_count = _backup_disk_stats(str(backup_path), b_name)
+            size_bytes = b.get("size")
+            file_count = b.get("file_count")
+
+            if size_bytes is None and backup_path and b_name:
+                if i < BACKUP_STAT_MAX_SNAPSHOTS:
+                    size_bytes, file_count = _backup_disk_stats(str(backup_path), b_name)
 
             if size_bytes is not None:
                 total_size += size_bytes
@@ -499,10 +505,14 @@ def _backup_disk_stats(backup_path: str, backup_name: str) -> tuple[int | None, 
         if backup_name == ".":
             total_size = 0
             total_count = 0
+            scanned_entries = 0
             for root, dirs, files in os.walk(backup_path):
                 if root == str(backup_path):
                     dirs[:] = [d for d in dirs if not d.startswith("backup-")]
                     files = [f for f in files if f != "mapping.yaml"]
+                scanned_entries += len(dirs) + len(files)
+                if scanned_entries > BACKUP_STAT_MAX_ENTRIES:
+                    return None, None
                 for f in files:
                     fp = os.path.join(root, f)
                     try:
@@ -517,7 +527,11 @@ def _backup_disk_stats(backup_path: str, backup_name: str) -> tuple[int | None, 
         if target.is_dir():
             total_size = 0
             total_count = 0
-            for root, _, files in os.walk(target):
+            scanned_entries = 0
+            for root, dirs, files in os.walk(target):
+                scanned_entries += len(dirs) + len(files)
+                if scanned_entries > BACKUP_STAT_MAX_ENTRIES:
+                    return None, None
                 for f in files:
                     fp = os.path.join(root, f)
                     try:
@@ -535,7 +549,10 @@ def _backup_disk_stats(backup_path: str, backup_name: str) -> tuple[int | None, 
             count = None
             try:
                 with zipfile.ZipFile(target, "r") as z:
-                    count = len([info for info in z.infolist() if not info.is_dir()])
+                    info_list = z.infolist()
+                    if len(info_list) > BACKUP_STAT_MAX_ENTRIES:
+                        return None, None
+                    count = len([info for info in info_list if not info.is_dir()])
             except zipfile.BadZipFile:
                 pass
             return size, count
@@ -547,7 +564,10 @@ def _backup_disk_stats(backup_path: str, backup_name: str) -> tuple[int | None, 
             count = None
             try:
                 with zipfile.ZipFile(alt_target, "r") as z:
-                    count = len([info for info in z.infolist() if not info.is_dir()])
+                    info_list = z.infolist()
+                    if len(info_list) > BACKUP_STAT_MAX_ENTRIES:
+                        return None, None
+                    count = len([info for info in info_list if not info.is_dir()])
             except zipfile.BadZipFile:
                 pass
             return size, count

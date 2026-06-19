@@ -185,4 +185,68 @@ describe("SettingsMutationRuntime", () => {
 
     expect(store.getSnapshot().settings?.update_channel).toBe("stable");
   });
+
+  it("late resolution only applies its specific field and does not clobber newer unrelated settings", async () => {
+    const store = createLudusaviStateStore();
+    const runtime = createSettingsMutationRuntime();
+    const rpc = await import("../api/ludusaviRpc");
+
+    runtime.setActiveStore(store, vi.fn());
+    const controller = runtime.createController({
+      ludusaviStore: store,
+      notifyFailure: vi.fn()
+    });
+
+    store.applySettings({ auto_sync_enabled: false, selected_game: "A", update_channel: "stable", notifications: { failures_errors: false } } as any);
+
+    let resolveAutoSync: any;
+    let resolveSelectedGame: any;
+    let resolveNotification: any;
+
+    vi.mocked(rpc.setAutoSyncEnabled).mockReturnValueOnce(new Promise(r => resolveAutoSync = r));
+    vi.mocked(rpc.setSelectedGameCall).mockReturnValueOnce(new Promise(r => resolveSelectedGame = r));
+    vi.mocked(rpc.setNotificationSettings).mockReturnValueOnce(new Promise(r => resolveNotification = r));
+
+    // 1. autoSync starts (generation 1)
+    controller.toggleAutoSync(true);
+    // 2. selectedGame starts (generation 2)
+    controller.onGameChange("B");
+    // 3. notifications start (generation 3)
+    controller.toggleNotificationSetting("failures_errors", true);
+
+    // Optimistically all are applied
+    expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(true);
+    expect(store.getSnapshot().settings?.selected_game).toBe("B");
+    expect(store.getSnapshot().settings?.notifications.failures_errors).toBe(true);
+
+    // 4. selectedGame succeeds! (generation 2 resolves)
+    resolveSelectedGame({ auto_sync_enabled: false, selected_game: "B", update_channel: "stable", notifications: { failures_errors: false } } as any);
+    await vi.runAllTimersAsync();
+
+    // Since it was generation 2 (not latest, generation 3 is latest), it should ONLY merge selected_game.
+    // It should NOT clobber the optimistic notifications or autoSync.
+    expect(store.getSnapshot().settings?.selected_game).toBe("B");
+    expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(true);
+    expect(store.getSnapshot().settings?.notifications.failures_errors).toBe(true);
+
+    // 5. autoSync succeeds late! (generation 1 resolves)
+    resolveAutoSync({ auto_sync_enabled: true, selected_game: "A", update_channel: "stable", notifications: { failures_errors: false } } as any);
+    await vi.runAllTimersAsync();
+
+    // It should ONLY merge auto_sync_enabled.
+    // It should NOT clobber the successfully persisted selected_game or the optimistic notifications.
+    expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(true);
+    expect(store.getSnapshot().settings?.selected_game).toBe("B");
+    expect(store.getSnapshot().settings?.notifications.failures_errors).toBe(true);
+
+    // 6. notifications succeeds! (generation 3 resolves)
+    // This is the latest generation, so it applies the full snapshot.
+    // However, the backend would return a snapshot reflecting all previous successes.
+    resolveNotification({ auto_sync_enabled: true, selected_game: "B", update_channel: "stable", notifications: { failures_errors: true } } as any);
+    await vi.runAllTimersAsync();
+
+    expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(true);
+    expect(store.getSnapshot().settings?.selected_game).toBe("B");
+    expect(store.getSnapshot().settings?.notifications.failures_errors).toBe(true);
+  });
 });
