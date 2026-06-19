@@ -897,3 +897,23 @@ def test_plugin_main_survives_singleton_guard_failure(
     asyncio.run(plugin._main())
 
     assert reconciled
+
+
+def test_call_reraises_system_exit_and_keyboard_interrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decky, logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+
+    def raise_system_exit() -> dict[str, object]:
+        raise SystemExit(1)
+
+    def raise_keyboard_interrupt() -> dict[str, object]:
+        raise KeyboardInterrupt()
+
+    with pytest.raises(SystemExit):
+        asyncio.run(plugin._call("refresh", raise_system_exit))
+
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(plugin._call("refresh", raise_keyboard_interrupt))
