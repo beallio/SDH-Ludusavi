@@ -60,8 +60,10 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
     assert all(name.startswith("SDH-Ludusavi/") for name in names)
     assert "SDH-Ludusavi/plugin.json" in names
 
-    # Version should start with the current development version and may include a git hash
-    assert plugin_metadata["version"].startswith("0.3.1")
+    # Version should start with the repository's source version (the single
+    # source of truth) and may include a git hash, so releases don't require
+    # editing this test.
+    assert plugin_metadata["version"].startswith(module.validate_package_versions(Path.cwd()))
     assert package_metadata["version"] == plugin_metadata["version"]
     assert "SDH-Ludusavi/dist/index.js" in names
     assert "SDH-Ludusavi/dist/index.js.map" in names
@@ -112,11 +114,14 @@ def test_package_metadata_versions_match_release_version() -> None:
     plugin_metadata = json.loads(Path("plugin.json").read_text())
     package_metadata = json.loads(Path("package.json").read_text())
 
-    assert plugin_metadata["version"] == "0.3.1"
-    assert package_metadata["version"] == "0.3.1"
+    # Derive the expected version from the single source of truth rather than
+    # hardcoding it (releases shouldn't require editing this test). The call also
+    # raises if plugin.json and package.json disagree.
+    expected_version = module.validate_package_versions(Path.cwd())
+    assert plugin_metadata["version"] == expected_version
+    assert package_metadata["version"] == expected_version
     assert "_root" not in plugin_metadata.get("flags", [])
     assert "root" not in plugin_metadata["publish"]["tags"]
-    assert module.validate_package_versions(Path.cwd()) == "0.3.1"
 
 
 def test_package_validation_rejects_mismatched_metadata(tmp_path: Path) -> None:
@@ -190,7 +195,7 @@ def test_package_script_supports_release_arguments(tmp_path: Path) -> None:
     assert manifest_data["pluginName"] == "SDH-Ludusavi"
     assert manifest_data["packageName"] == "sdh-ludusavi"
     assert manifest_data["version"] == "0.3.0"
-    assert manifest_data["sourceVersion"] == "0.3.1"
+    assert manifest_data["sourceVersion"] == json.loads(plugin_src)["version"]
     assert manifest_data["tag"] == "v0.3.0"
     assert manifest_data["channel"] == "stable"
     assert manifest_data["assetName"] == "SDH-Ludusavi-v0.3.0.zip"
