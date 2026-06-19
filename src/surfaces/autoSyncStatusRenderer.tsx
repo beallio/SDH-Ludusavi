@@ -28,6 +28,15 @@ export function isSyncthingActiveStatus(status: AutoSyncStatusKind): boolean {
   );
 }
 
+export function isSyncthingStatus(status: AutoSyncStatusKind): boolean {
+  return (
+    status === "syncthing_pending_upload" ||
+    status === "syncthing_uploading" ||
+    status === "syncthing_downloading" ||
+    status === "syncthing_complete"
+  );
+}
+
 export function shouldAutoHideStatus(status: AutoSyncStatusKind): boolean {
   return !isSyncthingActiveStatus(status);
 }
