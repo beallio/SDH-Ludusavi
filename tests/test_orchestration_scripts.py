@@ -15,6 +15,10 @@ from pathlib import Path
 import pytest
 
 ORCH = Path(__file__).resolve().parents[1] / "scripts" / "orchestration"
+pytestmark = pytest.mark.skipif(
+    not (ORCH / "mark-finished").exists(),
+    reason="orchestration scripts are a local-only symlink (../agent-orchestration); absent on CI runners",
+)
 SLUG = "demo-feature"
 
 
