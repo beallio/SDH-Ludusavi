@@ -5,7 +5,6 @@ import os
 from collections import deque
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any
 
 LOGGER = logging.getLogger("sdh_ludusavi.service.log_buffer")
 
@@ -66,7 +65,7 @@ def _decky_log_fallback(level: str, message: str) -> None:
             logger_level_map = {
                 "warning": getattr(logger, "warning", logger.info),
                 "error": getattr(logger, "error", getattr(logger, "exception", logger.info)),
-                "debug": getattr(logger, "info", None),
+                "debug": getattr(logger, "debug", getattr(logger, "info", None)),
                 "info": getattr(logger, "info", None),
             }
             logger_level = logger_level_map.get(level, getattr(logger, "info", None))
@@ -82,8 +81,7 @@ class DiagnosticLogBuffer:
     and configuring the custom standard Python logging handler.
     """
 
-    def __init__(self, service: Any, log_limit: int = 100) -> None:
-        self._service = service
+    def __init__(self, log_limit: int = 100) -> None:
         self._logs: deque[LogEntry] = deque(maxlen=log_limit)
 
     def log(
@@ -129,3 +127,12 @@ class DiagnosticLogBuffer:
 
             logger.addHandler(handler)
             logger.propagate = not bool(os.environ.get("DECKY_VERSION"))
+
+        try:
+            import decky
+
+            logger = getattr(decky, "logger", None)
+            if logger:
+                logger.setLevel(logging.DEBUG)
+        except ImportError:
+            pass

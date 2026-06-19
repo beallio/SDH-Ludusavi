@@ -412,8 +412,13 @@ export class SyncthingMonitor {
       timeoutStartedAt !== null &&
       Date.now() - timeoutStartedAt > MAX_WATCH_DURATION_MS
     ) {
-      log("info", `Syncthing watch ${context.watchID} hit the active 120s timeout, stopping.`);
-      this.handlePollFailure(context, "watch_duration_timeout");
+      if (context.phase === "pre_game") {
+        log("info", `Syncthing pre-game watch reached max duration with no incoming sync; stopping: generation=${context.generation}`);
+        this.stopWatchTerminally(context, "watch_duration_timeout");
+      } else {
+        log("info", `Syncthing watch ${context.watchID} hit the active 120s timeout, stopping.`);
+        this.handlePollFailure(context, "watch_duration_timeout");
+      }
       return;
     }
 
@@ -450,11 +455,10 @@ export class SyncthingMonitor {
     }
   }
 
-  private handlePollFailure(context: WatchContext, message: string, reason?: string): void {
+  private stopWatchTerminally(context: WatchContext, reason?: string): void {
     if (context.cancelled) {
       return;
     }
-    log("error", `Syncthing poll failure: generation=${context.generation} message=${message}`);
 
     if (context.generation === this.currentGeneration) {
       this.clearPollTimeout();
@@ -467,6 +471,14 @@ export class SyncthingMonitor {
     if (effects.stopWatch && wID !== null) {
       void this.stopWatchSafe(wID);
     }
+  }
+
+  private handlePollFailure(context: WatchContext, message: string, reason?: string): void {
+    if (context.cancelled) {
+      return;
+    }
+    log("error", `Syncthing poll failure: generation=${context.generation} message=${message}`);
+    this.stopWatchTerminally(context, reason);
   }
 
   private async stopWatchSafe(wID: string): Promise<void> {

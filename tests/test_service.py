@@ -15,6 +15,18 @@ from sdh_ludusavi.persistence import JsonSettingsStore
 from sdh_ludusavi.types import GameStatus
 
 
+@pytest.fixture(autouse=True)
+def mock_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    from sdh_ludusavi.watchdog import _ProcessIdentity
+
+    monkeypatch.setattr("sdh_ludusavi.watchdog.os.geteuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(
+        "sdh_ludusavi.watchdog._read_process_identity",
+        lambda pid: _ProcessIdentity(12345, 1000),
+        raising=False,
+    )
+
+
 class FakeAdapter:
     def __init__(self) -> None:
         self.games = [
@@ -140,6 +152,7 @@ def expected_settings(
     notifications: dict[str, bool] | None = None,
     update_channel: str = "stable",
     automatic_update_checks: bool = True,
+    debug_logging: bool = True,
 ) -> dict[str, object]:
     return {
         "auto_sync_enabled": auto_sync_enabled,
@@ -147,6 +160,7 @@ def expected_settings(
         "notifications": notifications or dict(DEFAULT_NOTIFICATIONS),
         "update_channel": update_channel,
         "automatic_update_checks": automatic_update_checks,
+        "debug_logging": debug_logging,
     }
 
 
@@ -156,11 +170,15 @@ def test_settings_do_not_initialize_ludusavi_adapter(tmp_path: Path) -> None:
 
     service = SDHLudusaviService(
         adapter_factory=fail_factory,
-        state_path=tmp_path / "state.json",
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
     )
 
     assert service.get_settings() == expected_settings()
     assert service.set_auto_sync_enabled(True) == expected_settings(auto_sync_enabled=True)
+    assert service.set_debug_logging(False) == expected_settings(
+        auto_sync_enabled=True, debug_logging=False
+    )
 
 
 def test_notification_settings_default_to_enabled_and_persist(tmp_path: Path) -> None:
@@ -224,7 +242,8 @@ def test_refresh_reports_ludusavi_adapter_initialization_failure(tmp_path: Path)
 
     service = SDHLudusaviService(
         adapter_factory=fail_factory,
-        state_path=tmp_path / "state.json",
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
     )
 
     result = service.refresh_games()
@@ -249,7 +268,8 @@ def test_ludusavi_adapter_factory_is_reused_after_success(tmp_path: Path) -> Non
 
     service = SDHLudusaviService(
         adapter_factory=factory,
-        state_path=tmp_path / "state.json",
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
     )
 
     service.refresh_games()
@@ -298,7 +318,8 @@ def test_ludusavi_adapter_initialization_is_thread_safe(tmp_path: Path) -> None:
 
     service = SDHLudusaviService(
         adapter_factory=factory,
-        state_path=tmp_path / "state.json",
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=tmp_path / "cache.json",
     )
     adapters: list[FakeAdapter] = []
     errors: list[BaseException] = []
@@ -382,8 +403,10 @@ def test_resume_game_process_rejects_invalid_signal_pids(
     monkeypatch: pytest.MonkeyPatch,
     pid: int,
 ) -> None:
+    from sdh_ludusavi.watchdog import _ProcessIdentity
+
     service = service_with_state(tmp_path)
-    service._watchdog._paused_pids[99] = 123.0
+    service._watchdog._paused_pids[99] = (_ProcessIdentity(12345, 1000), 123.0)
     calls: list[tuple[int, signal.Signals]] = []
 
     def capture_signal_tree(target_pid: int, sig: signal.Signals) -> bool:
@@ -398,7 +421,9 @@ def test_resume_game_process_rejects_invalid_signal_pids(
     assert "message" in result
     assert "pid" not in result
     assert calls == []
-    assert service._watchdog._paused_pids == {99: 123.0}
+    from sdh_ludusavi.watchdog import _ProcessIdentity
+
+    assert service._watchdog._paused_pids == {99: (_ProcessIdentity(12345, 1000), 123.0)}
 
 
 def test_signal_process_methods_reject_pid_above_os_signal_range(
@@ -741,6 +766,7 @@ def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
         "notifications": DEFAULT_NOTIFICATIONS,
         "update_channel": "stable",
         "automatic_update_checks": True,
+        "debug_logging": True,
     }
 
 
@@ -761,6 +787,7 @@ def test_persists_settings_and_cache_separately(tmp_path: Path) -> None:
         "notifications": DEFAULT_NOTIFICATIONS,
         "update_channel": "stable",
         "automatic_update_checks": True,
+        "debug_logging": True,
     }
     assert "games" not in settings
     assert "ludusaviLauncherShortcutAppId" not in settings
@@ -1319,13 +1346,17 @@ def test_force_restore_calls_refresh_after_operation(tmp_path: Path) -> None:
 def test_global_operation_lock_blocks_new_operations(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
     service.refresh_games()
-    service._coordinator._operation.is_running = True
-    service._coordinator._operation.name = "refresh"
+    service._coordinator._operation_lock.acquire()
+    try:
+        service._coordinator._operation.is_running = True
+        service._coordinator._operation.name = "refresh"
 
-    with pytest.raises(OperationLockedError):
-        service.force_backup("Hades")
+        with pytest.raises(OperationLockedError):
+            service.force_backup("Hades")
 
-    assert service.get_operation_status()["name"] == "refresh"
+        assert service.get_operation_status()["name"] == "refresh"
+    finally:
+        service._coordinator._operation_lock.release()
 
 
 def test_concurrent_operations_are_rejected_by_thread_safe_lock(tmp_path: Path) -> None:
@@ -1762,7 +1793,7 @@ def test_match_game_serializes_lazy_refresh_for_concurrent_callers(tmp_path: Pat
 
     def match() -> None:
         try:
-            game = service._match_game("Hades")
+            game = service._registry.match_game("Hades")
             matches.append(game.name if game else None)
         except BaseException as exc:  # pragma: no cover - asserted below.
             errors.append(exc)
@@ -1900,8 +1931,10 @@ def test_watchdog_auto_resumption_on_timeout(
     assert 123 in service._watchdog._paused_pids
 
     # Fast forward the paused timestamp to 20 seconds ago
+    from sdh_ludusavi.watchdog import _ProcessIdentity
+
     with service._watchdog._paused_pids_lock:
-        service._watchdog._paused_pids[123] = time.time() - 20.0
+        service._watchdog._paused_pids[123] = (_ProcessIdentity(12345, 1000), time.time() - 20.0)
 
     # Wait for watchdog thread to run its loop check (within 2 seconds)
     for _ in range(200):
@@ -1933,8 +1966,10 @@ def test_watchdog_does_not_resume_during_active_operation(
     assert 123 in service._watchdog._paused_pids
 
     # Fast forward paused timestamp to 20 seconds ago
+    from sdh_ludusavi.watchdog import _ProcessIdentity
+
     with service._watchdog._paused_pids_lock:
-        service._watchdog._paused_pids[123] = time.time() - 20.0
+        service._watchdog._paused_pids[123] = (_ProcessIdentity(12345, 1000), time.time() - 20.0)
 
     # Simulate an active operation (like cloud sync) running
     service._coordinator._operation.is_running = True
@@ -1989,3 +2024,27 @@ def test_service_syncthing_watch(tmp_path: Path) -> None:
 
     service.stop()
     service._syncthing_watch_manager.stop_all.assert_called_once()
+
+
+def test_apply_log_level(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    from tests.test_main import fake_decky_module
+
+    decky, logger = fake_decky_module(tmp_path)
+    monkeypatch.setitem(sys.modules, "decky", decky)
+
+    service = service_with_state(tmp_path)
+    # The initialization already calls _apply_log_level (which defaults to True based on previous change)
+    assert logging.DEBUG in logger.levels
+
+    logger.levels.clear()
+
+    # Toggle it to False
+    service.set_debug_logging(False)
+    assert logging.INFO in logger.levels
+
+    logger.levels.clear()
+
+    # Toggle it to True
+    service.set_debug_logging(True)
+    assert logging.DEBUG in logger.levels

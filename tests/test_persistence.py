@@ -1,11 +1,12 @@
 from __future__ import annotations
+from sdh_ludusavi.persistence import JsonSettingsStore
 
 import fcntl
-import json
 import threading
+import logging
 from pathlib import Path
 
-from sdh_ludusavi.persistence import PersistenceManager, JsonSettingsStore
+from sdh_ludusavi.persistence import PersistenceManager
 
 
 def test_persistence_manager_split_storage(tmp_path: Path) -> None:
@@ -103,22 +104,48 @@ def test_locked_serializes_other_threads(tmp_path: Path) -> None:
     assert order == ["holder-in", "holder-out", "contender-in"]
 
 
-def test_persistence_manager_combined_storage(tmp_path: Path) -> None:
-    combined_file = tmp_path / "state.json"
-    pm = PersistenceManager(state_path=combined_file)
+def test_warn_load_settings_read_failure_does_not_log_cache_path(tmp_path: Path, caplog) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+    settings_file.write_text("invalid json", encoding="utf-8")
 
-    data = pm.load_all()
-    assert data["settings"] == {}
-    assert data["cache"] == {}
+    store = JsonSettingsStore(settings_file)
+    pm = PersistenceManager(settings_store=store, cache_path=cache_file)
 
-    pm.save_settings({"auto_sync_enabled": True})
-    assert combined_file.exists()
+    with caplog.at_level(logging.WARNING):
+        pm.load_all()
 
-    # Verify both are written to the same file
-    raw = json.loads(combined_file.read_text(encoding="utf-8"))
-    assert raw["auto_sync_enabled"] is True
+    assert "cache.json" not in caplog.text
+    assert "unreadable settings" in caplog.text
 
-    pm.save_cache({"games": [{"name": "Celeste"}]})
-    raw_updated = json.loads(combined_file.read_text(encoding="utf-8"))
-    assert raw_updated["auto_sync_enabled"] is True
-    assert raw_updated["games"] == [{"name": "Celeste"}]
+
+def test_save_cache_raises_state_lock_timeout_error_on_contention(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from sdh_ludusavi.persistence import StateLockTimeoutError
+    import sdh_ludusavi.persistence
+
+    monkeypatch.setattr(sdh_ludusavi.persistence, "LOCK_ACQUIRE_TIMEOUT_SECONDS", 0.1)
+
+    cache_file = tmp_path / "cache.json"
+    cache_file.write_text('{"sentinel": true}', encoding="utf-8")
+
+    pm = PersistenceManager(
+        settings_store=JsonSettingsStore(tmp_path / "settings.json"),
+        cache_path=cache_file,
+    )
+
+    import pytest
+    import os
+
+    pm.lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(pm.lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        with pytest.raises(StateLockTimeoutError):
+            pm.save_cache({"new": "data"})
+
+        assert cache_file.read_text(encoding="utf-8") == '{"sentinel": true}'
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sdh_ludusavi.persistence import JsonSettingsStore
 
 import logging
 from collections import deque
@@ -13,8 +14,7 @@ class DummyService:
 
 
 def test_diagnostic_log_buffer_push_get() -> None:
-    svc = DummyService(limit=5)
-    buf = DiagnosticLogBuffer(svc)
+    buf = DiagnosticLogBuffer()
     buf.push_log_record("info", "Initialized", "init", "Hades")
     buf.push_log_record("error", "Failed backup", "backup", "Hades")
 
@@ -26,8 +26,7 @@ def test_diagnostic_log_buffer_push_get() -> None:
 
 
 def test_decky_log_handler_emit() -> None:
-    svc = DummyService(limit=5)
-    buf = DiagnosticLogBuffer(svc)
+    buf = DiagnosticLogBuffer()
     handler = DeckyLogHandler(buf)
     handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
     logger = logging.getLogger("test_srp_logger")
@@ -52,9 +51,17 @@ def test_setup_logging_removes_old_handlers(tmp_path) -> None:
     mock_adapter.get_diagnostics.return_value = {"version": "0.31.0"}
 
     # Create first service
-    svc1 = SDHLudusaviService(adapter=mock_adapter, state_path=tmp_path / "state1.json")
+    svc1 = SDHLudusaviService(
+        adapter=mock_adapter,
+        settings_store=JsonSettingsStore(tmp_path / "settings1.json"),
+        cache_path=tmp_path / "cache1.json",
+    )
     # Create second service
-    svc2 = SDHLudusaviService(adapter=mock_adapter, state_path=tmp_path / "state2.json")
+    svc2 = SDHLudusaviService(
+        adapter=mock_adapter,
+        settings_store=JsonSettingsStore(tmp_path / "settings2.json"),
+        cache_path=tmp_path / "cache2.json",
+    )
 
     # Now get active handlers for "sdh_ludusavi" logger
     logger = logging.getLogger("sdh_ludusavi")
@@ -74,7 +81,7 @@ def test_setup_logging_removes_old_handlers(tmp_path) -> None:
     assert any("Test routing" in entry["message"] for entry in recent2)
 
 
-def test_decky_log_fallback_debug_has_no_prefix(monkeypatch, tmp_path):
+def test_decky_log_fallback_debug_routes_to_logger_debug(monkeypatch, tmp_path):
     import sys
     from tests.test_main import fake_decky_module
     from sdh_ludusavi.log_buffer import _decky_log_fallback
@@ -83,5 +90,20 @@ def test_decky_log_fallback_debug_has_no_prefix(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "decky", decky)
     _decky_log_fallback("debug", "refresh: hello")
 
-    assert logger.infos == ["refresh: hello"]
-    assert all("[DEBUG]" not in m for m in logger.infos)
+    assert logger.debugs == ["refresh: hello"]
+    assert logger.infos == []
+    assert all("[DEBUG]" not in m for m in logger.debugs)
+
+
+def test_setup_logging_level(monkeypatch, tmp_path):
+    import sys
+    from tests.test_main import fake_decky_module
+    from sdh_ludusavi.log_buffer import DiagnosticLogBuffer
+
+    decky, logger = fake_decky_module(tmp_path)
+    monkeypatch.setitem(sys.modules, "decky", decky)
+
+    buf = DiagnosticLogBuffer()
+    buf.setup_logging()
+
+    assert logging.DEBUG in logger.levels

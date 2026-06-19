@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# SDH-ludusavi quality gates. Invoked by the orchestration engine's
+# run-quality-gates from the repo root. The engine separately enforces that
+# review notes are not deleted, so that check is not repeated here.
+set -euo pipefail
+
+if [[ -f package.json ]]; then
+  if [[ ! -d node_modules ]]; then
+    pnpm install --frozen-lockfile
+  fi
+
+  pnpm test
+  pnpm run build
+fi
+
+if [[ -x ./run.sh && -d py_modules ]]; then
+  ./run.sh uv run ruff check . --fix
+  ./run.sh uv run ruff format .
+  ./run.sh uv run ty check py_modules/sdh_ludusavi/
+  ./run.sh uv run pytest
+fi

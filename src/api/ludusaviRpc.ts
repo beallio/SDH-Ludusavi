@@ -32,6 +32,9 @@ export const setNotificationSettings = callable<
   [settings: NotificationSettings],
   RpcResult<Settings>
 >("set_notification_settings");
+export const setDebugLoggingCall = callable<[enabled: boolean], RpcResult<Settings>>(
+  "set_debug_logging"
+);
 export const setSelectedGameCall = callable<[gameName: string], RpcResult<Settings>>(
   "set_selected_game"
 );
@@ -81,7 +84,7 @@ export const stopSyncthingActivityWatchCall = callable<[watchID: string], RpcRes
 
 export const checkForPluginUpdateCall = callable<[currentVersion: string, force: boolean], UpdateCheckResult>("check_for_plugin_update");
 export const revalidatePluginUpdateCall = callable<[candidate: PluginUpdateCandidate], RevalidateResult>("revalidate_plugin_update");
-export const recordUpdateInstallRequestedCall = callable<[candidate: any], UpdateCheckContext>("record_update_install_requested");
-export const confirmUpdateInstallHandoffCall = callable<[version: string], UpdateCheckContext>("confirm_update_install_handoff");
-export const clearPendingUpdateInstallCall = callable<[version: string], UpdateCheckContext>("clear_pending_update_install");
-export const getUpdateCheckContextCall = callable<[], UpdateCheckContext>("get_update_check_context");
+export const recordUpdateInstallRequestedCall = callable<[candidate: any], RpcResult<UpdateCheckContext>>("record_update_install_requested");
+export const confirmUpdateInstallHandoffCall = callable<[version: string], RpcResult<UpdateCheckContext>>("confirm_update_install_handoff");
+export const clearPendingUpdateInstallCall = callable<[version: string], RpcResult<UpdateCheckContext>>("clear_pending_update_install");
+export const getUpdateCheckContextCall = callable<[], RpcResult<UpdateCheckContext>>("get_update_check_context");

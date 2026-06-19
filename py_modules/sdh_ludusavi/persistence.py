@@ -17,6 +17,12 @@ LOCK_ACQUIRE_TIMEOUT_SECONDS = 5.0
 LOCK_RETRY_INTERVAL_SECONDS = 0.05
 
 
+class StateLockTimeoutError(RuntimeError):
+    """Raised when the inter-process state lock cannot be acquired."""
+
+    pass
+
+
 class _InterProcessLock:
     """Advisory file lock shared by all plugin processes touching one state set.
 
@@ -37,7 +43,12 @@ class _InterProcessLock:
         self._thread_lock.acquire()
         self._depth += 1
         if self._depth == 1:
-            self._fd = self._acquire_file_lock()
+            try:
+                self._fd = self._acquire_file_lock()
+            except BaseException:
+                self._depth -= 1
+                self._thread_lock.release()
+                raise
         return self
 
     def __exit__(self, *exc_info: object) -> None:
@@ -51,13 +62,13 @@ class _InterProcessLock:
         self._depth -= 1
         self._thread_lock.release()
 
-    def _acquire_file_lock(self) -> int | None:
+    def _acquire_file_lock(self) -> int:
         try:
             self.path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
             fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
         except OSError as exc:
             LOGGER.warning("State lock unavailable at %s: %s", self.path, exc)
-            return None
+            raise StateLockTimeoutError(f"State lock unavailable at {self.path}: {exc}")
 
         deadline = time.monotonic() + LOCK_ACQUIRE_TIMEOUT_SECONDS
         while True:
@@ -67,13 +78,12 @@ class _InterProcessLock:
             except OSError:
                 if time.monotonic() >= deadline:
                     LOGGER.warning(
-                        "Timed out acquiring state lock at %s after %.1fs; "
-                        "proceeding without inter-process exclusion",
+                        "Timed out acquiring state lock at %s after %.1fs",
                         self.path,
                         LOCK_ACQUIRE_TIMEOUT_SECONDS,
                     )
                     os.close(fd)
-                    return None
+                    raise StateLockTimeoutError(f"Timed out acquiring state lock at {self.path}")
                 time.sleep(LOCK_RETRY_INTERVAL_SECONDS)
 
 
@@ -101,17 +111,21 @@ class JsonSettingsStore:
         return cast(dict[str, object], data)
 
     def write(self, settings: dict[str, object]) -> None:
-        self._path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-        temp_path = self._path.with_name(f".{self._path.name}.tmp")
-        try:
-            temp_path.write_text(
-                json.dumps(settings, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
-            os.replace(temp_path, self._path)
-        except OSError:
-            temp_path.unlink(missing_ok=True)
-            raise
+        _atomic_json_write(self._path, settings)
+
+
+def _atomic_json_write(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.tmp")
+    try:
+        temp_path.write_text(
+            json.dumps(data, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        os.replace(temp_path, path)
+    except OSError:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 class PersistenceManager:
@@ -122,16 +136,14 @@ class PersistenceManager:
 
     def __init__(
         self,
-        state_path: Path | None = None,
         settings_store: SettingsStore | None = None,
         cache_path: Path | None = None,
     ) -> None:
-        self._combined_state_path = state_path
         self._settings_store = settings_store or JsonSettingsStore(
-            state_path or Path("/tmp/sdh_ludusavi/settings.json")
+            Path("/tmp/sdh_ludusavi/settings.json")
         )
-        self._cache_path = cache_path or state_path or Path("/tmp/sdh_ludusavi/cache.json")
-        lock_anchor = self._combined_state_path or self._cache_path
+        self._cache_path = cache_path or Path("/tmp/sdh_ludusavi/cache.json")
+        lock_anchor = self._cache_path
         self._lock = _InterProcessLock(lock_anchor.with_name(".sdh_ludusavi.state.lock"))
 
     @property
@@ -154,25 +166,6 @@ class PersistenceManager:
     def _load_all_locked(self) -> dict[str, dict[str, Any]]:
         settings = {}
         cache = {}
-
-        if self._combined_state_path is not None:
-            if self._combined_state_path.exists():
-                try:
-                    raw_state = self._combined_state_path.read_text(encoding="utf-8")
-                    if not raw_state.strip():
-                        self._warn_load("empty state file")
-                    else:
-                        data = json.loads(raw_state)
-                        if isinstance(data, dict):
-                            settings = cast(dict[str, Any], dict(data))
-                            cache = cast(dict[str, Any], dict(data))
-                        else:
-                            self._warn_load("state file must contain a JSON object")
-                except OSError as exc:
-                    self._warn_load(f"unreadable state file: {exc}")
-                except json.JSONDecodeError as exc:
-                    self._warn_load(f"invalid JSON: {exc}")
-            return {"settings": settings, "cache": cache}
 
         # Load separate settings
         try:
@@ -202,67 +195,14 @@ class PersistenceManager:
         return {"settings": settings, "cache": cache}
 
     def save_settings(self, settings_data: dict[str, Any]) -> None:
-        """Save settings payload.
-
-        If combined state path is in use, saves the combined file (updating settings fields).
-        """
+        """Save settings payload."""
         with self._lock:
-            if self._combined_state_path is not None:
-                self._save_combined(settings_data, self._load_combined_cache())
-                return
             self._settings_store.write(settings_data)
 
     def save_cache(self, cache_data: dict[str, Any]) -> None:
-        """Save cache payload.
-
-        If combined state path is in use, saves the combined file (updating cache fields).
-        """
+        """Save cache payload."""
         with self._lock:
-            if self._combined_state_path is not None:
-                self._save_combined(self._load_combined_settings(), cache_data)
-                return
-
-            self._cache_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-            temp_path = self._cache_path.with_name(f".{self._cache_path.name}.tmp")
-            try:
-                temp_path.write_text(
-                    json.dumps(cache_data, indent=2, sort_keys=True),
-                    encoding="utf-8",
-                )
-                os.replace(temp_path, self._cache_path)
-            except OSError:
-                temp_path.unlink(missing_ok=True)
-                raise
-
-    def _load_combined_settings(self) -> dict[str, Any]:
-        data = self.load_all()
-        # Filter settings keys from combined loaded dict
-        from .constants import SETTINGS_KEYS
-
-        return {k: v for k, v in data["settings"].items() if k in SETTINGS_KEYS}
-
-    def _load_combined_cache(self) -> dict[str, Any]:
-        data = self.load_all()
-        from .constants import SETTINGS_KEYS
-
-        return {k: v for k, v in data["cache"].items() if k not in SETTINGS_KEYS}
-
-    def _save_combined(self, settings_data: dict[str, Any], cache_data: dict[str, Any]) -> None:
-        if self._combined_state_path is None:
-            raise RuntimeError("_save_combined called without a combined state path")
-        data = {**settings_data, **cache_data}
-        self._combined_state_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-        temp_path = self._combined_state_path.with_name(f".{self._combined_state_path.name}.tmp")
-        try:
-            temp_path.write_text(
-                json.dumps(data, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
-            os.replace(temp_path, self._combined_state_path)
-        except OSError:
-            temp_path.unlink(missing_ok=True)
-            raise
+            _atomic_json_write(self._cache_path, cache_data)
 
     def _warn_load(self, reason: str) -> None:
-        state_path = self._combined_state_path or self._cache_path
-        LOGGER.warning("Ignoring SDH-ludusavi state at %s: %s", state_path, reason)
+        LOGGER.warning("Ignoring SDH-ludusavi state: %s", reason)

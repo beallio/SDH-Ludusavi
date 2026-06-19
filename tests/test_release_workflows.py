@@ -30,6 +30,52 @@ def test_request_dev_release_rejects_non_stable_version(tmp_path: Path) -> None:
         assert "stable" in res.stderr.lower() or "error" in res.stderr.lower()
 
 
+def test_request_dev_release_rejects_already_released_stable(tmp_path: Path) -> None:
+    # A dev release must target the next unreleased version. If the base version
+    # already exists as a stable tag, the script must refuse and not dispatch.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    gh_calls_log = tmp_path / "gh_calls.log"
+    mock_gh = bin_dir / "gh"
+    mock_gh.write_text(
+        f"#!/bin/sh\n"
+        f'if [ "$1" = "auth" ]; then echo "Logged in"; exit 0; fi\n'
+        f'echo "$@" >> {gh_calls_log}\n'
+        f"exit 0\n",
+        encoding="utf-8",
+    )
+    mock_gh.chmod(mock_gh.stat().st_mode | stat.S_IEXEC)
+
+    # Mock git: a stable tag exists for the requested base version.
+    mock_git = bin_dir / "git"
+    mock_git.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "rev-parse" ]; then echo "1234567890abcdef1234567890abcdef12345678"; exit 0; fi\n'
+        'if [ "$1" = "tag" ]; then echo "v0.3.0"; exit 0; fi\n'
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    mock_git.chmod(mock_git.stat().st_mode | stat.S_IEXEC)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+
+    res = subprocess.run(
+        ["bash", "scripts/request_dev_release.sh", "0.3.0"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert res.returncode != 0
+    assert "already" in res.stderr.lower()
+    # Must not dispatch the workflow for an already-released base version.
+    assert not gh_calls_log.exists() or "workflow run" not in gh_calls_log.read_text(
+        encoding="utf-8"
+    )
+
+
 def test_request_dev_release_calls_gh_workflow_run(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -176,12 +222,38 @@ def test_workflows_use_node24_action_runtime_and_current_action_majors() -> None
             f"{path} must opt GitHub JavaScript actions into the Node 24 runtime"
         )
         assert "uses: actions/checkout@v6" in content
-        assert "uses: actions/setup-node@v6" in content
-        assert "uses: pnpm/action-setup@v6" in content
-        assert "uses: actions/cache@v5" in content
-        assert "uses: actions/setup-python@v6" in content
-        assert "uses: astral-sh/setup-uv@v8.1.0" in content
+        assert "uses: ./.github/actions/setup-toolchain" in content
+
+    action_content = Path(".github/actions/setup-toolchain/action.yml").read_text(encoding="utf-8")
+    assert "uses: actions/setup-node@v6" in action_content
+    assert "uses: pnpm/action-setup@v6" in action_content
+    assert "uses: actions/cache@v5" in action_content
+    assert "uses: actions/setup-python@v6" in action_content
+    assert "uses: astral-sh/setup-uv@v8.1.0" in action_content
 
     assert "uses: actions/upload-artifact@v7" in workflows[".github/workflows/ci.yml"]
     assert "uses: softprops/action-gh-release@v3" in workflows[".github/workflows/release.yml"]
     assert "uses: softprops/action-gh-release@v3" in workflows[".github/workflows/dev-release.yml"]
+
+
+def test_workflows_use_quality_gates_and_pin_uv() -> None:
+    workflows = {
+        ".github/workflows/ci.yml": Path(".github/workflows/ci.yml").read_text(encoding="utf-8"),
+        ".github/workflows/release.yml": Path(".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        ),
+        ".github/workflows/dev-release.yml": Path(".github/workflows/dev-release.yml").read_text(
+            encoding="utf-8"
+        ),
+    }
+
+    for path, content in workflows.items():
+        assert "./run.sh bash scripts/quality_gates.sh check" in content, (
+            f"{path} must use the shared quality_gates script"
+        )
+        assert "uv run ruff check ." not in content, (
+            f"{path} must not contain duplicated inline gate sequences"
+        )
+
+    action_content = Path(".github/actions/setup-toolchain/action.yml").read_text(encoding="utf-8")
+    assert 'version: "latest"' not in action_content, "setup-uv version must be pinned, not latest"

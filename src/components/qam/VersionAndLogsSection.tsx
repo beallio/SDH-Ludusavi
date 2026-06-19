@@ -1,4 +1,4 @@
-import { ButtonItem, Field, PanelSection, PanelSectionRow } from "@decky/ui";
+import { ButtonItem, Field, PanelSection, PanelSectionRow, ToggleField } from "@decky/ui";
 
 import type { Versions } from "../../types";
 
@@ -8,13 +8,20 @@ type VersionAndLogsSectionProps = {
   onShowLudusaviLogs: () => void;
 };
 
-type LogsSectionProps = Pick<VersionAndLogsSectionProps, "onShowPluginLogs" | "onShowLudusaviLogs">;
+type LogsSectionProps = Pick<VersionAndLogsSectionProps, "onShowPluginLogs" | "onShowLudusaviLogs"> & {
+  debugLogging: boolean;
+  isBusy: boolean;
+  onToggleDebugLogging: (enabled: boolean) => void;
+};
 
 type VersionsSectionProps = Pick<VersionAndLogsSectionProps, "versions">;
 
 export function LogsSection({
   onShowPluginLogs,
-  onShowLudusaviLogs
+  onShowLudusaviLogs,
+  debugLogging,
+  isBusy,
+  onToggleDebugLogging
 }: LogsSectionProps) {
   return (
     <PanelSection title="Logs">
@@ -24,9 +31,19 @@ export function LogsSection({
         </ButtonItem>
       </PanelSectionRow>
       <PanelSectionRow>
-        <ButtonItem layout="below" bottomSeparator="standard" onClick={onShowLudusaviLogs}>
+        <ButtonItem layout="below" bottomSeparator="none" onClick={onShowLudusaviLogs}>
           View Ludusavi Logs
         </ButtonItem>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ToggleField
+          label="Debug Logging"
+          description="Enables verbose logging for troubleshooting."
+          bottomSeparator="standard"
+          checked={debugLogging}
+          disabled={isBusy}
+          onChange={(enabled: boolean) => onToggleDebugLogging(enabled)}
+        />
       </PanelSectionRow>
     </PanelSection>
   );

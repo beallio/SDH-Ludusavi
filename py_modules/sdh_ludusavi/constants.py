@@ -15,6 +15,7 @@ SETTINGS_KEYS = (
     "notifications",
     "update_channel",
     "automatic_update_checks",
+    "debug_logging",
 )
 
 MAX_INSTALLED_APP_IDS_BYTES = 16_384

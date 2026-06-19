@@ -58,6 +58,7 @@ EXPECTED_METHODS: dict[str, list[str]] = {
     "set_auto_sync_enabled": ["enabled"],
     "set_selected_game": ["game_name"],
     "set_notification_settings": ["settings"],
+    "set_debug_logging": ["enabled"],
     "log": ["level", "message", "operation", "game_name"],
     "set_update_channel": ["channel"],
     "set_automatic_update_checks": ["enabled"],
@@ -108,7 +109,6 @@ def test_facade_method_signatures(tmp_path: Path) -> None:
     init_sig = inspect.signature(SDHLudusaviService.__init__)
     assert "adapter" in init_sig.parameters
     assert "adapter_factory" in init_sig.parameters
-    assert "state_path" in init_sig.parameters
     assert "settings_store" in init_sig.parameters
     assert "cache_path" in init_sig.parameters
     assert "log_limit" in init_sig.parameters

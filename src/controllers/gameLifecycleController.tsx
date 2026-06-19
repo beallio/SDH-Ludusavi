@@ -23,6 +23,8 @@ import {
   type SyncthingWatchSession,
 } from "./syncthingMonitor";
 
+const SILENT_SKIPPED_REASONS = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
+
 type AutoSyncStatusSurface = {
   publish: (
     status: AutoSyncStatusKind,
@@ -252,8 +254,7 @@ export function createGameLifecycleController(
       log("info", `Calling check_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
       const checkResult = await checkGameStartCall(name, appID);
       log("info", `check_game_start result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
-      const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
-      if (checkResult.status === "skipped" && silentReasons.includes(checkResult.reason ?? "")) {
+      if (checkResult.status === "skipped" && SILENT_SKIPPED_REASONS.includes(checkResult.reason ?? "")) {
         hideAutoSyncStatus({
           source: "hide",
           gameName: name,
@@ -322,6 +323,19 @@ export function createGameLifecycleController(
           activeMonitorEpoch = epoch;
           preGameWatch = syncthingMonitor.start("pre_game", name, appID);
         }
+        // Mirror the non-conflict auto paths: show the in-progress animation that
+        // matches the chosen resolution. keep_local runs a backup; restore_backup
+        // runs a restore. Without this the strip stays on the static "conflict"
+        // icon until the result and never animates.
+        publishAutoSyncStatus(
+          resolution === "restore_backup" ? "restoring" : "backing_up",
+          {
+            source: "lifecycle_start",
+            gameName: name,
+            appID,
+            tracked,
+          },
+        );
         const result = await resolveGameStartConflictCall(
           checkResult.game ?? name,
           appID,
@@ -404,8 +418,7 @@ export function createGameLifecycleController(
       log("info", `Calling check_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
       const checkResult = await checkGameExitCall(name, appID);
       log("info", `check_game_exit result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
-      const silentReasons = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
-      if (checkResult.status === "skipped" && silentReasons.includes(checkResult.reason ?? "")) {
+      if (checkResult.status === "skipped" && SILENT_SKIPPED_REASONS.includes(checkResult.reason ?? "")) {
         hideAutoSyncStatus({
           source: "hide",
           gameName: name,

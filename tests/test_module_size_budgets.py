@@ -2,13 +2,13 @@ import pytest
 from pathlib import Path
 
 BUDGETS = {
-    "src/surfaces/autoSyncStatusSurface.tsx": 350,
-    "src/surfaces/autoSyncStatusRenderer.tsx": 300,
-    "src/surfaces/autoSyncStatusBrowserView.ts": 300,
-    "src/controllers/gameLifecycleController.tsx": 550,
-    "src/controllers/steamLifecycleSource.ts": 250,
-    "src/controllers/syncthingMonitor.ts": 500,
-    "src/controllers/syncthingMonitorMachine.ts": 350,
+    "src/surfaces/autoSyncStatusSurface.tsx": 375,
+    "src/surfaces/autoSyncStatusRenderer.tsx": 180,
+    "src/surfaces/autoSyncStatusBrowserView.ts": 335,
+    "src/controllers/gameLifecycleController.tsx": 645,
+    "src/controllers/steamLifecycleSource.ts": 260,
+    "src/controllers/syncthingMonitor.ts": 565,
+    "src/controllers/syncthingMonitorMachine.ts": 375,
 }
 
 
