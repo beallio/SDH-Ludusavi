@@ -20,13 +20,10 @@ import type {
 } from "../types";
 import { log, logUiEvent, type LogFields, type LogLevel } from "../utils/logging";
 
-type MountedRef = { current: boolean };
 type NotifyFailure = (title: string, body: string) => void;
 
 type SettingsMutationControllerOptions = {
   ludusaviStore: LudusaviStateStore;
-  isMounted?: MountedRef;
-  setBusyLabel?: (label: string | null) => void;
   notifyFailure: NotifyFailure;
 };
 

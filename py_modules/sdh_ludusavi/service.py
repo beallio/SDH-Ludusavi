@@ -64,7 +64,7 @@ class SDHLudusaviService:
         # 2. Sub-managers setup
         from .log_buffer import DiagnosticLogBuffer
 
-        self._log_buffer = DiagnosticLogBuffer(self, log_limit=log_limit)
+        self._log_buffer = DiagnosticLogBuffer(log_limit=log_limit)
 
         from .gateway import LudusaviGateway
 
@@ -72,7 +72,7 @@ class SDHLudusaviService:
             adapter=adapter, adapter_factory=adapter_factory, log_callback=self.log
         )
 
-        self._coordinator = OperationCoordinator(self)
+        self._coordinator = OperationCoordinator()
 
         from .registry import GameRegistry
 
