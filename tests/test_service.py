@@ -15,6 +15,18 @@ from sdh_ludusavi.persistence import JsonSettingsStore
 from sdh_ludusavi.types import GameStatus
 
 
+@pytest.fixture(autouse=True)
+def mock_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    from sdh_ludusavi.watchdog import _ProcessIdentity
+
+    monkeypatch.setattr("sdh_ludusavi.watchdog.os.geteuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(
+        "sdh_ludusavi.watchdog._read_process_identity",
+        lambda pid: _ProcessIdentity(12345, 1000),
+        raising=False,
+    )
+
+
 class FakeAdapter:
     def __init__(self) -> None:
         self.games = [
@@ -391,8 +403,10 @@ def test_resume_game_process_rejects_invalid_signal_pids(
     monkeypatch: pytest.MonkeyPatch,
     pid: int,
 ) -> None:
+    from sdh_ludusavi.watchdog import _ProcessIdentity
+
     service = service_with_state(tmp_path)
-    service._watchdog._paused_pids[99] = 123.0
+    service._watchdog._paused_pids[99] = (_ProcessIdentity(12345, 1000), 123.0)
     calls: list[tuple[int, signal.Signals]] = []
 
     def capture_signal_tree(target_pid: int, sig: signal.Signals) -> bool:
@@ -407,7 +421,9 @@ def test_resume_game_process_rejects_invalid_signal_pids(
     assert "message" in result
     assert "pid" not in result
     assert calls == []
-    assert service._watchdog._paused_pids == {99: 123.0}
+    from sdh_ludusavi.watchdog import _ProcessIdentity
+
+    assert service._watchdog._paused_pids == {99: (_ProcessIdentity(12345, 1000), 123.0)}
 
 
 def test_signal_process_methods_reject_pid_above_os_signal_range(
@@ -1915,8 +1931,10 @@ def test_watchdog_auto_resumption_on_timeout(
     assert 123 in service._watchdog._paused_pids
 
     # Fast forward the paused timestamp to 20 seconds ago
+    from sdh_ludusavi.watchdog import _ProcessIdentity
+
     with service._watchdog._paused_pids_lock:
-        service._watchdog._paused_pids[123] = time.time() - 20.0
+        service._watchdog._paused_pids[123] = (_ProcessIdentity(12345, 1000), time.time() - 20.0)
 
     # Wait for watchdog thread to run its loop check (within 2 seconds)
     for _ in range(200):
@@ -1948,8 +1966,10 @@ def test_watchdog_does_not_resume_during_active_operation(
     assert 123 in service._watchdog._paused_pids
 
     # Fast forward paused timestamp to 20 seconds ago
+    from sdh_ludusavi.watchdog import _ProcessIdentity
+
     with service._watchdog._paused_pids_lock:
-        service._watchdog._paused_pids[123] = time.time() - 20.0
+        service._watchdog._paused_pids[123] = (_ProcessIdentity(12345, 1000), time.time() - 20.0)
 
     # Simulate an active operation (like cloud sync) running
     service._coordinator._operation.is_running = True
