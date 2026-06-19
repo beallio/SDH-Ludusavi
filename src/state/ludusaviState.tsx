@@ -245,14 +245,19 @@ export class LudusaviStateStore {
       return true;
     }
 
+    const candidates: string[] = [];
     for (const trackedName of this.snapshot.trackedNames) {
       if (
         (normalizedInput.length > 4 && trackedName.includes(normalizedInput)) ||
         (trackedName.length > 4 && normalizedInput.includes(trackedName))
       ) {
-        onMatch?.("substring", `${normalizedInput} <-> ${trackedName}`);
-        return true;
+        candidates.push(trackedName);
       }
+    }
+
+    if (candidates.length === 1) {
+      onMatch?.("substring", `${normalizedInput} <-> ${candidates[0]}`);
+      return true;
     }
 
     onMiss?.(normalizedInput);
