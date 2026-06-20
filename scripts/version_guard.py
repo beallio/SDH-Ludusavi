@@ -35,6 +35,25 @@ def is_base_ahead_of_stable(base: str, tags: Iterable[str]) -> bool:
     return base_ver > max_stable
 
 
+def is_version_behind_stable(version: str, tags: Iterable[str]) -> bool:
+    """True iff ``version`` is strictly behind the highest released stable tag.
+
+    Equality is NOT "behind": a version that exactly matches the highest stable tag is
+    the version being (or just) released, which is a valid state. Returns False when
+    there are no stable tags. This is the drift-detection invariant used by CI/quality
+    gates in every context (dev, dev-release, and the stable release itself), whereas
+    ``is_base_ahead_of_stable`` enforces the stricter "must target the next unreleased
+    version" rule used only when dispatching a dev release.
+    """
+    version_ver = parse_semver(version)
+    max_stable = highest_stable_version(tags)
+
+    if max_stable is None:
+        return False
+
+    return version_ver < max_stable
+
+
 def main():
     if len(sys.argv) != 3 or sys.argv[1] != "check-base":
         print("Usage: python version_guard.py check-base <BASE_VERSION>", file=sys.stderr)
