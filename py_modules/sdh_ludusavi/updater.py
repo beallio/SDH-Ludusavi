@@ -1,309 +1,30 @@
 from __future__ import annotations
 
 import datetime
-import re
 from contextlib import AbstractContextManager
-from typing import Any, Callable, List, Literal, Mapping, cast
-from dataclasses import dataclass
+from typing import Any, Callable, Literal, Mapping, cast
 
 from sdh_ludusavi.updater_client import ReleaseClient
 from sdh_ludusavi.updater_models import (
-    ParsedPluginVersion,
     UpdateCandidate,
-    parse_release_manifest,
     as_string_key_mapping,
 )
+from sdh_ludusavi.updater_rate_limit import parse_rate_limit_retry_after
+from sdh_ludusavi.updater_discovery import (
+    PrevalidatedRelease,
+    prevalidate_release_candidate,
+    validate_prevalidated_candidate,
+    validate_release_candidate,
+    select_candidate,
+    format_candidate_log,
+)
+from sdh_ludusavi.updater_pending import (
+    is_fresh_pending_install,
+    pending_install_matches_loaded_version,
+    effective_pending_install_version,
+)
 
-_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-dev\.([a-zA-Z0-9.-]+))?(?:\+([a-zA-Z0-9.-]+))?$")
-_PENDING_INSTALL_MISMATCH_GRACE = datetime.timedelta(minutes=15)
 MAX_MANIFEST_FETCH_ATTEMPTS = 5
-
-
-@dataclass(frozen=True)
-class PrevalidatedRelease:
-    record: Mapping[str, object]  # the original release JSON mapping
-    tag_name: str
-    version: ParsedPluginVersion  # parsed from tag_name[1:]
-    published_at: str  # str(record.get("published_at", ""))
-    prerelease: bool  # bool(record.get("prerelease", False))
-    manifest_asset: Mapping[str, object]
-    zip_asset: Mapping[str, object]
-
-
-def parse_plugin_version(version_str: str) -> ParsedPluginVersion | None:
-    match = _VERSION_RE.match(version_str)
-    if not match:
-        return None
-    major = int(match.group(1))
-    minor = int(match.group(2))
-    patch = int(match.group(3))
-    dev_suffix = match.group(4)
-    build_metadata = match.group(5)
-    is_dev = dev_suffix is not None
-    return ParsedPluginVersion(
-        major=major,
-        minor=minor,
-        patch=patch,
-        is_dev=is_dev,
-        dev_suffix=dev_suffix,
-        build_metadata=build_metadata,
-    )
-
-
-def _is_fresh_pending_install(pending: Any, now: Callable[[], datetime.datetime]) -> bool:
-    if not isinstance(pending, dict):
-        return False
-    requested_at = (
-        pending.get("handoff_confirmed_at")
-        if _is_confirmed_pending_install(pending)
-        else pending.get("requested_at")
-    )
-    if not isinstance(requested_at, str) or not requested_at:
-        return False
-
-    try:
-        requested = datetime.datetime.fromisoformat(requested_at.replace("Z", "+00:00"))
-    # Intentionally broad
-    except Exception:
-        return False
-
-    if requested.tzinfo is None:
-        requested = requested.replace(tzinfo=datetime.timezone.utc)
-    return now() - requested <= _PENDING_INSTALL_MISMATCH_GRACE
-
-
-def _is_confirmed_pending_install(pending: Any) -> bool:
-    if not isinstance(pending, dict):
-        return False
-    confirmed_at = pending.get("handoff_confirmed_at")
-    return isinstance(confirmed_at, str) and bool(confirmed_at)
-
-
-def _pending_install_matches_loaded_version(pending_version: str, current_version: str) -> bool:
-    if pending_version == current_version:
-        return True
-
-    parsed_pending = parse_plugin_version(pending_version)
-    parsed_current = parse_plugin_version(current_version)
-    if not parsed_pending or not parsed_current:
-        return False
-
-    if parsed_current.is_dev:
-        return False
-
-    if not parsed_pending.is_dev and parsed_pending == parsed_current:
-        return True
-
-    return False
-
-
-def _effective_pending_install_version(
-    pending: Any, now: Callable[[], datetime.datetime]
-) -> str | None:
-    if isinstance(pending, dict) and _is_fresh_pending_install(pending, now):
-        version = pending.get("version")
-        if isinstance(version, str) and version:
-            return version
-    return None
-
-
-def prevalidate_release_candidate(release: object) -> PrevalidatedRelease | None:
-    release_record = as_string_key_mapping(release)
-    if release_record is None:
-        return None
-    if release_record.get("draft", False):
-        return None
-
-    tag_name = str(release_record.get("tag_name", ""))
-    if not tag_name or not tag_name.startswith("v"):
-        return None
-
-    version_part = tag_name[1:]
-    parsed_version = parse_plugin_version(version_part)
-    if parsed_version is None:
-        return None
-
-    expected_manifest_name = f"SDH-Ludusavi-{tag_name}.manifest.json"
-
-    assets = release_record.get("assets", [])
-    if not isinstance(assets, list):
-        return None
-    manifest_assets = []
-    zip_assets = []
-    for a in assets:
-        a_dict = as_string_key_mapping(a)
-        if a_dict is not None:
-            name = str(a_dict.get("name", ""))
-            if name == expected_manifest_name:
-                manifest_assets.append(a_dict)
-            elif name.endswith(".zip"):
-                zip_assets.append(a_dict)
-    if len(manifest_assets) != 1:
-        return None
-    if len(zip_assets) != 1:
-        return None
-
-    manifest_asset = manifest_assets[0]
-    zip_asset = zip_assets[0]
-
-    published_at = str(release_record.get("published_at", ""))
-    prerelease = bool(release_record.get("prerelease", False))
-
-    return PrevalidatedRelease(
-        record=release_record,
-        tag_name=tag_name,
-        version=parsed_version,
-        published_at=published_at,
-        prerelease=prerelease,
-        manifest_asset=manifest_asset,
-        zip_asset=zip_asset,
-    )
-
-
-def validate_prevalidated_candidate(
-    pre: PrevalidatedRelease, client: ReleaseClient
-) -> UpdateCandidate | None:
-    resp = client.get_manifest(str(pre.manifest_asset.get("browser_download_url", "")))
-    if resp.status != 200:
-        return None
-
-    manifest = parse_release_manifest(resp.body)
-    if manifest is None:
-        return None
-
-    if manifest.plugin_name != "SDH-Ludusavi":
-        return None
-    if manifest.package_name != "sdh-ludusavi":
-        return None
-    if manifest.tag != pre.tag_name:
-        return None
-    if "v" + manifest.version != pre.tag_name:
-        return None
-
-    if manifest.channel == "stable" and pre.prerelease:
-        return None
-    if manifest.channel == "dev" and not pre.prerelease:
-        return None
-
-    if str(pre.zip_asset.get("name", "")) != manifest.asset_name:
-        return None
-
-    channel: Literal["stable", "development"] = (
-        "stable" if manifest.channel == "stable" else "development"
-    )
-    return UpdateCandidate(
-        version=manifest.version,
-        tag=manifest.tag,
-        channel=channel,
-        artifact_url=str(pre.zip_asset.get("browser_download_url", "")),
-        sha256=manifest.sha256,
-        release_url=str(pre.record.get("html_url", "")),
-        published_at=pre.published_at,
-        action="update",
-    )
-
-
-def validate_release_candidate(release: object, client: ReleaseClient) -> UpdateCandidate | None:
-    pre = prevalidate_release_candidate(release)
-    if pre is None:
-        return None
-    return validate_prevalidated_candidate(pre, client)
-
-
-def select_candidate(
-    candidates: List[UpdateCandidate],
-    installed_version_str: str,
-    preferred_channel: Literal["stable", "development"],
-) -> UpdateCandidate | None:
-    installed_version = parse_plugin_version(installed_version_str)
-    if not installed_version:
-        return None
-
-    eligible: List[UpdateCandidate] = []
-    for c in candidates:
-        if preferred_channel == "stable" and c.channel != "stable":
-            continue
-        c_ver = parse_plugin_version(c.version)
-        if not c_ver:
-            continue
-        eligible.append(c)
-
-    if not eligible:
-        return None
-
-    def get_sort_key(c: UpdateCandidate) -> tuple[int, int, int, bool, str]:
-        c_ver = parse_plugin_version(c.version)
-        assert c_ver is not None
-        return (c_ver.major, c_ver.minor, c_ver.patch, not c_ver.is_dev, c.published_at)
-
-    eligible.sort(key=get_sort_key)
-    best_candidate = eligible[-1]
-    best_ver = parse_plugin_version(best_candidate.version)
-    assert best_ver is not None
-
-    is_upgrade = False
-    action: Literal["update", "move_to_stable", "downgrade_to_stable"] = "update"
-
-    best_base = (best_ver.major, best_ver.minor, best_ver.patch)
-    installed_base = (installed_version.major, installed_version.minor, installed_version.patch)
-
-    if preferred_channel == "stable" and installed_version.is_dev:
-        is_upgrade = True
-        if best_base == installed_base:
-            action = "move_to_stable"
-        elif best_base < installed_base:
-            action = "downgrade_to_stable"
-        else:
-            action = "update"
-    else:
-        if best_ver > installed_version:
-            is_upgrade = True
-            if not best_ver.is_dev and installed_version.is_dev and best_base == installed_base:
-                action = "move_to_stable"
-        elif best_ver == installed_version:
-            if best_ver.is_dev and installed_version.is_dev:
-                if best_candidate.version != installed_version_str:
-                    is_upgrade = True
-                    action = "update"
-            elif not best_ver.is_dev and installed_version.is_dev:
-                is_upgrade = True
-                action = "move_to_stable"
-
-    if is_upgrade:
-        return UpdateCandidate(
-            version=best_candidate.version,
-            tag=best_candidate.tag,
-            channel=best_candidate.channel,
-            artifact_url=best_candidate.artifact_url,
-            sha256=best_candidate.sha256,
-            release_url=best_candidate.release_url,
-            published_at=best_candidate.published_at,
-            action=action,
-        )
-
-    return None
-
-
-def format_candidate_log(candidate: Any) -> str:
-    if not candidate:
-        return "none"
-    if not isinstance(candidate, dict):
-        try:
-            version = getattr(candidate, "version", "unknown")
-            tag = getattr(candidate, "tag", "unknown")
-            channel = getattr(candidate, "channel", "unknown")
-            sha256 = getattr(candidate, "sha256", None)
-            sha_prefix = sha256[:8] if (isinstance(sha256, str) and len(sha256) >= 8) else "unknown"
-            return f"version={version}, tag={tag}, channel={channel}, sha256_prefix={sha_prefix}"
-        # Intentionally broad
-        except Exception:
-            return "malformed candidate"
-    version = candidate.get("version", "unknown")
-    tag = candidate.get("tag", "unknown")
-    channel = candidate.get("channel", "unknown")
-    sha256 = candidate.get("sha256")
-    sha_prefix = sha256[:8] if (isinstance(sha256, str) and len(sha256) >= 8) else "unknown"
-    return f"version={version}, tag={tag}, channel={channel}, sha256_prefix={sha_prefix}"
 
 
 class PluginUpdater:
@@ -412,7 +133,7 @@ class PluginUpdater:
 
             installed_version = self._resolve_version()
             pending_install = self._cache.get("pending_update_install")
-            pending_version = _effective_pending_install_version(pending_install, self._now)
+            pending_version = effective_pending_install_version(pending_install, self._now)
 
             return {
                 "update_channel": self._channel,
@@ -446,7 +167,7 @@ class PluginUpdater:
             if not force:
                 pending_install = self._cache.get("pending_update_install")
                 if pending_install:
-                    effective_installed = _effective_pending_install_version(
+                    effective_installed = effective_pending_install_version(
                         pending_install, self._now
                     )
                     if effective_installed and effective_installed == current_version:
@@ -509,28 +230,7 @@ class PluginUpdater:
         checked_at = self._now().isoformat()
 
         if resp.status in (403, 429):
-            retry_after_str = None
-            if "retry-after" in resp.headers:
-                try:
-                    seconds = int(resp.headers["retry-after"])
-                    retry_after_str = (
-                        self._now() + datetime.timedelta(seconds=seconds)
-                    ).isoformat()
-                # Intentionally broad
-                except Exception:
-                    pass
-            elif "x-ratelimit-reset" in resp.headers:
-                try:
-                    reset_ts = int(resp.headers["x-ratelimit-reset"])
-                    retry_after_str = datetime.datetime.fromtimestamp(
-                        reset_ts, datetime.timezone.utc
-                    ).isoformat()
-                # Intentionally broad
-                except Exception:
-                    pass
-
-            if not retry_after_str:
-                retry_after_str = (self._now() + datetime.timedelta(minutes=1)).isoformat()
+            retry_after_str = parse_rate_limit_retry_after(resp.headers, self._now())
 
             msg = "Rate limit exceeded"
             body_record = as_string_key_mapping(resp.body)
@@ -716,28 +416,7 @@ class PluginUpdater:
         )
 
         if resp.status in (403, 429):
-            retry_after_str = None
-            if "retry-after" in resp.headers:
-                try:
-                    seconds = int(resp.headers["retry-after"])
-                    retry_after_str = (
-                        self._now() + datetime.timedelta(seconds=seconds)
-                    ).isoformat()
-                # Intentionally broad
-                except Exception:
-                    pass
-            elif "x-ratelimit-reset" in resp.headers:
-                try:
-                    reset_ts = int(resp.headers["x-ratelimit-reset"])
-                    retry_after_str = datetime.datetime.fromtimestamp(
-                        reset_ts, datetime.timezone.utc
-                    ).isoformat()
-                # Intentionally broad
-                except Exception:
-                    pass
-
-            if not retry_after_str:
-                retry_after_str = (self._now() + datetime.timedelta(minutes=1)).isoformat()
+            retry_after_str = parse_rate_limit_retry_after(resp.headers, self._now())
 
             with self._state_lock:
                 try:
@@ -892,7 +571,7 @@ class PluginUpdater:
             if pending:
                 pending_version = pending.get("version")
                 pending_tag = pending.get("tag")
-                if pending_version and _pending_install_matches_loaded_version(
+                if pending_version and pending_install_matches_loaded_version(
                     pending_version, current_version
                 ):
                     self._cache["installed_release_tag"] = pending_tag
@@ -904,7 +583,7 @@ class PluginUpdater:
                     self._cache.pop("pending_update_install", None)
                     self._clear_stale_cache()
                     self._save_callback()
-                elif _is_fresh_pending_install(pending, self._now):
+                elif is_fresh_pending_install(pending, self._now):
                     self._log(
                         "info",
                         f"Startup reconciliation: Pending update retained during reload grace window "
@@ -925,4 +604,4 @@ class PluginUpdater:
     def has_pending_install(self) -> bool:
         with self._state_lock:
             pending = self._cache.get("pending_update_install")
-            return _effective_pending_install_version(pending, self._now) is not None
+            return effective_pending_install_version(pending, self._now) is not None
