@@ -52,7 +52,11 @@ def test_request_dev_release_rejects_already_released_stable(tmp_path: Path) -> 
     mock_git.write_text(
         "#!/bin/sh\n"
         'if [ "$1" = "rev-parse" ]; then echo "1234567890abcdef1234567890abcdef12345678"; exit 0; fi\n'
-        'if [ "$1" = "tag" ]; then echo "v0.3.0"; exit 0; fi\n'
+        'if [ "$1" = "tag" ]; then\n'
+        '    if [ "$3" = "v0.3.0" ]; then echo "v0.3.0"; exit 0; fi\n'
+        '    if [ "$3" = "v*" ]; then echo "v0.3.0"; exit 0; fi\n'
+        "    exit 0\n"
+        "fi\n"
         "exit 1\n",
         encoding="utf-8",
     )
@@ -71,6 +75,52 @@ def test_request_dev_release_rejects_already_released_stable(tmp_path: Path) -> 
     assert res.returncode != 0
     assert "already" in res.stderr.lower()
     # Must not dispatch the workflow for an already-released base version.
+    assert not gh_calls_log.exists() or "workflow run" not in gh_calls_log.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_request_dev_release_rejects_behind_stable(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    gh_calls_log = tmp_path / "gh_calls.log"
+    mock_gh = bin_dir / "gh"
+    mock_gh.write_text(
+        f"#!/bin/sh\n"
+        f'if [ "$1" = "auth" ]; then echo "Logged in"; exit 0; fi\n'
+        f'echo "$@" >> {gh_calls_log}\n'
+        f"exit 0\n",
+        encoding="utf-8",
+    )
+    mock_gh.chmod(mock_gh.stat().st_mode | stat.S_IEXEC)
+
+    mock_git = bin_dir / "git"
+    mock_git.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "rev-parse" ]; then echo "1234567890abcdef1234567890abcdef12345678"; exit 0; fi\n'
+        'if [ "$1" = "tag" ]; then\n'
+        '    if [ "$3" = "v0.3.1" ]; then exit 0; fi\n'
+        '    if [ "$3" = "v*" ]; then echo "v0.3.2"; exit 0; fi\n'
+        "    exit 0\n"
+        "fi\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    mock_git.chmod(mock_git.stat().st_mode | stat.S_IEXEC)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+
+    res = subprocess.run(
+        ["bash", "scripts/request_dev_release.sh", "0.3.1"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert res.returncode != 0
+    assert "ahead" in res.stderr.lower() or "merge" in res.stderr.lower()
     assert not gh_calls_log.exists() or "workflow run" not in gh_calls_log.read_text(
         encoding="utf-8"
     )
@@ -97,6 +147,7 @@ def test_request_dev_release_calls_gh_workflow_run(tmp_path: Path) -> None:
     mock_git.write_text(
         "#!/bin/sh\n"
         'if [ "$1" = "rev-parse" ]; then echo "1234567890abcdef1234567890abcdef12345678"; exit 0; fi\n'
+        'if [ "$1" = "tag" ]; then exit 0; fi\n'
         "exit 1\n",
         encoding="utf-8",
     )
@@ -141,6 +192,7 @@ def test_request_dev_release_with_explicit_commit(tmp_path: Path) -> None:
     mock_git.write_text(
         "#!/bin/sh\n"
         'if [ "$1" = "rev-parse" ]; then echo "abcdefabcdefabcdefabcdefabcdefabcdefabcdef"; exit 0; fi\n'
+        'if [ "$1" = "tag" ]; then exit 0; fi\n'
         "exit 1\n",
         encoding="utf-8",
     )
@@ -204,6 +256,10 @@ def test_workflows_trigger_and_overwrite_and_checksum_verification() -> None:
         (".github/workflows/ci.yml", ci_content),
     ]:
         assert "SDH-ludusavi.zip" not in content, f"Bad asset name found in {path}"
+
+    assert "python3 scripts/version_guard.py check-base" in dev_content, (
+        "dev release must refuse base version drift via version_guard.py"
+    )
 
 
 def test_workflows_use_node24_action_runtime_and_current_action_majors() -> None:
