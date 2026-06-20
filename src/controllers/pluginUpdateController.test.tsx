@@ -16,6 +16,14 @@ vi.mock("react", () => ({
     }
     return [states[idx], setters[idx]];
   },
+  useReducer: (reducer: any, init: any) => {
+    const idx = stateIdx++;
+    if (states.length <= idx) {
+      states[idx] = init;
+      setters[idx] = (action: any) => { states[idx] = reducer(states[idx], action); };
+    }
+    return [states[idx], setters[idx]];
+  },
   useEffect: vi.fn(),
   useCallback: (fn: any) => fn,
   useRef: (init: any) => ({ current: init }),
@@ -131,5 +139,56 @@ describe("PluginUpdateController", () => {
 
     expect(updatedController.isInstalling).toBe(false);
     expect(updatedController.errorMessage).toBe(null);
+  });
+});
+
+import { updateReducer, initialUpdateState, UpdateState } from "./pluginUpdateReducer";
+
+describe("pluginUpdateReducer", () => {
+  it("transitions correctly on hydration complete with pending install", () => {
+    const action: any = {
+      type: "HYDRATION_COMPLETE",
+      installedReleasePublishedAt: "2026-06-19T00:00:00Z",
+      pendingInstall: {
+        version: "0.2.0",
+        channel: "stable",
+        preInstallVersion: "0.1.0"
+      }
+    };
+    const newState = updateReducer(initialUpdateState, action);
+    expect(newState.phase).toBe("installed");
+    expect(newState.pendingInstallVersion).toBe("0.2.0");
+    expect(newState.checkResult?.status).toBe("current");
+  });
+
+  it("transitions correctly on check timeout", () => {
+    const checkingState: UpdateState = { ...initialUpdateState, phase: "checking" };
+    const newState = updateReducer(checkingState, { type: "CHECK_TIMEOUT", message: "timeout" });
+    expect(newState.phase).toBe("failed");
+    expect(newState.errorMessage).toBe("timeout");
+  });
+
+  it("transitions correctly on check failed", () => {
+    const checkingState: UpdateState = { ...initialUpdateState, phase: "checking" };
+    const newState = updateReducer(checkingState, { type: "CHECK_FAILED", message: "error" });
+    expect(newState.phase).toBe("failed");
+    expect(newState.errorMessage).toBe("error");
+  });
+
+  it("transitions correctly on install handoff pending", () => {
+    const installingState: UpdateState = { ...initialUpdateState, phase: "installing" };
+    const newState = updateReducer(installingState, { type: "INSTALL_HANDOFF_PENDING" });
+    expect(newState.phase).toBe("handoff_pending");
+  });
+
+  it("clears installed override", () => {
+    const installedState: UpdateState = {
+      ...initialUpdateState,
+      phase: "installed",
+      installedOverride: { version: "0.2.0", channel: "stable", preInstallVersion: "0.1.0" }
+    };
+    const newState = updateReducer(installedState, { type: "CLEAR_INSTALLED_OVERRIDE" });
+    expect(newState.phase).toBe("idle");
+    expect(newState.installedOverride).toBe(null);
   });
 });
