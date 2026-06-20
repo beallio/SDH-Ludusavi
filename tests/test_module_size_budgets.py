@@ -9,6 +9,12 @@ BUDGETS = {
     "src/controllers/steamLifecycleSource.ts": 260,
     "src/controllers/syncthingMonitor.ts": 565,
     "src/controllers/syncthingMonitorMachine.ts": 375,
+    "py_modules/sdh_ludusavi/updater.py": 615,
+    "py_modules/sdh_ludusavi/updater_client.py": 105,
+    "py_modules/sdh_ludusavi/updater_discovery.py": 230,
+    "py_modules/sdh_ludusavi/updater_models.py": 165,
+    "py_modules/sdh_ludusavi/updater_pending.py": 75,
+    "py_modules/sdh_ludusavi/updater_rate_limit.py": 35,
 }
 
 

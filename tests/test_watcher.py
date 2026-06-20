@@ -923,3 +923,80 @@ def test_same_signature_replacement_leaves_exactly_one_registered() -> None:
     assert len(manager.watches) == 1
     assert "old_watch" not in manager.watches
     assert mock_stop.call_count == 1
+
+
+@patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
+@patch("sdh_ludusavi.syncthing.watcher.get_my_device_id")
+@patch("sdh_ludusavi.syncthing.watcher.resolve_folder_by_path")
+@patch("sdh_ludusavi.syncthing.watcher.get_connection_snapshot")
+def test_watch_manager_concurrent_same_signature_start(
+    mock_snapshot, mock_resolve_path, mock_my_id, mock_resolve_creds
+) -> None:
+    mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
+    mock_my_id.return_value = "LOCAL-DEVICE"
+    mock_resolve_path.return_value = _shared_folder(("DEV-B",))
+
+    manager = SyncthingWatchManager()
+    started_watches = set()
+    stopped_watches = set()
+
+    def mock_start(self):
+        started_watches.add(self.watch_id)
+        # don't actually start the thread for this unit test
+        pass
+
+    original_stop = SyncthingWatch.stop
+
+    def mock_stop(self):
+        stopped_watches.add(self.watch_id)
+        original_stop(self)
+
+    barrier = threading.Barrier(2)
+
+    def mock_get_connection_snapshot(*args, **kwargs):
+        barrier.wait()
+        # yield some time to let both threads wake up before racing for the lock
+        time.sleep(0.05)
+        return ConnectionSnapshot(0, 0, frozenset({"DEV-B"}))
+
+    mock_snapshot.side_effect = mock_get_connection_snapshot
+
+    with (
+        patch.object(SyncthingWatch, "start", autospec=True, side_effect=mock_start),
+        patch.object(SyncthingWatch, "stop", autospec=True, side_effect=mock_stop),
+    ):
+
+        def run_start():
+            manager.start_watch("post_game", "Hades", "1145300", "/home/deck/Sync/Hades")
+
+        t1 = threading.Thread(target=run_start)
+        t2 = threading.Thread(target=run_start)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+    # Assert exactly one watch remains registered
+    assert len(manager.watches) == 1
+    registered_id = list(manager.watches.keys())[0]
+
+    # Assert no started-but-unregistered watch thread survives
+    for wid in started_watches:
+        if wid != registered_id:
+            assert wid in stopped_watches
+
+
+def test_watch_stop_on_never_started_watch() -> None:
+    watch = SyncthingWatch(
+        "watch-1",
+        "post_game",
+        "Hades",
+        "1145300",
+        _shared_folder(("DEV-A",)),
+        None,
+        initial_snapshot=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+    )
+    # Never call watch.start()
+    # Does not raise
+    watch.stop()
+    assert watch.stop_event.is_set()
