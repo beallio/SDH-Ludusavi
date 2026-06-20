@@ -13,6 +13,11 @@ def parse_semver(text: str) -> tuple[int, int, int]:
     return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
 
 
+def next_patch_version(version: str) -> str:
+    major, minor, patch = parse_semver(version)
+    return f"{major}.{minor}.{patch + 1}"
+
+
 def highest_stable_version(tags: Iterable[str]) -> tuple[int, int, int] | None:
     max_version = None
     for tag in tags:
@@ -55,11 +60,22 @@ def is_version_behind_stable(version: str, tags: Iterable[str]) -> bool:
 
 
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] != "check-base":
-        print("Usage: python version_guard.py check-base <BASE_VERSION>", file=sys.stderr)
+    if len(sys.argv) != 3 or sys.argv[1] not in ("check-base", "next-patch"):
+        print("Usage: python version_guard.py <check-base|next-patch> <VERSION>", file=sys.stderr)
         sys.exit(1)
 
-    base_version = sys.argv[2]
+    command = sys.argv[1]
+    version_arg = sys.argv[2]
+
+    if command == "next-patch":
+        try:
+            print(next_patch_version(version_arg))
+            sys.exit(0)
+        except ValueError as e:
+            print(f"Error parsing version: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    base_version = version_arg
 
     try:
         result = subprocess.run(
