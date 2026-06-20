@@ -1,5 +1,10 @@
 import pytest
-from scripts.version_guard import parse_semver, highest_stable_version, is_base_ahead_of_stable
+from scripts.version_guard import (
+    parse_semver,
+    highest_stable_version,
+    is_base_ahead_of_stable,
+    is_version_behind_stable,
+)
 
 
 def test_parse_semver():
@@ -32,3 +37,16 @@ def test_is_base_ahead_of_stable():
     assert is_base_ahead_of_stable("0.1.0", []) is True
     # Base ahead of mixed
     assert is_base_ahead_of_stable("0.3.3", ["v0.3.2", "v0.3.4-dev"]) is True
+
+
+def test_is_version_behind_stable():
+    # Behind -> True (the drift we guard against)
+    assert is_version_behind_stable("0.3.1", ["v0.3.2"]) is True
+    # Equal -> not behind (valid: this is the version being/just released)
+    assert is_version_behind_stable("0.3.3", ["v0.3.3"]) is False
+    # Ahead -> not behind
+    assert is_version_behind_stable("0.3.4", ["v0.3.3"]) is False
+    # No stable tags -> not behind
+    assert is_version_behind_stable("0.1.0", []) is False
+    # Pre-release tags ignored when finding the highest stable
+    assert is_version_behind_stable("0.3.3", ["v0.3.3", "v0.3.4-dev"]) is False
