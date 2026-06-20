@@ -36,17 +36,11 @@ import type {
   RefreshResult,
   RpcResult,
   RpcStatus,
-  Settings
 } from "../../types";
 import { log, logUiEvent } from "../../utils/logging";
 import {
   captureSteamUiGameContext,
-  findGameForRunningSession,
-  getInstalledAppIdsString,
-  getPreferredSteamGameSession,
-  logCurrentGameNoMatch,
-  logCurrentGameSelection,
-  resetQuickAccessScroll
+  getInstalledAppIdsString
 } from "../../utils/steam";
 import { AutoSyncSettingsSection } from "./AutoSyncSettingsSection";
 import { GameSettingsSection } from "./GameSettingsSection";
@@ -57,6 +51,10 @@ import { QamStyles } from "./QamStyles";
 import { LogsSection, VersionsSection } from "./VersionAndLogsSection";
 import { resolveRefreshedSelection } from "./refreshSelection";
 import { resolveQamOpenSelection } from "./qamOpenSelection";
+import { runOperationFinalize } from "./manualOperationFinalize";
+import { useSteamContext, selectCurrentSteamGameIfAvailable } from "./useSteamContext";
+import { useInitialContent } from "./useInitialContent";
+import { useGameRefresh } from "./useGameRefresh";
 
 const EMPTY_GAMES: readonly GameStatus[] = Object.freeze([]);
 
@@ -85,8 +83,6 @@ export function LudusaviContent({
   const ludusaviStore = useLudusaviStateStore();
   const isQuickAccessVisible = useQuickAccessVisible();
   const qamContentRef = useRef<HTMLDivElement | null>(null);
-  const wasQuickAccessVisible = useRef(false);
-  const pendingCurrentGameSelection = useRef(false);
   const isMounted = useRef(true);
   const operationInProgress = useRef(false);
   const styleElement = useMemo(
@@ -152,38 +148,75 @@ export function LudusaviContent({
   }, [gameHistory, selectedGame]);
   const isBusy = operation.is_running || busyLabel !== null || backgroundRefreshBusy;
 
-  function selectCurrentSteamGameIfAvailable(
-    currentGames: readonly GameStatus[],
-    currentAliases: Record<string, string>
-  ): boolean {
-    const runningSession = getPreferredSteamGameSession();
-    if (!runningSession) {
-      logCurrentGameNoMatch(null, currentGames, currentAliases);
-      return false;
-    }
 
-    const runningGame = findGameForRunningSession(currentGames, runningSession, currentAliases);
-    if (!runningGame) {
-      logCurrentGameNoMatch(runningSession, currentGames, currentAliases);
-      return false;
-    }
+  useSteamContext({
+    isQuickAccessVisible,
+    games,
+    gameAliases,
+    selectedGame,
+    settingsLoaded: ludusaviState.settings !== null,
+    operationInProgress: operationInProgress.current,
+    qamContentRef,
+    setSelectedGame: (gameName) => ludusaviStore.setSelectedGame(gameName),
+    resolveQamOpenSelection,
+  });
 
-    ludusaviStore.setSelectedGame(runningGame.game.name);
-    logCurrentGameSelection(
-      runningSession,
-      runningGame.game,
-      runningGame.reason,
-      currentGames,
-      currentAliases
-    );
-    return true;
-  }
+  useInitialContent({
+    isMounted: () => isMounted.current,
+    isWarmed: ludusaviState.settings !== null && ludusaviState.games !== null,
+    installedAppIds: ludusaviState.installedAppIds,
+    cachedGames: ludusaviState.games ?? null,
+    initPromise: runtime.contentLoad.initPromise,
+    metadataPromise: runtime.contentLoad.metadataPromise,
+    setInitPromise: (p) => { runtime.contentLoad.initPromise = p; },
+    setMetadataPromise: (p) => { runtime.contentLoad.metadataPromise = p; },
+    getOperationStatus,
+    getVersions,
+    getLudusaviCommandCall,
+    getSettings,
+    getGameHistoryCall,
+    isGameCacheCurrentCall,
+    refreshGamesCall,
+    applySettings: (settings) => runtime.settings.applySettings(ludusaviStore, settings),
+    setGameHistory: (history) => ludusaviStore.setGameHistory(history),
+    setVersions: (versions) => ludusaviStore.setVersions(versions),
+    setLudusaviCommand: (command) => ludusaviStore.setLudusaviCommand(command),
+    applyRefreshResult: (result, preferredGame, allowSelection) => applyRefreshResult(result, preferredGame, allowSelection),
+    applyCachedRefreshResult: (preferredGame, allowSelection) => applyCachedRefreshResult(preferredGame, allowSelection),
+    setInstalledAppIds: (appIds) => ludusaviStore.setInstalledAppIds(appIds),
+    setOperation,
+    setBackgroundRefreshBusy,
+    setBusyLabel,
+    isRpcStatus,
+    logRpcStatus,
+  });
+
+  const { refreshGames } = useGameRefresh({
+    gamesCount: games.length,
+    getInstalledAppIdsString,
+    refreshGamesCall,
+    getOperationStatus,
+    getRecentLogs,
+    applyRefreshResult: (result, preferredGame) => applyRefreshResult(result, preferredGame),
+    setInstalledAppIds: (appIds) => ludusaviStore.setInstalledAppIds(appIds),
+    setOperation,
+    setLogs,
+    setBusyLabel,
+    notifyFailure: (title, body, icon) => notify(ludusaviStore, "failures_errors", title, body, icon),
+    notifySuccess: (title, body, icon) => notify(ludusaviStore, "refresh_status", title, body, icon),
+    isMounted: () => isMounted.current,
+    isRpcStatus,
+    logRpcStatus,
+    icons: { refresh: <IoMdRefresh />, warning: <FaExclamationTriangle /> },
+  });
+
+
+
 
   useEffect(() => {
     isMounted.current = true;
     runtime.settings.clearLastQueuedSelectedGame();
     logUiEvent("qam_content_mounted", {}, "info");
-    void loadInitial();
     return () => {
       logUiEvent("qam_content_unmounted", {}, "info");
       isMounted.current = false;
@@ -194,49 +227,6 @@ export function LudusaviContent({
     runtime.settings.syncLastQueuedSelectedGame(selectedGame);
   }, [selectedGame, runtime.settings]);
 
-  useEffect(() => {
-    if (isQuickAccessVisible && !wasQuickAccessVisible.current) {
-      logUiEvent(
-        "qam_opened",
-        {
-          game_count: games.length,
-          selected_game: selectedGame || null,
-          settings_loaded: ludusaviState.settings !== null,
-        },
-        "info",
-      );
-      pendingCurrentGameSelection.current = true;
-      const resetDelays = [50, 150, 350];
-      resetQuickAccessScroll(qamContentRef.current);
-      resetDelays.forEach((delay) => {
-        window.setTimeout(
-          () => resetQuickAccessScroll(qamContentRef.current, `qam_open_retry_${delay}`),
-          delay
-        );
-      });
-    } else if (!isQuickAccessVisible && wasQuickAccessVisible.current) {
-      logUiEvent("qam_closed", { selected_game: selectedGame || null }, "info");
-    }
-    wasQuickAccessVisible.current = isQuickAccessVisible;
-  }, [isQuickAccessVisible]);
-
-  useEffect(() => {
-    const action = resolveQamOpenSelection({
-      isQuickAccessVisible,
-      pendingSelection: pendingCurrentGameSelection.current,
-      gameCount: games.length,
-      operationInProgress: operationInProgress.current,
-    });
-    if (action === "wait") {
-      return;
-    }
-    if (action === "consume") {
-      pendingCurrentGameSelection.current = false;
-      return;
-    }
-    selectCurrentSteamGameIfAvailable(games, gameAliases);
-    pendingCurrentGameSelection.current = false;
-  }, [gameAliases, games, isQuickAccessVisible]);
 
   useEffect(() => {
     if (isQuickAccessVisible) {
@@ -248,180 +238,6 @@ export function LudusaviContent({
     return () => window.clearInterval(contextIntervalID);
   }, [isQuickAccessVisible]);
 
-  const loadInitial = async () => {
-    const isWarmed = ludusaviState.settings !== null && ludusaviState.games !== null;
-    if (!isMounted.current) return;
-    const startedAt = performance.now();
-    logUiEvent(
-      "initial_load_started",
-      {
-        cached_game_count: ludusaviState.games?.length ?? 0,
-        warmed: isWarmed,
-      },
-      "info",
-    );
-    if (!isWarmed) {
-      setBusyLabel("Loading");
-    }
-    setBackgroundRefreshBusy(isWarmed);
-
-    fetchMetadata();
-
-    const currentInit = runtime.contentLoad.initPromise;
-    if (!currentInit) {
-      log("debug", `Creating new initialization promise (warmed=${isWarmed})`);
-      const newInitP = (async () => {
-        const loadedSettings = await fetchInitialState();
-        await synchronizeGameList(isWarmed, loadedSettings);
-        return getOperationStatus();
-      })();
-      runtime.contentLoad.initPromise = newInitP;
-    } else {
-      log("debug", "Reusing in-flight initialization promise");
-    }
-
-    try {
-      const activeInit = runtime.contentLoad.initPromise!;
-      const loadedOperation = await activeInit;
-      if (isMounted.current) {
-        setOperation(loadedOperation);
-      }
-      logUiEvent(
-        "initial_load_completed",
-        {
-          elapsed_ms: Math.round(performance.now() - startedAt),
-          operation_running: loadedOperation.is_running,
-          warmed: isWarmed,
-        },
-        "info",
-      );
-    } catch (error) {
-      logUiEvent(
-        "initial_load_failed",
-        {
-          elapsed_ms: Math.round(performance.now() - startedAt),
-          message: error instanceof Error ? error.message : String(error),
-          warmed: isWarmed,
-        },
-        "error",
-      );
-      log("error", `Initial load failed: ${error}`);
-    } finally {
-      runtime.contentLoad.initPromise = null;
-      if (isMounted.current) {
-        setBackgroundRefreshBusy(false);
-        setBusyLabel(null);
-      }
-    }
-  };
-
-  const fetchMetadata = () => {
-    const snapshot = ludusaviStore.getSnapshot();
-    if (snapshot.versions !== null && snapshot.ludusaviCommand !== null) {
-      return;
-    }
-    if (runtime.contentLoad.metadataPromise) {
-      return;
-    }
-    // Load versions and commands in the background asynchronously.
-    const metaP = (async () => {
-      try {
-        const [versionsResult, commandResult] = await Promise.allSettled([
-          getVersions(),
-          getLudusaviCommandCall()
-        ]);
-
-        if (versionsResult.status === "fulfilled") {
-          const loadedVersions = versionsResult.value;
-          log("debug", `Loaded versions: ${JSON.stringify(loadedVersions)}`);
-          if (isRpcStatus(loadedVersions)) {
-            logRpcStatus(loadedVersions, "versions");
-            ludusaviStore.setVersions({ message: loadedVersions.message || "Error" });
-          } else {
-            ludusaviStore.setVersions(loadedVersions);
-          }
-        } else {
-          log("error", `Background load of versions failed: ${versionsResult.reason}`);
-          ludusaviStore.setVersions({ message: "Error" });
-        }
-
-        if (commandResult.status === "fulfilled") {
-          const loadedCommand = commandResult.value;
-          log("debug", `Loaded command: ${JSON.stringify(loadedCommand)}`);
-          if (isRpcStatus(loadedCommand)) {
-            logRpcStatus(loadedCommand, "command discovery");
-          } else {
-            ludusaviStore.setLudusaviCommand(loadedCommand);
-          }
-        } else {
-          log("error", `Background load of command failed: ${commandResult.reason}`);
-        }
-      } catch (err) {
-        log("error", `fetchMetadata failed: ${err}`);
-      } finally {
-        runtime.contentLoad.metadataPromise = null;
-      }
-    })();
-    runtime.contentLoad.metadataPromise = metaP;
-  };
-
-  const fetchInitialState = async (): Promise<RpcResult<Settings>> => {
-    const [loadedSettings, loadedHistory] = await Promise.all([
-      getSettings(),
-      getGameHistoryCall()
-    ]);
-
-    log("debug", `Loaded settings: ${JSON.stringify(loadedSettings)}`);
-    if (isRpcStatus(loadedSettings)) {
-      logRpcStatus(loadedSettings, "settings");
-    } else {
-      runtime.settings.applySettings(ludusaviStore, loadedSettings);
-    }
-
-    if (isRpcStatus(loadedHistory)) {
-      logRpcStatus(loadedHistory, "history");
-    } else {
-      ludusaviStore.setGameHistory(loadedHistory);
-    }
-
-    return loadedSettings;
-  };
-
-  const synchronizeGameList = async (isWarmed: boolean, loadedSettings: RpcResult<Settings>) => {
-    log("debug", "Initializing game list (cached)");
-    const installedAppIds = await getInstalledAppIdsString();
-    const installedAppIdsChanged = ludusaviState.installedAppIds !== installedAppIds;
-
-    const cacheCurrentResult =
-      isWarmed && !installedAppIdsChanged
-        ? await isGameCacheCurrentCall(installedAppIds)
-        : false;
-
-    const cacheCurrent = !isRpcStatus(cacheCurrentResult) && cacheCurrentResult === true;
-    const preferredGame = isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game;
-    logUiEvent("game_list_source_selected", {
-      cache_current: cacheCurrent,
-      installed_app_ids_changed: installedAppIdsChanged,
-      preferred_game: preferredGame,
-      warmed: isWarmed,
-    });
-
-    if (cacheCurrent && ludusaviState.games) {
-      applyCachedRefreshResult(preferredGame, true);
-      logUiEvent("game_list_loaded_from_cache", {
-        game_count: ludusaviState.games.length,
-      }, "info");
-    } else {
-      const refreshed = await refreshGamesCall(false, installedAppIds);
-      if (applyRefreshResult(refreshed, preferredGame, true)) {
-        ludusaviStore.setInstalledAppIds(installedAppIds);
-        logUiEvent("game_list_refreshed", {
-          game_count: isRpcStatus(refreshed) ? 0 : refreshed.games.length,
-          reason: installedAppIdsChanged ? "installed_apps_changed" : "cache_stale_or_cold",
-        }, "info");
-      }
-    }
-  };
 
   const applyCachedRefreshResult = (preferredGame?: string, allowSteamContextSelection = false): boolean => {
     const cachedGames = ludusaviState.games;
@@ -431,7 +247,7 @@ export function LudusaviContent({
 
     const cachedAliases = ludusaviState.gameAliases;
 
-    if (allowSteamContextSelection && selectCurrentSteamGameIfAvailable(cachedGames, cachedAliases)) {
+    if (allowSteamContextSelection && selectCurrentSteamGameIfAvailable(cachedGames, cachedAliases, (gameName) => ludusaviStore.setSelectedGame(gameName))) {
       return true;
     }
 
@@ -476,7 +292,7 @@ export function LudusaviContent({
 
     if (
       allowSteamContextSelection &&
-      selectCurrentSteamGameIfAvailable(result.games, result.aliases || {})
+      selectCurrentSteamGameIfAvailable(result.games, result.aliases || {}, (gameName) => ludusaviStore.setSelectedGame(gameName))
     ) {
       return true;
     }
@@ -494,72 +310,6 @@ export function LudusaviContent({
     return true;
   };
 
-  const refreshGames = async () => {
-    const startedAt = performance.now();
-    logUiEvent("manual_refresh_started", { previous_game_count: games.length }, "info", "refresh");
-    setBusyLabel("Refreshing games");
-    try {
-      const installedAppIds = await getInstalledAppIdsString();
-      const result = await refreshGamesCall(true, installedAppIds);
-      if (isRpcStatus(result)) {
-        logRpcStatus(result, "refresh");
-        notify(
-          ludusaviStore,
-          "failures_errors",
-          "SDH-Ludusavi refresh failed",
-          result.message || "Failed to refresh games",
-          <FaExclamationTriangle />
-        );
-      } else if (applyRefreshResult(result)) {
-        ludusaviStore.setInstalledAppIds(installedAppIds);
-        notify(
-          ludusaviStore,
-          "refresh_status",
-          "SDH-Ludusavi",
-          "Ludusavi game status refreshed",
-          <IoMdRefresh />
-        );
-        const operationStatus = await getOperationStatus();
-        const recentLogs = await getRecentLogs();
-        if (isMounted.current) {
-          setOperation(operationStatus);
-          setLogs(recentLogs);
-        }
-        logUiEvent(
-          "manual_refresh_completed",
-          {
-            elapsed_ms: Math.round(performance.now() - startedAt),
-            game_count: result.games.length,
-            log_count: recentLogs.length,
-          },
-          "info",
-          "refresh",
-        );
-      }
-    } catch (error) {
-      logUiEvent(
-        "manual_refresh_failed",
-        {
-          elapsed_ms: Math.round(performance.now() - startedAt),
-          message: error instanceof Error ? error.message : String(error),
-        },
-        "error",
-        "refresh",
-      );
-      log("error", `Manual refresh failed: ${error}`);
-      notify(
-        ludusaviStore,
-        "failures_errors",
-        "SDH-Ludusavi refresh failed",
-        error instanceof Error ? error.message : String(error),
-        <FaExclamationTriangle />
-      );
-    } finally {
-      if (isMounted.current) {
-        setBusyLabel(null);
-      }
-    }
-  };
 
   const showLudusaviLogs = async () => {
     logUiEvent("ludusavi_logs_requested", {}, "info", "logs");
@@ -664,19 +414,19 @@ export function LudusaviContent({
         summarizeOperationResult(result, label),
         resultIcon
       );
-      const refreshed = await refreshGamesCall(false);
-      const operationStatus = await getOperationStatus();
-      const recentLogs = await getRecentLogs();
-      const refreshedHistory = await getGameHistoryCall();
-
-      applyRefreshResult(refreshed, selectedGame);
-      if (isMounted.current) {
-        setOperation(operationStatus);
-        setLogs(recentLogs);
-        if (!isRpcStatus(refreshedHistory)) {
-          ludusaviStore.setGameHistory(refreshedHistory);
-        }
-      }
+      await runOperationFinalize({
+        selectedGame,
+        refreshGamesCall,
+        getOperationStatus,
+        getRecentLogs,
+        getGameHistoryCall,
+        applyRefreshResult,
+        setOperation,
+        setLogs,
+        setGameHistory: ludusaviStore.setGameHistory.bind(ludusaviStore),
+        isMounted: () => isMounted.current,
+        isRpcStatus,
+      });
     } catch (error) {
       logUiEvent(
         "manual_operation_failed",
@@ -744,19 +494,19 @@ export function LudusaviContent({
         summarizeOperationResult(result, label),
         resultIcon
       );
-      const refreshed = await refreshGamesCall(false);
-      const operationStatus = await getOperationStatus();
-      const recentLogs = await getRecentLogs();
-      const refreshedHistory = await getGameHistoryCall();
-
-      applyRefreshResult(refreshed, selectedGame);
-      if (isMounted.current) {
-        setOperation(operationStatus);
-        setLogs(recentLogs);
-        if (!isRpcStatus(refreshedHistory)) {
-          ludusaviStore.setGameHistory(refreshedHistory);
-        }
-      }
+      await runOperationFinalize({
+        selectedGame,
+        refreshGamesCall,
+        getOperationStatus,
+        getRecentLogs,
+        getGameHistoryCall,
+        applyRefreshResult,
+        setOperation,
+        setLogs,
+        setGameHistory: ludusaviStore.setGameHistory.bind(ludusaviStore),
+        isMounted: () => isMounted.current,
+        isRpcStatus,
+      });
     } catch (error) {
       logUiEvent(
         "manual_operation_failed",

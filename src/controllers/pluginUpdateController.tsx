@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useRef, useCallback, useEffect, useReducer } from "react";
 import { toaster } from "@decky/api";
 import {
   PluginUpdateCandidate,
@@ -19,6 +19,7 @@ import {
   INSTALL_TYPE_UPDATE,
 } from "../utils/deckyInstaller";
 import { callable } from "@decky/api";
+import { updateReducer, initialUpdateState } from "./pluginUpdateReducer";
 
 const logRpc = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
 
@@ -48,12 +49,6 @@ export interface PluginUpdateControllerProps {
   onInstallVersionConfirmed?: (version: string) => void;
 }
 
-interface InstalledOverride {
-  version: string;
-  channel: UpdateChannel;
-  preInstallVersion: string;
-}
-
 export type PluginUpdateController = {
   effectiveCurrentVersion: string;
   candidate: PluginUpdateCandidate | null;
@@ -73,27 +68,18 @@ export function usePluginUpdateController({
   automaticUpdateChecks,
   onInstallVersionConfirmed
 }: PluginUpdateControllerProps): PluginUpdateController {
-  const [isChecking, setIsChecking] = useState(false);
-  const [isInstalling, setIsInstalling] = useState(false);
-  const [isHandoffPending, setIsHandoffPending] = useState(false);
-  const [checkResult, setCheckResult] = useState<UpdateCheckResult | null>(null);
-  const [candidate, setCandidate] = useState<PluginUpdateCandidate | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [installedReleasePublishedAt, setInstalledReleasePublishedAt] = useState<string | null>(null);
-  const [installedOverride, setInstalledOverride] = useState<InstalledOverride | null>(null);
-  
+  const [state, dispatch] = useReducer(updateReducer, initialUpdateState);
+
   const hasChecked = useRef(false);
   const inFlightCheck = useRef<Promise<any> | null>(null);
-  const pendingInstallVersion = useRef<string | null>(null);
   const hydratedPendingInstallVersion = useRef<string | null>(null);
 
   const activeCheckId = useRef(0);
   const checkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [contextHydrated, setContextHydrated] = useState(false);
   const skipInitialCheck = useRef(false);
   const automaticCheckToggleHydrated = useRef(false);
 
-  const effectiveCurrentVersion = installedOverride?.version ?? currentVersion;
+  const effectiveCurrentVersion = state.installedOverride?.version ?? currentVersion;
 
   const clearCheckTimeout = useCallback(() => {
     if (checkTimeoutRef.current !== null) {
@@ -102,32 +88,8 @@ export function usePluginUpdateController({
     }
   }, []);
 
-  const enterPostInstallGuard = useCallback(
-    (version: string, channel: UpdateChannel, preInstall?: string) => {
-      activeCheckId.current += 1;
-      clearCheckTimeout();
-      inFlightCheck.current = null;
-      setIsChecking(false);
-      setInstalledOverride({
-        version,
-        channel,
-        preInstallVersion: preInstall ?? currentVersion
-      });
-      pendingInstallVersion.current = version;
-      setCheckResult({
-        status: "current",
-        checked_at: new Date().toISOString(),
-        channel
-      });
-      setCandidate(null);
-      setErrorMessage(null);
-    },
-    [currentVersion, clearCheckTimeout]
-  );
-
   const finishCheck = useCallback((checkId: number) => {
     if (checkId === activeCheckId.current) {
-      setIsChecking(false);
       inFlightCheck.current = null;
       clearCheckTimeout();
     }
@@ -138,7 +100,7 @@ export function usePluginUpdateController({
       if (!effectiveCurrentVersion || effectiveCurrentVersion === "Loading...") {
         return;
       }
-      if (opts.source === "automatic" && (installedOverride || pendingInstallVersion.current)) {
+      if (opts.source === "automatic" && (state.installedOverride || state.pendingInstallVersion)) {
         logUpdate(null, "automatic_check_suppressed_pending_install");
         return;
       }
@@ -152,22 +114,15 @@ export function usePluginUpdateController({
 
       const promise = (async () => {
         const checkStart = performance.now();
-        setIsChecking(true);
-        setErrorMessage(null);
+        dispatch({ type: "CHECK_START" });
         logUpdate(null, "check_start", { channel: updateChannel });
 
         clearCheckTimeout();
         checkTimeoutRef.current = setTimeout(() => {
           if (activeCheckId.current === checkId) {
             activeCheckId.current += 1;
-            setIsChecking(false);
             inFlightCheck.current = null;
-            setErrorMessage("Update check interrupted. Check again.");
-            setCheckResult({
-              status: "failed",
-              checked_at: new Date().toISOString(),
-              message: "Update check interrupted. Check again."
-            });
+            dispatch({ type: "CHECK_TIMEOUT", message: "Update check interrupted. Check again." });
             logUpdate(null, "check_timeout", { checkId });
           }
         }, UPDATE_CHECK_UI_TIMEOUT_MS);
@@ -180,10 +135,9 @@ export function usePluginUpdateController({
           }
 
           const elapsed_ms = Math.round(performance.now() - checkStart);
-          setCheckResult(res);
           if (res.status === "failed") {
             logUpdate(null, "check_failed", { message: res.message || "unknown", elapsed_ms });
-            setErrorMessage(res.message || "Failed to check for updates");
+            dispatch({ type: "CHECK_FAILED", message: res.message || "Failed to check for updates", result: res });
             if (opts.notify && opts.force) {
               toaster.toast({
                 title: "Update Check Failed",
@@ -194,20 +148,20 @@ export function usePluginUpdateController({
           } else if (res.status === "available") {
             const candidateVersion = res.candidate?.version;
             const isStale =
-              (installedOverride && candidateVersion === installedOverride.version) ||
-              candidateVersion === pendingInstallVersion.current ||
+              (state.installedOverride && candidateVersion === state.installedOverride.version) ||
+              candidateVersion === state.pendingInstallVersion ||
               candidateVersion === effectiveCurrentVersion;
+            
             if (isStale) {
               logUpdate(null, "check_success", { status: "current", stale_coerced: true, elapsed_ms });
-              setCheckResult({ status: "current", checked_at: res.checked_at, channel: updateChannel });
-              setCandidate(null);
+              dispatch({ type: "CHECK_SUCCESS_CURRENT", result: { status: "current", checked_at: res.checked_at, channel: updateChannel } });
             } else {
               logUpdate(null, "check_success", { status: "available", version: candidateVersion, elapsed_ms });
-              setCandidate(res.candidate);
+              dispatch({ type: "CHECK_SUCCESS_AVAILABLE", result: res, candidate: res.candidate! });
             }
           } else {
             logUpdate(null, "check_success", { status: "current", elapsed_ms });
-            setCandidate(null);
+            dispatch({ type: "CHECK_SUCCESS_CURRENT", result: res });
           }
           return res;
         } catch (err) {
@@ -218,7 +172,7 @@ export function usePluginUpdateController({
           const elapsed_ms = Math.round(performance.now() - checkStart);
           const msg = err instanceof Error ? err.message : String(err);
           logUpdate(null, "check_failed", { message: msg, elapsed_ms });
-          setErrorMessage(msg);
+          dispatch({ type: "CHECK_FAILED", message: msg });
           if (opts.notify && opts.force) {
             toaster.toast({
               title: "Update Check Failed",
@@ -226,13 +180,11 @@ export function usePluginUpdateController({
               duration: 3000
             });
           }
-          const failedRes: UpdateCheckResult = {
+          return {
             status: "failed",
             checked_at: new Date().toISOString(),
             message: msg
           };
-          setCheckResult(failedRes);
-          return failedRes;
         } finally {
           finishCheck(checkId);
         }
@@ -241,7 +193,7 @@ export function usePluginUpdateController({
       inFlightCheck.current = promise;
       return promise;
     },
-    [currentVersion, updateChannel, installedOverride, effectiveCurrentVersion, clearCheckTimeout, finishCheck]
+    [updateChannel, state.installedOverride, state.pendingInstallVersion, effectiveCurrentVersion, clearCheckTimeout, finishCheck]
   );
 
   const checkNow = useCallback(async () => {
@@ -250,8 +202,11 @@ export function usePluginUpdateController({
 
   const handleHandoffSuccess = useCallback(
     async (version: string, channel: UpdateChannel, traceId: string, handoffStart: number) => {
-      enterPostInstallGuard(version, channel);
-      // activeCheckId.current, setIsChecking(false), clearCheckTimeout
+      activeCheckId.current += 1;
+      clearCheckTimeout();
+      inFlightCheck.current = null;
+      dispatch({ type: "INSTALL_SUCCESS", version, channel, preInstallVersion: currentVersion });
+      
       try {
         const confirmRes = await confirmUpdateInstallHandoffCall(version);
         if ("status" in confirmRes && (confirmRes.status === "failed" || confirmRes.status === "skipped")) {
@@ -262,8 +217,6 @@ export function usePluginUpdateController({
         logUpdate(traceId, "handoff_confirm_failed", { message: msg });
       }
       logUpdate(traceId, "handoff_resolved", { status: "success", elapsed_ms: Math.round(performance.now() - handoffStart) });
-      setIsInstalling(false);
-      setIsHandoffPending(false);
       onInstallVersionConfirmed?.(version);
       toaster.toast({
         title: "Installation Initiated",
@@ -271,22 +224,20 @@ export function usePluginUpdateController({
         duration: 3000
       });
     },
-    [currentVersion, onInstallVersionConfirmed, enterPostInstallGuard]
+    [currentVersion, onInstallVersionConfirmed, clearCheckTimeout]
   );
 
   useEffect(() => {
-    if (!installedOverride) return;
-    // currentVersion !== installedOverride.version
+    if (!state.installedOverride) return;
     if (
       currentVersion &&
       currentVersion !== "Loading..." &&
-      (currentVersion !== installedOverride.preInstallVersion ||
-       currentVersion === installedOverride.version)
+      (currentVersion !== state.installedOverride.preInstallVersion ||
+       currentVersion === state.installedOverride.version)
     ) {
-      setInstalledOverride(null);
-      pendingInstallVersion.current = null;
+      dispatch({ type: "CLEAR_INSTALLED_OVERRIDE" });
     }
-  }, [currentVersion, installedOverride]);
+  }, [currentVersion, state.installedOverride]);
 
   useEffect(() => {
     return () => {
@@ -302,10 +253,8 @@ export function usePluginUpdateController({
         if (!active) return;
         if (result && !("status" in result && (result.status === "failed" || result.status === "skipped"))) {
           const ctx = result as import("../types").UpdateCheckContext;
-          if (ctx.installed_release_published_at) {
-            setInstalledReleasePublishedAt(ctx.installed_release_published_at);
-          }
           const pendingInstall = ctx.pending_update_install;
+          
           if (
             pendingInstall?.version &&
             ctx.effective_installed_version === pendingInstall.version &&
@@ -314,15 +263,29 @@ export function usePluginUpdateController({
             const pendingChannel: UpdateChannel =
               pendingInstall.channel === "development" ? "development" : "stable";
             hydratedPendingInstallVersion.current = pendingInstall.version;
-            setInstalledOverride({
-              version: pendingInstall.version,
-              channel: pendingChannel,
-              preInstallVersion: ctx.installed_version ?? currentVersion
+            
+            activeCheckId.current += 1;
+            clearCheckTimeout();
+            inFlightCheck.current = null;
+
+            dispatch({
+              type: "HYDRATION_COMPLETE",
+              installedReleasePublishedAt: ctx.installed_release_published_at || null,
+              pendingInstall: {
+                version: pendingInstall.version,
+                channel: pendingChannel,
+                preInstallVersion: ctx.installed_version ?? currentVersion
+              }
             });
-            enterPostInstallGuard(pendingInstall.version, pendingChannel, ctx.installed_version ?? currentVersion);
             onInstallVersionConfirmed?.(pendingInstall.version);
             skipInitialCheck.current = true;
+          } else {
+            dispatch({
+              type: "HYDRATION_COMPLETE",
+              installedReleasePublishedAt: ctx.installed_release_published_at || null,
+            });
           }
+
           if (ctx.last_checked_at && ctx.last_checked_channel === updateChannel) {
             const hasPending =
               !!ctx.pending_update_install &&
@@ -331,12 +294,12 @@ export function usePluginUpdateController({
               void checkForUpdates({ force: false, notify: false, source: "automatic" });
             }
           }
+        } else {
+          dispatch({ type: "HYDRATION_COMPLETE", installedReleasePublishedAt: null });
         }
       } catch (err) {
-        // Quiet failure on context check
-      } finally {
         if (active) {
-          setContextHydrated(true);
+          dispatch({ type: "HYDRATION_COMPLETE", installedReleasePublishedAt: null });
         }
       }
     }
@@ -344,10 +307,10 @@ export function usePluginUpdateController({
     return () => {
       active = false;
     };
-  }, [currentVersion, onInstallVersionConfirmed, updateChannel, enterPostInstallGuard, checkForUpdates]);
+  }, [currentVersion, onInstallVersionConfirmed, updateChannel, checkForUpdates, clearCheckTimeout]);
 
   useEffect(() => {
-    if (!contextHydrated) {
+    if (state.phase === "hydrating") {
       return;
     }
     if (!currentVersion || currentVersion === "Loading...") {
@@ -367,10 +330,10 @@ export function usePluginUpdateController({
     } else {
       void checkForUpdates({ force: true, notify: false, source: "automatic" });
     }
-  }, [updateChannel, currentVersion, contextHydrated, checkForUpdates]);
+  }, [updateChannel, currentVersion, state.phase, checkForUpdates]);
 
   useEffect(() => {
-    if (!contextHydrated) {
+    if (state.phase === "hydrating") {
       return;
     }
     if (!automaticCheckToggleHydrated.current) {
@@ -381,13 +344,11 @@ export function usePluginUpdateController({
       return;
     }
     void checkForUpdates({ force: false, notify: false, source: "automatic" });
-  }, [automaticUpdateChecks, currentVersion, contextHydrated, checkForUpdates]);
+  }, [automaticUpdateChecks, currentVersion, state.phase, checkForUpdates]);
 
   const install = useCallback(async (targetCandidate: PluginUpdateCandidate) => {
-    if (isInstalling) return;
-    setIsInstalling(true);
-    setIsHandoffPending(false);
-    setErrorMessage(null);
+    if (state.phase === "installing" || state.phase === "handoff_pending") return;
+    dispatch({ type: "INSTALL_START" });
 
     const updateTraceId = generateUpdateTraceId();
     logUpdate(updateTraceId, "install_clicked", { version: targetCandidate.version });
@@ -419,7 +380,10 @@ export function usePluginUpdateController({
       }
       logUpdate(updateTraceId, "record_install_success", { version: revalRes.version, elapsed_ms: Math.round(performance.now() - recordStart) });
 
-      enterPostInstallGuard(revalRes.version, revalRes.channel as UpdateChannel);
+      activeCheckId.current += 1;
+      clearCheckTimeout();
+      inFlightCheck.current = null;
+      dispatch({ type: "INSTALL_SUCCESS", version: revalRes.version, channel: revalRes.channel as UpdateChannel, preInstallVersion: currentVersion });
 
       const handoffStart = performance.now();
       logUpdate(updateTraceId, "handoff_start", {
@@ -447,7 +411,7 @@ export function usePluginUpdateController({
 
       if (handoffTimerFired) {
         logUpdate(updateTraceId, "handoff_pending", { status: "installer_handoff_pending", elapsed_ms: Math.round(performance.now() - handoffStart) });
-        setIsHandoffPending(true);
+        dispatch({ type: "INSTALL_HANDOFF_PENDING" });
         void (async () => {
             try {
               await installerPromise;
@@ -464,12 +428,8 @@ export function usePluginUpdateController({
                 const clearMsg = clearErr instanceof Error ? clearErr.message : String(clearErr);
                 logUpdate(updateTraceId, "pending_clear_failed", { message: clearMsg });
               }
-              setInstalledOverride(null);
-              pendingInstallVersion.current = null;
               void checkForUpdates({ force: false, notify: false, source: "automatic" });
-              setIsInstalling(false);
-              setIsHandoffPending(false);
-              setErrorMessage(msg);
+              dispatch({ type: "INSTALL_FAILED", message: msg });
               toaster.toast({
                 title: "Installation Failed",
                 body: msg,
@@ -492,29 +452,25 @@ export function usePluginUpdateController({
         const clearMsg = clearErr instanceof Error ? clearErr.message : String(clearErr);
         logUpdate(updateTraceId, "pending_clear_failed", { message: clearMsg });
       }
-      setInstalledOverride(null);
-      pendingInstallVersion.current = null;
       void checkForUpdates({ force: false, notify: false, source: "automatic" });
-      setErrorMessage(msg);
-      setIsInstalling(false);
-      setIsHandoffPending(false);
+      dispatch({ type: "INSTALL_FAILED", message: msg });
       toaster.toast({
         title: "Installation Failed",
         body: msg,
         duration: 4000
       });
     }
-  }, [isInstalling, enterPostInstallGuard, handleHandoffSuccess, checkForUpdates]);
+  }, [state.phase, handleHandoffSuccess, checkForUpdates, currentVersion, clearCheckTimeout]);
 
   return {
     effectiveCurrentVersion,
-    candidate,
-    checkResult,
-    errorMessage,
-    isChecking,
-    isInstalling,
-    isHandoffPending,
-    installedReleasePublishedAt,
+    candidate: state.candidate,
+    checkResult: state.checkResult,
+    errorMessage: state.errorMessage,
+    isChecking: state.phase === "checking",
+    isInstalling: state.phase === "installing",
+    isHandoffPending: state.phase === "handoff_pending",
+    installedReleasePublishedAt: state.installedReleasePublishedAt,
     checkNow,
     install,
   };

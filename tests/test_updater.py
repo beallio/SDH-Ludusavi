@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sdh_ludusavi.updater import parse_plugin_version
+from sdh_ludusavi.updater_models import parse_plugin_version
 
 
 def test_parse_plugin_version_stable() -> None:
@@ -95,7 +95,7 @@ def test_version_comparison() -> None:
 
 
 def test_validate_release_candidate(monkeypatch) -> None:
-    from sdh_ludusavi.updater import validate_release_candidate
+    from sdh_ludusavi.updater_discovery import validate_release_candidate
     from sdh_ludusavi.updater_models import JsonResponse
 
     release = {
@@ -169,7 +169,8 @@ def test_validate_release_candidate(monkeypatch) -> None:
 
 
 def test_select_candidate() -> None:
-    from sdh_ludusavi.updater import select_candidate, UpdateCandidate
+    from sdh_ludusavi.updater_discovery import select_candidate
+    from sdh_ludusavi.updater_models import UpdateCandidate
 
     # Setup list of validated candidates
     c_stable_1 = UpdateCandidate(
@@ -483,7 +484,7 @@ def test_revalidate_install_candidate() -> None:
 
 
 def test_validate_release_candidate_manifest_name_strict(monkeypatch) -> None:
-    from sdh_ludusavi.updater import validate_release_candidate
+    from sdh_ludusavi.updater_discovery import validate_release_candidate
     from sdh_ludusavi.updater_models import JsonResponse
 
     # 1. Stable release with correct manifest name
@@ -626,7 +627,7 @@ def test_validate_release_candidate_manifest_name_strict(monkeypatch) -> None:
 
 
 def test_malformed_github_payloads(monkeypatch) -> None:
-    from sdh_ludusavi.updater import validate_release_candidate
+    from sdh_ludusavi.updater_discovery import validate_release_candidate
     from sdh_ludusavi.updater_models import JsonResponse
 
     # Manifest fetch returns 500
@@ -732,7 +733,7 @@ def test_rate_limit_header_precedence() -> None:
 
 
 def test_prohibition_on_logging_full_sha256() -> None:
-    from sdh_ludusavi.updater import format_candidate_log
+    from sdh_ludusavi.updater_discovery import format_candidate_log
     from types import SimpleNamespace
 
     full_sha = "a" * 64
