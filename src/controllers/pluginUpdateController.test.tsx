@@ -88,43 +88,7 @@ describe("PluginUpdateController", () => {
     vi.mocked(ludusaviRpc.checkForPluginUpdateCall).mockResolvedValue({ status: "current", checked_at: "now", channel: "stable" });
   });
 
-  const renderAndRunEffects = async (props: any, maxLoops = 50) => {
-    let prevDepsMap = new Map<number, any[]>();
-    let loopCount = 0;
-    let lastController: any;
 
-    while (loopCount++ < maxLoops) {
-      stateIdx = 0;
-      activeEffects.length = 0;
-      lastController = usePluginUpdateController(props);
-
-      let effectsToRun: any[] = [];
-      activeEffects.forEach((eff, i) => {
-        const prevDeps = prevDepsMap.get(i);
-        let changed = !prevDeps || !eff.deps;
-        if (!changed && prevDeps && eff.deps) {
-          changed = eff.deps.some((d, idx) => d !== prevDeps[idx]);
-        }
-        if (changed) {
-          effectsToRun.push(eff.cb);
-          prevDepsMap.set(i, eff.deps);
-        }
-      });
-
-      if (effectsToRun.length === 0) {
-        break; // No effects changed, stable state
-      }
-
-      for (const cb of effectsToRun) {
-        const p = cb();
-        if (p instanceof Promise) await p;
-      }
-      
-      // Give promises a microtask to resolve state dispatches
-      await new Promise(r => setTimeout(r, 0));
-    }
-    return { controller: lastController, loops: loopCount };
-  };
 
   it("fails install and exits installing state if recordUpdateInstallRequestedCall fails", async () => {
     const candidate: any = {
@@ -206,34 +170,50 @@ describe("PluginUpdateController", () => {
     expect(updatedController.errorMessage).toBe(null);
   });
 
-  it("does not loop forced checks when update is available", async () => {
-    vi.mocked(ludusaviRpc.getUpdateCheckContextCall).mockResolvedValue({
-      installed_version: "0.1.0",
-      effective_installed_version: "0.1.0",
-      last_checked_channel: "stable",
-      last_checked_at: new Date().toISOString()
-    } as any);
+  it("dependency arrays for re-check effects do not change on check result", () => {
+    stateIdx = 0;
+    activeEffects.length = 0;
 
-    vi.mocked(ludusaviRpc.checkForPluginUpdateCall).mockResolvedValue({ 
-      status: "available", 
-      checked_at: "now", 
-      channel: "stable",
-      candidate: { version: "0.2.0" }
-    } as any);
-
-    const result = await renderAndRunEffects({
+    // Call hook to initialize state
+    usePluginUpdateController({
       currentVersion: "0.1.0",
       updateChannel: "stable",
       automaticUpdateChecks: true
     });
 
-    // Should not exceed a small number of loops.
-    // A runaway loop hits the 50 maxLoops bound.
-    expect(result.loops).toBeLessThan(50);
-    
-    // There should be bounded checkForUpdates calls (1 for initial check)
-    const checkCalls = vi.mocked(ludusaviRpc.checkForPluginUpdateCall).mock.calls;
-    expect(checkCalls.length).toBeLessThanOrEqual(2);
+    const dispatch = setters[0];
+
+    // Transition out of hydrating phase
+    dispatch({ type: "HYDRATION_COMPLETE", installedReleasePublishedAt: null });
+
+    // Render again
+    stateIdx = 0;
+    activeEffects.length = 0;
+    usePluginUpdateController({
+      currentVersion: "0.1.0",
+      updateChannel: "stable",
+      automaticUpdateChecks: true
+    });
+
+    // Capture the dependency arrays of all effects (the ones at index 3 and 4 are the ones we care about)
+    const depsBefore = activeEffects.map(e => e.deps);
+
+    // Transition to available
+    dispatch({ type: "CHECK_SUCCESS_AVAILABLE", result: { status: "available" } as any, candidate: { version: "0.2.0" } as any });
+
+    // Render again
+    stateIdx = 0;
+    activeEffects.length = 0;
+    usePluginUpdateController({
+      currentVersion: "0.1.0",
+      updateChannel: "stable",
+      automaticUpdateChecks: true
+    });
+
+    const depsAfter = activeEffects.map(e => e.deps);
+
+    // If the fix is correct (using isHydrated instead of state.phase), the deps will be identical.
+    expect(depsAfter).toEqual(depsBefore);
   });
 });
 
