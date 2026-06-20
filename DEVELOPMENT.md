@@ -91,6 +91,11 @@ To create a stable release:
    git push origin main vX.Y.Z
    ```
 4. The GitHub Actions release workflow will trigger on tag push to validate, build, and publish the release.
+5. Immediately run the post-release sync script to bump `dev` to the next patch version and sync it with `main`:
+   ```bash
+   ./scripts/post_release_sync.sh
+   ```
+   This will automatically commit the version bump and push `dev`.
 
 #### Prerelease (Dev) Release Process
 

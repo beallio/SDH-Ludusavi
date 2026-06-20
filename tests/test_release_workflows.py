@@ -315,19 +315,101 @@ def test_workflows_use_quality_gates_and_pin_uv() -> None:
     assert 'version: "latest"' not in action_content, "setup-uv version must be pinned, not latest"
 
 
-def test_post_release_dev_sync_job_content() -> None:
-    content = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+def test_post_release_sync_script_content() -> None:
+    script_path = Path("scripts/post_release_sync.sh")
+    assert script_path.exists()
+    assert os.access(script_path, os.X_OK)
 
-    assert "post-release-dev-sync:" in content
-    assert "needs: build-and-release" in content
-    assert "if: success() && startsWith(github.ref, 'refs/tags/v')" in content
-    assert "python3 scripts/version_guard.py next-patch" in content
+    content = script_path.read_text(encoding="utf-8")
+    assert "scripts/version_guard.py next-patch" in content
     assert "scripts/set_release_version.py" in content
-    assert "pull-requests: write" in content
 
-    assert "gh pr create" in content or "peter-evans/create-pull-request" in content
-    if "gh pr create" in content:
-        assert "--base dev" in content
+    assert "git push origin main" not in content
+    assert "git push HEAD:main" not in content
+    # Ensure it doesn't create a tag (it can read tags, e.g., git tag -l)
+    import re
 
-    assert "git push origin dev" not in content
-    assert "git push origin HEAD:dev" not in content
+    assert not re.search(r"git tag [^\-l]", content)
+
+
+def test_post_release_sync_script_dirty_tree(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    mock_git = bin_dir / "git"
+    mock_git.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "diff-index" ]; then exit 1; fi\n'
+        'if [ "$1" = "tag" ]; then echo "v0.3.3"; exit 0; fi\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    mock_git.chmod(mock_git.stat().st_mode | stat.S_IEXEC)
+
+    mock_run_sh = tmp_path / "run.sh"
+    mock_run_sh.write_text("#!/bin/sh\necho 0.3.4\nexit 0\n", encoding="utf-8")
+    mock_run_sh.chmod(mock_run_sh.stat().st_mode | stat.S_IEXEC)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+
+    script_content = Path("scripts/post_release_sync.sh").read_text(encoding="utf-8")
+    tmp_script = tmp_path / "post_release_sync.sh"
+    tmp_script.write_text(script_content, encoding="utf-8")
+    tmp_script.chmod(tmp_script.stat().st_mode | stat.S_IEXEC)
+
+    res = subprocess.run(
+        ["bash", "post_release_sync.sh"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert res.returncode != 0
+    assert "dirty" in res.stderr.lower()
+
+
+def test_post_release_sync_script_merge_conflict(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    mock_git = bin_dir / "git"
+    mock_git.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "tag" ]; then echo "v0.3.3"; exit 0; fi\n'
+        'if [ "$1" = "diff-index" ]; then exit 0; fi\n'
+        'if [ "$1" = "checkout" ]; then exit 0; fi\n'
+        'if [ "$1" = "pull" ]; then exit 0; fi\n'
+        'if [ "$1" = "fetch" ]; then exit 0; fi\n'
+        'if [ "$1" = "merge-base" ]; then exit 1; fi\n'
+        'if [ "$1" = "merge" ]; then exit 1; fi\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    mock_git.chmod(mock_git.stat().st_mode | stat.S_IEXEC)
+
+    mock_run_sh = tmp_path / "run.sh"
+    mock_run_sh.write_text("#!/bin/sh\necho 0.3.4\nexit 0\n", encoding="utf-8")
+    mock_run_sh.chmod(mock_run_sh.stat().st_mode | stat.S_IEXEC)
+
+    (tmp_path / "package.json").write_text('{"version": "0.3.4"}', encoding="utf-8")
+
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+
+    script_content = Path("scripts/post_release_sync.sh").read_text(encoding="utf-8")
+    tmp_script = tmp_path / "post_release_sync.sh"
+    tmp_script.write_text(script_content, encoding="utf-8")
+    tmp_script.chmod(tmp_script.stat().st_mode | stat.S_IEXEC)
+
+    res = subprocess.run(
+        ["bash", "post_release_sync.sh"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert res.returncode != 0
+    assert "conflict" in res.stderr.lower()
