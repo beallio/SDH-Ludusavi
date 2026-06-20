@@ -257,7 +257,7 @@ def test_workflows_trigger_and_overwrite_and_checksum_verification() -> None:
     ]:
         assert "SDH-ludusavi.zip" not in content, f"Bad asset name found in {path}"
 
-    assert "python scripts/version_guard.py check-base" in dev_content, (
+    assert "python3 scripts/version_guard.py check-base" in dev_content, (
         "dev release must refuse base version drift via version_guard.py"
     )
 
