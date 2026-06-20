@@ -23,7 +23,20 @@ import {
   type SyncthingWatchSession,
 } from "./syncthingMonitor";
 
-const SILENT_SKIPPED_REASONS = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
+import {
+  evaluateStartCheck,
+  evaluateStartRestore,
+  evaluateStartConflictResolution,
+  getStartCleanup,
+  evaluateExitCheck,
+  evaluateExitBackup,
+  evaluateExitHandoff,
+  getExitCleanup,
+  type StartState,
+  type ExitState,
+  type LifecycleCommand,
+} from "./gameLifecycleDecision";
+
 
 type AutoSyncStatusSurface = {
   publish: (
@@ -216,167 +229,92 @@ export function createGameLifecycleController(
 
     const tracked = isTracked(name, appID);
     log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
-    let paused = false;
 
     if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
-      publishAutoSyncStatus("checking", {
-        source: "lifecycle_start",
-        gameName: name,
-        appID,
-        tracked,
-      });
+      publishAutoSyncStatus("checking", { source: "lifecycle_start", gameName: name, appID, tracked });
     } else {
       logPreRpcStatusBarSuppressed("start", name, tracked);
     }
 
     const autoSyncEnabled = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
     let preGameWatch: SyncthingWatchSession | null = null;
-    let retainPreGameWatch = false;
+    let state: StartState = {
+      name, appID, instanceID, tracked, autoSyncEnabled,
+      paused: false, watchActive: false, retainPreGameWatch: false
+    };
 
     try {
-      const shouldPauseLaunch =
-        autoSyncEnabled &&
-        tracked &&
-        typeof instanceID === "number" &&
-        instanceID > 1;
-
+      const shouldPauseLaunch = autoSyncEnabled && tracked && typeof instanceID === "number" && instanceID > 1;
       if (shouldPauseLaunch) {
         const pauseResult = await pauseGameProcessCall(instanceID);
         if (!isRpcStatus(pauseResult) && pauseResult.status === "paused") {
-          paused = true;
+          state.paused = true;
         }
       }
 
       if (autoSyncEnabled && tracked) {
         activeMonitorEpoch = epoch;
         preGameWatch = syncthingMonitor.start("pre_game", name, appID);
+        state.watchActive = true;
       }
+      
+      const execCmds = (cmds: LifecycleCommand[]) => {
+        for (const cmd of cmds) {
+          if (cmd.type === "publishStatus") publishAutoSyncStatus(cmd.status as any, { source: "lifecycle_start", gameName: name, appID, tracked, resultStatus: cmd.resultStatus as any });
+          else if (cmd.type === "hideStatus") hideAutoSyncStatus({ source: "hide", gameName: name, appID, tracked, resultStatus: cmd.resultStatus as any });
+          else if (cmd.type === "completeStatus") completeAutoSyncStatus(cmd.result, { gameName: name, appID, tracked });
+          else if (cmd.type === "notifyFailure") notifyFailure("SDH-Ludusavi Auto-sync", cmd.result ? summarizeOperationResult(cmd.result, "Auto-sync") : (cmd.fallbackMessage || "Operation failed"));
+        }
+      };
+
       log("info", `Calling check_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
       const checkResult = await checkGameStartCall(name, appID);
       log("info", `check_game_start result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
-      if (checkResult.status === "skipped" && SILENT_SKIPPED_REASONS.includes(checkResult.reason ?? "")) {
-        hideAutoSyncStatus({
-          source: "hide",
-          gameName: name,
-          appID,
-          tracked,
-          resultStatus: checkResult.status,
-        });
-        return;
-      }
+      
+      const dec1 = evaluateStartCheck(state, checkResult);
+      execCmds(dec1.commands);
+      Object.assign(state, dec1.stateUpdates);
 
-      if (checkResult.status === "needed" && checkResult.operation === "restore") {
-        if (!paused) {
-          const result: OperationResult = {
-            status: "failed",
-            game: name,
-            message: "Launch gate unavailable; restore skipped while game is loading.",
-          };
-          completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-          notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
-          return;
-        }
-        publishAutoSyncStatus("restoring", {
-          source: "lifecycle_start",
-          gameName: name,
-          appID,
-          tracked,
-        });
+      if (dec1.nextRpc === "restore") {
         log("info", `Calling restore_game_on_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-        const result = await restoreGameOnStartCall(name, appID);
-        log("info", `restore_game_on_start result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
-        completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-        if (result.status === "failed") {
-          notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
-        } else {
-          retainPreGameWatch = true;
-        }
-        return;
-      }
-
-      if (checkResult.status === "conflict") {
-        publishAutoSyncStatus("conflict", {
-          source: "lifecycle_start",
-          gameName: name,
-          appID,
-          tracked,
-          resultStatus: checkResult.status,
-        });
-        if (!paused) {
-          notifyFailure(
-            "SDH-Ludusavi Auto-sync",
-            "Launch gate unavailable; conflict resolution skipped while game is loading.",
-          );
-          return;
-        }
+        const restoreRes = await restoreGameOnStartCall(name, appID);
+        log("info", `restore_game_on_start result for ${name} (${appID}): ${JSON.stringify(restoreRes)}`, "lifecycle", name);
+        const dec2 = evaluateStartRestore(state, restoreRes);
+        execCmds(dec2.commands);
+        Object.assign(state, dec2.stateUpdates);
+      } else if (dec1.nextRpc === "conflict") {
         await preGameWatch?.cancel("conflict_resolution_pending");
         preGameWatch = null;
+        state.watchActive = false;
+        
         const resolution = await resolveConflict(checkResult);
-        if (!resolution) {
-          completeAutoSyncStatus(
-            { status: "skipped", game: name, reason: "conflict_unresolved" },
-            { gameName: name, appID, tracked },
-          );
-          return;
+        const dec3 = evaluateStartConflictResolution(state, resolution);
+        execCmds(dec3.commands);
+        Object.assign(state, dec3.stateUpdates);
+        
+        if (resolution) {
+          if (autoSyncEnabled && tracked) {
+            activeMonitorEpoch = epoch;
+            preGameWatch = syncthingMonitor.start("pre_game", name, appID);
+            state.watchActive = true;
+          }
+          const conflictRes = await resolveGameStartConflictCall(name, appID, resolution);
+          const dec4 = evaluateStartConflictResolution(state, resolution, conflictRes);
+          execCmds(dec4.commands);
+          Object.assign(state, dec4.stateUpdates);
         }
-        if (autoSyncEnabled && tracked) {
-          activeMonitorEpoch = epoch;
-          preGameWatch = syncthingMonitor.start("pre_game", name, appID);
-        }
-        // Mirror the non-conflict auto paths: show the in-progress animation that
-        // matches the chosen resolution. keep_local runs a backup; restore_backup
-        // runs a restore. Without this the strip stays on the static "conflict"
-        // icon until the result and never animates.
-        publishAutoSyncStatus(
-          resolution === "restore_backup" ? "restoring" : "backing_up",
-          {
-            source: "lifecycle_start",
-            gameName: name,
-            appID,
-            tracked,
-          },
-        );
-        const result = await resolveGameStartConflictCall(
-          checkResult.game ?? name,
-          appID,
-          resolution,
-        );
-        completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-        if (result.status === "failed") {
-          notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
-        } else {
-          retainPreGameWatch = true;
-        }
-        return;
-      }
-
-      completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
-      if (checkResult.status === "failed") {
-        notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"));
-      } else {
-        retainPreGameWatch = true;
       }
     } catch (err) {
       log("error", `App start handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
-      hideAutoSyncStatus({
-        source: "hide",
-        gameName: name,
-        appID,
-        tracked,
-        resultStatus: "failed",
-      });
+      hideAutoSyncStatus({ source: "hide", gameName: name, appID, tracked, resultStatus: "failed" });
     } finally {
-      if (!retainPreGameWatch) {
-        await preGameWatch?.cancel("start_handler_cleanup");
+      const cleanup = getStartCleanup(state);
+      for (const cmd of cleanup) {
+        if (cmd.type === "cancelWatch") await preGameWatch?.cancel(cmd.reason);
+        else if (cmd.type === "resumeProcess") {
+          try { await resumeGameProcessCall(cmd.instanceID); } catch (err) { log("error", `Failed to resume game process ${cmd.instanceID}: ${err}`, "lifecycle", name); }
+        } else if (cmd.type === "syncHistory") await syncGlobalHistory();
       }
-      if (paused && typeof instanceID === "number") {
-        try {
-          await resumeGameProcessCall(instanceID);
-        } catch (err) {
-          log("error", `Failed to resume game process ${instanceID}: ${err}`, "lifecycle", name);
-        }
-      }
-      await syncGlobalHistory();
     }
   };
 
@@ -395,142 +333,82 @@ export function createGameLifecycleController(
 
     const autoSyncEnabledExit = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
     let postGameWatch: SyncthingWatchSession | null = null;
-    let handoffTransferred = false;
-    // The backend check is authoritative; the frontend tracking cache can be stale.
-    // Post-game publication stays buffered until a successful backup activates it.
+    let state: ExitState = {
+      name, appID, tracked, autoSyncEnabled: autoSyncEnabledExit,
+      watchActive: false, handoffTransferred: false
+    };
+
     if (autoSyncEnabledExit) {
       activeMonitorEpoch = epoch;
       postGameWatch = syncthingMonitor.start("post_game", name, appID);
+      state.watchActive = true;
     }
 
     if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
-      publishAutoSyncStatus("checking", {
-        source: "lifecycle_exit",
-        gameName: name,
-        appID,
-        tracked,
-      });
+      publishAutoSyncStatus("checking", { source: "lifecycle_exit", gameName: name, appID, tracked });
     } else {
       logPreRpcStatusBarSuppressed("exit", name, tracked);
     }
+    
+    const execCmds = (cmds: LifecycleCommand[]) => {
+      for (const cmd of cmds) {
+        if (cmd.type === "publishStatus") publishAutoSyncStatus(cmd.status as any, { source: cmd.status.startsWith("syncthing") ? "lifecycle_exit" : "lifecycle_exit", gameName: name, appID, tracked, resultStatus: cmd.resultStatus as any });
+        else if (cmd.type === "hideStatus") hideAutoSyncStatus({ source: "hide", gameName: name, appID, tracked, resultStatus: cmd.resultStatus as any });
+        else if (cmd.type === "completeStatus") completeAutoSyncStatus(cmd.result, { gameName: name, appID, tracked });
+        else if (cmd.type === "notifyFailure") notifyFailure("SDH-Ludusavi Auto-sync", cmd.result ? summarizeOperationResult(cmd.result, "Auto-sync") : (cmd.fallbackMessage || "Operation failed"));
+      }
+    };
 
     try {
       log("info", `Calling check_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
       const checkResult = await checkGameExitCall(name, appID);
       log("info", `check_game_exit result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
-      if (checkResult.status === "skipped" && SILENT_SKIPPED_REASONS.includes(checkResult.reason ?? "")) {
-        hideAutoSyncStatus({
-          source: "hide",
-          gameName: name,
-          appID,
-          tracked,
-          resultStatus: checkResult.status,
-        });
-        return;
-      }
+      
+      const dec1 = evaluateExitCheck(state, checkResult);
+      execCmds(dec1.commands);
+      Object.assign(state, dec1.stateUpdates);
 
-      if (checkResult.status === "needed" && checkResult.operation === "backup") {
-        publishAutoSyncStatus("backing_up", {
-          source: "lifecycle_exit",
-          gameName: name,
-          appID,
-          tracked,
-        });
+      if (dec1.nextRpc === "backup") {
         log("info", `Calling backup_game_on_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-        const result = await backupGameOnExitCall(name, appID);
-        log("info", `backup_game_on_exit result for ${name} (${appID}): ${JSON.stringify(result)}`, "lifecycle", name);
+        const backupResult = await backupGameOnExitCall(name, appID);
+        log("info", `backup_game_on_exit result for ${name} (${appID}): ${JSON.stringify(backupResult)}`, "lifecycle", name);
+        
+        const dec2 = evaluateExitBackup(state, backupResult);
+        execCmds(dec2.commands);
+        Object.assign(state, dec2.stateUpdates);
 
-        if (result.status === "backed_up") {
-          publishAutoSyncStatus("has_backup", {
-            source: "lifecycle_exit",
-            gameName: name,
-            appID,
-            tracked,
-          });
+        if (dec2.nextRpc === "handoff") {
           const handoff = postGameWatch === null
             ? { status: "unavailable" as const, reason: "watch_not_started" }
-            : await postGameWatch.activatePostGameHandoff(
-                750, // SYNCTHING_HANDOFF_CONFIRMATION_MS
-              );
+            : await postGameWatch.activatePostGameHandoff(750);
+            
+          if (epoch !== lifecycleEpoch) return;
 
-          if (epoch !== lifecycleEpoch) {
-            return;
-          }
-
-          switch (handoff.status) {
-            case "pending":
-              handoffTransferred = true;
-              publishAutoSyncStatus("syncthing_pending_upload", {
-                source: "lifecycle_exit",
-                gameName: name,
-                appID,
-                tracked,
-              });
-              return;
-            case "uploading":
-              handoffTransferred = true;
-              publishAutoSyncStatus("syncthing_uploading", {
-                source: "lifecycle_exit",
-                gameName: name,
-                appID,
-                tracked,
-              });
-              return;
-            case "complete":
-              handoffTransferred = true;
-              publishAutoSyncStatus("syncthing_complete", {
-                source: "lifecycle_exit",
-                gameName: name,
-                appID,
-                tracked,
-              });
-              return;
-            case "unavailable": {
-              const mappedStatus = mapSyncthingFailureReason(handoff.reason);
-              if (mappedStatus) {
-                publishAutoSyncStatus(mappedStatus, {
-                  source: "rpc_result",
-                  gameName: name,
-                  appID,
-                  tracked,
-                  resultStatus: result.status,
-                });
-                return;
-              }
-              completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-              return;
+          const mappedStatus = handoff.status === "unavailable" ? mapSyncthingFailureReason(handoff.reason) : null;
+          const dec3 = evaluateExitHandoff(state, handoff, backupResult, mappedStatus);
+          
+          for (const cmd of dec3.commands) {
+            if (cmd.type === "publishStatus") {
+               publishAutoSyncStatus(cmd.status, {
+                 source: mappedStatus ? "rpc_result" : "lifecycle_exit",
+                 gameName: name, appID, tracked, resultStatus: cmd.resultStatus as any
+               });
+            } else if (cmd.type === "completeStatus") {
+               completeAutoSyncStatus(cmd.result, { gameName: name, appID, tracked });
             }
-            case "stale":
-              completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-              return;
           }
-        } else {
-          completeAutoSyncStatus(result, { gameName: name, appID, tracked });
-          if (result.status === "failed") {
-            notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
-          }
-          return;
+          Object.assign(state, dec3.stateUpdates);
         }
-      }
-
-      completeAutoSyncStatus(checkResult, { gameName: name, appID, tracked });
-      if (checkResult.status === "failed") {
-        notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(checkResult, "Auto-sync"));
       }
     } catch (err) {
       log("error", `App exit handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
-      hideAutoSyncStatus({
-        source: "hide",
-        gameName: name,
-        appID,
-        tracked,
-        resultStatus: "failed",
-      });
+      hideAutoSyncStatus({ source: "hide", gameName: name, appID, tracked, resultStatus: "failed" });
     } finally {
-      if (!handoffTransferred) {
-        await postGameWatch?.cancel("exit_handler_cleanup");
+      const cleanup = getExitCleanup(state);
+      for (const cmd of cleanup) {
+        if (cmd.type === "cancelWatch") await postGameWatch?.cancel(cmd.reason);
+        else if (cmd.type === "syncHistory") await syncGlobalHistory();
       }
-      await syncGlobalHistory();
     }
   };
 
