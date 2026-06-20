@@ -16,6 +16,15 @@ BUDGETS = {
     "py_modules/sdh_ludusavi/updater_models.py": 165,
     "py_modules/sdh_ludusavi/updater_pending.py": 75,
     "py_modules/sdh_ludusavi/updater_rate_limit.py": 35,
+    "src/controllers/pluginUpdateController.tsx": 490,
+    "src/controllers/pluginUpdateReducer.ts": 190,
+    "src/components/qam/LudusaviContent.tsx": 625,
+    "src/components/qam/useInitialContent.ts": 240,
+    "src/components/qam/useGameRefresh.ts": 135,
+    "src/components/qam/useSteamContext.ts": 120,
+    "src/components/qam/manualOperationFinalize.ts": 65,
+    "src/components/qam/refreshSelection.ts": 35,
+    "src/components/qam/qamOpenSelection.ts": 35,
 }
 
 
