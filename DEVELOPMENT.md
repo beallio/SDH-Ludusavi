@@ -100,6 +100,15 @@ To publish a development prerelease for testing, run:
 ```
 This triggers the manual `dev-release.yml` GitHub workflow for the specified base version and commit.
 
+`<base_version>` must be the next *unreleased* stable version. Both `request_dev_release.sh`
+and the `dev-release.yml` workflow refuse a base that is not strictly ahead of the highest
+released stable tag (not just an exact tag match), using the shared rule in
+`scripts/version_guard.py` (`check-base`). This prevents the `dev` branch from drifting
+behind `main` and emitting dev builds that sort *below* the current stable release. If you
+hit this refusal, sync `main` into `dev` and bump `package.json`/`plugin.json` to the next
+version first. A CI test (`tests/test_version_config.py::test_dev_version_ahead_of_stable`)
+also asserts the declared version stays strictly ahead of the highest stable tag.
+
 #### Release Artifacts
 
 The packaging automation produces the following versioned artifacts:
@@ -152,8 +161,15 @@ The updater architecture enforces strict boundaries between domain models, trans
 - **`PluginUpdater` Ownership**: The `PluginUpdater` class is the sole owner of updater settings, cache persistence, cooldown logic, update checks, and installer reconciliation.
 - **Model/Client/State Separation**:
   - `updater_models.py` contains pure dataclasses for JSON definitions and candidate logic.
-  - `updater_client.py` isolates all network transport (`urllib.request`) and rate-limit parsing.
-  - `updater.py` orchestrates the logic using the client and models.
+  - `updater_client.py` isolates all network transport (`urllib.request`).
+  - `updater_rate_limit.py` is a pure helper that parses `Retry-After` / `X-RateLimit-Reset`
+    headers into the cooldown deadline, shared by both `check_for_update()` and `revalidate()`.
+  - `updater_discovery.py` holds the pure release parsing/validation/selection logic
+    (prevalidate → validate → select candidate).
+  - `updater_pending.py` owns the pending-install ledger (load/promote/reconcile of the
+    persisted cache payload).
+  - `updater.py` is the small façade that orchestrates discovery/validation, the rate-limit
+    cooldown policy, the pending-install ledger, and persistence using the modules above.
 - **Service Isolation**: The `SDHLudusaviService` acts merely as a facade. It holds an instance of `PluginUpdater` and delegates RPC methods to it. Updater modules never import the service or access private service fields.
 - **Unchanged Persistence**: While the logic is decomposed, the data schema in `cache.json` and `settings.json` remains entirely backward-compatible and unchanged. `main.py` simply acts as an async adapter passing calls to the facade.
 

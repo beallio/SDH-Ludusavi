@@ -3,6 +3,9 @@ from pathlib import Path
 FRONTEND_PATHS = [
     Path("src/index.tsx"),
     Path("src/components/qam/LudusaviContent.tsx"),
+    Path("src/components/qam/useGameRefresh.ts"),
+    Path("src/components/qam/useInitialContent.ts"),
+    Path("src/components/qam/manualOperationFinalize.ts"),
 ]
 
 

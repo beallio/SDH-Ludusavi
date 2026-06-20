@@ -76,6 +76,9 @@ jobs:
             echo "Error: v${{ env.BASE_VERSION }} is already released as a stable tag; a dev release must target the next unreleased version (bump package.json/plugin.json)." >&2
             exit 1
           fi
+          if ! python3 scripts/version_guard.py check-base "${{ env.BASE_VERSION }}"; then
+            exit 1
+          fi
 
       - name: Setup Toolchain
         uses: ./.github/actions/setup-toolchain
