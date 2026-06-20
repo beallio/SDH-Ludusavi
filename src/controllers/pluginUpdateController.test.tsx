@@ -7,6 +7,11 @@ let stateIdx = 0;
 let states: any[] = [];
 let setters: any[] = [];
 
+const { activeEffects, activeUnmounts } = vi.hoisted(() => ({ 
+  activeEffects: [] as Array<{ cb: any, deps: any[] }>,
+  activeUnmounts: [] as any[]
+}));
+
 vi.mock("react", () => ({
   useState: (init: any) => {
     const idx = stateIdx++;
@@ -24,9 +29,29 @@ vi.mock("react", () => ({
     }
     return [states[idx], setters[idx]];
   },
-  useEffect: vi.fn(),
-  useCallback: (fn: any) => fn,
-  useRef: (init: any) => ({ current: init }),
+  useEffect: (cb: any, deps: any[]) => {
+    activeEffects.push({ cb, deps });
+  },
+  useCallback: (fn: any, deps: any[]) => {
+    const idx = stateIdx++;
+    if (states.length <= idx) {
+      states[idx] = { fn, deps };
+    } else {
+      const prev = states[idx];
+      const changed = !prev.deps || deps.some((d, i) => d !== prev.deps[i]);
+      if (changed) {
+        states[idx] = { fn, deps };
+      }
+    }
+    return states[idx].fn;
+  },
+  useRef: (init: any) => {
+    const idx = stateIdx++;
+    if (states.length <= idx) {
+      states[idx] = { current: init };
+    }
+    return states[idx];
+  },
 }));
 
 vi.mock("@decky/api", () => ({
@@ -57,9 +82,49 @@ describe("PluginUpdateController", () => {
     stateIdx = 0;
     states = [];
     setters = [];
+    activeEffects.length = 0;
+    activeUnmounts.length = 0;
     vi.mocked(ludusaviRpc.getUpdateCheckContextCall).mockResolvedValue(null as any);
     vi.mocked(ludusaviRpc.checkForPluginUpdateCall).mockResolvedValue({ status: "current", checked_at: "now", channel: "stable" });
   });
+
+  const renderAndRunEffects = async (props: any, maxLoops = 50) => {
+    let prevDepsMap = new Map<number, any[]>();
+    let loopCount = 0;
+    let lastController: any;
+
+    while (loopCount++ < maxLoops) {
+      stateIdx = 0;
+      activeEffects.length = 0;
+      lastController = usePluginUpdateController(props);
+
+      let effectsToRun: any[] = [];
+      activeEffects.forEach((eff, i) => {
+        const prevDeps = prevDepsMap.get(i);
+        let changed = !prevDeps || !eff.deps;
+        if (!changed && prevDeps && eff.deps) {
+          changed = eff.deps.some((d, idx) => d !== prevDeps[idx]);
+        }
+        if (changed) {
+          effectsToRun.push(eff.cb);
+          prevDepsMap.set(i, eff.deps);
+        }
+      });
+
+      if (effectsToRun.length === 0) {
+        break; // No effects changed, stable state
+      }
+
+      for (const cb of effectsToRun) {
+        const p = cb();
+        if (p instanceof Promise) await p;
+      }
+      
+      // Give promises a microtask to resolve state dispatches
+      await new Promise(r => setTimeout(r, 0));
+    }
+    return { controller: lastController, loops: loopCount };
+  };
 
   it("fails install and exits installing state if recordUpdateInstallRequestedCall fails", async () => {
     const candidate: any = {
@@ -139,6 +204,36 @@ describe("PluginUpdateController", () => {
 
     expect(updatedController.isInstalling).toBe(false);
     expect(updatedController.errorMessage).toBe(null);
+  });
+
+  it("does not loop forced checks when update is available", async () => {
+    vi.mocked(ludusaviRpc.getUpdateCheckContextCall).mockResolvedValue({
+      installed_version: "0.1.0",
+      effective_installed_version: "0.1.0",
+      last_checked_channel: "stable",
+      last_checked_at: new Date().toISOString()
+    } as any);
+
+    vi.mocked(ludusaviRpc.checkForPluginUpdateCall).mockResolvedValue({ 
+      status: "available", 
+      checked_at: "now", 
+      channel: "stable",
+      candidate: { version: "0.2.0" }
+    } as any);
+
+    const result = await renderAndRunEffects({
+      currentVersion: "0.1.0",
+      updateChannel: "stable",
+      automaticUpdateChecks: true
+    });
+
+    // Should not exceed a small number of loops.
+    // A runaway loop hits the 50 maxLoops bound.
+    expect(result.loops).toBeLessThan(50);
+    
+    // There should be bounded checkForUpdates calls (1 for initial check)
+    const checkCalls = vi.mocked(ludusaviRpc.checkForPluginUpdateCall).mock.calls;
+    expect(checkCalls.length).toBeLessThanOrEqual(2);
   });
 });
 

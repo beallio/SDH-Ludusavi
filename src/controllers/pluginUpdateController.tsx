@@ -79,6 +79,8 @@ export function usePluginUpdateController({
   const skipInitialCheck = useRef(false);
   const automaticCheckToggleHydrated = useRef(false);
 
+  const isHydrated = state.phase !== "hydrating";
+
   const effectiveCurrentVersion = state.installedOverride?.version ?? currentVersion;
 
   const clearCheckTimeout = useCallback(() => {
@@ -310,7 +312,7 @@ export function usePluginUpdateController({
   }, [currentVersion, onInstallVersionConfirmed, updateChannel, checkForUpdates, clearCheckTimeout]);
 
   useEffect(() => {
-    if (state.phase === "hydrating") {
+    if (!isHydrated) {
       return;
     }
     if (!currentVersion || currentVersion === "Loading...") {
@@ -330,10 +332,10 @@ export function usePluginUpdateController({
     } else {
       void checkForUpdates({ force: true, notify: false, source: "automatic" });
     }
-  }, [updateChannel, currentVersion, state.phase, checkForUpdates]);
+  }, [updateChannel, currentVersion, isHydrated, checkForUpdates]);
 
   useEffect(() => {
-    if (state.phase === "hydrating") {
+    if (!isHydrated) {
       return;
     }
     if (!automaticCheckToggleHydrated.current) {
@@ -344,7 +346,7 @@ export function usePluginUpdateController({
       return;
     }
     void checkForUpdates({ force: false, notify: false, source: "automatic" });
-  }, [automaticUpdateChecks, currentVersion, state.phase, checkForUpdates]);
+  }, [automaticUpdateChecks, currentVersion, isHydrated, checkForUpdates]);
 
   const install = useCallback(async (targetCandidate: PluginUpdateCandidate) => {
     if (state.phase === "installing" || state.phase === "handoff_pending") return;
