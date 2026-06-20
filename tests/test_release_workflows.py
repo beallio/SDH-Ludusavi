@@ -313,3 +313,21 @@ def test_workflows_use_quality_gates_and_pin_uv() -> None:
 
     action_content = Path(".github/actions/setup-toolchain/action.yml").read_text(encoding="utf-8")
     assert 'version: "latest"' not in action_content, "setup-uv version must be pinned, not latest"
+
+
+def test_post_release_dev_sync_job_content() -> None:
+    content = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert "post-release-dev-sync:" in content
+    assert "needs: build-and-release" in content
+    assert "if: success() && startsWith(github.ref, 'refs/tags/v')" in content
+    assert "python3 scripts/version_guard.py next-patch" in content
+    assert "scripts/set_release_version.py" in content
+    assert "pull-requests: write" in content
+
+    assert "gh pr create" in content or "peter-evans/create-pull-request" in content
+    if "gh pr create" in content:
+        assert "--base dev" in content
+
+    assert "git push origin dev" not in content
+    assert "git push origin HEAD:dev" not in content

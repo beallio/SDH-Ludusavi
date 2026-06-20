@@ -101,3 +101,89 @@ jobs:
             out/SDH-Ludusavi-${{ env.TAG_NAME }}.zip
             out/SDH-Ludusavi-${{ env.TAG_NAME }}.zip.sha256
             out/SDH-Ludusavi-${{ env.TAG_NAME }}.manifest.json
+
+  post-release-dev-sync:
+    name: Sync Dev Branch After Release
+    needs: build-and-release
+    if: success() && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Compute Next Patch and Check Sync Need
+        id: compute
+        run: |
+          TAG="${{ github.ref_name }}"
+          NEXT=$(python3 scripts/version_guard.py next-patch "${TAG#v}")
+          echo "NEXT=$NEXT" >> $GITHUB_ENV
+          
+          git fetch origin dev:dev
+          git fetch origin main:main
+          
+          git checkout dev
+          
+          DEV_VER=$(jq -r .version package.json)
+          IS_AHEAD_OR_EQUAL=$(python3 -c "from scripts.version_guard import parse_semver; print('true' if parse_semver('$DEV_VER') >= parse_semver('$NEXT') else 'false')")
+          
+          if git merge-base --is-ancestor origin/main dev && [ "$IS_AHEAD_OR_EQUAL" = "true" ]; then
+            echo "dev is already >= $NEXT and contains main. Skipping."
+            echo "SKIP_SYNC=true" >> $GITHUB_ENV
+          else
+            echo "SKIP_SYNC=false" >> $GITHUB_ENV
+          fi
+
+      - name: Create Sync Branch and Merge Main
+        if: env.SKIP_SYNC == 'false'
+        run: |
+          git checkout -B auto/post-release-sync dev
+          
+          CONFLICT_MSG=""
+          # Attempt non-interactive merge
+          GIT_EDITOR=true git merge origin/main -m "chore(release): merge main into dev for post-release sync" || {
+            echo "Merge conflict detected. Aborting merge and continuing with PR creation."
+            git merge --abort
+            CONFLICT_MSG="**Note: The automatic merge of main into dev encountered conflicts. You will need to resolve these conflicts manually.**"
+          }
+          echo "CONFLICT_MSG=$CONFLICT_MSG" >> $GITHUB_ENV
+
+      - name: Bump Version to Next Patch
+        if: env.SKIP_SYNC == 'false'
+        run: |
+          TAG="${{ github.ref_name }}"
+          python3 scripts/set_release_version.py "$NEXT"
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git add package.json plugin.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(release): bump dev to $NEXT after $TAG"
+          fi
+          
+          git push origin auto/post-release-sync -f
+
+      - name: Create Pull Request
+        if: env.SKIP_SYNC == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          PR_TITLE="chore(release): sync dev after $TAG"
+          PR_BODY="This PR brings \`dev\` up to date with the released \`main\` branch and bumps the version to \`$NEXT\`.
+          
+          $CONFLICT_MSG"
+          
+          # Check if PR already exists
+          PR_EXISTS=$(gh pr list --head auto/post-release-sync --base dev --json number -q '.[0].number')
+          if [ -n "$PR_EXISTS" ] && [ "$PR_EXISTS" != "null" ]; then
+            gh pr edit auto/post-release-sync --title "$PR_TITLE" --body "$PR_BODY"
+          else
+            gh pr create --base dev --head auto/post-release-sync --title "$PR_TITLE" --body "$PR_BODY"
+          fi
