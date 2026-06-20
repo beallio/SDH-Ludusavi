@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import datetime
 import time
-from sdh_ludusavi.updater import PluginUpdater, prevalidate_release_candidate
+from sdh_ludusavi.updater import PluginUpdater
+from sdh_ludusavi.updater_discovery import prevalidate_release_candidate
 from sdh_ludusavi.updater_models import JsonResponse
 
 

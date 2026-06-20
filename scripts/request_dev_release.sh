@@ -40,6 +40,11 @@ if [ -n "$(git tag --list "v${BASE_VERSION}" 2>/dev/null)" ]; then
     exit 1
 fi
 
+# Ensure the dev base version is strictly ahead of the highest released stable tag
+if ! ./run.sh uv run python scripts/version_guard.py check-base "$BASE_VERSION"; then
+    exit 1
+fi
+
 echo "Requesting dev release for base version: $BASE_VERSION at commit: $FULL_SHA"
 gh workflow run dev-release.yml \
   -f commit="$FULL_SHA" \
