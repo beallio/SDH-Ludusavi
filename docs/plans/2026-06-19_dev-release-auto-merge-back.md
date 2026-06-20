@@ -43,3 +43,7 @@ can never occur in normal operation.
 
 Once B is in place and working, A and C become rarely-fired safety nets (defense in depth).
 A and C should ship first (they are cheap and catch drift immediately); B follows.
+
+## Status Update: Superseded
+
+The CI/PR approach for Guard B outlined above was superseded by the local script `scripts/post_release_sync.sh`, because this project uses a local release workflow. The local script handles the `dev` version bump and sync immediately after a stable release is cut locally, avoiding the need for CI PR permissions.

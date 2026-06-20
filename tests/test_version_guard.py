@@ -50,3 +50,17 @@ def test_is_version_behind_stable():
     assert is_version_behind_stable("0.1.0", []) is False
     # Pre-release tags ignored when finding the highest stable
     assert is_version_behind_stable("0.3.3", ["v0.3.3", "v0.3.4-dev"]) is False
+
+
+def test_next_patch_version():
+    from scripts.version_guard import next_patch_version
+
+    assert next_patch_version("0.3.3") == "0.3.4"
+    assert next_patch_version("v0.3.3") == "0.3.4"
+    assert next_patch_version("1.2.9") == "1.2.10"
+
+    with pytest.raises(ValueError):
+        next_patch_version("0.3.3-dev")
+
+    with pytest.raises(ValueError):
+        next_patch_version("not_a_version")
