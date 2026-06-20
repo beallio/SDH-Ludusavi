@@ -105,7 +105,7 @@ class SyncthingWatch:
 
     def stop(self) -> None:
         self.stop_event.set()
-        if self.thread and self.thread.is_alive():
+        if self.thread and self.thread.ident is not None:
             self.thread.join(timeout=1.0)
 
     def _run(self) -> None:
@@ -396,7 +396,11 @@ class SyncthingWatchManager:
         for old_watch in watches_to_stop:
             old_watch.stop()
 
-        watch.start()
+        with self.lock:
+            still_registered = self.watches.get(watch_id) is watch
+
+        if still_registered:
+            watch.start()
 
         return {
             "status": "watching",
