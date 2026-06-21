@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Run from the repository root so stdlib-only helper scripts (and the `scripts`
+# namespace package) resolve regardless of where this script is invoked from.
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$ROOT" ] && cd "$ROOT"
+
+# Pure-Python helpers below (version_guard, set_release_version) are stdlib-only and
+# are invoked with `python3` directly, NOT via `./run.sh`: `./run.sh` prints an
+# environment preamble to stdout that would pollute command substitutions like NEXT.
+# Only the quality gates (which need the project venv) go through `./run.sh`.
+
 # 1. Determine stable version and next patch
 if [ $# -ge 1 ]; then
     RELEASED_TAG="$1"
@@ -15,7 +25,7 @@ else
     fi
 fi
 
-NEXT=$(./run.sh uv run python scripts/version_guard.py next-patch "${RELEASED_TAG#v}")
+NEXT=$(python3 scripts/version_guard.py next-patch "${RELEASED_TAG#v}")
 
 # 2. Require a clean working tree
 if ! git diff-index --quiet HEAD --; then
@@ -35,7 +45,7 @@ fi
 
 # Get current dev version
 DEV_VER=$(grep -o '"version": "[^"]*"' package.json | head -n1 | cut -d'"' -f4)
-IS_AHEAD_OR_EQUAL=$(./run.sh uv run python -c "from scripts.version_guard import parse_semver; print('true' if parse_semver('$DEV_VER') >= parse_semver('$NEXT') else 'false')")
+IS_AHEAD_OR_EQUAL=$(python3 -c "from scripts.version_guard import parse_semver; print('true' if parse_semver('$DEV_VER') >= parse_semver('$NEXT') else 'false')")
 
 # 4. No-op guard
 if [ "$CONTAINS_MAIN" = "true" ] && [ "$IS_AHEAD_OR_EQUAL" = "true" ]; then
@@ -55,7 +65,7 @@ fi
 
 # 5. Bump dev to the next patch
 echo "Bumping dev to $NEXT..."
-./run.sh uv run python scripts/set_release_version.py "$NEXT"
+python3 scripts/set_release_version.py "$NEXT"
 
 # 6. Run quality gates
 echo "Running quality gates..."
