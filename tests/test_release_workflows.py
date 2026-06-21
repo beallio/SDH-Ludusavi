@@ -331,6 +331,16 @@ def test_post_release_sync_script_content() -> None:
 
     assert not re.search(r"git tag [^\-l]", content)
 
+    # Regression guard: version values must be captured with `python3` directly, never
+    # via `./run.sh` (whose stdout env preamble would pollute the command substitution).
+    # version_guard / set_release_version are stdlib-only, so python3 is correct.
+    assert "python3 scripts/version_guard.py next-patch" in content
+    assert not re.search(r"=\$\(\s*\./run\.sh", content), (
+        "do not capture ./run.sh stdout into a variable; its env preamble corrupts the value"
+    )
+    # The quality gates legitimately go through ./run.sh (they need the venv).
+    assert "./run.sh bash scripts/quality_gates.sh" in content
+
 
 def test_post_release_sync_script_dirty_tree(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
@@ -346,9 +356,12 @@ def test_post_release_sync_script_dirty_tree(tmp_path: Path) -> None:
     )
     mock_git.chmod(mock_git.stat().st_mode | stat.S_IEXEC)
 
-    mock_run_sh = tmp_path / "run.sh"
-    mock_run_sh.write_text("#!/bin/sh\necho 0.3.4\nexit 0\n", encoding="utf-8")
-    mock_run_sh.chmod(mock_run_sh.stat().st_mode | stat.S_IEXEC)
+    # The script computes the next version with `python3 scripts/version_guard.py`
+    # (stdlib-only, not via ./run.sh), so provide the real helper reachable from cwd.
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "version_guard.py").write_text(
+        Path("scripts/version_guard.py").read_text(encoding="utf-8"), encoding="utf-8"
+    )
 
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
@@ -389,9 +402,12 @@ def test_post_release_sync_script_merge_conflict(tmp_path: Path) -> None:
     )
     mock_git.chmod(mock_git.stat().st_mode | stat.S_IEXEC)
 
-    mock_run_sh = tmp_path / "run.sh"
-    mock_run_sh.write_text("#!/bin/sh\necho 0.3.4\nexit 0\n", encoding="utf-8")
-    mock_run_sh.chmod(mock_run_sh.stat().st_mode | stat.S_IEXEC)
+    # The script computes/compares versions with `python3` against the real helper
+    # (stdlib-only), so provide it reachable from cwd as an importable namespace package.
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "version_guard.py").write_text(
+        Path("scripts/version_guard.py").read_text(encoding="utf-8"), encoding="utf-8"
+    )
 
     (tmp_path / "package.json").write_text('{"version": "0.3.4"}', encoding="utf-8")
 
