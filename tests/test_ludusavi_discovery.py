@@ -28,7 +28,7 @@ def test_find_ludusavi_signature_is_clean_upstream() -> None:
 def test_explicit_flatpak_id_uses_absolute_flatpak_when_path_lookup_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name, path=None: None)
 
     with pytest.raises(discovery.LudusaviNotFoundError):
         discovery.find_ludusavi(explicit_flatpak_id=APP_ID)
@@ -39,7 +39,7 @@ def test_explicit_flatpak_id_uses_path_flatpak_only(
 ) -> None:
     calls: list[list[str]] = []
 
-    def which(name: str) -> str | None:
+    def which(name: str, path: str | None = None) -> str | None:
         if name == "flatpak":
             return "flatpak"
         return None
@@ -61,7 +61,7 @@ def test_default_flatpak_lookup_raises_when_all_candidates_fail(
 ) -> None:
     calls: list[list[str]] = []
 
-    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name, path=None: None)
 
     def verify(prefix: list[str], env: dict[str, str] | None = None) -> bool:
         calls.append(prefix)
