@@ -157,30 +157,20 @@ export function useInitialContent(deps: InitialContentDependencies) {
 
     fetchMetadata();
 
-    const currentInit = deps.initPromise;
-    if (!currentInit) {
+    let activeInit = deps.initPromise;
+    if (!activeInit) {
       log("debug", `Creating new initialization promise (warmed=${isWarmed})`);
-      const newInitP = (async () => {
+      activeInit = (async () => {
         const loadedSettings = await fetchInitialState();
         await synchronizeGameList(isWarmed, loadedSettings);
         return deps.getOperationStatus();
       })();
-      deps.setInitPromise(newInitP);
+      deps.setInitPromise(activeInit);
     } else {
       log("debug", "Reusing in-flight initialization promise");
     }
 
     try {
-      let activeInit = deps.initPromise;
-      if (!activeInit) {
-        activeInit = (async () => {
-          const loadedSettings = await fetchInitialState();
-          await synchronizeGameList(isWarmed, loadedSettings);
-          return deps.getOperationStatus();
-        })();
-        deps.setInitPromise(activeInit);
-      }
-      
       const loadedOperation = await activeInit;
       if (deps.isMounted()) {
         deps.setOperation(loadedOperation);

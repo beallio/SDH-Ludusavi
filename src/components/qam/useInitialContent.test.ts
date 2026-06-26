@@ -58,4 +58,45 @@ describe("useInitialContent", () => {
     expect(deps.setInitPromise).toHaveBeenCalled();
     expect(deps.setMetadataPromise).toHaveBeenCalled();
   });
+
+  it("refreshes the game list exactly once per load (no concurrent refresh)", async () => {
+    const initPromises: Array<Promise<unknown>> = [];
+    const deps = {
+      isMounted: vi.fn().mockReturnValue(true),
+      isWarmed: false,
+      installedAppIds: "app1",
+      cachedGames: [],
+      initPromise: null,
+      metadataPromise: null,
+      setInitPromise: vi.fn((p: Promise<unknown> | null) => {
+        if (p) initPromises.push(p);
+      }),
+      setMetadataPromise: vi.fn(),
+      getOperationStatus: vi.fn().mockResolvedValue({}),
+      getVersions: vi.fn().mockResolvedValue({}),
+      getLudusaviCommandCall: vi.fn().mockResolvedValue({}),
+      getSettings: vi.fn().mockResolvedValue({}),
+      getGameHistoryCall: vi.fn().mockResolvedValue({}),
+      isGameCacheCurrentCall: vi.fn().mockResolvedValue(false),
+      refreshGamesCall: vi.fn().mockResolvedValue({ games: [], aliases: {} }),
+      applySettings: vi.fn(),
+      setGameHistory: vi.fn(),
+      setVersions: vi.fn(),
+      setLudusaviCommand: vi.fn(),
+      applyRefreshResult: vi.fn().mockReturnValue(true),
+      applyCachedRefreshResult: vi.fn(),
+      setInstalledAppIds: vi.fn(),
+      setOperation: vi.fn(),
+      setBackgroundRefreshBusy: vi.fn(),
+      setBusyLabel: vi.fn(),
+      isRpcStatus: vi.fn().mockReturnValue(false),
+      logRpcStatus: vi.fn(),
+    };
+
+    useInitialContent(deps as any);
+
+    await Promise.allSettled(initPromises);
+
+    expect(deps.refreshGamesCall).toHaveBeenCalledTimes(1);
+  });
 });
