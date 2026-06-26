@@ -27,11 +27,11 @@ class OperationStatus(TypedDict):
     totalGames: int
 
 
-class ApiErrorDetails(TypedDict, total=False):
-    cloudConflict: Optional[Dict]
-    cloudSyncFailed: Optional[Dict]
-    someGamesFailed: Optional[bool]
-    unknownGames: Optional[List[str]]
+class ApiErrorDetails(TypedDict):
+    cloudConflict: NotRequired[Optional[Dict]]
+    cloudSyncFailed: NotRequired[Optional[Dict]]
+    someGamesFailed: NotRequired[Optional[bool]]
+    unknownGames: NotRequired[Optional[List[str]]]
 
 
 # --- Game Level Structures ---
