@@ -16,7 +16,7 @@ classifiers = [
 ]
 keywords = ["decky", "ludusavi", "steam-deck", "backup", "saves"]
 dependencies = [
-    "pyludusavi>=0.2.6",
+    "pyludusavi>=0.3.0",
 ]
 
 [project.urls]

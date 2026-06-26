@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: pyludusavi
-Version: 0.2.6
+Version: 0.3.0
 Summary: A robust, type-safe Python wrapper for the Ludusavi game backup tool.
 Project-URL: Homepage, https://github.com/beallio/pyludusavi
 Project-URL: Repository, https://github.com/beallio/pyludusavi
@@ -20,6 +20,11 @@ Requires-Python: >=3.12
 Description-Content-Type: text/markdown
 
 # pyludusavi
+
+[![PyPI version](https://img.shields.io/pypi/v/pyludusavi.svg?cacheBuster=030)](https://pypi.org/project/pyludusavi/)
+[![CI](https://github.com/beallio/pyludusavi/actions/workflows/workflow.yml/badge.svg?cacheBuster=030)](https://github.com/beallio/pyludusavi/actions/workflows/workflow.yml)
+[![Python versions](https://img.shields.io/pypi/pyversions/pyludusavi.svg?cacheBuster=030)](https://pypi.org/project/pyludusavi/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?cacheBuster=030)](https://github.com/beallio/pyludusavi/blob/main/LICENSE)
 
 A robust, type-safe Python wrapper for the [Ludusavi](https://github.com/mtkennerly/ludusavi) CLI.
 
@@ -146,18 +151,12 @@ lud.wrap(["steam", "-applaunch", "292030"], infer="steam", force=True)
 ```
 
 #### Game Aliases
-`add_game_alias()` maps a custom name to an existing manifest title by updating
-Ludusavi's `customGames` configuration using only the Python standard library. It is
-**idempotent** (no write occurs if the alias already exists unchanged), updates the
-target in place if the same name already points at a different alias, and writes
-**atomically** (via a temporary file and rename) so an interrupted write cannot corrupt
-`config.yaml`. The config is written as JSON, which Ludusavi reads as YAML; this does not
-preserve existing comments or formatting. Use `get_game_alias()` to read back the alias
-for a custom name (returns `None` if not found).
+`get_game_alias(name)` returns the manifest title a custom name is aliased to (or
+`None`). Custom games / aliases are created in the Ludusavi GUI or config file; this
+library reads them but does not write them.
 
 ```python
-lud.add_game_alias("My Game", "The Witcher 3")
-lud.get_game_alias("My Game")  # -> "The Witcher 3"
+lud.get_game_alias("My Game")  # -> "The Witcher 3" or None
 ```
 
 #### Timeouts

@@ -53,7 +53,7 @@ def test_upstream_timeout_behavior_present():
     assert "_DISCOVERY_VERIFY_TIMEOUT_SECONDS = 15.0" in content, (
         "Upstream timeout constant missing"
     )
-    assert content.count("timeout=_DISCOVERY_VERIFY_TIMEOUT_SECONDS") == 2, (
+    assert content.count("timeout=_DISCOVERY_VERIFY_TIMEOUT_SECONDS") == 1, (
         "Upstream timeout constant not passed to subprocess calls"
     )
     assert "subprocess.TimeoutExpired" in content, "TimeoutExpired must be handled"

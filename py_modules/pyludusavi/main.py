@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 from typing import Optional, List, Dict, Literal, Any, Union, Mapping
 from ._environment import resolve_environment
@@ -750,45 +749,6 @@ class Ludusavi:
         if not path.exists():
             return ""
         return path.read_text(encoding="utf-8")
-
-    def add_game_alias(self, name: str, alias: str) -> None:
-        """
-        Add a game alias to the Ludusavi configuration.
-
-        This method updates the `customGames` section in `config.yaml` to map a
-        custom name to an existing game in the manifest.
-
-        Args:
-            name: The custom name for the game.
-            alias: The official title of the game as it appears in the manifest.
-        """
-        path = Path(self.config_path())
-        config = self.config_show().data
-
-        custom_games = config.setdefault("customGames", [])
-        existing = next((g for g in custom_games if g.get("name") == name), None)
-
-        if existing is None:
-            custom_games.append(
-                {
-                    "name": name,
-                    "alias": alias,
-                    "files": [],
-                    "registry": [],
-                    "installDir": [],
-                    "winePrefix": [],
-                }
-            )
-        elif existing.get("alias") != alias:
-            existing["alias"] = alias
-        else:
-            # Already present with the same alias; nothing to do.
-            return
-
-        # Write atomically so a crash mid-write cannot corrupt the user's config.
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(config, indent=2), encoding="utf-8")
-        tmp.replace(path)
 
     def get_game_alias(self, name: str) -> Optional[str]:
         """
