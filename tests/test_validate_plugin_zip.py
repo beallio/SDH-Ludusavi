@@ -110,7 +110,7 @@ def test_validator_rejects_forbidden_paths(tmp_path: Path) -> None:
         archive.writestr("SDH-Ludusavi/dist/index.js", "// index")
         archive.writestr("SDH-Ludusavi/py_modules/sdh_ludusavi/dummy.py", "# dummy")
         archive.writestr("SDH-Ludusavi/py_modules/pyludusavi/dummy.py", "# dummy")
-        archive.writestr("SDH-Ludusavi/py_modules/pyludusavi-0.2.6.dist-info/dummy.py", "# dummy")
+        archive.writestr("SDH-Ludusavi/py_modules/pyludusavi-0.3.0.dist-info/dummy.py", "# dummy")
         # forbidden node_modules folder
         archive.writestr("SDH-Ludusavi/node_modules/some-lib/index.js", "// lib")
 
@@ -144,7 +144,7 @@ def test_validator_rejects_casing_bugs(tmp_path: Path) -> None:
         archive.writestr("SDH-ludusavi/dist/index.js", "// index")
         archive.writestr("SDH-ludusavi/py_modules/sdh_ludusavi/dummy.py", "# dummy")
         archive.writestr("SDH-ludusavi/py_modules/pyludusavi/dummy.py", "# dummy")
-        archive.writestr("SDH-ludusavi/py_modules/pyludusavi-0.2.6.dist-info/dummy.py", "# dummy")
+        archive.writestr("SDH-ludusavi/py_modules/pyludusavi-0.3.0.dist-info/dummy.py", "# dummy")
 
     # Run validator with --expected-name SDH-Ludusavi
     res = subprocess.run(
