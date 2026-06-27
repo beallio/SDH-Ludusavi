@@ -72,31 +72,20 @@ def find_ludusavi(
 
 
 def _which(command: str, path: Optional[str]) -> Optional[str]:
-    if path is None:
-        return shutil.which(command)
     return shutil.which(command, path=path)
 
 
 def _verify(prefix: list[str], env: Optional[dict[str, str]] = None) -> bool:
     """Verify that the command prefix correctly calls Ludusavi."""
     try:
-        if env is None:
-            result = subprocess.run(
-                prefix + ["--version"],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=_DISCOVERY_VERIFY_TIMEOUT_SECONDS,
-            )
-        else:
-            result = subprocess.run(
-                prefix + ["--version"],
-                capture_output=True,
-                text=True,
-                check=False,
-                env=env,
-                timeout=_DISCOVERY_VERIFY_TIMEOUT_SECONDS,
-            )
+        result = subprocess.run(
+            prefix + ["--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+            timeout=_DISCOVERY_VERIFY_TIMEOUT_SECONDS,
+        )
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
