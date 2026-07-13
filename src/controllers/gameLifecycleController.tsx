@@ -15,6 +15,7 @@ import type {
 } from "../types";
 import type { LudusaviStateStore } from "../state/ludusaviState";
 import { summarizeOperationResult } from "../formatting/operationText";
+import { summarizeLifecycleResult } from "../formatting/lifecycleLogSummary";
 import { createSteamLifecycleSource } from "./steamLifecycleSource";
 import { log } from "../utils/logging";
 import { isRpcStatus } from "../utils/rpc";
@@ -267,7 +268,7 @@ export function createGameLifecycleController(
       } else {
         checkResult = await checkGameStart(name, appID);
       }
-      log("info", `check_game_start result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
+      log("info", `check_game_start result for ${name} (${appID}): ${summarizeLifecycleResult(checkResult)}`, "lifecycle", name);
       
       const dec1 = evaluateStartCheck(state, checkResult);
       execCmds(dec1.commands);
@@ -275,7 +276,7 @@ export function createGameLifecycleController(
 
       if (dec1.nextRpc === "restore") {
         const restoreRes = await restoreGameOnStart(name, appID);
-        log("info", `restore_game_on_start result for ${name} (${appID}): ${JSON.stringify(restoreRes)}`, "lifecycle", name);
+        log("info", `restore_game_on_start result for ${name} (${appID}): ${summarizeLifecycleResult(restoreRes)}`, "lifecycle", name);
         const dec2 = evaluateStartRestore(state, restoreRes);
         execCmds(dec2.commands);
         Object.assign(state, dec2.stateUpdates);
@@ -372,7 +373,7 @@ export function createGameLifecycleController(
       } else {
         checkResult = await checkGameExit(name, appID);
       }
-      log("info", `check_game_exit result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
+      log("info", `check_game_exit result for ${name} (${appID}): ${summarizeLifecycleResult(checkResult)}`, "lifecycle", name);
       
       const dec1 = evaluateExitCheck(state, checkResult);
       execCmds(dec1.commands);
@@ -380,7 +381,7 @@ export function createGameLifecycleController(
 
       if (dec1.nextRpc === "backup") {
         const backupResult = await backupGameOnExit(name, appID);
-        log("info", `backup_game_on_exit result for ${name} (${appID}): ${JSON.stringify(backupResult)}`, "lifecycle", name);
+        log("info", `backup_game_on_exit result for ${name} (${appID}): ${summarizeLifecycleResult(backupResult)}`, "lifecycle", name);
         
         const dec2 = evaluateExitBackup(state, backupResult);
         execCmds(dec2.commands);
