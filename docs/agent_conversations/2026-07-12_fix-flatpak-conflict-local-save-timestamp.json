@@ -1,0 +1,63 @@
+{
+  "date": "2026-07-12",
+  "task_objective": "Use host-accessible paths from Ludusavi Flatpak backup-preview file-map keys to populate launch-conflict local save timestamps without weakening fallback or exception boundaries.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/ludusavi.py",
+    "tests/test_ludusavi.py",
+    "tests/test_exception_boundaries.py",
+    "docs/agent_conversations/2026-07-12_fix-flatpak-conflict-local-save-timestamp.json"
+  ],
+  "tests_added": [
+    "test_conflict_metadata_uses_newest_flatpak_host_map_key_mtime",
+    "test_conflict_metadata_falls_back_to_legacy_original_path",
+    "test_conflict_metadata_falls_back_to_redirected_path",
+    "test_conflict_metadata_continues_after_candidate_oserror",
+    "test_conflict_metadata_ignores_malformed_paths_with_bounded_diagnostics",
+    "test_get_conflict_metadata_preserves_backup_metadata_on_local_value_error",
+    "test_get_conflict_metadata_propagates_unexpected_stat_exception"
+  ],
+  "red_evidence": [
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_ludusavi.py -k conflict_metadata",
+      "observed_failure": "Four of eight selected tests failed before implementation: production Flatpak host-key data omitted localModifiedAt, an inaccessible redirectedPath prevented originalPath fallback, an OSError on the first absolute candidate prevented fallback, and the zero-success scan emitted no bounded summary."
+    },
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_exception_boundaries.py -k conflict_metadata",
+      "observed_failure": "The adapter did not inspect an absolute file-map key with an otherwise empty file record, so the injected unexpected stat exception was not raised."
+    }
+  ],
+  "green_evidence": [
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_ludusavi.py -k conflict_metadata",
+      "result": "8 passed, 23 deselected"
+    },
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_exception_boundaries.py -k conflict_metadata",
+      "result": "4 passed, 14 deselected"
+    }
+  ],
+  "design_decisions": [
+    "For each preview file entry, inspect only non-empty absolute paths in stable order: file-map key, originalPath, redirectedPath.",
+    "Deduplicate candidate Paths, recover from OSError per candidate, accept only the first stat success for each entry, and select the maximum mtime across entries.",
+    "Keep localModifiedAt absent when no candidate succeeds and retain existing backupModifiedAt and backupPath metadata.",
+    "Emit at most one zero-success debug summary containing only the game name and scalar entry, success, and failure counts; never log candidate paths or the nested file payload.",
+    "Preserve the existing outer recoverable exception set while allowing unrelated unexpected Path.stat exceptions to propagate."
+  ],
+  "validation_commands": [
+    "./run.sh uv run ruff check . --fix",
+    "./run.sh uv run ruff format .",
+    "./run.sh uv run ty check py_modules/sdh_ludusavi/",
+    "./run.sh uv run pytest",
+    "./run.sh pnpm run verify",
+    "scripts/orchestration/run-quality-gates",
+    "scripts/orchestration/check-review-notes-not-deleted",
+    "git diff --check",
+    "git status --short"
+  ],
+  "results": {
+    "python": "675 tests passed with 86.96% coverage; Ruff check and formatting plus ty passed.",
+    "frontend": "31 test files and 259 tests passed; TypeScript typecheck, dependency audit, and Rollup build passed.",
+    "orchestration": "Project quality gates passed and no review note deletion was detected.",
+    "hardware_verification": "Deferred until reviewed integration and an explicitly requested Steam Deck packaging or deployment round; no on-device success is claimed."
+  }
+}
