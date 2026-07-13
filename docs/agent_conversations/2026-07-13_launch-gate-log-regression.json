@@ -1,0 +1,59 @@
+{
+  "date": "2026-07-13",
+  "objective": "Harden Launch-Gate Lifecycle and Add Reusable Log Regression Analysis",
+  "files_modified": [
+    "scripts/pull_plugin_logs.py",
+    "scripts/analyze_plugin_logs.py",
+    "src/runtime/startupHydration.ts",
+    "src/state/ludusaviState.tsx",
+    "src/index.tsx",
+    "src/controllers/gameLifecycleController.tsx",
+    "src/controllers/launchGateLease.ts",
+    "src/api/ludusaviRpc.ts",
+    "src/types/index.ts",
+    "py_modules/sdh_ludusavi/watchdog.py",
+    "py_modules/sdh_ludusavi/constants.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "main.py",
+    "py_modules/sdh_ludusavi/syncthing/watcher.py",
+    "src/formatting/lifecycleLogSummary.ts",
+    "src/surfaces/autoSyncStatusBrowserView.ts",
+    "README.md",
+    "DEVELOPMENT.md",
+    "docs/specs/custom_status_bar_ui.md"
+  ],
+  "tests_added": [
+    "tests/test_pull_plugin_logs.py",
+    "tests/test_analyze_plugin_logs.py",
+    "src/runtime/startupHydration.test.ts",
+    "src/state/ludusaviState.test.tsx",
+    "src/controllers/gameLifecycleController.test.ts",
+    "src/controllers/gameLifecycleController.logging.test.ts",
+    "tests/test_watchdog.py",
+    "tests/test_service.py",
+    "tests/test_main_rpc.py",
+    "tests/test_compatibility.py",
+    "src/controllers/launchGateLease.test.ts",
+    "tests/test_watcher.py",
+    "src/controllers/syncthingMonitor.handoffCleanup.test.ts",
+    "src/formatting/lifecycleLogSummary.test.ts",
+    "src/surfaces/autoSyncStatusBrowserView.test.ts"
+  ],
+  "red_evidence": "Each feature implementation phase established failing RED tests showing launch-gate gaps (cold state skipping, watchdog resuming over conflicts, raw payload diagnostics).",
+  "design_decisions": [
+    "Introduced explicit tracking readiness states (cold, ready, failed) to decouple QAM UI selection from lifecycle initialization.",
+    "Enforced conservative cold-state gating by treating a game launch without tracking data as tracked to prevent skipped gate, canceling the speculative watch on backend rejection.",
+    "Replaced inference-based watchdog timeouts with a renewable pause lease system to guarantee safe pause during frontend conflict wait scenarios.",
+    "Changed Syncthing watch ownership across phases to aggressively supersede prior watches to avoid race conditions during state transitions.",
+    "Added bounds to diagnostic payloads using summary helpers and bounded object descriptions to avoid huge stringifications."
+  ],
+  "commands": [
+    "./run.sh uv run pytest tests/test_pull_plugin_logs.py tests/test_analyze_plugin_logs.py",
+    "./run.sh pnpm run test:unit",
+    "./run.sh uv run ruff check . --fix",
+    "./run.sh uv run ty check src/",
+    "./run.sh uv run pytest",
+    "scripts/orchestration/run-quality-gates"
+  ],
+  "results": "All tests passed with GREEN output. The launch gate correctly hydrates tracking, pauses cold starts conservatively, maintains pauses with renewable leases, supersedes cross-phase Syncthing watches cleanly, and sanitizes logs effectively."
+}
