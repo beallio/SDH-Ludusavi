@@ -383,11 +383,7 @@ class SyncthingWatchManager:
         with self.lock:
             # Check for existing watches with the same signature
             for old_id, old_watch in list(self.watches.items()):
-                if (
-                    old_watch.phase == phase
-                    and old_watch.game_name == game_name
-                    and old_watch.app_id == app_id
-                ):
+                if old_watch.game_name == game_name and old_watch.app_id == app_id:
                     watches_to_stop.append(old_watch)
                     self.watches.pop(old_id, None)
 

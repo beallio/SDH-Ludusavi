@@ -210,7 +210,7 @@ export function createGameLifecycleController(
       await ensureStateReady();
     }
     const epoch = ++lifecycleEpoch;
-    void syncthingMonitor.stop();
+    await syncthingMonitor.stop();
     const {
       publish: publishAutoSyncStatus,
       complete: completeAutoSyncStatus,
@@ -326,7 +326,7 @@ export function createGameLifecycleController(
       await ensureStateReady();
     }
     const epoch = ++lifecycleEpoch;
-    void syncthingMonitor.stop();
+    await syncthingMonitor.stop();
     const {
       publish: publishAutoSyncStatus,
       complete: completeAutoSyncStatus,
