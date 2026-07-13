@@ -1,10 +1,12 @@
 
 
+import { createPauseLease, type PauseLeaseHandle } from "./launchGateLease";
 import type {
   ConflictResolution,
   LifecycleCheckResult,
   OperationResult,
   ProcessSignalResult,
+  PauseGameProcessResult,
   RpcResult,
   RpcStatus,
   AutoSyncStatusKind,
@@ -88,8 +90,9 @@ type LifecycleRpc = {
     gameName: string,
     appID?: string,
   ) => Promise<RpcResult<OperationResult>>;
-  pauseGameProcess: (pid: number) => Promise<RpcResult<ProcessSignalResult>>;
+  pauseGameProcess: (pid: number) => Promise<RpcResult<PauseGameProcessResult>>;
   resumeGameProcess: (pid: number) => Promise<RpcResult<ProcessSignalResult>>;
+  renewGameProcessPause: (pid: number, leaseId: string) => Promise<RpcResult<import("../types").RenewGameProcessPauseResult>>;
   startSyncthingActivityWatch: (
     phase: string,
     gameName?: string,
@@ -155,27 +158,12 @@ export function createGameLifecycleController(
     ensureStateReady = async () => {},
   } = dependencies;
   const ludusaviStore = store;
-  const {
-    startSyncthingActivityWatch: startSyncthingActivityWatchCall,
-    getSyncthingActivity: getSyncthingActivityCall,
-    stopSyncthingActivityWatch: stopSyncthingActivityWatchCall,
-    checkGameStart: checkGameStartCall,
-    restoreGameOnStart: restoreGameOnStartCall,
-    resolveGameStartConflict: resolveGameStartConflictCall,
-    checkGameExit: checkGameExitCall,
-    backupGameOnExit: backupGameOnExitCall,
-    pauseGameProcess: pauseGameProcessCall,
-    resumeGameProcess: resumeGameProcessCall,
-  } = rpc;
+  const { startSyncthingActivityWatch: startWatch, getSyncthingActivity: pollWatch, stopSyncthingActivityWatch: stopWatch, checkGameStart, restoreGameOnStart, resolveGameStartConflict, checkGameExit, backupGameOnExit, pauseGameProcess, resumeGameProcess } = rpc;
   const { publish: rawPublish } = statusSurface;
   let lifecycleEpoch = 0;
   let activeMonitorEpoch = 0;
 
-  const syncthingRpc: SyncthingRpc = {
-    startWatch: startSyncthingActivityWatchCall,
-    pollWatch: getSyncthingActivityCall,
-    stopWatch: stopSyncthingActivityWatchCall,
-  };
+  const syncthingRpc: SyncthingRpc = { startWatch, pollWatch, stopWatch };
 
   const syncthingMonitor = new SyncthingMonitor(syncthingRpc, (status, options) => {
     if (activeMonitorEpoch === lifecycleEpoch) {
@@ -218,7 +206,9 @@ export function createGameLifecycleController(
   }
 
   const handleAppStart = async (name: string, appID: string, instanceID?: number) => {
-    await ensureStateReady();
+    if (ludusaviStore.getSnapshot().trackingReadiness === "cold") {
+      await ensureStateReady();
+    }
     const epoch = ++lifecycleEpoch;
     void syncthingMonitor.stop();
     const {
@@ -227,7 +217,8 @@ export function createGameLifecycleController(
       hide: hideAutoSyncStatus,
     } = createEpochGuardedSurface(statusSurface, epoch, () => lifecycleEpoch);
 
-    const tracked = isTracked(name, appID);
+    const isTrackingFailed = ludusaviStore.getSnapshot().trackingReadiness === "failed";
+    const tracked = isTrackingFailed ? true : isTracked(name, appID);
     log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
 
     if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
@@ -243,12 +234,15 @@ export function createGameLifecycleController(
       paused: false, watchActive: false, retainPreGameWatch: false
     };
 
+    let pauseHandle: PauseLeaseHandle | undefined;
     try {
       const shouldPauseLaunch = autoSyncEnabled && tracked && typeof instanceID === "number" && instanceID > 1;
       if (shouldPauseLaunch) {
-        const pauseResult = await pauseGameProcessCall(instanceID);
+        const pauseResult = await pauseGameProcess(instanceID);
         if (!isRpcStatus(pauseResult) && pauseResult.status === "paused") {
           state.paused = true;
+          // type cast rpc because createPauseLease expects LudusaviRpc but LifecycleRpc has the needed methods
+          pauseHandle = createPauseLease(rpc as any, instanceID, pauseResult.lease_id, { warn: (msg) => log("warning", msg), error: (msg, e) => log("error", msg + String(e)) });
         }
       }
 
@@ -267,8 +261,12 @@ export function createGameLifecycleController(
         }
       };
 
-      log("info", `Calling check_game_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-      const checkResult = await checkGameStartCall(name, appID);
+      let checkResult: RpcResult<LifecycleCheckResult>;
+      if (isTrackingFailed) {
+        checkResult = { status: "conflict", reason: "startup_tracking_hydration_failed", message: "Failed to load tracking data during startup" };
+      } else {
+        checkResult = await checkGameStart(name, appID);
+      }
       log("info", `check_game_start result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
       
       const dec1 = evaluateStartCheck(state, checkResult);
@@ -276,8 +274,7 @@ export function createGameLifecycleController(
       Object.assign(state, dec1.stateUpdates);
 
       if (dec1.nextRpc === "restore") {
-        log("info", `Calling restore_game_on_start for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-        const restoreRes = await restoreGameOnStartCall(name, appID);
+        const restoreRes = await restoreGameOnStart(name, appID);
         log("info", `restore_game_on_start result for ${name} (${appID}): ${JSON.stringify(restoreRes)}`, "lifecycle", name);
         const dec2 = evaluateStartRestore(state, restoreRes);
         execCmds(dec2.commands);
@@ -298,7 +295,12 @@ export function createGameLifecycleController(
             preGameWatch = syncthingMonitor.start("pre_game", name, appID);
             state.watchActive = true;
           }
-          const conflictRes = await resolveGameStartConflictCall(name, appID, resolution);
+          let conflictRes: RpcResult<OperationResult>;
+          if (isTrackingFailed) {
+             conflictRes = { status: "failed", reason: "startup_tracking_hydration_failed", message: "Cannot apply resolution because tracking data is missing" };
+          } else {
+             conflictRes = await resolveGameStartConflict(name, appID, resolution);
+          }
           const dec4 = evaluateStartConflictResolution(state, resolution, conflictRes);
           execCmds(dec4.commands);
           Object.assign(state, dec4.stateUpdates);
@@ -312,14 +314,17 @@ export function createGameLifecycleController(
       for (const cmd of cleanup) {
         if (cmd.type === "cancelWatch") await preGameWatch?.cancel(cmd.reason);
         else if (cmd.type === "resumeProcess") {
-          try { await resumeGameProcessCall(cmd.instanceID); } catch (err) { log("error", `Failed to resume game process ${cmd.instanceID}: ${err}`, "lifecycle", name); }
+          if (pauseHandle) { await pauseHandle.release(); }
+          else { try { await resumeGameProcess(cmd.instanceID); } catch (err) { log("error", `Failed to resume process: ${err}`); } }
         } else if (cmd.type === "syncHistory") await syncGlobalHistory();
       }
     }
   };
 
   const handleAppExit = async (name: string, appID: string) => {
-    await ensureStateReady();
+    if (ludusaviStore.getSnapshot().trackingReadiness === "cold") {
+      await ensureStateReady();
+    }
     const epoch = ++lifecycleEpoch;
     void syncthingMonitor.stop();
     const {
@@ -328,7 +333,8 @@ export function createGameLifecycleController(
       hide: hideAutoSyncStatus,
     } = createEpochGuardedSurface(statusSurface, epoch, () => lifecycleEpoch);
 
-    const tracked = isTracked(name, appID);
+    const isTrackingFailed = ludusaviStore.getSnapshot().trackingReadiness === "failed";
+    const tracked = isTrackingFailed ? true : isTracked(name, appID);
     log("info", `App exited: ${name} (${appID}) tracked=${tracked}`);
 
     const autoSyncEnabledExit = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
@@ -360,8 +366,12 @@ export function createGameLifecycleController(
     };
 
     try {
-      log("info", `Calling check_game_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-      const checkResult = await checkGameExitCall(name, appID);
+      let checkResult: RpcResult<LifecycleCheckResult>;
+      if (isTrackingFailed) {
+        checkResult = { status: "skipped", reason: "startup_tracking_hydration_failed", message: "Failed to load tracking data during startup" };
+      } else {
+        checkResult = await checkGameExit(name, appID);
+      }
       log("info", `check_game_exit result for ${name} (${appID}): ${JSON.stringify(checkResult)}`, "lifecycle", name);
       
       const dec1 = evaluateExitCheck(state, checkResult);
@@ -369,8 +379,7 @@ export function createGameLifecycleController(
       Object.assign(state, dec1.stateUpdates);
 
       if (dec1.nextRpc === "backup") {
-        log("info", `Calling backup_game_on_exit for ${name} (${appID}) tracked=${tracked}`, "lifecycle", name);
-        const backupResult = await backupGameOnExitCall(name, appID);
+        const backupResult = await backupGameOnExit(name, appID);
         log("info", `backup_game_on_exit result for ${name} (${appID}): ${JSON.stringify(backupResult)}`, "lifecycle", name);
         
         const dec2 = evaluateExitBackup(state, backupResult);

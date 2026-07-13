@@ -12,6 +12,7 @@ import {
   resolveGameStartConflictCall,
   restoreGameOnStartCall,
   resumeGameProcessCall,
+  renewGameProcessPauseCall,
   startSyncthingActivityWatchCall,
   getSyncthingActivityCall,
   stopSyncthingActivityWatchCall,
@@ -235,6 +236,7 @@ export default definePlugin(() => {
       backupGameOnExit: backupGameOnExitCall,
       pauseGameProcess: pauseGameProcessCall,
       resumeGameProcess: resumeGameProcessCall,
+      renewGameProcessPause: renewGameProcessPauseCall,
       startSyncthingActivityWatch: startSyncthingActivityWatchCall,
       getSyncthingActivity: getSyncthingActivityCall,
       stopSyncthingActivityWatch: stopSyncthingActivityWatchCall

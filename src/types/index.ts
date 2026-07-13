@@ -122,6 +122,23 @@ export type ProcessSignalResult = {
   message?: string;
 };
 
+export type PauseGameProcessResult = {
+  status: "paused" | "skipped" | "failed";
+  pid?: number;
+  reason?: string;
+  message?: string;
+  lease_id: string;
+  lease_ttl_seconds: number;
+};
+
+export type RenewGameProcessPauseResult = {
+  status: "renewed" | "failed";
+  pid?: number;
+  message?: string;
+  lease_id: string;
+  lease_ttl_seconds: number;
+};
+
 export type AppLifetimeNotification = {
   unAppID: number;
   nInstanceID: number;

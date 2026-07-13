@@ -35,6 +35,7 @@ describe("GameLifecycleController", () => {
         settings: {
           auto_sync_enabled: true,
         },
+        trackingReadiness: "ready",
       }),
     };
 
@@ -89,13 +90,14 @@ describe("GameLifecycleController", () => {
   };
 
   it("hydrates persisted settings before deciding whether to start the post-game watch", async () => {
-    let snapshot: any = { settings: null };
+    let snapshot: any = { settings: null, trackingReadiness: "cold" };
     mockStore.getSnapshot.mockImplementation(() => snapshot);
     mockEnsureStateReady.mockImplementation(async () => {
       snapshot = {
         settings: {
           auto_sync_enabled: true,
         },
+        trackingReadiness: "ready",
       };
     });
     mockRpc.getSyncthingActivity.mockResolvedValue({
@@ -749,5 +751,78 @@ describe("GameLifecycleController", () => {
       expect.any(Object)
     );
     expect(mockNotifyFailure).not.toHaveBeenCalled();
+  });
+
+  it("fails conservatively on start when tracking data failed to hydrate", async () => {
+    mockStore.getSnapshot.mockReturnValue({
+      settings: { auto_sync_enabled: true },
+      trackingReadiness: "failed",
+    });
+
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+      ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    // Do not call checkGameStart, resolve should simulate "conflict" and "failed" respectively.
+    let resolveFlow: any;
+    mockResolveConflict.mockReturnValue(new Promise((resolve) => {
+      resolveFlow = resolve;
+    }));
+
+    // Use nInstanceID: 2 so that state.paused becomes true
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(mockEnsureStateReady).not.toHaveBeenCalled();
+    expect(mockRpc.checkGameStart).not.toHaveBeenCalled();
+    // Pre-RPC checking status is published.
+    expect(mockStatusSurface.publish).toHaveBeenCalledWith("checking", expect.any(Object));
+
+    resolveFlow("keep_local");
+    await vi.runAllTimersAsync();
+
+    expect(mockRpc.resolveGameStartConflict).not.toHaveBeenCalled();
+    expect(mockStatusSurface.publish).toHaveBeenCalledWith("backing_up", expect.any(Object));
+    expect(mockNotifyFailure).toHaveBeenCalledWith(
+      "SDH-Ludusavi Auto-sync",
+      "Auto-sync failed: Cannot apply resolution because tracking data is missing"
+    );
+  });
+
+  it("fails conservatively on exit when tracking data failed to hydrate", async () => {
+    mockStore.getSnapshot.mockReturnValue({
+      settings: { auto_sync_enabled: true },
+      trackingReadiness: "failed",
+    });
+
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+      ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockEnsureStateReady).not.toHaveBeenCalled();
+    expect(mockRpc.checkGameExit).not.toHaveBeenCalled();
+    // We expect it to complete with skipped because we return a skip result
+    expect(mockStatusSurface.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "skipped", reason: "startup_tracking_hydration_failed" }),
+      expect.any(Object)
+    );
+    expect(mockRpc.backupGameOnExit).not.toHaveBeenCalled();
   });
 });
