@@ -122,22 +122,31 @@ export type ProcessSignalResult = {
   message?: string;
 };
 
-export type PauseGameProcessResult = {
-  status: "paused" | "skipped" | "failed";
-  pid?: number;
-  reason?: string;
-  message?: string;
-  lease_id: string;
-  lease_ttl_seconds: number;
-};
+export type PauseGameProcessResult =
+  | {
+      status: "paused";
+      pid: number;
+      lease_id: string;
+      lease_ttl_seconds: number;
+    }
+  | {
+      status: "skipped" | "failed";
+      pid?: number;
+      reason?: string;
+      message?: string;
+    };
 
-export type RenewGameProcessPauseResult = {
-  status: "renewed" | "failed";
-  pid?: number;
-  message?: string;
-  lease_id: string;
-  lease_ttl_seconds: number;
-};
+export type RenewGameProcessPauseResult =
+  | {
+      status: "renewed";
+      pid: number;
+      lease_ttl_seconds: number;
+    }
+  | {
+      status: "failed";
+      pid?: number;
+      message?: string;
+    };
 
 export type AppLifetimeNotification = {
   unAppID: number;

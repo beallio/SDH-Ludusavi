@@ -23,14 +23,16 @@ describe("summarizeLifecycleResult", () => {
     const result = {
       status: "failed",
       reason: "error_reason",
-      message: "a".repeat(200),
+      message: "Failed at /home/deck/somewhere because of a".repeat(10),
       backupPath: "/tmp/foo/bar/baz"
     };
     const summaryStr = summarizeLifecycleResult(result as any);
     const summary = JSON.parse(summaryStr);
     expect(summary.status).toBe("failed");
     expect(summary.reason).toBe("error_reason");
-    expect(summary.message.length).toBe(150);
+    expect(summary.message.length).toBeLessThanOrEqual(150);
+    expect(summary.message).not.toContain("/home/deck");
+    expect(summary.message).toContain("[PATH]");
     expect(summary.backupPath).toBeUndefined();
   });
 });
