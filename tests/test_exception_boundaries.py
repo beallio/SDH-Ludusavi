@@ -169,6 +169,56 @@ def test_get_conflict_metadata_propagates_unrelated_exception():
         adapter.get_conflict_metadata("Hades")
 
 
+def test_get_conflict_metadata_preserves_backup_metadata_on_local_value_error(monkeypatch):
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    mock_client = MagicMock()
+    backups_response = MagicMock()
+    backups_response.data = {
+        "games": {
+            "Hades": {
+                "backups": [{"when": "2026-07-12T07:37:15Z"}],
+                "backupPath": "/backup/Hades",
+            }
+        }
+    }
+    preview_response = MagicMock()
+    preview_response.data = {"games": {"Hades": {"files": {"/save.sav": {}}}}}
+    mock_client.backups_list.return_value = backups_response
+    mock_client.backup.return_value = preview_response
+    adapter._client = mock_client
+
+    mock_path = MagicMock()
+    mock_path.is_absolute.return_value = True
+    mock_path.stat.side_effect = ValueError("malformed path")
+    monkeypatch.setattr("sdh_ludusavi.ludusavi.Path", lambda _raw_path: mock_path)
+
+    metadata = adapter.get_conflict_metadata("Hades")
+
+    assert metadata["backupModifiedAt"] == "2026-07-12T07:37:15Z"
+    assert metadata["backupPath"] == "/backup/Hades"
+    assert "localModifiedAt" not in metadata
+
+
+def test_get_conflict_metadata_propagates_unexpected_stat_exception(monkeypatch):
+    adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    mock_client = MagicMock()
+    backups_response = MagicMock()
+    backups_response.data = {"games": {}}
+    preview_response = MagicMock()
+    preview_response.data = {"games": {"Hades": {"files": {"/save.sav": {}}}}}
+    mock_client.backups_list.return_value = backups_response
+    mock_client.backup.return_value = preview_response
+    adapter._client = mock_client
+
+    mock_path = MagicMock()
+    mock_path.is_absolute.return_value = True
+    mock_path.stat.side_effect = RuntimeError("unexpected stat failure")
+    monkeypatch.setattr("sdh_ludusavi.ludusavi.Path", lambda _raw_path: mock_path)
+
+    with pytest.raises(RuntimeError, match="unexpected stat failure"):
+        adapter.get_conflict_metadata("Hades")
+
+
 def test_get_diagnostics_handles_ludusavi_error_and_keeps_backup_path_unknown():
     adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
     mock_client = MagicMock()
