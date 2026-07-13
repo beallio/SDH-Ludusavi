@@ -246,18 +246,44 @@ class PyludusaviAdapter:
                 timeout=LUDUSAVI_PREVIEW_TIMEOUT_SECONDS,
             ).data
             files = preview.get("games", {}).get(game_name, {}).get("files", {})
-            mtimes = []
+            mtimes: list[float] = []
+            entry_count = 0
+            success_count = 0
             if isinstance(files, dict):
-                for file_data in files.values():
+                for map_key, file_data in files.items():
+                    entry_count += 1
                     if not isinstance(file_data, dict):
                         continue
-                    raw_path = file_data.get("redirectedPath") or file_data.get("originalPath")
-                    if not raw_path:
-                        continue
-                    try:
-                        mtimes.append(Path(str(raw_path)).stat().st_mtime)
-                    except OSError:
-                        continue
+                    candidates: list[Path] = []
+                    seen_candidates: set[Path] = set()
+                    for raw_path in (
+                        map_key,
+                        file_data.get("originalPath"),
+                        file_data.get("redirectedPath"),
+                    ):
+                        if not isinstance(raw_path, str) or not raw_path.strip():
+                            continue
+                        candidate = Path(raw_path)
+                        if not candidate.is_absolute() or candidate in seen_candidates:
+                            continue
+                        seen_candidates.add(candidate)
+                        candidates.append(candidate)
+
+                    for candidate in candidates:
+                        try:
+                            mtimes.append(candidate.stat().st_mtime)
+                        except OSError:
+                            continue
+                        success_count += 1
+                        break
+            if success_count == 0:
+                LOGGER.debug(
+                    "Local save timestamp scan for %s: entries=%d successes=%d failures=%d",
+                    game_name,
+                    entry_count,
+                    success_count,
+                    entry_count - success_count,
+                )
             if mtimes:
                 metadata["localModifiedAt"] = datetime.fromtimestamp(
                     max(mtimes),
