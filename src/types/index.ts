@@ -9,6 +9,8 @@ export type NotificationSettings = {
 
 export type NotificationCategory = keyof Omit<NotificationSettings, "enabled">;
 
+export type TrackingReadiness = "cold" | "ready" | "failed";
+
 export type UpdateChannel = "stable" | "development";
 
 export type PluginUpdateCandidate = {
