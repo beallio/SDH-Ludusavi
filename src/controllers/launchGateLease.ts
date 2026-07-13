@@ -12,25 +12,35 @@ export function createPauseLease(
 ): PauseLeaseHandle {
   const renewIntervalMs = 5000;
   let isActive = true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
-  const timer = setInterval(async () => {
+  const scheduleNext = () => {
     if (!isActive) return;
-    try {
-      const res = await rpc.renewGameProcessPause(pid, leaseId);
-      if (res.status === "failed") {
-        logger.warn(`[PauseLease] Failed to renew lease for PID ${pid}: ${res.message}`);
-        clearInterval(timer);
+    timer = setTimeout(async () => {
+      if (!isActive) return;
+      try {
+        const res = await rpc.renewGameProcessPause(pid, leaseId);
+        if (res.status === "failed") {
+          logger.warn(`[PauseLease] Failed to renew lease for PID ${pid}: ${res.message}`);
+          isActive = false;
+        }
+      } catch (e) {
+        logger.error(`[PauseLease] Exception renewing lease for PID ${pid}`, e);
+        isActive = false;
       }
-    } catch (e) {
-      logger.error(`[PauseLease] Exception renewing lease for PID ${pid}`, e);
-    }
-  }, renewIntervalMs);
+      if (isActive) {
+        scheduleNext();
+      }
+    }, renewIntervalMs);
+  };
+  
+  scheduleNext();
 
   return {
     release: async () => {
       if (!isActive) return;
       isActive = false;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
       try {
         await rpc.resumeGameProcess(pid);
       } catch (e) {

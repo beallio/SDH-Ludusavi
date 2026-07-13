@@ -32,7 +32,7 @@ def test_pull_args_and_destination(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
     mock_run = MagicMock()
     mock_run.return_value.returncode = 0
-    mock_run.return_value.stdout = "SDH-Ludusavi.log\nSDH-Ludusavi.log.1\n"
+    mock_run.return_value.stdout = "2026-07-12 09.55.50.log\nolder.log.save\nignored.txt\n"
     monkeypatch.setattr(subprocess, "run", mock_run)
 
     dest = tmp_path / "logs"
@@ -44,7 +44,7 @@ def test_pull_args_and_destination(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     ssh_args = mock_run.call_args_list[0][0][0]
     assert ssh_args == [
         "ssh",
-        "deck@steamdeck",
+        "steamdeck",
         "ls",
         "-1",
         "/home/deck/homebrew/logs/SDH-Ludusavi/",
@@ -54,7 +54,7 @@ def test_pull_args_and_destination(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     assert scp_args == [
         "scp",
         "-p",
-        "deck@steamdeck:/home/deck/homebrew/logs/SDH-Ludusavi/SDH-Ludusavi.log",
-        "deck@steamdeck:/home/deck/homebrew/logs/SDH-Ludusavi/SDH-Ludusavi.log.1",
+        "steamdeck:/home/deck/homebrew/logs/SDH-Ludusavi/2026-07-12 09.55.50.log",
+        "steamdeck:/home/deck/homebrew/logs/SDH-Ludusavi/older.log.save",
         str(dest),
     ]

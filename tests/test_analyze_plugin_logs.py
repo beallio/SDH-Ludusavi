@@ -139,3 +139,16 @@ def test_analyze_malformed_lines_handled() -> None:
     data = json.loads(res.stdout)
     # Shouldn't crash on unparseable lines
     assert "parse_failures" in data["stats"]
+
+
+def test_analyze_missing_input_returns_2() -> None:
+    res = subprocess.run(
+        [
+            sys.executable,
+            "scripts/analyze_plugin_logs.py",
+            "nonexistent_file_xyz123.log",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 2

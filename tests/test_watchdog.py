@@ -92,7 +92,7 @@ def test_process_watchdog_failed_resume() -> None:
         assert "Unable to resume" in res["message"]
 
         with wd._paused_pids_lock:
-            assert 7777 in wd._paused_pids
+            assert 7777 not in wd._paused_pids
 
         wd.stop()
 

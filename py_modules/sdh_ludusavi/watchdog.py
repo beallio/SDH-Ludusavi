@@ -94,31 +94,35 @@ class ProcessWatchdog:
             self._log("warning", f"Invalid PID passed to renew: {exc}", "launch_gate", None)
             return {"status": "failed", "message": str(exc)}
 
+        current_identity = _read_process_identity(valid_pid)
+        now_mono = time.monotonic()
+
         with self._paused_pids_lock:
             lease = self._paused_pids.get(valid_pid)
+            if lease is None:
+                self._log(
+                    "warning", f"PID {valid_pid} is not tracked for renewal", "launch_gate", None
+                )
+                return {"status": "failed", "pid": valid_pid, "message": "Process not paused"}
 
-        if lease is None:
-            self._log("warning", f"PID {valid_pid} is not tracked for renewal", "launch_gate", None)
-            return {"status": "failed", "pid": valid_pid, "message": "Process not paused"}
+            if lease.lease_id != lease_id:
+                self._log("warning", f"Lease ID mismatch for PID {valid_pid}", "launch_gate", None)
+                return {"status": "failed", "pid": valid_pid, "message": "Lease ID mismatch"}
 
-        if lease.lease_id != lease_id:
-            self._log("warning", f"Lease ID mismatch for PID {valid_pid}", "launch_gate", None)
-            return {"status": "failed", "pid": valid_pid, "message": "Lease ID mismatch"}
-
-        current_identity = _read_process_identity(valid_pid)
-        if current_identity != lease.identity:
-            with self._paused_pids_lock:
+            if current_identity != lease.identity:
                 self._paused_pids.pop(valid_pid, None)
-            self._log(
-                "warning",
-                f"PID {valid_pid} identity mismatch on renew (PID reused)",
-                "launch_gate",
-                None,
-            )
-            return {"status": "failed", "pid": valid_pid, "message": "Process identity mismatch"}
+                self._log(
+                    "warning",
+                    f"PID {valid_pid} identity mismatch on renew (PID reused)",
+                    "launch_gate",
+                    None,
+                )
+                return {
+                    "status": "failed",
+                    "pid": valid_pid,
+                    "message": "Process identity mismatch",
+                }
 
-        now_mono = time.monotonic()
-        with self._paused_pids_lock:
             lease.lease_deadline = now_mono + LAUNCH_GATE_LEASE_TTL_SECONDS
 
         return {
@@ -135,22 +139,29 @@ class ProcessWatchdog:
             self._log("warning", f"Invalid PID passed to resume: {exc}", "launch_gate", None)
             return {"status": "failed", "message": str(exc)}
 
-        with self._paused_pids_lock:
-            lease = self._paused_pids.get(valid_pid)
-
-        if lease is None:
-            self._log("warning", f"PID {valid_pid} is not tracked", "launch_gate", None)
-            return {"status": "failed", "pid": valid_pid, "message": "Process not paused"}
-
         current_identity = _read_process_identity(valid_pid)
 
-        if current_identity != lease.identity:
-            with self._paused_pids_lock:
+        with self._paused_pids_lock:
+            lease = self._paused_pids.get(valid_pid)
+            if lease is None:
+                self._log("warning", f"PID {valid_pid} is not tracked", "launch_gate", None)
+                return {"status": "failed", "pid": valid_pid, "message": "Process not paused"}
+
+            if current_identity != lease.identity:
                 self._paused_pids.pop(valid_pid, None)
-            self._log(
-                "warning", f"PID {valid_pid} identity mismatch (PID reused)", "launch_gate", None
-            )
-            return {"status": "failed", "pid": valid_pid, "message": "Process identity mismatch"}
+                self._log(
+                    "warning",
+                    f"PID {valid_pid} identity mismatch (PID reused)",
+                    "launch_gate",
+                    None,
+                )
+                return {
+                    "status": "failed",
+                    "pid": valid_pid,
+                    "message": "Process identity mismatch",
+                }
+
+            self._paused_pids.pop(valid_pid, None)
 
         if not _send_signal_tree(valid_pid, signal.SIGCONT, root_identity=lease.identity):
             self._log(
@@ -165,8 +176,6 @@ class ProcessWatchdog:
                 "message": "Unable to resume game process",
             }
 
-        with self._paused_pids_lock:
-            self._paused_pids.pop(valid_pid, None)
         self._log(
             "info", f"Resumed game process tree rooted at PID {valid_pid}", "launch_gate", None
         )
