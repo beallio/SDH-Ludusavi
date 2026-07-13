@@ -19,16 +19,16 @@ export function summarizeLifecycleResult(result: LifecycleCheckResult | Operatio
 
   if ("result" in result && result.result && typeof result.result === "object") {
     const resPayload = result.result as Record<string, any>;
-    if ("files" in resPayload) {
+    if (typeof resPayload.files === "number" || typeof resPayload.files === "string") {
       summary.files = resPayload.files;
     }
-    if ("registry" in resPayload) {
+    if (typeof resPayload.registry === "number" || typeof resPayload.registry === "string") {
       summary.registry = resPayload.registry;
     }
-    if ("bytes" in resPayload) {
+    if (typeof resPayload.bytes === "number" || typeof resPayload.bytes === "string") {
       summary.bytes = resPayload.bytes;
     }
-    if ("game" in resPayload) {
+    if (typeof resPayload.game === "number" || typeof resPayload.game === "string") {
       summary.game = resPayload.game;
     }
   }

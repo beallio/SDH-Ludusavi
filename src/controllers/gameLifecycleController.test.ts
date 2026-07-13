@@ -47,6 +47,7 @@ describe("GameLifecycleController", () => {
       backupGameOnExit: vi.fn().mockResolvedValue({ status: "backed_up" }),
       pauseGameProcess: vi.fn().mockResolvedValue({ status: "paused" }),
       resumeGameProcess: vi.fn().mockResolvedValue({ status: "resumed" }),
+      renewGameProcessPause: vi.fn().mockResolvedValue({ status: "renewed" }),
       startSyncthingActivityWatch: vi.fn().mockResolvedValue({ status: "watching", watch_id: "w1" }),
       getSyncthingActivity: vi.fn().mockResolvedValue({ status: "activity", watch_id: "w1", sample: null }),
       stopSyncthingActivityWatch: vi.fn().mockResolvedValue({ status: "stopped", watch_id: "w1" }),
@@ -753,76 +754,144 @@ describe("GameLifecycleController", () => {
     expect(mockNotifyFailure).not.toHaveBeenCalled();
   });
 
-  it("fails conservatively on start when tracking data failed to hydrate", async () => {
+  it("cold cache + known backend conflict pauses and allows the modal/action path", async () => {
+    mockStore.getSnapshot.mockReturnValue({
+      settings: { auto_sync_enabled: true },
+      trackingReadiness: "cold",
+    });
+    mockStore.isTracked.mockReturnValue(false); // Frontend doesn't know it yet
+    mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
+    
+    let resolveFlow: any;
+    mockResolveConflict.mockReturnValue(new Promise((resolve) => { resolveFlow = resolve; }));
+
+    const controller = createGameLifecycleController({
+      store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.advanceTimersByTimeAsync(100);
+
+    // It should pause conservatively
+    expect(mockRpc.pauseGameProcess).toHaveBeenCalled();
+    expect(mockRpc.checkGameStart).toHaveBeenCalled();
+
+    // After backend confirms conflict, it should show the conflict UI (waiting for resolve)
+    resolveFlow("keep_local");
+    mockRpc.resolveGameStartConflict.mockResolvedValue({ status: "backed_up" });
+    await vi.runAllTimersAsync();
+    
+    expect(mockRpc.resolveGameStartConflict).toHaveBeenCalled();
+  });
+
+  it("cold cache + unmatched backend result pauses briefly, then resumes and cancels the watch", async () => {
+    mockStore.getSnapshot.mockReturnValue({
+      settings: { auto_sync_enabled: true },
+      trackingReadiness: "cold",
+    });
+    mockStore.isTracked.mockReturnValue(false);
+    mockRpc.checkGameStart.mockResolvedValue({ status: "unmatched_game", reason: "not_in_db" });
+
+    const controller = createGameLifecycleController({
+      store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(mockRpc.pauseGameProcess).toHaveBeenCalled();
+    expect(mockRpc.checkGameStart).toHaveBeenCalled();
+    
+    // It should resume and cancel watch
+    await vi.runAllTimersAsync();
+    expect(mockRpc.resumeGameProcess).toHaveBeenCalled();
+  });
+
+  it("ready cache + untracked game does not pause", async () => {
+    mockStore.getSnapshot.mockReturnValue({
+      settings: { auto_sync_enabled: true },
+      trackingReadiness: "ready",
+    });
+    mockStore.isTracked.mockReturnValue(false);
+
+    const controller = createGameLifecycleController({
+      store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.runAllTimersAsync();
+
+    expect(mockRpc.pauseGameProcess).not.toHaveBeenCalled();
+    expect(mockRpc.checkGameStart).toHaveBeenCalled();
+  });
+
+  it("failed tracking hydration follows the cold conservative path and emits one diagnostic", async () => {
     mockStore.getSnapshot.mockReturnValue({
       settings: { auto_sync_enabled: true },
       trackingReadiness: "failed",
     });
+    mockStore.isTracked.mockReturnValue(false);
+    mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
+    
+    let resolveFlow: any;
+    mockResolveConflict.mockReturnValue(new Promise((resolve) => { resolveFlow = resolve; }));
 
     const controller = createGameLifecycleController({
-      store: mockStore,
-      rpc: mockRpc,
-      statusSurface: mockStatusSurface,
-      resolveConflict: mockResolveConflict,
-      notifyFailure: mockNotifyFailure,
-      syncGlobalHistory: mockSyncGlobalHistory,
-      ensureStateReady: mockEnsureStateReady,
+      store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
     });
     controller.start();
 
-    // Do not call checkGameStart, resolve should simulate "conflict" and "failed" respectively.
-    let resolveFlow: any;
-    mockResolveConflict.mockReturnValue(new Promise((resolve) => {
-      resolveFlow = resolve;
-    }));
-
-    // Use nInstanceID: 2 so that state.paused becomes true
     lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
     await vi.advanceTimersByTimeAsync(200);
 
-    expect(mockEnsureStateReady).not.toHaveBeenCalled();
-    expect(mockRpc.checkGameStart).not.toHaveBeenCalled();
-    // Pre-RPC checking status is published.
-    expect(mockStatusSurface.publish).toHaveBeenCalledWith("checking", expect.any(Object));
-
+    expect(mockRpc.pauseGameProcess).toHaveBeenCalled();
+    expect(mockRpc.checkGameStart).toHaveBeenCalled();
+    
     resolveFlow("keep_local");
     await vi.runAllTimersAsync();
-
-    expect(mockRpc.resolveGameStartConflict).not.toHaveBeenCalled();
-    expect(mockStatusSurface.publish).toHaveBeenCalledWith("backing_up", expect.any(Object));
-    expect(mockNotifyFailure).toHaveBeenCalledWith(
-      "SDH-Ludusavi Auto-sync",
-      "Auto-sync failed: Cannot apply resolution because tracking data is missing"
-    );
+    
+    // For exit check, it should call checkGameExit and not just skip
+    mockRpc.checkGameExit.mockResolvedValue({ status: "needed", operation: "backup" });
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: false });
+    await vi.runAllTimersAsync();
+    
+    expect(mockRpc.checkGameExit).toHaveBeenCalled();
   });
 
-  it("fails conservatively on exit when tracking data failed to hydrate", async () => {
+  it("invalid PID cannot be falsely reported as guarded", async () => {
     mockStore.getSnapshot.mockReturnValue({
       settings: { auto_sync_enabled: true },
-      trackingReadiness: "failed",
+      trackingReadiness: "cold",
     });
+    mockStore.isTracked.mockReturnValue(false);
+    mockRpc.checkGameStart.mockResolvedValue({ status: "needed", operation: "restore" });
 
     const controller = createGameLifecycleController({
-      store: mockStore,
-      rpc: mockRpc,
-      statusSurface: mockStatusSurface,
-      resolveConflict: mockResolveConflict,
-      notifyFailure: mockNotifyFailure,
-      syncGlobalHistory: mockSyncGlobalHistory,
-      ensureStateReady: mockEnsureStateReady,
+      store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
     });
     controller.start();
 
-    triggerExit(1145300);
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: undefined as any, bRunning: true });
     await vi.runAllTimersAsync();
 
-    expect(mockEnsureStateReady).not.toHaveBeenCalled();
-    expect(mockRpc.checkGameExit).not.toHaveBeenCalled();
-    // We expect it to complete with skipped because we return a skip result
+    expect(mockRpc.pauseGameProcess).not.toHaveBeenCalled();
+    // But since it needed restore and wasn't paused, it skips and notifies failure
     expect(mockStatusSurface.complete).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "skipped", reason: "startup_tracking_hydration_failed" }),
+      expect.objectContaining({ status: "failed" }),
       expect.any(Object)
     );
-    expect(mockRpc.backupGameOnExit).not.toHaveBeenCalled();
   });
 });

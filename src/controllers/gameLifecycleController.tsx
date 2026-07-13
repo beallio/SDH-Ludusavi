@@ -218,9 +218,11 @@ export function createGameLifecycleController(
       hide: hideAutoSyncStatus,
     } = createEpochGuardedSurface(statusSurface, epoch, () => lifecycleEpoch);
 
-    const isTrackingFailed = ludusaviStore.getSnapshot().trackingReadiness === "failed";
-    const tracked = isTrackingFailed ? true : isTracked(name, appID);
-    log("info", `App started: ${name} (${appID}) tracked=${tracked}`);
+    const trackingReadiness = ludusaviStore.getSnapshot().trackingReadiness;
+    const isTrackingReady = trackingReadiness === "ready";
+    const tracked = isTracked(name, appID);
+    const guardCandidate = tracked || !isTrackingReady;
+    log("info", `App started: ${name} (${appID}) tracked=${tracked} tracking_readiness=${trackingReadiness} guard_candidate=${guardCandidate}`);
 
     if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
       publishAutoSyncStatus("checking", { source: "lifecycle_start", gameName: name, appID, tracked });
@@ -237,7 +239,7 @@ export function createGameLifecycleController(
 
     let pauseHandle: PauseLeaseHandle | undefined;
     try {
-      const shouldPauseLaunch = autoSyncEnabled && tracked && typeof instanceID === "number" && instanceID > 1;
+      const shouldPauseLaunch = autoSyncEnabled && guardCandidate && typeof instanceID === "number" && instanceID > 1;
       if (shouldPauseLaunch) {
         const pauseResult = await pauseGameProcess(instanceID);
         if (!isRpcStatus(pauseResult) && pauseResult.status === "paused") {
@@ -247,7 +249,7 @@ export function createGameLifecycleController(
         }
       }
 
-      if (autoSyncEnabled && tracked) {
+      if (autoSyncEnabled && guardCandidate) {
         activeMonitorEpoch = epoch;
         preGameWatch = syncthingMonitor.start("pre_game", name, appID);
         state.watchActive = true;
@@ -262,12 +264,7 @@ export function createGameLifecycleController(
         }
       };
 
-      let checkResult: RpcResult<LifecycleCheckResult>;
-      if (isTrackingFailed) {
-        checkResult = { status: "conflict", reason: "startup_tracking_hydration_failed", message: "Failed to load tracking data during startup" };
-      } else {
-        checkResult = await checkGameStart(name, appID);
-      }
+      let checkResult: RpcResult<LifecycleCheckResult> = await checkGameStart(name, appID);
       log("info", `check_game_start result for ${name} (${appID}): ${summarizeLifecycleResult(checkResult)}`, "lifecycle", name);
       
       const dec1 = evaluateStartCheck(state, checkResult);
@@ -291,17 +288,12 @@ export function createGameLifecycleController(
         Object.assign(state, dec3.stateUpdates);
         
         if (resolution) {
-          if (autoSyncEnabled && tracked) {
+          if (autoSyncEnabled && guardCandidate) {
             activeMonitorEpoch = epoch;
             preGameWatch = syncthingMonitor.start("pre_game", name, appID);
             state.watchActive = true;
           }
-          let conflictRes: RpcResult<OperationResult>;
-          if (isTrackingFailed) {
-             conflictRes = { status: "failed", reason: "startup_tracking_hydration_failed", message: "Cannot apply resolution because tracking data is missing" };
-          } else {
-             conflictRes = await resolveGameStartConflict(name, appID, resolution);
-          }
+          let conflictRes: RpcResult<OperationResult> = await resolveGameStartConflict(name, appID, resolution);
           const dec4 = evaluateStartConflictResolution(state, resolution, conflictRes);
           execCmds(dec4.commands);
           Object.assign(state, dec4.stateUpdates);
@@ -334,9 +326,11 @@ export function createGameLifecycleController(
       hide: hideAutoSyncStatus,
     } = createEpochGuardedSurface(statusSurface, epoch, () => lifecycleEpoch);
 
-    const isTrackingFailed = ludusaviStore.getSnapshot().trackingReadiness === "failed";
-    const tracked = isTrackingFailed ? true : isTracked(name, appID);
-    log("info", `App exited: ${name} (${appID}) tracked=${tracked}`);
+    const trackingReadiness = ludusaviStore.getSnapshot().trackingReadiness;
+    const isTrackingReady = trackingReadiness === "ready";
+    const tracked = isTracked(name, appID);
+    const guardCandidate = tracked || !isTrackingReady;
+    log("info", `App exited: ${name} (${appID}) tracked=${tracked} tracking_readiness=${trackingReadiness} guard_candidate=${guardCandidate}`);
 
     const autoSyncEnabledExit = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
     let postGameWatch: SyncthingWatchSession | null = null;
@@ -367,12 +361,7 @@ export function createGameLifecycleController(
     };
 
     try {
-      let checkResult: RpcResult<LifecycleCheckResult>;
-      if (isTrackingFailed) {
-        checkResult = { status: "skipped", reason: "startup_tracking_hydration_failed", message: "Failed to load tracking data during startup" };
-      } else {
-        checkResult = await checkGameExit(name, appID);
-      }
+      let checkResult: RpcResult<LifecycleCheckResult> = await checkGameExit(name, appID);
       log("info", `check_game_exit result for ${name} (${appID}): ${summarizeLifecycleResult(checkResult)}`, "lifecycle", name);
       
       const dec1 = evaluateExitCheck(state, checkResult);
