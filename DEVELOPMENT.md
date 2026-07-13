@@ -31,7 +31,7 @@ The installable Decky plugin is built from these required files:
 Install frontend dependencies when needed:
 
 ```bash
-pnpm install --frozen-lockfile --ignore-scripts
+./run.sh pnpm install --frozen-lockfile --ignore-scripts
 ```
 
 The repository uses `pnpm-lock.yaml` as the canonical frontend lockfile. Do not use `npm install` or add `package-lock.json`. The pnpm store and heavy virtual store are configured under `/tmp/sdh_ludusavi`; the local `node_modules/` directory is ignored and contains only pnpm links/bin shims needed by package scripts.
@@ -47,13 +47,13 @@ The repository uses `pnpm-lock.yaml` as the canonical frontend lockfile. Do not 
 ### Build the Decky frontend:
 
 ```bash
-pnpm run build
+./run.sh pnpm run build
 ```
 
 ### Run frontend supply-chain checks:
 
 ```bash
-pnpm run verify
+./run.sh pnpm run verify
 ```
 
 ### Create the Decky plugin zip locally:
@@ -139,7 +139,7 @@ If no named shortcut exists, the plugin validates the cached AppID and renames t
 
 ### QAM Cache Markers & Limitations
 
-To support instant Quick Access Menu (QAM) load times (< 1ms) after a system reboot, the plugin utilizes a composite modification time marker. The adapter stats three core configuration and database metadata files in Ludusavi's config directory: `config.yaml`, `cache.yaml`, and `manifest.yaml`. 
+To support instant Quick Access Menu (QAM) load times (< 1ms) after a system reboot, the plugin utilizes a composite modification time marker. The adapter stats three core configuration and database metadata files in Ludusavi's config directory: `config.yaml`, `cache.yaml`, and `manifest.yaml`.
 
 This composite marker changes whenever the user modifies Ludusavi settings, backs up/restores a game, or downloads a manifest update using the Ludusavi GUI or CLI.
 
@@ -195,12 +195,15 @@ browser console level and forwards the same entry to the backend diagnostic log 
 Structured UI entries use this format:
 
 ```text
+SDH-Ludusavi:[LABEL] [GAME_NAME]: message
+```
+
 Fields are sorted for stable searching. UI code should log transitions at controller
 and action boundaries: requested, started, completed, skipped, superseded, failed, or
-rolled back. 
+rolled back.
 
 **Diagnostic Logging Contract:**
-Do not log React renders, full settings objects, environment values, full checksums, or high-frequency polling samples. 
+Do not log React renders, full settings objects, environment values, full checksums, or high-frequency polling samples.
 Explicitly prohibited in routine logs:
 - Full RPC-result object serialization (e.g., `JSON.stringify(operationResult)`).
 - Raw save paths, home directories (e.g., `/home/deck`), or nested file registries.
@@ -276,5 +279,5 @@ Before committing changes, run:
 ./run.sh uv run ruff format .
 ./run.sh uv run ty check py_modules/sdh_ludusavi/
 ./run.sh uv run pytest
-pnpm run build
+./run.sh pnpm run build
 ```

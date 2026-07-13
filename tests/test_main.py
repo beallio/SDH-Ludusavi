@@ -357,7 +357,7 @@ def test_plugin_exposes_process_pause_resume_rpcs(
     decky, _logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
     module = import_main(monkeypatch, decky)
     plugin = module.Plugin()
-    calls: list[tuple[str, int]] = []
+    calls: list[tuple[object, ...]] = []
 
     class CapturingService:
         def __init__(self, settings_store: object, cache_path: Path) -> None:
@@ -368,19 +368,22 @@ def test_plugin_exposes_process_pause_resume_rpcs(
             calls.append(("pause", pid))
             return {"status": "paused", "pid": pid}
 
-        def resume_game_process(self, pid: int) -> dict[str, object]:
-            calls.append(("resume", pid))
+        def resume_game_process(self, pid: int, lease_id: str | None = None) -> dict[str, object]:
+            calls.append(("resume", pid, lease_id))
             return {"status": "resumed", "pid": pid}
 
     monkeypatch.setattr(module, "SDHLudusaviService", CapturingService)
 
     async def scenario() -> None:
         assert await plugin.pause_game_process(1234) == {"status": "paused", "pid": 1234}
-        assert await plugin.resume_game_process(1234) == {"status": "resumed", "pid": 1234}
+        assert await plugin.resume_game_process(1234, "lease-1234") == {
+            "status": "resumed",
+            "pid": 1234,
+        }
 
     asyncio.run(scenario())
 
-    assert calls == [("pause", 1234), ("resume", 1234)]
+    assert calls == [("pause", 1234), ("resume", 1234, "lease-1234")]
 
 
 def test_unload_stops_backend_through_call(

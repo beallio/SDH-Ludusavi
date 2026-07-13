@@ -98,9 +98,23 @@ export type OperationResult = {
   game?: string;
   reason?: string;
   message?: string;
+  result?: LudusaviResultPayload;
 };
 
 export type ConflictResolution = "keep_local" | "restore_backup";
+
+export type LudusaviOverall = {
+  totalGames?: number;
+  totalBytes?: number;
+  processedGames?: number;
+  processedBytes?: number;
+};
+
+export type LudusaviResultPayload = {
+  overall?: LudusaviOverall;
+  games?: Record<string, unknown>;
+  errors?: Record<string, unknown>;
+};
 
 export type LifecycleCheckResult = {
   status: "needed" | "conflict" | "skipped" | "failed";
@@ -113,6 +127,7 @@ export type LifecycleCheckResult = {
   backupPath?: string | null;
   localLabel?: string;
   backupLabel?: string;
+  result?: LudusaviResultPayload;
 };
 
 export type ProcessSignalResult = {

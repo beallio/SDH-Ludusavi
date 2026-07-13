@@ -1,20 +1,122 @@
 {
   "date": "2026-07-12",
-  "task_objective": "Fix outstanding test failures related to gameLifecycleController and autoSyncStatusBrowserView after regression changes",
+  "task_objective": "Harden cold-start launch gating, renewable pause ownership, Syncthing watch handoff, bounded diagnostics, and reusable Decky log regression analysis.",
   "files_modified": [
+    "DEVELOPMENT.md",
+    "docs/specs/custom_status_bar_ui.md",
+    "main.py",
+    "py_modules/sdh_ludusavi/constants.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "py_modules/sdh_ludusavi/syncthing/watcher.py",
+    "py_modules/sdh_ludusavi/watchdog.py",
+    "scripts/analyze_plugin_logs.py",
+    "scripts/pull_plugin_logs.py",
+    "src/api/ludusaviRpc.ts",
     "src/controllers/gameLifecycleController.test.ts",
+    "src/controllers/gameLifecycleController.tsx",
+    "src/controllers/launchGateLease.test.ts",
+    "src/controllers/launchGateLease.ts",
+    "src/formatting/lifecycleLogSummary.test.ts",
+    "src/formatting/lifecycleLogSummary.ts",
+    "src/index.tsx",
+    "src/runtime/startupHydration.test.ts",
+    "src/runtime/startupHydration.ts",
+    "src/state/ludusaviState.test.tsx",
+    "src/state/ludusaviState.tsx",
     "src/surfaces/autoSyncStatusBrowserView.test.ts",
+    "src/surfaces/autoSyncStatusBrowserView.ts",
+    "src/types/index.ts",
+    "tests/fixtures/plugin_logs/clean.log",
+    "tests/fixtures/plugin_logs/cold-tracking-conflict.log",
+    "tests/fixtures/plugin_logs/integrated.log",
+    "tests/fixtures/plugin_logs/syncthing-ttl-expiry.log",
+    "tests/fixtures/plugin_logs/watchdog-resume-before-resolution.log",
+    "tests/test_analyze_plugin_logs.py",
+    "tests/test_compatibility.py",
+    "tests/test_main.py",
+    "tests/test_main_rpc.py",
+    "tests/test_pull_plugin_logs.py",
+    "tests/test_service.py",
     "tests/test_watchdog.py",
-    "tests/test_module_size_budgets.py"
+    "tests/test_watcher.py"
   ],
-  "tests_added": [
-    "awaits syncthingMonitor.stop() before allocating the next watch"
+  "tests_added_or_extended": [
+    "Pull-script argv, validation, and temp-destination coverage",
+    "Real-syntax log parsing, incident correlation, strict exit, malformed/unreadable input, deduplication, and false-positive coverage",
+    "Startup tracking hydration and tracking-readiness store coverage",
+    "Cold/failed tracking launch gating and awaited Syncthing stop-order coverage",
+    "Five-second non-overlapping lease renewal, one shared resume, lease loss, long conflict waits, and controller disposal coverage",
+    "Per-PID backend STOP/CONT serialization, exact-generation renewal/resume, retry, expiry revalidation, and RPC compatibility coverage",
+    "Cross-phase backend Syncthing watch replacement coverage",
+    "Typed structural lifecycle summaries and bounded BrowserView diagnostics coverage"
+  ],
+  "red_evidence": [
+    {
+      "group": "log analyzer",
+      "command": "./run.sh uv run python scripts/analyze_plugin_logs.py --format json /tmp/sdh_ludusavi/steamdeck/logs",
+      "failure": "Round-03 review observed 3401 input lines but zero parsed levels and missed all three historical early resumes plus the tracking mismatch; sentinel fixtures contained rule IDs instead of production syntax."
+    },
+    {
+      "group": "backend lease transitions",
+      "command": "./run.sh uv run pytest tests/test_watchdog.py tests/test_service.py tests/test_main.py tests/test_main_rpc.py tests/test_compatibility.py",
+      "failure": "Review ordering analysis showed an old SIGCONT could occur after a concurrent new SIGSTOP, while the stale-resume test asserted only dictionary contents; expiry selection could also race a late renewal."
+    },
+    {
+      "group": "frontend lease protection",
+      "command": "./run.sh pnpm run test:unit -- src/controllers/launchGateLease.test.ts src/controllers/gameLifecycleController.test.ts",
+      "failure": "Round-03 review found controller lease-loss coverage absent, mutation Promises created before protection checks, disposal unable to cancel in-flight handlers, and loss/release using different resume settlement paths."
+    },
+    {
+      "group": "diagnostics and audit",
+      "command": "./run.sh pnpm run test:unit -- src/formatting/lifecycleLogSummary.test.ts src/surfaces/autoSyncStatusBrowserView.test.ts",
+      "failure": "Review found untyped shallow summary tests, missing actual result.overall aggregates, path-bearing free-form fields, malformed Markdown fences, and inaccurate split session records."
+    },
+    {
+      "group": "module budget",
+      "command": "scripts/orchestration/run-quality-gates",
+      "failure": "The first final round-03 gate reported gameLifecycleController.tsx at 475 lines against the temporarily raised 460-line budget; local contracts were consolidated and the original 450-line budget restored."
+    }
   ],
   "design_decisions": [
-    "Mocked global window setTimeout for vitest environment because @decky/ui relies on it during import",
-    "Fixed the slow stop watch mock timing in the controller test to prevent blocking the initial handleAppStart completely",
-    "Increased the line budget for gameLifecycleController.tsx slightly to account for the newly added behavior and imports",
-    "Auto-fixed python linting issues with ruff and removed unused variables in python test fixtures"
+    "Tracking hydration and settings hydration settle independently before startup readiness; tracking failures enter an explicit failed state and cold/failed launches gate conservatively.",
+    "Each paused PID owns an opaque renewable lease; frontend releases include the exact lease ID and backend STOP/CONT plus lease generation changes serialize under a per-PID transition lock.",
+    "Loss, explicit release, and disposal share one idempotent resume Promise, while protected RPC thunks and lifecycle epochs prevent post-loss or post-disposal mutations.",
+    "The watchdog revalidates the exact expired generation after acquiring the transition lock, so a late renewal or replacement lease cannot be resumed from stale inspection.",
+    "Log analysis derives stable rule IDs from production syntax and resets bounded correlation state per file; raw Deck logs remain only under /tmp/sdh_ludusavi.",
+    "Routine lifecycle diagnostics whitelist typed scalar fields, sanitize all included free-form values, and omit nested save/registry/path payloads."
   ],
-  "results": "All tests pass successfully across both python backend and react frontend environments. Regression fully resolved."
+  "validation_commands": [
+    "./run.sh uv run pytest tests/test_pull_plugin_logs.py tests/test_analyze_plugin_logs.py",
+    "./run.sh uv run pytest tests/test_watchdog.py tests/test_service.py tests/test_main.py tests/test_main_rpc.py tests/test_compatibility.py tests/test_watcher.py",
+    "./run.sh pnpm run test:unit -- src/runtime/startupHydration.test.ts src/state/ludusaviState.test.tsx src/controllers/launchGateLease.test.ts src/controllers/gameLifecycleController.test.ts src/controllers/gameLifecycleController.logging.test.ts src/controllers/syncthingMonitor.handoffCleanup.test.ts src/controllers/syncthingMonitor.initialization.test.ts src/surfaces/autoSyncStatusBrowserView.test.ts",
+    "./run.sh uv run python scripts/analyze_plugin_logs.py --format json /tmp/sdh_ludusavi/steamdeck/logs",
+    "./run.sh uv run ruff check . --fix",
+    "./run.sh uv run ruff format .",
+    "./run.sh uv run ty check py_modules/sdh_ludusavi/",
+    "scripts/orchestration/run-quality-gates",
+    "scripts/orchestration/check-review-notes-not-deleted",
+    "git diff --check"
+  ],
+  "results": {
+    "frontend": "31 files and 259 tests passed; TypeScript typecheck and Rollup build passed.",
+    "python": "668 tests passed with 86.80% coverage; Ruff check/format and ty passed.",
+    "saved_log_analysis": {
+      "lines_parsed": 3401,
+      "parse_failures": 0,
+      "levels": {
+        "DEBUG": 1432,
+        "INFO": 1953,
+        "WARNING": 11,
+        "ERROR": 0,
+        "CRITICAL": 0
+      },
+      "rule_incidents": {
+        "diagnostics.oversized_or_raw_payload": 21,
+        "launch_gate.backend_match_after_untracked_start": 17,
+        "launch_gate.resume_before_resolution": 3,
+        "syncthing.watch_ttl_expired": 1
+      }
+    },
+    "hardware_verification": "Pending review, finalization onto dev, development prerelease installation, and the deferred Steam Deck scenario in the plan."
+  }
 }

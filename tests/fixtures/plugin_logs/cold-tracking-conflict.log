@@ -1,0 +1,3 @@
+[2026-07-12 10:00:00,001][INFO]: frontend: App started: Fictional Game A (123) tracked=false
+[2026-07-12 10:00:01,002][INFO]: launch_gate: Paused game process tree rooted at PID 1234
+[2026-07-12 10:00:02,003][INFO]: [Fictional Game A] lifecycle: check_game_start result for Fictional Game A (123): {"status":"conflict","operation":"restore","game":"Fictional Game A","reason":"ambiguous_recency"}
