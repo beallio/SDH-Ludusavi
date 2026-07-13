@@ -9,6 +9,8 @@ export type NotificationSettings = {
 
 export type NotificationCategory = keyof Omit<NotificationSettings, "enabled">;
 
+export type TrackingReadiness = "cold" | "ready" | "failed";
+
 export type UpdateChannel = "stable" | "development";
 
 export type PluginUpdateCandidate = {
@@ -96,9 +98,23 @@ export type OperationResult = {
   game?: string;
   reason?: string;
   message?: string;
+  result?: LudusaviResultPayload;
 };
 
 export type ConflictResolution = "keep_local" | "restore_backup";
+
+export type LudusaviOverall = {
+  totalGames?: number;
+  totalBytes?: number;
+  processedGames?: number;
+  processedBytes?: number;
+};
+
+export type LudusaviResultPayload = {
+  overall?: LudusaviOverall;
+  games?: Record<string, unknown>;
+  errors?: Record<string, unknown>;
+};
 
 export type LifecycleCheckResult = {
   status: "needed" | "conflict" | "skipped" | "failed";
@@ -111,6 +127,7 @@ export type LifecycleCheckResult = {
   backupPath?: string | null;
   localLabel?: string;
   backupLabel?: string;
+  result?: LudusaviResultPayload;
 };
 
 export type ProcessSignalResult = {
@@ -119,6 +136,32 @@ export type ProcessSignalResult = {
   reason?: string;
   message?: string;
 };
+
+export type PauseGameProcessResult =
+  | {
+      status: "paused";
+      pid: number;
+      lease_id: string;
+      lease_ttl_seconds: number;
+    }
+  | {
+      status: "skipped" | "failed";
+      pid?: number;
+      reason?: string;
+      message?: string;
+    };
+
+export type RenewGameProcessPauseResult =
+  | {
+      status: "renewed";
+      pid: number;
+      lease_ttl_seconds: number;
+    }
+  | {
+      status: "failed";
+      pid?: number;
+      message?: string;
+    };
 
 export type AppLifetimeNotification = {
   unAppID: number;

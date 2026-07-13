@@ -98,7 +98,6 @@ class SDHLudusaviService:
 
         self._watchdog = ProcessWatchdog(
             log_callback=self.log,
-            is_operation_running=lambda: self._coordinator.is_running,
         )
 
         # 6. History Manager
@@ -332,9 +331,13 @@ class SDHLudusaviService:
         """Suspend a launched game process tree while start sync runs."""
         return self._watchdog.pause(pid)
 
-    def resume_game_process(self, pid: int) -> dict[str, object]:
+    def renew_game_process_pause(self, pid: int, lease_id: str) -> dict[str, object]:
+        """Renew the lease on a suspended game process."""
+        return self._watchdog.renew_pause(pid, lease_id)
+
+    def resume_game_process(self, pid: int, lease_id: str | None = None) -> dict[str, object]:
         """Resume a previously suspended game process tree."""
-        return self._watchdog.resume(pid)
+        return self._watchdog.resume(pid, lease_id)
 
     def resume_all_paused_processes(self) -> None:
         """Best-effort cleanup for plugin unload or launch-gate failures."""

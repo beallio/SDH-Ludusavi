@@ -93,7 +93,8 @@ EXPECTED_METHODS: dict[str, list[str]] = {
     "get_operation_status": [],
     "get_recent_logs": [],
     "pause_game_process": ["pid"],
-    "resume_game_process": ["pid"],
+    "renew_game_process_pause": ["pid", "lease_id"],
+    "resume_game_process": ["pid", "lease_id"],
     "stop": [],
 }
 
@@ -138,6 +139,7 @@ def test_sdh_ludusavi_service_facade_behavior(tmp_path: Path) -> None:
 
     # Test process watchdog facade methods don't crash when called with bad PIDs (they report failed)
     assert service.pause_game_process(-1)["status"] == "failed"
+    assert service.renew_game_process_pause(-1, "bad")["status"] == "failed"
     assert service.resume_game_process(-1)["status"] == "failed"
 
     # Test history integration
