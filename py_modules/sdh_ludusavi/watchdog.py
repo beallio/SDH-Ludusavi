@@ -5,12 +5,13 @@ import os
 import signal
 import threading
 import time
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from .constants import (
     WATCHDOG_ABSOLUTE_RESUME_SECONDS,
-    WATCHDOG_STUCK_RESUME_SECONDS,
+    LAUNCH_GATE_LEASE_TTL_SECONDS,
 )
 
 LOGGER = logging.getLogger("sdh_ludusavi.service.watchdog")
@@ -26,11 +27,9 @@ class ProcessWatchdog:
     def __init__(
         self,
         log_callback: Callable[[str, str, str | None, str | None], None],
-        is_operation_running: Callable[[], bool],
     ) -> None:
         self._log = log_callback
-        self._is_operation_running = is_operation_running
-        self._paused_pids: dict[int, tuple[_ProcessIdentity, float]] = {}
+        self._paused_pids: dict[int, _PauseLease] = {}
         self._paused_pids_lock = threading.Lock()
         self._watchdog_active = False
         self._watchdog_thread: threading.Thread | None = None
@@ -67,13 +66,66 @@ class ProcessWatchdog:
             )
             return {"status": "failed", "pid": valid_pid, "message": "Unable to pause game process"}
 
+        lease_id = secrets.token_urlsafe(16)
+        now_mono = time.monotonic()
         with self._paused_pids_lock:
-            self._paused_pids[valid_pid] = (identity, time.time())
+            self._paused_pids[valid_pid] = _PauseLease(
+                identity=identity,
+                paused_at=now_mono,
+                lease_id=lease_id,
+                lease_deadline=now_mono + LAUNCH_GATE_LEASE_TTL_SECONDS,
+            )
             self._ensure_watchdog_running()
         self._log(
             "info", f"Paused game process tree rooted at PID {valid_pid}", "launch_gate", None
         )
-        return {"status": "paused", "pid": valid_pid}
+        return {
+            "status": "paused",
+            "pid": valid_pid,
+            "lease_id": lease_id,
+            "lease_ttl_seconds": LAUNCH_GATE_LEASE_TTL_SECONDS,
+        }
+
+    def renew_pause(self, pid: int, lease_id: str) -> dict[str, object]:
+        """Renew the lease on a suspended game process."""
+        try:
+            valid_pid = _coerce_signal_pid(pid)
+        except ValueError as exc:
+            self._log("warning", f"Invalid PID passed to renew: {exc}", "launch_gate", None)
+            return {"status": "failed", "message": str(exc)}
+
+        with self._paused_pids_lock:
+            lease = self._paused_pids.get(valid_pid)
+
+        if lease is None:
+            self._log("warning", f"PID {valid_pid} is not tracked for renewal", "launch_gate", None)
+            return {"status": "failed", "pid": valid_pid, "message": "Process not paused"}
+
+        if lease.lease_id != lease_id:
+            self._log("warning", f"Lease ID mismatch for PID {valid_pid}", "launch_gate", None)
+            return {"status": "failed", "pid": valid_pid, "message": "Lease ID mismatch"}
+
+        current_identity = _read_process_identity(valid_pid)
+        if current_identity != lease.identity:
+            with self._paused_pids_lock:
+                self._paused_pids.pop(valid_pid, None)
+            self._log(
+                "warning",
+                f"PID {valid_pid} identity mismatch on renew (PID reused)",
+                "launch_gate",
+                None,
+            )
+            return {"status": "failed", "pid": valid_pid, "message": "Process identity mismatch"}
+
+        now_mono = time.monotonic()
+        with self._paused_pids_lock:
+            lease.lease_deadline = now_mono + LAUNCH_GATE_LEASE_TTL_SECONDS
+
+        return {
+            "status": "renewed",
+            "pid": valid_pid,
+            "lease_ttl_seconds": LAUNCH_GATE_LEASE_TTL_SECONDS,
+        }
 
     def resume(self, pid: int) -> dict[str, object]:
         """Resume a previously suspended game process tree."""
@@ -84,16 +136,15 @@ class ProcessWatchdog:
             return {"status": "failed", "message": str(exc)}
 
         with self._paused_pids_lock:
-            entry = self._paused_pids.get(valid_pid)
+            lease = self._paused_pids.get(valid_pid)
 
-        if entry is None:
+        if lease is None:
             self._log("warning", f"PID {valid_pid} is not tracked", "launch_gate", None)
             return {"status": "failed", "pid": valid_pid, "message": "Process not paused"}
 
-        stored_identity, _ = entry
         current_identity = _read_process_identity(valid_pid)
 
-        if current_identity != stored_identity:
+        if current_identity != lease.identity:
             with self._paused_pids_lock:
                 self._paused_pids.pop(valid_pid, None)
             self._log(
@@ -101,7 +152,7 @@ class ProcessWatchdog:
             )
             return {"status": "failed", "pid": valid_pid, "message": "Process identity mismatch"}
 
-        if not _send_signal_tree(valid_pid, signal.SIGCONT, root_identity=stored_identity):
+        if not _send_signal_tree(valid_pid, signal.SIGCONT, root_identity=lease.identity):
             self._log(
                 "warning",
                 f"Failed to send SIGCONT to process tree rooted at PID {valid_pid}",
@@ -168,28 +219,24 @@ class ProcessWatchdog:
             self._check_and_resume_stuck_pids()
 
     def _check_and_resume_stuck_pids(self) -> None:
-        now = time.time()
+        now_mono = time.monotonic()
         stuck: list[tuple[int, float, str]] = []
         with self._paused_pids_lock:
             if not self._paused_pids:
                 self._watchdog_active = False
                 return
-            operation_running = self._is_operation_running()
-            for pid, (identity, paused_at) in list(self._paused_pids.items()):
-                paused_for = now - paused_at
+            for pid, lease in list(self._paused_pids.items()):
+                paused_for = now_mono - lease.paused_at
                 if paused_for > WATCHDOG_ABSOLUTE_RESUME_SECONDS:
-                    # Unconditional safety net: even a (claimed) running
-                    # operation may not keep a game suspended past the longest
-                    # legal operation duration.
                     stuck.append((pid, paused_for, "absolute ceiling"))
-                elif not operation_running and paused_for > WATCHDOG_STUCK_RESUME_SECONDS:
-                    stuck.append((pid, paused_for, "idle timeout"))
+                elif now_mono > lease.lease_deadline:
+                    stuck.append((pid, paused_for, "lease expired"))
 
         for pid, paused_for, why in stuck:
             self._log(
                 "warning",
                 f"Watchdog detected PID {pid} suspended for {paused_for:.0f}s "
-                f"({why} exceeded). Resuming automatically.",
+                f"({why}). Resuming automatically.",
                 "watchdog",
                 None,
             )
@@ -251,6 +298,14 @@ def _send_signal_tree(
 class _ProcessIdentity:
     start_ticks: int
     uid: int
+
+
+@dataclass
+class _PauseLease:
+    identity: _ProcessIdentity
+    paused_at: float
+    lease_id: str
+    lease_deadline: float
 
 
 def _read_process_identity(pid: int, *, proc_root: str = "/proc") -> _ProcessIdentity | None:

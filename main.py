@@ -198,6 +198,12 @@ class Plugin:
             "pause_game_process", lambda: self._service().pause_game_process(pid)
         )
 
+    async def renew_game_process_pause(self, pid: int, lease_id: str) -> dict[str, object]:
+        return await self._call(
+            "renew_game_process_pause",
+            lambda: self._service().renew_game_process_pause(pid, lease_id),
+        )
+
     async def resume_game_process(self, pid: int) -> dict[str, object]:
         return await self._call(
             "resume_game_process", lambda: self._service().resume_game_process(pid)

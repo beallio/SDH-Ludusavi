@@ -38,9 +38,11 @@ LUDUSAVI_OPERATION_TIMEOUT_SECONDS = 900.0
 # the worst-case launch-gate pause during check_game_start.
 LUDUSAVI_PREVIEW_TIMEOUT_SECONDS = 300.0
 
-# Watchdog: resume a SIGSTOPped game after this long when NO operation is
-# running (pre-existing behavior, previously hardcoded as 15.0 in watchdog.py).
-WATCHDOG_STUCK_RESUME_SECONDS = 15.0
+# Watchdog: A pause lease is valid for this many seconds from its last renewal.
+LAUNCH_GATE_LEASE_TTL_SECONDS = 30.0
+
+# Watchdog: The frontend should renew a lease every this many seconds.
+LAUNCH_GATE_RENEW_INTERVAL_SECONDS = 5.0
 
 # Watchdog: resume a SIGSTOPped game after this long UNCONDITIONALLY, even if
 # an operation still claims to be running. Sized to outlast the longest legal
