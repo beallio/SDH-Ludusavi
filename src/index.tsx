@@ -12,9 +12,11 @@ import {
   resolveGameStartConflictCall,
   restoreGameOnStartCall,
   resumeGameProcessCall,
+  renewGameProcessPauseCall,
   startSyncthingActivityWatchCall,
   getSyncthingActivityCall,
-  stopSyncthingActivityWatchCall
+  stopSyncthingActivityWatchCall,
+  refreshGamesCall
 } from "./api/ludusaviRpc";
 
 import {
@@ -29,6 +31,7 @@ import {
 } from "./components/qam/LudusaviContent";
 import { createGameLifecycleController } from "./controllers/gameLifecycleController";
 import { isRpcStatus } from "./utils/rpc";
+import { getInstalledAppIdsString } from "./utils/steam";
 import { log, logUiEvent } from "./utils/logging";
 import {
   LudusaviStateProvider,
@@ -209,9 +212,15 @@ export default definePlugin(() => {
   });
   const startupHydration = createStartupHydration({
     fetchSettings: getSettings,
+    fetchTracking: async () => {
+      const installedAppIds = await getInstalledAppIdsString();
+      return refreshGamesCall(false, installedAppIds);
+    },
     getStoredSettings: () => ludusaviStore.getSnapshot().settings,
     isRpcStatus,
     applySettings: (settings) => runtime.settings.applySettings(ludusaviStore, settings),
+    applyTracking: (result) => ludusaviStore.applyRefreshResult(result),
+    markTrackingFailed: () => ludusaviStore.markTrackingFailed(),
     logRpcStatus,
     logUiEvent,
     logError: (message) => log("error", message),
@@ -227,6 +236,7 @@ export default definePlugin(() => {
       backupGameOnExit: backupGameOnExitCall,
       pauseGameProcess: pauseGameProcessCall,
       resumeGameProcess: resumeGameProcessCall,
+      renewGameProcessPause: renewGameProcessPauseCall,
       startSyncthingActivityWatch: startSyncthingActivityWatchCall,
       getSyncthingActivity: getSyncthingActivityCall,
       stopSyncthingActivityWatch: stopSyncthingActivityWatchCall
@@ -260,7 +270,7 @@ export default definePlugin(() => {
     onDismount() {
       logUiEvent("plugin_dismounting", {}, "info");
       startupHydration.dispose();
-      lifecycleController.dispose();
+      void lifecycleController.dispose();
 
       if (dropdownStyleEl.parentNode) {
         dropdownStyleEl.parentNode.removeChild(dropdownStyleEl);

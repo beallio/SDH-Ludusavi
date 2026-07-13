@@ -44,11 +44,14 @@ An external native overlay process, like OverLaid's backend-launched `DISPLAY=:0
 overlay binary, remains a fallback architecture only. The autosync strip should stay
 inside SteamUI unless runtime testing proves the BrowserView surface is insufficient.
 
-Lifecycle status publication must not depend solely on frontend tracking caches. If
-settings or tracking data have not been loaded yet, the frontend should show the
-running strip before calling the backend and hide it if the backend returns a silent
-skip such as disabled autosync, unmatched game, another operation running, or a
-deselected Ludusavi game.
+Lifecycle status publication must not depend solely on frontend tracking caches. Tracking
+hydration guarantees settings and game lists are loaded before standard classification.
+If tracking data fails to load or is cold, the frontend conservatively guards the game 
+launch and shows the running strip before calling the backend, hiding it immediately if 
+the backend returns a silent skip (e.g., disabled autosync, unmatched game, or a 
+deselected Ludusavi game). While the user is deciding on a save conflict, a renewable 
+pause lease ensures the backend watchdog does not automatically resume the game before 
+the UI resolves.
 
 ## Core Data Structures
 

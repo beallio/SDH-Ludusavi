@@ -13,7 +13,8 @@ import {
   RefreshResult,
   Settings,
   Versions,
-  UpdateChannel
+  UpdateChannel,
+  TrackingReadiness
 } from "../types";
 import { LudusaviLaunchCommand } from "../ludusaviLauncher";
 import { normalize } from "../utils/steam";
@@ -72,6 +73,7 @@ export type LudusaviStateSnapshot = {
   trackedNames: Set<string>;
   autoSyncNotificationsEnabled: boolean;
   notificationSettings: NotificationSettings;
+  trackingReadiness: TrackingReadiness;
 };
 
 function createInitialSnapshot(): LudusaviStateSnapshot {
@@ -87,7 +89,8 @@ function createInitialSnapshot(): LudusaviStateSnapshot {
     trackedAppIDs: new Set<string>(),
     trackedNames: new Set<string>(),
     autoSyncNotificationsEnabled: false,
-    notificationSettings: { ...defaultNotificationSettings }
+    notificationSettings: { ...defaultNotificationSettings },
+    trackingReadiness: "cold"
   };
 }
 
@@ -175,8 +178,13 @@ export class LudusaviStateStore {
       gameAliases: aliases,
       gameHistory: result.history ?? {},
       trackedAppIDs: buildTrackedAppIDs(result.games),
-      trackedNames: buildTrackedNames(result.games, aliases)
+      trackedNames: buildTrackedNames(result.games, aliases),
+      trackingReadiness: "ready"
     });
+  }
+
+  markTrackingFailed() {
+    this.commit({ trackingReadiness: "failed" });
   }
 
   setInstalledAppIds(installedAppIds: string | undefined) {

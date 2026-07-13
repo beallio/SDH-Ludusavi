@@ -358,7 +358,10 @@ def test_pause_and_resume_game_process_signal_process_tree(
         "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
     )
 
-    assert service.pause_game_process(100) == {"status": "paused", "pid": 100}
+    res = service.pause_game_process(100)
+    assert res["status"] == "paused"
+    assert res["pid"] == 100
+    assert "lease_id" in res
     assert service.resume_game_process(100) == {"status": "resumed", "pid": 100}
 
     assert signals == [
@@ -529,7 +532,10 @@ def test_signal_process_tree_snapshots_process_table_once(
         "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
     )
 
-    assert service.pause_game_process(100) == {"status": "paused", "pid": 100}
+    res = service.pause_game_process(100)
+    assert res["status"] == "paused"
+    assert res["pid"] == 100
+    assert "lease_id" in res
 
     assert len(listdir_calls) == 1
     assert signals == [
@@ -555,7 +561,10 @@ def test_signal_process_tree_falls_back_to_root_when_snapshot_fails(
         "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
     )
 
-    assert service.pause_game_process(100) == {"status": "paused", "pid": 100}
+    res = service.pause_game_process(100)
+    assert res["status"] == "paused"
+    assert res["pid"] == 100
+    assert "lease_id" in res
 
     assert signals == [(100, signal.SIGSTOP)]
 
@@ -1934,7 +1943,14 @@ def test_watchdog_auto_resumption_on_timeout(
     from sdh_ludusavi.watchdog import _ProcessIdentity
 
     with service._watchdog._paused_pids_lock:
-        service._watchdog._paused_pids[123] = (_ProcessIdentity(12345, 1000), time.time() - 20.0)
+        from sdh_ludusavi.watchdog import _PauseLease
+
+        service._watchdog._paused_pids[123] = _PauseLease(
+            identity=_ProcessIdentity(12345, 1000),
+            paused_at=time.monotonic() - 20.0,
+            lease_id="test",
+            lease_deadline=time.monotonic() - 10.0,
+        )
 
     # Wait for watchdog thread to run its loop check (within 2 seconds)
     for _ in range(200):
@@ -1969,7 +1985,14 @@ def test_watchdog_does_not_resume_during_active_operation(
     from sdh_ludusavi.watchdog import _ProcessIdentity
 
     with service._watchdog._paused_pids_lock:
-        service._watchdog._paused_pids[123] = (_ProcessIdentity(12345, 1000), time.time() - 20.0)
+        from sdh_ludusavi.watchdog import _PauseLease
+
+        service._watchdog._paused_pids[123] = _PauseLease(
+            identity=_ProcessIdentity(12345, 1000),
+            paused_at=time.monotonic() - 20.0,
+            lease_id="test",
+            lease_deadline=time.monotonic() - 10.0,
+        )
 
     # Simulate an active operation (like cloud sync) running
     service._coordinator._operation.is_running = True

@@ -1,0 +1,4 @@
+[2026-07-12 10:00:00,001][INFO]: frontend: App started: Fictional Game C (789) tracked=true
+[2026-07-12 10:00:01,002] [INFO]: launch_gate: Paused game process tree rooted at PID 9012
+[2026-07-12 10:00:02,003][INFO]: [Fictional Game C] lifecycle: check_game_start result for Fictional Game C (789): {"status":"skipped","game":"Fictional Game C","reason":"local_current"}
+[2026-07-12 10:00:06,004][INFO]: launch_gate: Resumed game process tree rooted at PID 9012
