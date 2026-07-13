@@ -1,6 +1,6 @@
 
 import type { AutoSyncStatusBrowserView, AutoSyncStatusBrowserViewOwner, AutoSyncStatusKind, AutoSyncStatusState } from "../types";
-import { getAutoSyncStatusBounds, objectKeys } from "../utils/steam";
+import { getAutoSyncStatusBounds } from "../utils/steam";
 import { log } from "../utils/logging";
 import { renderAutoSyncStatusHtml } from "./autoSyncStatusRenderer";
 import { getSteamClient, asRecord, getGamepadUIMainWindowInstance } from "../utils/steamRuntime";
@@ -30,16 +30,7 @@ export function createAutoSyncStatusBrowserView(): AutoSyncStatusBrowserViewApi 
     autoSyncStatusShowTimeoutID = null;
   }
 
-  function getPrototypeKeys(value: unknown): string {
-    if (typeof value !== "object" || value === null) {
-      return "none";
-    }
-    const prototype = Object.getPrototypeOf(value);
-    if (typeof prototype !== "object" || prototype === null) {
-      return "none";
-    }
-    return Object.getOwnPropertyNames(prototype).join(",");
-  }
+
 
   function browserViewMethod<T extends (...args: any[]) => void>(
     raw: any,
@@ -108,9 +99,17 @@ export function createAutoSyncStatusBrowserView(): AutoSyncStatusBrowserViewApi 
         log("info", `BrowserView normalized from ${source}`, "autosync_status");
         return adapter;
       }
+      const missingMethods: string[] = [];
+      if (typeof view !== "object" || view === null) {
+        missingMethods.push("not_object");
+      } else {
+        if (!("LoadURL" in view) && !("loadURL" in view)) missingMethods.push("LoadURL");
+        if (!("SetBounds" in view) && !("setBounds" in view)) missingMethods.push("SetBounds");
+        if (!("SetVisible" in view) && !("setVisible" in view)) missingMethods.push("SetVisible");
+      }
       log(
         "debug",
-        `BrowserView candidate ${source} missing methods; keys=${objectKeys(view)} prototype=${getPrototypeKeys(view)}`,
+        `BrowserView candidate ${source} missing methods: ${missingMethods.join(",")}`,
         "autosync_status",
       );
     }
@@ -147,7 +146,7 @@ export function createAutoSyncStatusBrowserView(): AutoSyncStatusBrowserViewApi 
 
       log(
         "info",
-        `BrowserView created: type=${typeof autoSyncStatusBrowserViewOwner}, keys=${objectKeys(autoSyncStatusBrowserViewOwner)} prototype=${getPrototypeKeys(autoSyncStatusBrowserViewOwner)}`,
+        `BrowserView created: type=${typeof autoSyncStatusBrowserViewOwner}`,
         "autosync_status",
       );
 

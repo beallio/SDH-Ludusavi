@@ -195,13 +195,33 @@ browser console level and forwards the same entry to the backend diagnostic log 
 Structured UI entries use this format:
 
 ```text
-event_name: field_name=value other_field="string value"
-```
-
 Fields are sorted for stable searching. UI code should log transitions at controller
 and action boundaries: requested, started, completed, skipped, superseded, failed, or
-rolled back. Do not log React renders, full settings objects, environment values, full
-checksums, or high-frequency polling samples.
+rolled back. 
+
+**Diagnostic Logging Contract:**
+Do not log React renders, full settings objects, environment values, full checksums, or high-frequency polling samples. 
+Explicitly prohibited in routine logs:
+- Full RPC-result object serialization (e.g., `JSON.stringify(operationResult)`).
+- Raw save paths, home directories (e.g., `/home/deck`), or nested file registries.
+- Massive JSON payloads or runtime property inventories.
+
+Instead, use `summarizeLifecycleResult` or similar pure summary helpers to log bounded fields (status, operation, reason, canonical game, and aggregate counts).
+
+**Log Regression Analyzer:**
+To run deterministic regression checks against field logs, pull them to `/tmp/sdh_ludusavi` and run the analyzer:
+```bash
+./run.sh uv run python scripts/pull_plugin_logs.py --host steamdeck
+./run.sh uv run python scripts/analyze_plugin_logs.py /tmp/sdh_ludusavi/steamdeck/logs
+./run.sh uv run python scripts/analyze_plugin_logs.py --strict --format json <path>...
+```
+The JSON format output can be inspected for automated processing. The analyzer checks for the following stable rule IDs:
+- `launch_gate.backend_match_after_untracked_start`
+- `launch_gate.resume_before_resolution`
+- `launch_gate.lease_expired`
+- `syncthing.watch_ttl_expired`
+- `diagnostics.error_or_traceback`
+- `diagnostics.oversized_or_raw_payload`
 
 The primary operation labels are:
 
