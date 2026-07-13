@@ -1,6 +1,7 @@
+import logging
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -297,6 +298,197 @@ def test_conflict_metadata_local_modified_at_is_timezone_aware_utc(tmp_path):
     assert metadata["backupPath"] == "/backup/Hades"
     assert str(metadata["localModifiedAt"]).endswith("+00:00")
     assert datetime.fromisoformat(str(metadata["localModifiedAt"])).tzinfo is not None
+
+
+def test_conflict_metadata_uses_newest_flatpak_host_map_key_mtime(tmp_path) -> None:
+    older_save = tmp_path / "older.sav"
+    newer_save = tmp_path / "newer.sav"
+    older_save.write_text("older", encoding="utf-8")
+    newer_save.write_text("newer", encoding="utf-8")
+    older_mtime = 1_800_000_000
+    newer_mtime = 1_800_000_100
+    os.utime(older_save, (older_mtime, older_mtime))
+    os.utime(newer_save, (newer_mtime, newer_mtime))
+    adapter, _client = adapter_with_backups(
+        backup_data={
+            "games": {
+                "Test Game": {
+                    "backups": [{"when": "2026-07-12T07:37:15.216332992Z"}],
+                    "backupPath": "/backup/Test Game",
+                }
+            }
+        },
+        backup_preview_data={
+            "games": {
+                "Test Game": {
+                    "files": {
+                        str(older_save): {
+                            "bytes": 123,
+                            "change": "Different",
+                            "redirectedPath": "/ludusavi/heroic/prefixes/default/older.sav",
+                        },
+                        str(newer_save): {
+                            "bytes": 456,
+                            "change": "Different",
+                            "redirectedPath": "/ludusavi/heroic/prefixes/default/newer.sav",
+                        },
+                    }
+                }
+            }
+        },
+    )
+
+    metadata = adapter.get_conflict_metadata("Test Game")
+
+    expected = datetime.fromtimestamp(newer_mtime, tz=timezone.utc)
+    actual = datetime.fromisoformat(str(metadata["localModifiedAt"]))
+    assert actual == expected
+    assert actual.tzinfo == timezone.utc
+    assert metadata["backupModifiedAt"] == "2026-07-12T07:37:15.216332992Z"
+    assert metadata["backupPath"] == "/backup/Test Game"
+
+
+def test_conflict_metadata_falls_back_to_legacy_original_path(tmp_path) -> None:
+    save_file = tmp_path / "legacy.sav"
+    save_file.write_text("save", encoding="utf-8")
+    mtime = 1_800_000_200
+    os.utime(save_file, (mtime, mtime))
+    adapter, _client = adapter_with_backups(
+        backup_data={"games": {}},
+        backup_preview_data={
+            "games": {
+                "Test Game": {
+                    "files": {
+                        "opaque-id": {
+                            "originalPath": str(save_file),
+                            "redirectedPath": "/ludusavi/inaccessible/legacy.sav",
+                        }
+                    }
+                }
+            }
+        },
+    )
+
+    metadata = adapter.get_conflict_metadata("Test Game")
+
+    assert metadata["localModifiedAt"] == datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+
+
+def test_conflict_metadata_falls_back_to_redirected_path(tmp_path) -> None:
+    save_file = tmp_path / "redirected.sav"
+    save_file.write_text("save", encoding="utf-8")
+    mtime = 1_800_000_300
+    os.utime(save_file, (mtime, mtime))
+    adapter, _client = adapter_with_backups(
+        backup_data={"games": {}},
+        backup_preview_data={
+            "games": {
+                "Test Game": {
+                    "files": {
+                        "opaque-id": {
+                            "originalPath": "relative-save.sav",
+                            "redirectedPath": str(save_file),
+                        }
+                    }
+                }
+            }
+        },
+    )
+
+    metadata = adapter.get_conflict_metadata("Test Game")
+
+    assert metadata["localModifiedAt"] == datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+
+
+def test_conflict_metadata_continues_after_candidate_oserror(tmp_path) -> None:
+    missing_host_key = tmp_path / "missing-host-key.sav"
+    original_save = tmp_path / "original.sav"
+    original_save.write_text("save", encoding="utf-8")
+    mtime = 1_800_000_400
+    os.utime(original_save, (mtime, mtime))
+    adapter, _client = adapter_with_backups(
+        backup_data={"games": {}},
+        backup_preview_data={
+            "games": {
+                "Test Game": {
+                    "files": {
+                        str(missing_host_key): {
+                            "originalPath": str(original_save),
+                            "redirectedPath": "/ludusavi/inaccessible/original.sav",
+                        }
+                    }
+                }
+            }
+        },
+    )
+
+    metadata = adapter.get_conflict_metadata("Test Game")
+
+    assert metadata["localModifiedAt"] == datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+
+
+def test_conflict_metadata_ignores_malformed_paths_with_bounded_diagnostics(
+    tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    missing_save = tmp_path / "private-save.sav"
+    adapter, _client = adapter_with_backups(
+        backup_data={
+            "games": {
+                "Test Game": {
+                    "backups": [{"when": "2026-07-12T07:37:15Z"}],
+                    "backupPath": "/backup/Test Game",
+                }
+            }
+        },
+        backup_preview_data={
+            "games": {
+                "Test Game": {
+                    "files": {
+                        "not-a-mapping": "payload-secret",
+                        "": {"originalPath": "", "redirectedPath": None},
+                        "relative-key": {
+                            "originalPath": "relative-save.sav",
+                            "redirectedPath": "/home/example/sdh-private-save.sav",
+                        },
+                        17: {
+                            "originalPath": "/run/media/example/sdh-private-save.sav",
+                            "redirectedPath": 123,
+                        },
+                        str(missing_save): {"bytes": 123, "change": "Different"},
+                    }
+                }
+            }
+        },
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.ludusavi"):
+        metadata = adapter.get_conflict_metadata("Test Game")
+
+    assert "localModifiedAt" not in metadata
+    assert metadata["backupModifiedAt"] == "2026-07-12T07:37:15Z"
+    assert metadata["backupPath"] == "/backup/Test Game"
+    summaries = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "sdh_ludusavi.ludusavi"
+        and "Local save timestamp scan" in record.getMessage()
+    ]
+    assert summaries == [
+        "Local save timestamp scan for Test Game: entries=5 successes=0 failures=5"
+    ]
+    summary = summaries[0]
+    for sensitive_value in (
+        "payload-secret",
+        "not-a-mapping",
+        "relative-key",
+        "private-save.sav",
+        str(tmp_path),
+        "/home/",
+        "/run/media/",
+        "originalPath",
+        "redirectedPath",
+    ):
+        assert sensitive_value not in summary
 
 
 def test_get_conflict_metadata_uses_newest_backup_timestamp() -> None:
