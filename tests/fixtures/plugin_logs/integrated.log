@@ -1,0 +1,18 @@
+[2026-07-12 10:00:00,001][INFO]: frontend: App started: Fictional Current Game (123) tracked=false
+[2026-07-12 10:00:01,002][INFO]: [Fictional Current Game] lifecycle: check_game_start result for Fictional Current Game (123): {"status":"skipped","game":"Fictional Current Game","reason":"local_current"}
+[2026-07-12 10:00:03,003][INFO]: frontend: App started: Fictional Conflict Game (456) tracked=true
+[2026-07-12 10:00:04,004][INFO]: launch_gate: Paused game process tree rooted at PID 5678
+[2026-07-12 10:00:05,005][INFO]: [Fictional Conflict Game] lifecycle: check_game_start result for Fictional Conflict Game (456): {"status":"conflict","operation":"restore","game":"Fictional Conflict Game","reason":"ambiguous_recency"}
+[2026-07-12 10:00:20,006][WARNING]: watchdog: Watchdog detected PID 5678 suspended for 15s (idle timeout exceeded). Resuming automatically.
+[2026-07-12 10:00:21,007][INFO]: launch_gate: Resumed game process tree rooted at PID 5678
+[2026-07-12 10:00:22,008][INFO]: [Fictional Conflict Game] restore: Restored backup save for Fictional Conflict Game
+[2026-07-12 10:00:23,009][INFO]: frontend: App started: Fictional Lease Game (999) tracked=true
+[2026-07-12 10:00:24,010][INFO]: launch_gate: Paused game process tree rooted at PID 9999
+[2026-07-12 10:00:25,011][INFO]: [Fictional Lease Game] lifecycle: check_game_start result for Fictional Lease Game (999): {"status":"conflict","operation":"restore","game":"Fictional Lease Game","reason":"ambiguous_recency"}
+[2026-07-12 10:00:56,012][WARNING]: watchdog: Watchdog detected PID 9999 suspended for 31s (lease expired). Resuming automatically.
+[2026-07-12 10:00:57,013][WARNING]: sdh_ludusavi.syncthing.watcher: Syncthing watch fictional-watch-123 exceeded 180.0s TTL without stop_watch; terminating
+[2026-07-12 10:00:58,014][INFO]: lifecycle: legacy payload {"files":{"save.dat":{"path":"/fictional/user/save.dat"}}}
+[2026-07-12 10:00:59,015][INFO]: frontend: App started: Fictional Unmatched Game (321) tracked=false
+[2026-07-12 10:01:00,016][INFO]: [Fictional Unmatched Game] lifecycle: check_game_start result for Fictional Unmatched Game (321): {"status":"skipped","game":"Fictional Unmatched Game","reason":"unmatched_game"}
+[2026-07-12 10:01:01,017][ERROR]: autosync_status: source=timeout status=skipped
+[2026-07-12 10:01:02,018][ERROR]: Network timeout while copying a save

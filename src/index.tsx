@@ -270,7 +270,7 @@ export default definePlugin(() => {
     onDismount() {
       logUiEvent("plugin_dismounting", {}, "info");
       startupHydration.dispose();
-      lifecycleController.dispose();
+      void lifecycleController.dispose();
 
       if (dropdownStyleEl.parentNode) {
         dropdownStyleEl.parentNode.removeChild(dropdownStyleEl);

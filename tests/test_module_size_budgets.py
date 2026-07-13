@@ -5,7 +5,7 @@ BUDGETS = {
     "src/surfaces/autoSyncStatusSurface.tsx": 375,
     "src/surfaces/autoSyncStatusRenderer.tsx": 180,
     "src/surfaces/autoSyncStatusBrowserView.ts": 335,
-    "src/controllers/gameLifecycleController.tsx": 460,
+    "src/controllers/gameLifecycleController.tsx": 450,
     "src/controllers/gameLifecycleDecision.ts": 255,
     "src/controllers/steamLifecycleSource.ts": 260,
     "src/controllers/syncthingMonitor.ts": 565,

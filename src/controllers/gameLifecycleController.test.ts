@@ -27,7 +27,7 @@ describe("GameLifecycleController", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     globalThis.window = globalThis as any;
-    
+
     mockStore = {
       isTracked: vi.fn().mockReturnValue(true),
       shouldPublishAutoSyncStatusBeforeRpc: vi.fn().mockReturnValue(true),
@@ -45,7 +45,12 @@ describe("GameLifecycleController", () => {
       resolveGameStartConflict: vi.fn(),
       checkGameExit: vi.fn().mockResolvedValue({ status: "needed", operation: "backup" }),
       backupGameOnExit: vi.fn().mockResolvedValue({ status: "backed_up" }),
-      pauseGameProcess: vi.fn().mockResolvedValue({ status: "paused", lease_id: "mock_lease", lease_ttl_seconds: 30 }),
+      pauseGameProcess: vi.fn().mockResolvedValue({
+        status: "paused",
+        pid: 2,
+        lease_id: "mock_lease",
+        lease_ttl_seconds: 30,
+      }),
       resumeGameProcess: vi.fn().mockResolvedValue({ status: "resumed" }),
       renewGameProcessPause: vi.fn().mockResolvedValue({ status: "renewed" }),
       startSyncthingActivityWatch: vi.fn().mockResolvedValue({ status: "watching", watch_id: "w1" }),
@@ -155,7 +160,7 @@ describe("GameLifecycleController", () => {
     await vi.advanceTimersByTimeAsync(100);
 
     triggerExit(1145300);
-    
+
     // Let checks, backup, and handoff run
     await vi.runAllTimersAsync();
 
@@ -761,7 +766,7 @@ describe("GameLifecycleController", () => {
     });
     mockStore.isTracked.mockReturnValue(false); // Frontend doesn't know it yet
     mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
-    
+
     let resolveFlow: any;
     mockResolveConflict.mockReturnValue(new Promise((resolve) => { resolveFlow = resolve; }));
 
@@ -783,7 +788,7 @@ describe("GameLifecycleController", () => {
     resolveFlow("keep_local");
     mockRpc.resolveGameStartConflict.mockResolvedValue({ status: "backed_up" });
     await vi.runAllTimersAsync();
-    
+
     expect(mockRpc.resolveGameStartConflict).toHaveBeenCalled();
   });
 
@@ -807,7 +812,7 @@ describe("GameLifecycleController", () => {
 
     expect(mockRpc.pauseGameProcess).toHaveBeenCalled();
     expect(mockRpc.checkGameStart).toHaveBeenCalled();
-    
+
     // It should resume and cancel watch
     await vi.runAllTimersAsync();
     expect(mockRpc.resumeGameProcess).toHaveBeenCalled();
@@ -841,7 +846,7 @@ describe("GameLifecycleController", () => {
     });
     mockStore.isTracked.mockReturnValue(false);
     mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
-    
+
     let resolveFlow: any;
     mockResolveConflict.mockReturnValue(new Promise((resolve) => { resolveFlow = resolve; }));
 
@@ -857,15 +862,15 @@ describe("GameLifecycleController", () => {
 
     expect(mockRpc.pauseGameProcess).toHaveBeenCalled();
     expect(mockRpc.checkGameStart).toHaveBeenCalled();
-    
+
     resolveFlow("keep_local");
     await vi.runAllTimersAsync();
-    
+
     // For exit check, it should call checkGameExit and not just skip
     mockRpc.checkGameExit.mockResolvedValue({ status: "needed", operation: "backup" });
     lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: false });
     await vi.runAllTimersAsync();
-    
+
     expect(mockRpc.checkGameExit).toHaveBeenCalled();
   });
 
@@ -930,7 +935,7 @@ describe("GameLifecycleController", () => {
 
     // Exit causes handleAppExit to run, which starts by awaiting syncthingMonitor.stop()
     triggerExit(1145300);
-    
+
     // Advance slightly, enough to trigger stop() but not to resolve it
     await vi.advanceTimersByTimeAsync(100);
     expect(mockRpc.stopSyncthingActivityWatch).toHaveBeenCalled();
@@ -939,9 +944,147 @@ describe("GameLifecycleController", () => {
 
     // Advance time past the 1000ms delay of stop
     await vi.advanceTimersByTimeAsync(1500);
-    
+
     expect(stopResolved).toBe(true);
     // NOW it should be called
     expect(mockRpc.startSyncthingActivityWatch).toHaveBeenCalledWith("post_game", "Hades", "1145300");
+  });
+
+  describe("lease safety and atomic protection", () => {
+    let controller: any;
+    let resolveConflictFlow: any;
+
+    beforeEach(() => {
+      mockStore.getSnapshot.mockReturnValue({
+        settings: { auto_sync_enabled: true },
+        trackingReadiness: "ready",
+      });
+      mockStore.isTracked.mockReturnValue(true);
+
+      mockResolveConflict.mockReturnValue(new Promise(resolve => {
+        resolveConflictFlow = resolve;
+      }));
+
+      controller = createGameLifecycleController({
+        store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+        resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+        syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
+      });
+      controller.start();
+    });
+
+    it("60-second unresolved conflict renews lease but waits", async () => {
+      mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
+
+      lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Advance 60 seconds at the five-second renewal cadence.
+      for (let i = 0; i < 12; i++) {
+        await vi.advanceTimersByTimeAsync(5000);
+      }
+
+      expect(mockRpc.renewGameProcessPause).toHaveBeenCalledTimes(12);
+      expect(mockRpc.resolveGameStartConflict).not.toHaveBeenCalled();
+
+      resolveConflictFlow("keep_local");
+      await vi.runAllTimersAsync();
+
+      expect(mockRpc.resumeGameProcess).toHaveBeenCalledTimes(1);
+    });
+
+    it("loss before restore prevents mutation", async () => {
+      let resolveCheck: any;
+      mockRpc.checkGameStart.mockReturnValue(new Promise(resolve => { resolveCheck = resolve; }));
+
+      lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Simulate loss
+      mockRpc.renewGameProcessPause.mockResolvedValue({ status: "failed" });
+      await vi.advanceTimersByTimeAsync(5000);
+
+      // Resolve check now, which says restore needed
+      resolveCheck({ status: "needed", operation: "restore" });
+      await vi.runAllTimersAsync();
+
+      expect(mockRpc.restoreGameOnStart).not.toHaveBeenCalled();
+      expect(mockRpc.resumeGameProcess).toHaveBeenCalledTimes(1);
+    });
+
+    it("loss before conflict mutation prevents mutation", async () => {
+      mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
+      lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Simulate loss
+      mockRpc.renewGameProcessPause.mockResolvedValue({ status: "failed" });
+      await vi.advanceTimersByTimeAsync(5000);
+
+      resolveConflictFlow("keep_local");
+      await vi.runAllTimersAsync();
+
+      expect(mockRpc.resolveGameStartConflict).not.toHaveBeenCalled();
+      expect(mockRpc.resumeGameProcess).toHaveBeenCalledTimes(1);
+    });
+
+    it("loss during check aborts cleanly", async () => {
+      let resolveCheck: any;
+      mockRpc.checkGameStart.mockReturnValue(new Promise(resolve => { resolveCheck = resolve; }));
+      lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+      await vi.advanceTimersByTimeAsync(100);
+
+      mockRpc.renewGameProcessPause.mockResolvedValue({ status: "failed" });
+      await vi.advanceTimersByTimeAsync(5000);
+
+      resolveCheck({ status: "skipped" });
+      await vi.runAllTimersAsync();
+
+      expect(mockRpc.resumeGameProcess).toHaveBeenCalledTimes(1);
+    });
+
+    it("dispose during check/conflict cancels watch and status updates", async () => {
+      mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
+      lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Controller disposed while waiting for user conflict resolution
+      await controller.dispose();
+      await vi.runAllTimersAsync();
+
+      // Resolve the promise now - but controller is disposed
+      resolveConflictFlow("keep_local");
+      await vi.runAllTimersAsync();
+
+      expect(mockRpc.stopSyncthingActivityWatch).toHaveBeenCalled();
+      expect(mockRpc.resolveGameStartConflict).not.toHaveBeenCalled();
+      const backUpCalls = mockStatusSurface.publish.mock.calls.filter((c: any) => c[0] === "backing_up");
+      expect(backUpCalls.length).toBe(0);
+      expect(mockRpc.resumeGameProcess).toHaveBeenCalledTimes(1);
+    });
+
+    it("dispose during the backend check prevents every later mutation and status write", async () => {
+      let resolveCheck: ((result: { status: "needed"; operation: "restore" }) => void) | undefined;
+      mockRpc.checkGameStart.mockReturnValue(
+        new Promise((resolve) => {
+          resolveCheck = resolve;
+        }),
+      );
+      lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+      await vi.advanceTimersByTimeAsync(100);
+      const publishCountAtDispose = mockStatusSurface.publish.mock.calls.length;
+      const completeCountAtDispose = mockStatusSurface.complete.mock.calls.length;
+
+      await controller.dispose();
+      resolveCheck?.({ status: "needed", operation: "restore" });
+      await vi.runAllTimersAsync();
+
+      expect(mockRpc.restoreGameOnStart).not.toHaveBeenCalled();
+      expect(mockRpc.resolveGameStartConflict).not.toHaveBeenCalled();
+      expect(mockStatusSurface.publish).toHaveBeenCalledTimes(publishCountAtDispose);
+      expect(mockStatusSurface.complete).toHaveBeenCalledTimes(completeCountAtDispose);
+      expect(mockRpc.stopSyncthingActivityWatch).toHaveBeenCalled();
+      expect(mockRpc.resumeGameProcess).toHaveBeenCalledTimes(1);
+    });
   });
 });

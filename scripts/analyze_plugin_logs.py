@@ -1,8 +1,41 @@
+from __future__ import annotations
+
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+
+LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+LOG_LINE_RE = re.compile(
+    r"^\[(?P<timestamp>[^\]]+)\]\s*\[(?P<level>DEBUG|INFO|WARNING|ERROR|CRITICAL)\]\s*:\s*(?P<message>.*)$"
+)
+APP_STARTED_RE = re.compile(
+    r"App started:\s*(?P<game>.*?)\s+\((?P<app_id>\d+)\)\s+tracked=(?P<tracked>true|false)"
+)
+CHECK_RESULT_RE = re.compile(
+    r"check_game_start result for\s+(?P<game>.*?)\s+\((?P<app_id>\d+)\):\s*(?P<payload>\{.*\})\s*$"
+)
+PAUSE_RE = re.compile(r"Paused game process tree rooted at PID\s+(?P<pid>\d+)")
+WATCHDOG_RE = re.compile(
+    r"Watchdog detected PID\s+(?P<pid>\d+)\s+suspended for .*?\((?P<reason>[^)]+)\)\.\s+Resuming automatically\."
+)
+ACTION_RE = re.compile(
+    r"(?:\[(?P<game>[^\]]+)\]\s+)?(?:backup:\s+Kept local save|restore:\s+Restored)"
+)
+TTL_RE = re.compile(r"Syncthing watch\s+(?P<watch>\S+)\s+exceeded\s+180(?:\.0)?s TTL")
+
+UNRECOGNIZED_REASONS = {
+    "unmatched_game",
+    "auto_sync_disabled",
+    "autosync_disabled",
+    "operation_running",
+    "not_configured",
+}
+MAX_INCIDENT_LINES = 250
 
 
 @dataclass
@@ -19,131 +52,316 @@ class LogFinding:
 class Stats:
     lines_parsed: int = 0
     parse_failures: int = 0
-    levels: dict[str, int] = field(
-        default_factory=lambda: {"DEBUG": 0, "INFO": 0, "WARNING": 0, "ERROR": 0, "CRITICAL": 0}
-    )
+    levels: dict[str, int] = field(default_factory=lambda: dict.fromkeys(LEVELS, 0))
     tracebacks: int = 0
 
 
-def analyze_logs(paths: list[Path], strict: bool) -> tuple[list[LogFinding], Stats]:
-    findings = []
+@dataclass
+class _LaunchIncident:
+    app_id: str
+    app_name: str
+    tracked: bool
+    start_line: int
+    pid: str | None = None
+    check_line: int | None = None
+    canonical_game: str | None = None
+    waiting_for_action: bool = False
+    watchdog_line: int | None = None
+    watchdog_reason: str | None = None
+    completed: bool = False
+
+
+def _normalized_game(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
+def _game_matches(action_game: str | None, incident: _LaunchIncident) -> bool:
+    if action_game is None:
+        return True
+    action = _normalized_game(action_game)
+    candidates = (
+        _normalized_game(incident.app_name),
+        _normalized_game(incident.canonical_game or ""),
+    )
+    return any(
+        candidate and (candidate in action or action in candidate) for candidate in candidates
+    )
+
+
+def _is_backend_recognized(payload: dict[str, Any]) -> bool:
+    status = payload.get("status")
+    reason = payload.get("reason")
+    operation = payload.get("operation")
+    if status in {"needed", "conflict"}:
+        return True
+    if status == "skipped" and isinstance(reason, str):
+        return reason not in UNRECOGNIZED_REASONS
+    return status in {"backed_up", "restored"} or operation in {"backup", "restore"}
+
+
+def _is_known_benign_error(message: str) -> bool:
+    """Exclude only the known status-surface timeout/skip grammar."""
+    lowered = message.casefold()
+    has_timeout_source = bool(re.search(r"\bsource[=:]\s*timeout\b", lowered))
+    has_skipped_status = bool(re.search(r"\b(?:status|result_status)[=:]\s*skipped\b", lowered))
+    return has_timeout_source and has_skipped_status
+
+
+def analyze_logs(paths: list[Path], strict: bool = False) -> tuple[list[LogFinding], Stats]:
+    del strict  # Strictness affects the CLI exit code, not parsing.
     stats = Stats()
+    findings: dict[tuple[object, ...], LogFinding] = {}
 
-    for path in sorted(paths):
+    def add_finding(
+        key: tuple[object, ...],
+        rule_id: str,
+        severity: str,
+        path: Path,
+        line_number: int,
+        evidence: str,
+    ) -> None:
+        existing = findings.get(key)
+        if existing is not None:
+            existing.occurrences += 1
+            return
+        findings[key] = LogFinding(
+            rule_id=rule_id,
+            severity=severity,
+            filename=path.name,
+            line_number=line_number,
+            evidence=evidence[:200],
+        )
+
+    for path in sorted(paths, key=lambda item: str(item)):
         if not path.is_file():
-            continue
-        try:
-            content = path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
+            raise OSError(f"Unreadable log input: {path}")
+        content = path.read_text(encoding="utf-8")
 
-        for idx, line in enumerate(content.splitlines(), 1):
+        # Correlation is deliberately reset for each file. Rotated logs are independent inputs.
+        incidents: list[_LaunchIncident] = []
+
+        for line_number, line in enumerate(content.splitlines(), 1):
             stats.lines_parsed += 1
+            parsed = LOG_LINE_RE.match(line)
+            message = line
+            level: str | None = None
+            if parsed is not None:
+                level = parsed.group("level")
+                message = parsed.group("message")
+                stats.levels[level] += 1
+            elif line.strip():
+                stats.parse_failures += 1
 
-            if "Traceback" in line:
+            if "Traceback (most recent call last)" in line:
                 stats.tracebacks += 1
-
-            if "failures_errors" not in line and "timeout" not in line and "skipped" not in line:
-                if "Traceback" in line or "[ERROR]" in line or "[CRITICAL]" in line:
-                    findings.append(
-                        LogFinding(
-                            "diagnostics.error_or_traceback", "error", path.name, idx, line[:200]
-                        )
-                    )
-
             if (
-                len(line) > 2000
-                or '"backupPath"' in line
-                or '"/home/deck"' in line
-                or '"/run/media"' in line
-                or '"files":' in line
+                "Traceback (most recent call last)" in line or level in {"ERROR", "CRITICAL"}
+            ) and not _is_known_benign_error(message):
+                add_finding(
+                    ("diagnostics.error_or_traceback", str(path), line_number),
+                    "diagnostics.error_or_traceback",
+                    "error",
+                    path,
+                    line_number,
+                    line,
+                )
+
+            if len(line) > 2000 or any(
+                marker in line
+                for marker in ('"backupPath"', '"/home/deck', '"/run/media', '"files":')
             ):
-                findings.append(
-                    LogFinding(
-                        "diagnostics.oversized_or_raw_payload",
-                        "warning",
-                        path.name,
-                        idx,
-                        line[:200],
+                add_finding(
+                    ("diagnostics.oversized_or_raw_payload", str(path), line_number),
+                    "diagnostics.oversized_or_raw_payload",
+                    "warning",
+                    path,
+                    line_number,
+                    line,
+                )
+
+            ttl_match = TTL_RE.search(message)
+            if ttl_match is not None:
+                add_finding(
+                    ("syncthing.watch_ttl_expired", str(path), ttl_match.group("watch")),
+                    "syncthing.watch_ttl_expired",
+                    "error",
+                    path,
+                    line_number,
+                    line,
+                )
+
+            app_match = APP_STARTED_RE.search(message)
+            if app_match is not None:
+                incidents.append(
+                    _LaunchIncident(
+                        app_id=app_match.group("app_id"),
+                        app_name=app_match.group("game"),
+                        tracked=app_match.group("tracked") == "true",
+                        start_line=line_number,
                     )
                 )
+                continue
 
-            if "exceeded 180.0s TTL" in line:
-                findings.append(
-                    LogFinding("syncthing.watch_ttl_expired", "error", path.name, idx, line[:200])
+            pause_match = PAUSE_RE.search(message)
+            if pause_match is not None:
+                incident = next(
+                    (
+                        item
+                        for item in reversed(incidents)
+                        if item.pid is None
+                        and not item.completed
+                        and line_number - item.start_line <= MAX_INCIDENT_LINES
+                    ),
+                    None,
                 )
+                if incident is not None:
+                    incident.pid = pause_match.group("pid")
+                continue
 
-            if "backend_match_after_untracked_start" in line:
-                findings.append(
-                    LogFinding(
+            check_match = CHECK_RESULT_RE.search(message)
+            if check_match is not None:
+                incident = next(
+                    (
+                        item
+                        for item in reversed(incidents)
+                        if item.app_id == check_match.group("app_id")
+                        and item.check_line is None
+                        and line_number - item.start_line <= MAX_INCIDENT_LINES
+                    ),
+                    None,
+                )
+                try:
+                    payload = json.loads(check_match.group("payload"))
+                except json.JSONDecodeError:
+                    stats.parse_failures += 1
+                    continue
+                if incident is None or not isinstance(payload, dict):
+                    continue
+                incident.check_line = line_number
+                canonical_game = payload.get("game")
+                if isinstance(canonical_game, str):
+                    incident.canonical_game = canonical_game
+                incident.waiting_for_action = payload.get("status") in {"needed", "conflict"}
+                if not incident.tracked and _is_backend_recognized(payload):
+                    add_finding(
+                        (
+                            "launch_gate.backend_match_after_untracked_start",
+                            str(path),
+                            incident.start_line,
+                        ),
                         "launch_gate.backend_match_after_untracked_start",
                         "error",
-                        path.name,
-                        idx,
-                        line[:200],
+                        path,
+                        line_number,
+                        line,
                     )
-                )
+                continue
 
-            if "lease expired for PID" in line:
-                findings.append(
-                    LogFinding("launch_gate.lease_expired", "error", path.name, idx, line[:200])
+            watchdog_match = WATCHDOG_RE.search(message)
+            if watchdog_match is not None:
+                pid = watchdog_match.group("pid")
+                reason = watchdog_match.group("reason").casefold()
+                incident = next(
+                    (
+                        item
+                        for item in reversed(incidents)
+                        if item.pid == pid
+                        and not item.completed
+                        and line_number - item.start_line <= MAX_INCIDENT_LINES
+                    ),
+                    None,
                 )
+                if incident is not None:
+                    incident.watchdog_line = line_number
+                    incident.watchdog_reason = reason
+                if reason in {"lease expired", "absolute ceiling"}:
+                    incident_key = (
+                        incident.start_line if incident is not None else f"pid:{pid}:{line_number}"
+                    )
+                    add_finding(
+                        ("launch_gate.lease_expired", str(path), incident_key),
+                        "launch_gate.lease_expired",
+                        "error",
+                        path,
+                        line_number,
+                        f"{line} (watchdog reason: {reason})",
+                    )
+                continue
 
-            if "resume_before_resolution" in line:
-                findings.append(
-                    LogFinding(
+            action_match = ACTION_RE.search(message)
+            if action_match is not None:
+                incident = next(
+                    (
+                        item
+                        for item in reversed(incidents)
+                        if item.watchdog_line is not None
+                        and item.waiting_for_action
+                        and not item.completed
+                        and line_number - item.start_line <= MAX_INCIDENT_LINES
+                        and _game_matches(action_match.group("game"), item)
+                    ),
+                    None,
+                )
+                if incident is not None:
+                    add_finding(
+                        ("launch_gate.resume_before_resolution", str(path), incident.start_line),
                         "launch_gate.resume_before_resolution",
                         "error",
-                        path.name,
-                        idx,
-                        line[:200],
+                        path,
+                        incident.watchdog_line or line_number,
+                        f"{line} (watchdog resume at line {incident.watchdog_line})",
                     )
-                )
+                    incident.completed = True
 
-    # Deduplicate findings by rule and evidence prefix
-    deduped = {}
-    for f in findings:
-        key = (f.rule_id, f.evidence[:50])
-        if key not in deduped:
-            deduped[key] = f
+    return list(findings.values()), stats
+
+
+def _expand_inputs(paths: list[Path]) -> list[Path]:
+    files: list[Path] = []
+    for path in paths:
+        if path.is_file():
+            files.append(path)
+        elif path.is_dir():
+            files.extend(candidate for candidate in path.rglob("*") if candidate.is_file())
         else:
-            deduped[key].occurrences += 1
+            raise OSError(f"Unreadable log input: {path}")
+    if not files:
+        raise OSError("No readable log inputs found")
+    return files
 
-    return list(deduped.values()), stats
 
-
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--strict", action="store_true")
-    parser.add_argument("--format", choices=["text", "json"], default="text")
+    parser.add_argument("--format", choices=("text", "json"), default="text")
     parser.add_argument("paths", nargs="+", type=Path)
     args = parser.parse_args()
 
-    files = []
-    for p in args.paths:
-        if p.is_file():
-            files.append(p)
-        elif p.is_dir():
-            files.extend(p.glob("**/*"))
-
-    if not files:
-        sys.exit(2)
-
-    findings, stats = analyze_logs(files, args.strict)
+    try:
+        findings, stats = analyze_logs(_expand_inputs(args.paths), args.strict)
+    except (OSError, UnicodeError) as exc:
+        print(f"Operational error: {exc}", file=sys.stderr)
+        return 2
 
     if args.format == "json":
-        out = {"stats": stats.__dict__, "findings": [f.__dict__ for f in findings]}
-        print(json.dumps(out, indent=2))
+        print(
+            json.dumps(
+                {"stats": stats.__dict__, "findings": [finding.__dict__ for finding in findings]},
+                indent=2,
+            )
+        )
     else:
-        for f in findings:
+        for finding in findings:
             print(
-                f"[{f.severity.upper()}] {f.rule_id} at {f.filename}:{f.line_number} ({f.occurrences}x) - {f.evidence}"
+                f"[{finding.severity.upper()}] {finding.rule_id} at "
+                f"{finding.filename}:{finding.line_number} ({finding.occurrences}x) - "
+                f"{finding.evidence}"
             )
 
-    if args.strict and any(f.severity == "error" for f in findings):
-        sys.exit(1)
-    sys.exit(0)
+    if args.strict and any(finding.severity == "error" for finding in findings):
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

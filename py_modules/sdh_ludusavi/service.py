@@ -335,9 +335,9 @@ class SDHLudusaviService:
         """Renew the lease on a suspended game process."""
         return self._watchdog.renew_pause(pid, lease_id)
 
-    def resume_game_process(self, pid: int) -> dict[str, object]:
+    def resume_game_process(self, pid: int, lease_id: str | None = None) -> dict[str, object]:
         """Resume a previously suspended game process tree."""
-        return self._watchdog.resume(pid)
+        return self._watchdog.resume(pid, lease_id)
 
     def resume_all_paused_processes(self) -> None:
         """Best-effort cleanup for plugin unload or launch-gate failures."""

@@ -1,0 +1,6 @@
+[2026-07-12 10:00:00,001][INFO]: frontend: App started: Fictional Game B (456) tracked=true
+[2026-07-12 10:00:01,002][INFO]: launch_gate: Paused game process tree rooted at PID 5678
+[2026-07-12 10:00:02,003][INFO]: [Fictional Game B] lifecycle: check_game_start result for Fictional Game B (456): {"status":"conflict","operation":"restore","game":"Fictional Game B","reason":"ambiguous_recency"}
+[2026-07-12 10:00:17,004][WARNING]: watchdog: Watchdog detected PID 5678 suspended for 15s (idle timeout exceeded). Resuming automatically.
+[2026-07-12 10:00:18,005][INFO]: launch_gate: Resumed game process tree rooted at PID 5678
+[2026-07-12 10:00:21,006][INFO]: [Fictional Game B] backup: Kept local save for Fictional Game B

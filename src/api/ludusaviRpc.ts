@@ -68,7 +68,10 @@ export const getLudusaviCommandCall = callable<
 >("get_ludusavi_command");
 export const pauseGameProcessCall = callable<[pid: number], RpcResult<PauseGameProcessResult>>("pause_game_process");
 export const renewGameProcessPauseCall = callable<[pid: number, leaseId: string], RpcResult<RenewGameProcessPauseResult>>("renew_game_process_pause");
-export const resumeGameProcessCall = callable<[pid: number], RpcResult<ProcessSignalResult>>("resume_game_process");
+export const resumeGameProcessCall = callable<
+  [pid: number, leaseId?: string],
+  RpcResult<ProcessSignalResult>
+>("resume_game_process");
 export const checkGameStartCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_start");
 export const restoreGameOnStartCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("restore_game_on_start");
 export const resolveGameStartConflictCall = callable<[gameName: string, app_id: string | undefined, resolution: ConflictResolution], RpcResult<OperationResult>>("resolve_game_start_conflict");

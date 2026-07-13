@@ -204,9 +204,9 @@ class Plugin:
             lambda: self._service().renew_game_process_pause(pid, lease_id),
         )
 
-    async def resume_game_process(self, pid: int) -> dict[str, object]:
+    async def resume_game_process(self, pid: int, lease_id: str | None = None) -> dict[str, object]:
         return await self._call(
-            "resume_game_process", lambda: self._service().resume_game_process(pid)
+            "resume_game_process", lambda: self._service().resume_game_process(pid, lease_id)
         )
 
     async def log(

@@ -230,7 +230,10 @@ def test_watchdog_identity_mismatch() -> None:
         wd.stop()
 
 
-def test_watchdog_stale_resume_does_not_remove_concurrent_lease() -> None:
+def test_watchdog_serialize_pause_and_resume() -> None:
+    import threading
+    import signal
+
     log_mock = MagicMock()
     with (
         patch("sdh_ludusavi.watchdog.os.kill"),
@@ -248,28 +251,42 @@ def test_watchdog_stale_resume_does_not_remove_concurrent_lease() -> None:
                 lease_deadline=time.monotonic() + 30.0,
             )
 
-        # Simulate resume being called with a stale lease. The resume looks up the lease,
-        # drops the lock, calls _send_signal_tree, and then re-acquires the lock to remove it.
-        # We patch _send_signal_tree to simulate a concurrent pause that overwrites the lease
-        # while the lock is dropped.
+        signal_order = []
+        resume_ready = threading.Event()
+        pause_started = threading.Event()
+
         def mock_send_signal_tree(pid, sig, root_identity=None):
-            with wd._paused_pids_lock:
-                wd._paused_pids[4567] = _PauseLease(
-                    identity=mock_identity(),
-                    paused_at=time.monotonic(),
-                    lease_id="new_lease",
-                    lease_deadline=time.monotonic() + 30.0,
-                )
+            signal_order.append(sig)
+            if sig == signal.SIGCONT:
+                resume_ready.set()
+                pause_started.wait()
+                time.sleep(0.05)
             return True
 
         with patch("sdh_ludusavi.watchdog._send_signal_tree", side_effect=mock_send_signal_tree):
-            res = wd.resume(4567)
-            assert res["status"] == "resumed"
 
-        # The new lease MUST remain because the resume was for the old_lease
+            def run_resume():
+                wd.resume(4567, "old_lease")
+
+            def run_pause():
+                pause_started.set()
+                wd.pause(4567)
+
+            t_resume = threading.Thread(target=run_resume)
+            t_pause = threading.Thread(target=run_pause)
+
+            t_resume.start()
+            resume_ready.wait()
+            t_pause.start()
+
+            t_resume.join()
+            t_pause.join()
+
+        # The lock serializes them: resume must finish (sending SIGCONT) before pause can send SIGSTOP
+        assert signal_order == [signal.SIGCONT, signal.SIGSTOP]
         with wd._paused_pids_lock:
             assert 4567 in wd._paused_pids
-            assert wd._paused_pids[4567].lease_id == "new_lease"
+            assert wd._paused_pids[4567].lease_id != "old_lease"
 
         wd.stop()
 
@@ -313,3 +330,36 @@ def test_watchdog_failed_sigcont_allows_retry() -> None:
             assert 4567 not in wd._paused_pids
 
         wd.stop()
+
+
+def test_watchdog_rechecks_expiry_after_late_renewal() -> None:
+    log_mock = MagicMock()
+    with (
+        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
+        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
+    ):
+        wd = ProcessWatchdog(log_callback=log_mock)
+        with wd._paused_pids_lock:
+            wd._paused_pids[4567] = _PauseLease(
+                identity=mock_identity(),
+                paused_at=time.monotonic(),
+                lease_id="renewed_lease",
+                lease_deadline=time.monotonic() - 1.0,
+            )
+
+        pid_lock = wd._get_pid_lock(4567)
+
+        def renew_before_transition(_pid: int):
+            with wd._paused_pids_lock:
+                wd._paused_pids[4567].lease_deadline = time.monotonic() + 30.0
+            return pid_lock
+
+        with (
+            patch.object(wd, "_get_pid_lock", side_effect=renew_before_transition),
+            patch("sdh_ludusavi.watchdog._send_signal_tree") as send_signal,
+        ):
+            wd._check_and_resume_stuck_pids()
+
+        send_signal.assert_not_called()
+        with wd._paused_pids_lock:
+            assert wd._paused_pids[4567].lease_id == "renewed_lease"

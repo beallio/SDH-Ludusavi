@@ -94,7 +94,7 @@ EXPECTED_METHODS: dict[str, list[str]] = {
     "get_recent_logs": [],
     "pause_game_process": ["pid"],
     "renew_game_process_pause": ["pid", "lease_id"],
-    "resume_game_process": ["pid"],
+    "resume_game_process": ["pid", "lease_id"],
     "stop": [],
 }
 

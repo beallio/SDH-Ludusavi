@@ -5,20 +5,29 @@ export interface PauseLeaseHandle {
   release(): Promise<void>;
   /** Promise that resolves with the loss reason if the lease is lost prematurely. */
   onLost: Promise<string>;
+  /** Synchronous state of the lease */
+  readonly state: "renewing" | "lost" | "released";
+  /** Safely run a mutation only if still renewing, racing against loss. */
+  runProtected<T>(thunk: () => Promise<T>): Promise<T>;
 }
 
 export interface LeaseRpcContract {
   renewGameProcessPause(pid: number, leaseId: string): Promise<RpcResult<RenewGameProcessPauseResult>>;
-  resumeGameProcess(pid: number): Promise<RpcResult<ProcessSignalResult>>;
+  resumeGameProcess(pid: number, leaseId?: string): Promise<RpcResult<ProcessSignalResult>>;
+}
+
+export interface LeaseLogger {
+  warn(msg: string): void;
+  error(msg: string, e?: unknown): void;
 }
 
 export function createPauseLease(
   rpc: LeaseRpcContract,
   pauseResult: Extract<PauseGameProcessResult, { status: "paused" }>,
-  logger: { warn: (msg: string) => void; error: (msg: string, e?: any) => void } = console
+  logger: LeaseLogger = console
 ): PauseLeaseHandle {
   const { pid, lease_id, lease_ttl_seconds } = pauseResult;
-  
+
   if (!lease_id || typeof lease_id !== "string" || lease_id.trim() === "") {
     throw new Error("Invalid lease_id: must be non-blank");
   }
@@ -26,24 +35,33 @@ export function createPauseLease(
     throw new Error("Invalid lease_ttl_seconds: must be a positive finite number");
   }
 
-  // Safety margin: renew halfway through the TTL, min 1s
-  const renewIntervalMs = Math.max(1000, (lease_ttl_seconds * 1000) / 2);
-  
+  // Renew every five seconds for the normal 30-second lease, or halfway through
+  // a shorter backend-provided TTL so the cadence always retains safety margin.
+  const renewIntervalMs = Math.max(
+    100,
+    Math.min(5000, (lease_ttl_seconds * 1000) / 2),
+  );
+
   let state: "renewing" | "lost" | "released" = "renewing";
   let timer: ReturnType<typeof setTimeout> | undefined;
   let currentRenewPromise: Promise<void> | undefined;
-  
+  let resumePromise: Promise<void> | undefined;
+
   let resolveLost: (reason: string) => void;
   const onLost = new Promise<string>((resolve) => {
     resolveLost = resolve;
   });
 
-  const doResume = async () => {
-    try {
-      await rpc.resumeGameProcess(pid);
-    } catch (e) {
-      logger.error(`[PauseLease] Exception resuming PID ${pid}`, e);
+  const doResume = () => {
+    if (!resumePromise) {
+      resumePromise = rpc
+        .resumeGameProcess(pid, lease_id)
+        .then(() => {})
+        .catch((error: unknown) => {
+          logger.error(`[PauseLease] Exception resuming PID ${pid}`, error);
+        });
     }
+    return resumePromise;
   };
 
   const handleLoss = (reason: string) => {
@@ -60,8 +78,10 @@ export function createPauseLease(
     if (state !== "renewing") return;
     try {
       const res = await rpc.renewGameProcessPause(pid, lease_id);
-      if (res.status === "failed" || res.status === "skipped") {
-        handleLoss(res.message || (res as any).reason || "renewal failed");
+      if (res.status === "failed") {
+        handleLoss(res.message || "renewal failed");
+      } else if (res.status === "skipped") {
+        handleLoss(res.reason || "renewal skipped");
       }
     } catch (e) {
       handleLoss(e instanceof Error ? e.message : String(e));
@@ -84,19 +104,39 @@ export function createPauseLease(
       }
     }, renewIntervalMs);
   };
-  
+
   scheduleNext();
 
   return {
     onLost,
-    release: async () => {
-      if (state === "released") return;
-      const wasRenewing = state === "renewing";
-      state = "released";
-      if (timer) clearTimeout(timer);
-      if (wasRenewing) {
-        await doResume();
+    get state() { return state; },
+    runProtected: async <T,>(thunk: () => Promise<T>): Promise<T> => {
+      if (state !== "renewing") {
+        throw new Error(`Lease lost: already ${state}`);
       }
+      return await new Promise<T>((resolve, reject) => {
+        let done = false;
+        thunk().then(
+          (val) => {
+            if (!done) { done = true; resolve(val); }
+          },
+          (err) => {
+            if (!done) { done = true; reject(err); }
+          }
+        );
+        onLost.then((reason) => {
+          if (!done) { done = true; reject(new Error(`Lease lost: ${reason}`)); }
+        });
+      });
+    },
+    release: async () => {
+      if (state !== "released") {
+        const wasRenewing = state === "renewing";
+        state = "released";
+        if (timer) clearTimeout(timer);
+        if (wasRenewing) resolveLost("released");
+      }
+      await doResume();
     },
   };
 }

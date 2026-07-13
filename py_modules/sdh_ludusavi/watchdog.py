@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import signal
 import threading
 import time
-import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -34,6 +34,16 @@ class ProcessWatchdog:
         self._watchdog_active = False
         self._watchdog_thread: threading.Thread | None = None
         self._watchdog_stop = threading.Event()
+        # Process STOP/CONT and lease generation changes are serialized per PID.
+        # The state lock is only held for in-memory reads/writes, never signaling.
+        self._pid_locks: dict[int, threading.Lock] = {}
+        self._pid_locks_lock = threading.Lock()
+
+    def _get_pid_lock(self, pid: int) -> threading.Lock:
+        with self._pid_locks_lock:
+            if pid not in self._pid_locks:
+                self._pid_locks[pid] = threading.Lock()
+            return self._pid_locks[pid]
 
     def pause(self, pid: int) -> dict[str, object]:
         """Suspend a launched game process tree while start sync runs."""
@@ -43,48 +53,53 @@ class ProcessWatchdog:
             self._log("warning", f"Invalid PID passed to pause: {exc}", "launch_gate", None)
             return {"status": "failed", "message": str(exc)}
 
-        identity = _read_process_identity(valid_pid)
-        if identity is None or identity.uid != os.geteuid():
+        with self._get_pid_lock(valid_pid):
+            identity = _read_process_identity(valid_pid)
+            if identity is None or identity.uid != os.geteuid():
+                self._log(
+                    "warning",
+                    f"Unable to read identity for PID {valid_pid} or uid mismatch",
+                    "launch_gate",
+                    None,
+                )
+                return {
+                    "status": "failed",
+                    "pid": valid_pid,
+                    "message": "Unable to verify process identity",
+                }
+
+            if not _send_signal_tree(valid_pid, signal.SIGSTOP, root_identity=identity):
+                self._log(
+                    "warning",
+                    f"Unable to pause game process tree rooted at PID {valid_pid}",
+                    "launch_gate",
+                    None,
+                )
+                return {
+                    "status": "failed",
+                    "pid": valid_pid,
+                    "message": "Unable to pause game process",
+                }
+
+            lease_id = secrets.token_urlsafe(16)
+            now_mono = time.monotonic()
+            with self._paused_pids_lock:
+                self._paused_pids[valid_pid] = _PauseLease(
+                    identity=identity,
+                    paused_at=now_mono,
+                    lease_id=lease_id,
+                    lease_deadline=now_mono + LAUNCH_GATE_LEASE_TTL_SECONDS,
+                )
+                self._ensure_watchdog_running()
             self._log(
-                "warning",
-                f"Unable to read identity for PID {valid_pid} or uid mismatch",
-                "launch_gate",
-                None,
+                "info", f"Paused game process tree rooted at PID {valid_pid}", "launch_gate", None
             )
             return {
-                "status": "failed",
+                "status": "paused",
                 "pid": valid_pid,
-                "message": "Unable to verify process identity",
+                "lease_id": lease_id,
+                "lease_ttl_seconds": LAUNCH_GATE_LEASE_TTL_SECONDS,
             }
-
-        if not _send_signal_tree(valid_pid, signal.SIGSTOP, root_identity=identity):
-            self._log(
-                "warning",
-                f"Unable to pause game process tree rooted at PID {valid_pid}",
-                "launch_gate",
-                None,
-            )
-            return {"status": "failed", "pid": valid_pid, "message": "Unable to pause game process"}
-
-        lease_id = secrets.token_urlsafe(16)
-        now_mono = time.monotonic()
-        with self._paused_pids_lock:
-            self._paused_pids[valid_pid] = _PauseLease(
-                identity=identity,
-                paused_at=now_mono,
-                lease_id=lease_id,
-                lease_deadline=now_mono + LAUNCH_GATE_LEASE_TTL_SECONDS,
-            )
-            self._ensure_watchdog_running()
-        self._log(
-            "info", f"Paused game process tree rooted at PID {valid_pid}", "launch_gate", None
-        )
-        return {
-            "status": "paused",
-            "pid": valid_pid,
-            "lease_id": lease_id,
-            "lease_ttl_seconds": LAUNCH_GATE_LEASE_TTL_SECONDS,
-        }
 
     def renew_pause(self, pid: int, lease_id: str) -> dict[str, object]:
         """Renew the lease on a suspended game process."""
@@ -94,44 +109,50 @@ class ProcessWatchdog:
             self._log("warning", f"Invalid PID passed to renew: {exc}", "launch_gate", None)
             return {"status": "failed", "message": str(exc)}
 
-        current_identity = _read_process_identity(valid_pid)
-        now_mono = time.monotonic()
+        with self._get_pid_lock(valid_pid):
+            current_identity = _read_process_identity(valid_pid)
+            now_mono = time.monotonic()
 
-        with self._paused_pids_lock:
-            lease = self._paused_pids.get(valid_pid)
-            if lease is None:
-                self._log(
-                    "warning", f"PID {valid_pid} is not tracked for renewal", "launch_gate", None
-                )
-                return {"status": "failed", "pid": valid_pid, "message": "Process not paused"}
+            with self._paused_pids_lock:
+                lease = self._paused_pids.get(valid_pid)
+                if lease is None:
+                    self._log(
+                        "warning",
+                        f"PID {valid_pid} is not tracked for renewal",
+                        "launch_gate",
+                        None,
+                    )
+                    return {"status": "failed", "pid": valid_pid, "message": "Process not paused"}
 
-            if lease.lease_id != lease_id:
-                self._log("warning", f"Lease ID mismatch for PID {valid_pid}", "launch_gate", None)
-                return {"status": "failed", "pid": valid_pid, "message": "Lease ID mismatch"}
+                if lease.lease_id != lease_id:
+                    self._log(
+                        "warning", f"Lease ID mismatch for PID {valid_pid}", "launch_gate", None
+                    )
+                    return {"status": "failed", "pid": valid_pid, "message": "Lease ID mismatch"}
 
-            if current_identity != lease.identity:
-                self._paused_pids.pop(valid_pid, None)
-                self._log(
-                    "warning",
-                    f"PID {valid_pid} identity mismatch on renew (PID reused)",
-                    "launch_gate",
-                    None,
-                )
-                return {
-                    "status": "failed",
-                    "pid": valid_pid,
-                    "message": "Process identity mismatch",
-                }
+                if current_identity != lease.identity:
+                    self._paused_pids.pop(valid_pid, None)
+                    self._log(
+                        "warning",
+                        f"PID {valid_pid} identity mismatch on renew (PID reused)",
+                        "launch_gate",
+                        None,
+                    )
+                    return {
+                        "status": "failed",
+                        "pid": valid_pid,
+                        "message": "Process identity mismatch",
+                    }
 
-            lease.lease_deadline = now_mono + LAUNCH_GATE_LEASE_TTL_SECONDS
+                lease.lease_deadline = now_mono + LAUNCH_GATE_LEASE_TTL_SECONDS
 
-        return {
-            "status": "renewed",
-            "pid": valid_pid,
-            "lease_ttl_seconds": LAUNCH_GATE_LEASE_TTL_SECONDS,
-        }
+            return {
+                "status": "renewed",
+                "pid": valid_pid,
+                "lease_ttl_seconds": LAUNCH_GATE_LEASE_TTL_SECONDS,
+            }
 
-    def resume(self, pid: int) -> dict[str, object]:
+    def resume(self, pid: int, lease_id: str | None = None) -> dict[str, object]:
         """Resume a previously suspended game process tree."""
         try:
             valid_pid = _coerce_signal_pid(pid)
@@ -139,32 +160,38 @@ class ProcessWatchdog:
             self._log("warning", f"Invalid PID passed to resume: {exc}", "launch_gate", None)
             return {"status": "failed", "message": str(exc)}
 
-        current_identity = _read_process_identity(valid_pid)
+        with self._get_pid_lock(valid_pid):
+            return self._resume_locked(valid_pid, lease_id)
 
+    def _resume_locked(self, valid_pid: int, lease_id: str | None = None) -> dict[str, object]:
+        """Resume one exact generation while its per-PID transition lock is held."""
+        current_identity = _read_process_identity(valid_pid)
         with self._paused_pids_lock:
             lease = self._paused_pids.get(valid_pid)
-            if lease is None:
-                self._log("warning", f"PID {valid_pid} is not tracked", "launch_gate", None)
-                return {"status": "failed", "pid": valid_pid, "message": "Process not paused"}
 
-            if current_identity != lease.identity:
-                self._paused_pids.pop(valid_pid, None)
-                self._log(
-                    "warning",
-                    f"PID {valid_pid} identity mismatch (PID reused)",
-                    "launch_gate",
-                    None,
-                )
-                return {
-                    "status": "failed",
-                    "pid": valid_pid,
-                    "message": "Process identity mismatch",
-                }
+        if lease is None:
+            self._log("warning", f"PID {valid_pid} is not tracked", "launch_gate", None)
+            return {"status": "failed", "pid": valid_pid, "message": "Process not paused"}
+        if lease_id is not None and lease.lease_id != lease_id:
+            self._log("warning", f"Lease ID mismatch for PID {valid_pid}", "launch_gate", None)
+            return {"status": "failed", "pid": valid_pid, "message": "Lease ID mismatch"}
+        if current_identity != lease.identity:
+            with self._paused_pids_lock:
+                if self._paused_pids.get(valid_pid) is lease:
+                    self._paused_pids.pop(valid_pid, None)
+            self._log(
+                "warning",
+                f"PID {valid_pid} identity mismatch (PID reused)",
+                "launch_gate",
+                None,
+            )
+            return {
+                "status": "failed",
+                "pid": valid_pid,
+                "message": "Process identity mismatch",
+            }
 
-            lease_id_to_resume = lease.lease_id
-            lease_identity = lease.identity
-
-        if not _send_signal_tree(valid_pid, signal.SIGCONT, root_identity=lease_identity):
+        if not _send_signal_tree(valid_pid, signal.SIGCONT, root_identity=lease.identity):
             self._log(
                 "warning",
                 f"Failed to send SIGCONT to process tree rooted at PID {valid_pid}",
@@ -178,10 +205,8 @@ class ProcessWatchdog:
             }
 
         with self._paused_pids_lock:
-            current_lease = self._paused_pids.get(valid_pid)
-            if current_lease is not None and current_lease.lease_id == lease_id_to_resume:
+            if self._paused_pids.get(valid_pid) is lease:
                 self._paused_pids.pop(valid_pid, None)
-
         self._log(
             "info", f"Resumed game process tree rooted at PID {valid_pid}", "launch_gate", None
         )
@@ -235,28 +260,35 @@ class ProcessWatchdog:
 
     def _check_and_resume_stuck_pids(self) -> None:
         now_mono = time.monotonic()
-        stuck: list[tuple[int, float, str]] = []
+        candidates: list[tuple[int, str]] = []
         with self._paused_pids_lock:
             if not self._paused_pids:
                 self._watchdog_active = False
                 return
             for pid, lease in list(self._paused_pids.items()):
-                paused_for = now_mono - lease.paused_at
-                if paused_for > WATCHDOG_ABSOLUTE_RESUME_SECONDS:
-                    stuck.append((pid, paused_for, "absolute ceiling"))
-                elif now_mono > lease.lease_deadline:
-                    stuck.append((pid, paused_for, "lease expired"))
+                if _lease_expiry_reason(lease, now_mono) is not None:
+                    candidates.append((pid, lease.lease_id))
 
-        for pid, paused_for, why in stuck:
-            self._log(
-                "warning",
-                f"Watchdog detected PID {pid} suspended for {paused_for:.0f}s "
-                f"({why}). Resuming automatically.",
-                "watchdog",
-                None,
-            )
+        for pid, expected_lease_id in candidates:
             try:
-                self.resume(pid)
+                with self._get_pid_lock(pid):
+                    now_mono = time.monotonic()
+                    with self._paused_pids_lock:
+                        lease = self._paused_pids.get(pid)
+                    if lease is None or lease.lease_id != expected_lease_id:
+                        continue
+                    why = _lease_expiry_reason(lease, now_mono)
+                    if why is None:
+                        continue
+                    paused_for = now_mono - lease.paused_at
+                    self._log(
+                        "warning",
+                        f"Watchdog detected PID {pid} suspended for {paused_for:.0f}s "
+                        f"({why}). Resuming automatically.",
+                        "watchdog",
+                        None,
+                    )
+                    self._resume_locked(pid, expected_lease_id)
             # Intentionally broad: catch automatic resume errors in background watchdog thread
             except Exception as exc:
                 self._log(
@@ -265,6 +297,14 @@ class ProcessWatchdog:
                     "watchdog",
                     None,
                 )
+
+
+def _lease_expiry_reason(lease: _PauseLease, now_mono: float) -> str | None:
+    if now_mono - lease.paused_at > WATCHDOG_ABSOLUTE_RESUME_SECONDS:
+        return "absolute ceiling"
+    if now_mono > lease.lease_deadline:
+        return "lease expired"
+    return None
 
 
 def _coerce_signal_pid(value: object) -> int:
