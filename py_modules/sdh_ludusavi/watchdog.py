@@ -161,9 +161,10 @@ class ProcessWatchdog:
                     "message": "Process identity mismatch",
                 }
 
-            self._paused_pids.pop(valid_pid, None)
+            lease_id_to_resume = lease.lease_id
+            lease_identity = lease.identity
 
-        if not _send_signal_tree(valid_pid, signal.SIGCONT, root_identity=lease.identity):
+        if not _send_signal_tree(valid_pid, signal.SIGCONT, root_identity=lease_identity):
             self._log(
                 "warning",
                 f"Failed to send SIGCONT to process tree rooted at PID {valid_pid}",
@@ -175,6 +176,11 @@ class ProcessWatchdog:
                 "pid": valid_pid,
                 "message": "Unable to resume game process",
             }
+
+        with self._paused_pids_lock:
+            current_lease = self._paused_pids.get(valid_pid)
+            if current_lease is not None and current_lease.lease_id == lease_id_to_resume:
+                self._paused_pids.pop(valid_pid, None)
 
         self._log(
             "info", f"Resumed game process tree rooted at PID {valid_pid}", "launch_gate", None

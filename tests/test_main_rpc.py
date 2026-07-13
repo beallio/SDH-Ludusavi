@@ -255,3 +255,22 @@ def test_log_rpc_before_service_construction(
 
     assert plugin._backend is None
     assert "[frontend:info] frontend: test message" in logger.infos
+
+
+def test_plugin_renew_game_process_pause_calls_service(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decky, _logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+
+    mock_service = MockService()
+    mock_service.renew_game_process_pause = lambda pid, lease_id: {"status": "renewed"}
+
+    class FakePlugin(module.Plugin):
+        def _service(self) -> Any:
+            return mock_service
+
+    plugin = FakePlugin()
+    result = asyncio.run(plugin.renew_game_process_pause(pid=123, lease_id="test_lease"))
+
+    assert result == {"status": "renewed"}

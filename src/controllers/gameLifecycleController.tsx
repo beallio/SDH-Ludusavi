@@ -163,6 +163,7 @@ export function createGameLifecycleController(
   const { publish: rawPublish } = statusSurface;
   let lifecycleEpoch = 0;
   let activeMonitorEpoch = 0;
+  const activeLeases = new Set<PauseLeaseHandle>();
 
   const syncthingRpc: SyncthingRpc = { startWatch, pollWatch, stopWatch };
 
@@ -244,8 +245,8 @@ export function createGameLifecycleController(
         const pauseResult = await pauseGameProcess(instanceID);
         if (!isRpcStatus(pauseResult) && pauseResult.status === "paused") {
           state.paused = true;
-          // type cast rpc because createPauseLease expects LudusaviRpc but LifecycleRpc has the needed methods
-          pauseHandle = createPauseLease(rpc as any, instanceID, pauseResult.lease_id, { warn: (msg) => log("warning", msg), error: (msg, e) => log("error", msg + String(e)) });
+          pauseHandle = createPauseLease(rpc, pauseResult, { warn: (msg) => log("warning", msg), error: (msg, e) => log("error", msg + String(e)) });
+          activeLeases.add(pauseHandle);
         }
       }
 
@@ -264,7 +265,15 @@ export function createGameLifecycleController(
         }
       };
 
-      let checkResult: RpcResult<LifecycleCheckResult> = await checkGameStart(name, appID);
+      const withLease = async <T,>(p: Promise<T>): Promise<T> => {
+        if (!pauseHandle) return p;
+        return Promise.race([
+          p,
+          pauseHandle.onLost.then((reason) => { throw new Error(`Lease lost: ${reason}`); })
+        ]);
+      };
+
+      let checkResult: RpcResult<LifecycleCheckResult> = await withLease(checkGameStart(name, appID));
       log("info", `check_game_start result for ${name} (${appID}): ${summarizeLifecycleResult(checkResult)}`, "lifecycle", name);
       
       const dec1 = evaluateStartCheck(state, checkResult);
@@ -272,7 +281,7 @@ export function createGameLifecycleController(
       Object.assign(state, dec1.stateUpdates);
 
       if (dec1.nextRpc === "restore") {
-        const restoreRes = await restoreGameOnStart(name, appID);
+        const restoreRes = await withLease(restoreGameOnStart(name, appID));
         log("info", `restore_game_on_start result for ${name} (${appID}): ${summarizeLifecycleResult(restoreRes)}`, "lifecycle", name);
         const dec2 = evaluateStartRestore(state, restoreRes);
         execCmds(dec2.commands);
@@ -282,7 +291,7 @@ export function createGameLifecycleController(
         preGameWatch = null;
         state.watchActive = false;
         
-        const resolution = await resolveConflict(checkResult);
+        const resolution = await withLease(resolveConflict(checkResult));
         const dec3 = evaluateStartConflictResolution(state, resolution);
         execCmds(dec3.commands);
         Object.assign(state, dec3.stateUpdates);
@@ -293,7 +302,7 @@ export function createGameLifecycleController(
             preGameWatch = syncthingMonitor.start("pre_game", name, appID);
             state.watchActive = true;
           }
-          let conflictRes: RpcResult<OperationResult> = await resolveGameStartConflict(name, appID, resolution);
+          let conflictRes: RpcResult<OperationResult> = await withLease(resolveGameStartConflict(name, appID, resolution));
           const dec4 = evaluateStartConflictResolution(state, resolution, conflictRes);
           execCmds(dec4.commands);
           Object.assign(state, dec4.stateUpdates);
@@ -307,7 +316,10 @@ export function createGameLifecycleController(
       for (const cmd of cleanup) {
         if (cmd.type === "cancelWatch") await preGameWatch?.cancel(cmd.reason);
         else if (cmd.type === "resumeProcess") {
-          if (pauseHandle) { await pauseHandle.release(); }
+          if (pauseHandle) { 
+            activeLeases.delete(pauseHandle);
+            await pauseHandle.release(); 
+          }
           else { try { await resumeGameProcess(cmd.instanceID); } catch (err) { log("error", `Failed to resume process: ${err}`); } }
         } else if (cmd.type === "syncHistory") await syncGlobalHistory();
       }
@@ -428,6 +440,10 @@ export function createGameLifecycleController(
     lifecycleEpoch++;
     steamLifecycleSource.dispose();
     syncthingMonitor.dispose();
+    for (const lease of activeLeases) {
+      lease.release().catch(() => {});
+    }
+    activeLeases.clear();
   }
 
   return {

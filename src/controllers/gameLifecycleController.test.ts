@@ -45,7 +45,7 @@ describe("GameLifecycleController", () => {
       resolveGameStartConflict: vi.fn(),
       checkGameExit: vi.fn().mockResolvedValue({ status: "needed", operation: "backup" }),
       backupGameOnExit: vi.fn().mockResolvedValue({ status: "backed_up" }),
-      pauseGameProcess: vi.fn().mockResolvedValue({ status: "paused" }),
+      pauseGameProcess: vi.fn().mockResolvedValue({ status: "paused", lease_id: "mock_lease", lease_ttl_seconds: 30 }),
       resumeGameProcess: vi.fn().mockResolvedValue({ status: "resumed" }),
       renewGameProcessPause: vi.fn().mockResolvedValue({ status: "renewed" }),
       startSyncthingActivityWatch: vi.fn().mockResolvedValue({ status: "watching", watch_id: "w1" }),
@@ -893,5 +893,55 @@ describe("GameLifecycleController", () => {
       expect.objectContaining({ status: "failed" }),
       expect.any(Object)
     );
+  });
+
+  it("awaits syncthingMonitor.stop() before allocating the next watch", async () => {
+    mockStore.isTracked.mockReturnValue(true);
+    let stopResolved = false;
+
+    // Make checkGameStart slow so handleAppStart stays pending and pre_game watch stays active
+    mockRpc.checkGameStart.mockImplementation(async () => {
+      return new Promise((resolve) => setTimeout(() => resolve({ status: "needed", operation: "restore" }), 500));
+    });
+
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    // Start creates a pre-game watch. Since checkGameStart is slow, it won't finish and cancel it.
+    triggerStart(1145300);
+    await vi.advanceTimersByTimeAsync(100); // Allow startSyncthingActivityWatch to resolve so wID is set
+
+    // NOW make stopSyncthingActivityWatch resolve slowly so we can check that start is delayed
+    mockRpc.stopSyncthingActivityWatch.mockImplementation(async () => {
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          stopResolved = true;
+          resolve({ status: "stopped", watch_id: "w1" });
+        }, 1000);
+      });
+    });
+
+    // Exit causes handleAppExit to run, which starts by awaiting syncthingMonitor.stop()
+    triggerExit(1145300);
+    
+    // Advance slightly, enough to trigger stop() but not to resolve it
+    await vi.advanceTimersByTimeAsync(100);
+    expect(mockRpc.stopSyncthingActivityWatch).toHaveBeenCalled();
+    // The start (post_game) should NOT have been called yet because stop() is pending
+    expect(mockRpc.startSyncthingActivityWatch).not.toHaveBeenCalledWith("post_game", "Hades", "1145300");
+
+    // Advance time past the 1000ms delay of stop
+    await vi.advanceTimersByTimeAsync(1500);
+    
+    expect(stopResolved).toBe(true);
+    // NOW it should be called
+    expect(mockRpc.startSyncthingActivityWatch).toHaveBeenCalledWith("post_game", "Hades", "1145300");
   });
 });

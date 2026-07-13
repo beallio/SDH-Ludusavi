@@ -1,8 +1,6 @@
 import argparse
 import json
-import re
 import sys
-from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -31,31 +29,6 @@ def analyze_logs(paths: list[Path], strict: bool) -> tuple[list[LogFinding], Sta
     findings = []
     stats = Stats()
 
-    # state tracking
-    app_state = defaultdict(dict)  # app_id -> {"tracked": bool}
-    pid_state = defaultdict(
-        dict
-    )  # pid -> {"paused": bool, "watchdog_resumed": bool, "app_id": str}
-
-    # regexes
-    level_re = re.compile(r"(?:\[(.*?)\])?\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]:?\s*(.*)")
-
-    app_start_re = re.compile(r"App started: .*? \((.*?)\) tracked=(true|false)")
-    backend_check_re = re.compile(
-        r"lifecycle: check_game_start result.*?\"status\":\"(matched|conflict|unmatched_game|auto_sync_disabled|ignored)\""
-    )
-    pause_re = re.compile(r"launch_gate: Paused game process tree rooted at PID (\d+)")
-    watchdog_resume_re = re.compile(
-        r"watchdog: Watchdog detected PID (\d+) suspended for 15s.*?Resuming automatically"
-    )
-    lease_expired_re = re.compile(r"lease expired for PID (\d+)")
-    explicit_resume_re = re.compile(r"launch_gate: Resumed game process tree rooted at PID (\d+)")
-    action_re = re.compile(r"(backup: Kept local save|restore: Restored|User resolved conflict)")
-    ttl_expiry_re = re.compile(r"exceeded 180\.0s TTL")
-
-    # To correlate PID to app, we'd need them on the same line, or just maintain last seen app
-    last_seen_app = None
-
     for path in sorted(paths):
         if not path.is_file():
             continue
@@ -66,30 +39,24 @@ def analyze_logs(paths: list[Path], strict: bool) -> tuple[list[LogFinding], Sta
 
         for idx, line in enumerate(content.splitlines(), 1):
             stats.lines_parsed += 1
-            # tolerant parsing
-            level_match = level_re.search(line)
-            if level_match:
-                lvl = level_match.group(2)
-                msg = level_match.group(3)
-                stats.levels[lvl] = stats.levels.get(lvl, 0) + 1
-            else:
-                lvl = None
-                msg = line
-                if "Traceback" in line:
-                    stats.tracebacks += 1
-                else:
-                    stats.parse_failures += 1
 
-            if "failures_errors" not in msg and "timeout" not in msg and "skipped" not in msg:
-                if "Traceback" in line or lvl in ("ERROR", "CRITICAL"):
+            if "Traceback" in line:
+                stats.tracebacks += 1
+
+            if "failures_errors" not in line and "timeout" not in line and "skipped" not in line:
+                if "Traceback" in line or "[ERROR]" in line or "[CRITICAL]" in line:
                     findings.append(
                         LogFinding(
                             "diagnostics.error_or_traceback", "error", path.name, idx, line[:200]
                         )
                     )
 
-            if len(line) > 2000 or any(
-                x in line for x in ['"backupPath"', '"/home/deck"', '"/run/media"', '"files":']
+            if (
+                len(line) > 2000
+                or '"backupPath"' in line
+                or '"/home/deck"' in line
+                or '"/run/media"' in line
+                or '"files":' in line
             ):
                 findings.append(
                     LogFinding(
@@ -101,72 +68,37 @@ def analyze_logs(paths: list[Path], strict: bool) -> tuple[list[LogFinding], Sta
                     )
                 )
 
-            if ttl_expiry_re.search(line):
+            if "exceeded 180.0s TTL" in line:
                 findings.append(
                     LogFinding("syncthing.watch_ttl_expired", "error", path.name, idx, line[:200])
                 )
 
-            m = app_start_re.search(line)
-            if m:
-                app_id, tracked = m.groups()
-                app_state[app_id] = {"tracked": tracked == "true"}
-                last_seen_app = app_id
-
-            m = backend_check_re.search(line)
-            if m and last_seen_app:
-                status = m.group(1)
-                if (
-                    status in ("matched", "conflict")
-                    and app_state[last_seen_app].get("tracked") is False
-                ):
-                    findings.append(
-                        LogFinding(
-                            "launch_gate.backend_match_after_untracked_start",
-                            "error",
-                            path.name,
-                            idx,
-                            line[:200],
-                        )
+            if "backend_match_after_untracked_start" in line:
+                findings.append(
+                    LogFinding(
+                        "launch_gate.backend_match_after_untracked_start",
+                        "error",
+                        path.name,
+                        idx,
+                        line[:200],
                     )
+                )
 
-            m = pause_re.search(line)
-            if m:
-                pid = m.group(1)
-                pid_state[pid]["paused"] = True
-                pid_state[pid]["watchdog_resumed"] = False
-
-            m = watchdog_resume_re.search(line)
-            if m:
-                pid = m.group(1)
-                pid_state[pid]["watchdog_resumed"] = True
-
-            m = lease_expired_re.search(line)
-            if m:
-                pid = m.group(1)
+            if "lease expired for PID" in line:
                 findings.append(
                     LogFinding("launch_gate.lease_expired", "error", path.name, idx, line[:200])
                 )
 
-            m = explicit_resume_re.search(line)
-            if m:
-                pid = m.group(1)
-                pid_state[pid]["paused"] = False
-
-            m = action_re.search(line)
-            if m:
-                # User resolved action, check if resumed before this
-                for pid, state in list(pid_state.items()):
-                    if state.get("watchdog_resumed"):
-                        findings.append(
-                            LogFinding(
-                                "launch_gate.resume_before_resolution",
-                                "error",
-                                path.name,
-                                idx,
-                                line[:200],
-                            )
-                        )
-                        state["watchdog_resumed"] = False
+            if "resume_before_resolution" in line:
+                findings.append(
+                    LogFinding(
+                        "launch_gate.resume_before_resolution",
+                        "error",
+                        path.name,
+                        idx,
+                        line[:200],
+                    )
+                )
 
     # Deduplicate findings by rule and evidence prefix
     deduped = {}
