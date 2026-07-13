@@ -62,6 +62,28 @@ describe("LudusaviStateStore", () => {
     });
   });
 
+  describe("Tracking readiness", () => {
+    it("starts cold, sets ready on refresh, and failed on markTrackingFailed without clearing games", () => {
+      const store = createLudusaviStateStore();
+      expect(store.getSnapshot().trackingReadiness).toBe("cold");
+
+      // empty-but-valid refresh sets readiness to ready
+      store.applyRefreshResult({
+        games: [],
+        history: {},
+        aliases: {},
+        dependency_error: null
+      });
+      expect(store.getSnapshot().trackingReadiness).toBe("ready");
+      expect(store.getSnapshot().games).toEqual([]);
+
+      // markTrackingFailed sets failed and leaves games untouched
+      store.markTrackingFailed();
+      expect(store.getSnapshot().trackingReadiness).toBe("failed");
+      expect(store.getSnapshot().games).toEqual([]);
+    });
+  });
+
   describe("Settings invariants", () => {
     it("maintains consistency across snapshot and settings when fields are mutated", () => {
       const store = createLudusaviStateStore();

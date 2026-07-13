@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createStartupHydration, StartupHydrationDeps } from "./startupHydration";
-import { Settings, RpcStatus } from "../types";
+import { Settings, RpcStatus, RefreshResult } from "../types";
 import { isRpcStatus } from "../utils/rpc";
 
 const SETTINGS: Settings = {
@@ -19,12 +19,22 @@ const SETTINGS: Settings = {
   debug_logging: true,
 };
 
+const TRACKING: RefreshResult = {
+  games: [{ name: "Celeste", configured: true, has_backup: true, needs_first_backup: false, error: null, status: "has_backup" }],
+  aliases: {},
+  history: {},
+  dependency_error: null,
+};
+
 function makeDeps(overrides: Partial<StartupHydrationDeps> = {}): StartupHydrationDeps {
   return {
     fetchSettings: vi.fn().mockResolvedValue(SETTINGS),
+    fetchTracking: vi.fn().mockResolvedValue(TRACKING),
     getStoredSettings: vi.fn().mockReturnValue(null),
     isRpcStatus,
     applySettings: vi.fn(),
+    applyTracking: vi.fn(),
+    markTrackingFailed: vi.fn(),
     logRpcStatus: vi.fn(),
     logUiEvent: vi.fn(),
     logError: vi.fn(),
@@ -50,6 +60,13 @@ describe("createStartupHydration", () => {
       },
       "info",
     );
+    expect(deps.applyTracking).toHaveBeenCalledTimes(1);
+    expect(deps.applyTracking).toHaveBeenCalledWith(TRACKING);
+    expect(deps.logUiEvent).toHaveBeenCalledWith(
+      "startup_tracking_hydrated",
+      { game_count: 1, alias_count: 0 },
+      "info"
+    );
   });
 
   it("skips when the store is already populated", async () => {
@@ -62,6 +79,8 @@ describe("createStartupHydration", () => {
     expect(deps.logUiEvent).toHaveBeenCalledWith("startup_settings_hydration_skipped", {
       reason: "state_already_populated",
     });
+    // Tracking is still applied even if settings was populated
+    expect(deps.applyTracking).toHaveBeenCalledTimes(1);
   });
 
   it("routes RPC failure payloads to logRpcStatus without applying", async () => {
@@ -73,6 +92,19 @@ describe("createStartupHydration", () => {
 
     expect(deps.applySettings).not.toHaveBeenCalled();
     expect(deps.logRpcStatus).toHaveBeenCalledWith(failure, "startup settings");
+  });
+
+  it("routes tracking failure without discarding settings", async () => {
+    const failure: RpcStatus = { status: "failed", message: "nope" };
+    const deps = makeDeps({ fetchTracking: vi.fn().mockResolvedValue(failure) });
+
+    const hydration = createStartupHydration(deps);
+    await hydration.ready;
+
+    expect(deps.applyTracking).not.toHaveBeenCalled();
+    expect(deps.markTrackingFailed).toHaveBeenCalledTimes(1);
+    expect(deps.logUiEvent).toHaveBeenCalledWith("startup_tracking_hydration_failed", expect.anything(), "error");
+    expect(deps.applySettings).toHaveBeenCalledTimes(1);
   });
 
   it("does not apply settings or log hydration after dispose", async () => {
@@ -91,6 +123,7 @@ describe("createStartupHydration", () => {
     await hydration.ready;
 
     expect(deps.applySettings).not.toHaveBeenCalled();
+    expect(deps.applyTracking).not.toHaveBeenCalled();
     expect(deps.logUiEvent).toHaveBeenCalledWith("startup_settings_hydration_skipped", {
       reason: "plugin_dismounted",
     });
@@ -101,9 +134,13 @@ describe("createStartupHydration", () => {
   });
 
   it("logs fetch errors without throwing, and stays quiet after dispose", async () => {
-    const failing = makeDeps({ fetchSettings: vi.fn().mockRejectedValue(new Error("boom")) });
+    const failing = makeDeps({
+      fetchSettings: vi.fn().mockRejectedValue(new Error("boom")),
+      fetchTracking: vi.fn().mockRejectedValue(new Error("bam"))
+    });
     await createStartupHydration(failing).ready;
     expect(failing.logError).toHaveBeenCalledTimes(1);
+    expect(failing.markTrackingFailed).toHaveBeenCalledTimes(1);
 
     let rejectFetch: (err: Error) => void = () => {};
     const disposed = makeDeps({
