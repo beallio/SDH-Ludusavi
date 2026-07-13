@@ -925,6 +925,82 @@ def test_same_signature_replacement_leaves_exactly_one_registered() -> None:
     assert mock_stop.call_count == 1
 
 
+def test_cross_phase_replacement_supersedes_first_watch() -> None:
+    manager = SyncthingWatchManager()
+
+    watch_old = SyncthingWatch(
+        "old_watch",
+        "post_game",
+        "Hades",
+        "1145300",
+        FolderSelection(folder_id="test-folder", label="Test", path="/path"),
+        None,
+    )
+    manager.watches["old_watch"] = watch_old
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.resolve_api_credentials",
+            return_value=("http://127.0.0.1:8384", "key", None),
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.get_my_device_id", return_value="LOCAL"),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.resolve_folder_by_path",
+            return_value=_shared_folder(("DEV-A",)),
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+            return_value=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+        ),
+        patch.object(SyncthingWatch, "start"),
+        patch.object(SyncthingWatch, "stop") as mock_stop,
+    ):
+        res = manager.start_watch("pre_game", "Hades", "1145300", "/path")
+
+    assert res["status"] == "watching"
+    assert len(manager.watches) == 1
+    assert "old_watch" not in manager.watches
+    assert mock_stop.call_count == 1
+
+
+def test_different_game_does_not_get_stopped() -> None:
+    manager = SyncthingWatchManager()
+
+    watch_old = SyncthingWatch(
+        "old_watch",
+        "pre_game",
+        "Hades",
+        "1145300",
+        FolderSelection(folder_id="test-folder", label="Test", path="/path"),
+        None,
+    )
+    manager.watches["old_watch"] = watch_old
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.resolve_api_credentials",
+            return_value=("http://127.0.0.1:8384", "key", None),
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.get_my_device_id", return_value="LOCAL"),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.resolve_folder_by_path",
+            return_value=_shared_folder(("DEV-A",)),
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+            return_value=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+        ),
+        patch.object(SyncthingWatch, "start"),
+        patch.object(SyncthingWatch, "stop") as mock_stop,
+    ):
+        res = manager.start_watch("pre_game", "Celeste", "504230", "/path")
+
+    assert res["status"] == "watching"
+    assert len(manager.watches) == 2
+    assert "old_watch" in manager.watches
+    assert mock_stop.call_count == 0
+
+
 @patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
 @patch("sdh_ludusavi.syncthing.watcher.get_my_device_id")
 @patch("sdh_ludusavi.syncthing.watcher.resolve_folder_by_path")
