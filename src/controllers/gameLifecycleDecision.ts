@@ -186,7 +186,7 @@ export function evaluateExitCheck(_state: ExitState, checkResult: LifecycleCheck
 export function evaluateExitBackup(_state: ExitState, result: OperationResult): ExitDecision {
   if (result.status === "backed_up") {
     return {
-      commands: [{ type: "publishStatus", status: "has_backup" }],
+      commands: [{ type: "completeStatus", result }],
       nextRpc: "handoff",
       stateUpdates: {}
     };
@@ -231,16 +231,10 @@ export function evaluateExitHandoff(
           stateUpdates: {}
         };
       }
-      return {
-        commands: [{ type: "completeStatus", result: backupResult }],
-        stateUpdates: {}
-      };
+      return { commands: [], stateUpdates: {} };
     }
     case "stale":
-      return {
-        commands: [{ type: "completeStatus", result: backupResult }],
-        stateUpdates: {}
-      };
+      return { commands: [], stateUpdates: {} };
   }
   return { commands: [], stateUpdates: {} };
 }

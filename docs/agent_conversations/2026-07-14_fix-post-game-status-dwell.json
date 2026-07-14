@@ -1,0 +1,45 @@
+{
+  "date": "2026-07-14",
+  "task_objective": "Fix the post-game BrowserUI dwell regression found in live steamdeck logs and publish a replacement development release.",
+  "source_evidence": {
+    "device": "steamdeck",
+    "build": "0.3.6-dev.g0fe48e6",
+    "log": "/tmp/sdh_ludusavi/steamdeck/logs/2026-07-14 11.16.22.log",
+    "observed_sequence": [
+      "11:28:27.476 lifecycle_exit has_backup",
+      "11:28:27.478 lifecycle_exit syncthing_pending_upload"
+    ],
+    "observed_dwell_ms": 2,
+    "required_dwell_ms": 900
+  },
+  "files_modified": [
+    "docs/plans/2026-07-14_fix-post-game-status-dwell.md",
+    "src/controllers/gameLifecycleController.test.ts",
+    "src/controllers/gameLifecycleDecision.test.ts",
+    "src/controllers/gameLifecycleDecision.ts",
+    "docs/agent_conversations/2026-07-14_fix-post-game-status-dwell.json"
+  ],
+  "tests_added": [
+    "successful exit backup preserves the original backed_up result through completeStatus",
+    "controller supplies lifecycle_exit completion provenance and does not publish a generic lifecycle_exit has_backup",
+    "unavailable and stale handoffs do not complete an already completed backup twice"
+  ],
+  "design_decisions": [
+    "Keep the 900 ms timer and BrowserView ownership unchanged in autoSyncStatusSurface.",
+    "Route successful exit backups through completeStatus so resultStatus=backed_up and lifecycle_exit provenance reach the surface.",
+    "Make unmapped unavailable and stale handoff fallbacks no-ops because the successful backup result is now completed before handoff activation.",
+    "Preserve mapped Syncthing-unavailable warning publication and all polling behavior."
+  ],
+  "tdd_evidence": {
+    "red": "2 focused failures proved missing completion provenance; 3 follow-up failures proved duplicate completion for unavailable/stale handoffs.",
+    "green": "85 focused controller, decision, and status-surface tests passed."
+  },
+  "results": {
+    "ruff_check_fix": "passed",
+    "ruff_format": "128 files unchanged",
+    "ty": "passed",
+    "pytest": "687 passed; 87.66 percent coverage",
+    "frontend_verify": "286 Vitest tests passed; typecheck, build, audit, and supply-chain checks passed",
+    "diff_check": "passed"
+  }
+}
