@@ -27,7 +27,7 @@ def test_package_script_defines_decky_runtime_files_only() -> None:
     assert module.ARCHIVE_ROOT == "SDH-Ludusavi"
     assert module.REQUIRED_FILES == (
         "LICENSE",
-        "NOTICE",
+        "NOTICE.md",
         "main.py",
         "package.json",
         "plugin.json",
@@ -60,7 +60,7 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
     assert names == set(module.iter_required_archive_names(Path.cwd()))
     assert all(name.startswith("SDH-Ludusavi/") for name in names)
     assert "SDH-Ludusavi/plugin.json" in names
-    assert "SDH-Ludusavi/NOTICE" in names
+    assert "SDH-Ludusavi/NOTICE.md" in names
 
     # Version should start with the repository's source version (the single
     # source of truth) and may include a git hash, so releases don't require

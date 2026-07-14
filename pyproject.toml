@@ -36,7 +36,7 @@ include = [
     "py_modules/sdh_ludusavi",
     "README.md",
     "LICENSE",
-    "NOTICE",
+    "NOTICE.md",
 ]
 
 [build-system]

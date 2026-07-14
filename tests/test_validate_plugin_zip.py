@@ -138,7 +138,7 @@ def test_validator_rejects_missing_notice(tmp_path: Path) -> None:
     )
 
     assert res.returncode != 0
-    assert "NOTICE" in res.stderr or "NOTICE" in res.stdout
+    assert "NOTICE.md" in res.stderr or "NOTICE.md" in res.stdout
 
 
 def test_validator_rejects_forbidden_paths(tmp_path: Path) -> None:
@@ -150,7 +150,7 @@ def test_validator_rejects_forbidden_paths(tmp_path: Path) -> None:
         archive.writestr("SDH-Ludusavi/package.json", json.dumps({"version": "0.2.1"}))
         archive.writestr("SDH-Ludusavi/main.py", "# main")
         archive.writestr("SDH-Ludusavi/LICENSE", "BSD")
-        archive.writestr("SDH-Ludusavi/NOTICE", "notices")
+        archive.writestr("SDH-Ludusavi/NOTICE.md", "notices")
         archive.writestr("SDH-Ludusavi/dist/index.js", "// index")
         archive.writestr("SDH-Ludusavi/py_modules/sdh_ludusavi/dummy.py", "# dummy")
         archive.writestr("SDH-Ludusavi/py_modules/pyludusavi/dummy.py", "# dummy")

@@ -25,7 +25,7 @@ The installable Decky plugin is built from these required files:
 - `assets/steamgrid/ludusavi/`: bundled local artwork source files for the plugin-managed Ludusavi launcher shortcut.
 - `dist/`: generated frontend bundle, source map, and built frontend assets from `pnpm run build`, including hashed artwork files emitted from the local assets.
 - `LICENSE`: redistributable license text.
-- `NOTICE`: source lineage, third-party licenses, API integrations, and artwork provenance.
+- `NOTICE.md`: source lineage, third-party licenses, API integrations, and artwork provenance.
 
 ### Frontend Dependencies
 
@@ -63,7 +63,7 @@ The repository uses `pnpm-lock.yaml` as the canonical frontend lockfile. Do not 
 ./run.sh uv run python scripts/package_plugin.py
 ```
 
-The package is written to `out/SDH-Ludusavi.zip` and contains a top-level `SDH-Ludusavi/` plugin directory. `LICENSE` and `NOTICE` are required package files. The local post-commit hook runs `scripts/post_commit.sh`, which rebuilds `dist/` and recreates that zip after each commit.
+The package is written to `out/SDH-Ludusavi.zip` and contains a top-level `SDH-Ludusavi/` plugin directory. `LICENSE` and `NOTICE.md` are required package files. The local post-commit hook runs `scripts/post_commit.sh`, which rebuilds `dist/` and recreates that zip after each commit.
 
 ## Licensing and Provenance
 
@@ -73,7 +73,7 @@ SteamDeckHomebrew Decky plugin template remain BSD-3-Clause. Vendored `pyludusav
 MIT-licensed under its own included license. Frontend libraries, icon sets, external runtime
 integrations, and SteamGridDB artwork retain their respective upstream terms. SDH-GameSync is
 credited as design inspiration for the game-launch pause and pre-launch save-check concept; no
-SDH-GameSync code is bundled. Keep `LICENSE` and `NOTICE` synchronized with dependency, asset,
+SDH-GameSync code is bundled. Keep `LICENSE` and `NOTICE.md` synchronized with dependency, asset,
 and packaging changes.
 
 ### Release Packaging and Workflows

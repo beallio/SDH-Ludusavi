@@ -43,7 +43,7 @@ def main() -> None:
             # 2. Required files must exist
             required_files = [
                 "LICENSE",
-                "NOTICE",
+                "NOTICE.md",
                 "main.py",
                 "package.json",
                 "plugin.json",
