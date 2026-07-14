@@ -140,6 +140,35 @@ def test_analyze_absolute_ceiling_as_launch_gate_expiry(tmp_path: Path) -> None:
     assert "absolute ceiling" in findings[0].evidence
 
 
+def test_analyze_scope_freeze_and_thaw_watchdog_syntax(tmp_path: Path) -> None:
+    log_path = tmp_path / "scope-freeze.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "[2026-07-14 12:32:45,001][INFO]: frontend: "
+                "App started: Wolverine (3156562597) tracked=true",
+                "[2026-07-14 12:32:46,001][INFO]: launch_gate: Froze Steam app scope "
+                "app-steam-app3156562597-12992.scope for root PID 12992",
+                "[2026-07-14 12:32:52,001][INFO]: frontend: check_game_start result for "
+                'Wolverine (3156562597): {"status":"conflict","game":"Wolverine"}',
+                "[2026-07-14 12:33:22,001][WARNING]: watchdog: Watchdog detected Steam "
+                "app scope app-steam-app3156562597-12992.scope for root PID 12992 frozen "
+                "for 36s (lease expired). Thawing automatically.",
+                "[2026-07-14 12:33:24,001][INFO]: frontend: [Wolverine] restore: Restored",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    module = load_analyze_module()
+
+    findings, _ = module.analyze_logs([log_path])
+
+    assert {finding.rule_id for finding in findings} == {
+        "launch_gate.lease_expired",
+        "launch_gate.resume_before_resolution",
+    }
+
+
 def test_analyze_strict_returns_1() -> None:
     result = subprocess.run(
         [
