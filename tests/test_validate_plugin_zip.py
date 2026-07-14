@@ -98,6 +98,49 @@ def test_validator_rejects_missing_required_files(tmp_path: Path) -> None:
     assert "missing" in res.stderr.lower() or "missing" in res.stdout.lower()
 
 
+def test_validator_rejects_missing_notice(tmp_path: Path) -> None:
+    zip_path = tmp_path / "missing_notice.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        archive.writestr(
+            "SDH-Ludusavi/plugin.json",
+            json.dumps(
+                {
+                    "name": "SDH-Ludusavi",
+                    "version": "0.2.1",
+                    "flags": [],
+                    "publish": {},
+                }
+            ),
+        )
+        archive.writestr("SDH-Ludusavi/package.json", json.dumps({"version": "0.2.1"}))
+        archive.writestr("SDH-Ludusavi/main.py", "# main")
+        archive.writestr("SDH-Ludusavi/LICENSE", "MIT")
+        archive.writestr("SDH-Ludusavi/dist/index.js", "// index")
+        archive.writestr("SDH-Ludusavi/py_modules/sdh_ludusavi/dummy.py", "# dummy")
+        archive.writestr("SDH-Ludusavi/py_modules/pyludusavi/dummy.py", "# dummy")
+        archive.writestr(
+            "SDH-Ludusavi/py_modules/pyludusavi-0.3.0.dist-info/dummy.py",
+            "# dummy",
+        )
+
+    res = subprocess.run(
+        [
+            sys.executable,
+            "scripts/validate_plugin_zip.py",
+            str(zip_path),
+            "--expected-version",
+            "0.2.1",
+            "--expected-name",
+            "SDH-Ludusavi",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert res.returncode != 0
+    assert "NOTICE" in res.stderr or "NOTICE" in res.stdout
+
+
 def test_validator_rejects_forbidden_paths(tmp_path: Path) -> None:
     zip_path = tmp_path / "forbidden.zip"
     with zipfile.ZipFile(zip_path, "w") as archive:
@@ -107,6 +150,7 @@ def test_validator_rejects_forbidden_paths(tmp_path: Path) -> None:
         archive.writestr("SDH-Ludusavi/package.json", json.dumps({"version": "0.2.1"}))
         archive.writestr("SDH-Ludusavi/main.py", "# main")
         archive.writestr("SDH-Ludusavi/LICENSE", "BSD")
+        archive.writestr("SDH-Ludusavi/NOTICE", "notices")
         archive.writestr("SDH-Ludusavi/dist/index.js", "// index")
         archive.writestr("SDH-Ludusavi/py_modules/sdh_ludusavi/dummy.py", "# dummy")
         archive.writestr("SDH-Ludusavi/py_modules/pyludusavi/dummy.py", "# dummy")
