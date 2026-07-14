@@ -1,0 +1,89 @@
+{
+  "date": "2026-07-14",
+  "task_objective": "Keep launch-gated games paused through observed incoming Syncthing activity, recheck Ludusavi after settlement, preserve active transfer status precedence, and make conflict dismissal explicit.",
+  "files_modified": [
+    "README.md",
+    "docs/agent_conversations/2026-07-14_pre-game-sync-status-correctness.json",
+    "docs/specs/custom_status_bar_ui.md",
+    "docs/status_bar_game_state_flows.html",
+    "src/controllers/gameLifecycleController.test.ts",
+    "src/controllers/gameLifecycleController.tsx",
+    "src/controllers/gameLifecycleDecision.test.ts",
+    "src/controllers/gameLifecycleDecision.ts",
+    "src/controllers/syncthingMonitor.activity.test.ts",
+    "src/controllers/syncthingMonitor.failures.test.ts",
+    "src/controllers/syncthingMonitor.initialization.test.ts",
+    "src/controllers/syncthingMonitor.ts",
+    "src/controllers/syncthingMonitorMachine.test.ts",
+    "src/controllers/syncthingMonitorMachine.ts",
+    "src/surfaces/autoSyncStatusRenderer.tsx",
+    "src/surfaces/autoSyncStatusSurface.suppression.test.ts",
+    "src/surfaces/autoSyncStatusSurface.test.ts",
+    "src/surfaces/autoSyncStatusSurface.tsx",
+    "src/types/index.ts",
+    "tests/test_status_flow_diagram.py"
+  ],
+  "tests_added": [
+    "Pre-game activity records mutation, resets settlement on interleaving activity, and resolves only after three distinct settled samples.",
+    "Repeated pre-game download samples publish once while download-to-upload and idle-to-new-transfer transitions remain visible.",
+    "Idle, settled, unavailable, timeout, cancellation, supersession, late allocation, and post-game session misuse have typed quiescence outcomes.",
+    "The launch lease remains held through settlement and a fresh check; interrupted activity fails once without restore or conflict mutation and still resumes.",
+    "Pre-game local_current cannot replace a visible transfer, while only the post-game backed-up handoff receives the 900 ms dwell.",
+    "SAVE CONFLICT remains visible for the modal lifetime and conflict dismissal renders SYNC SKIPPED — CONFLICT UNRESOLVED in amber for the normal result duration."
+  ],
+  "red_tests": {
+    "frontend_command": "./run.sh pnpm run test:unit -- src/controllers/syncthingMonitorMachine.test.ts src/controllers/syncthingMonitor.initialization.test.ts src/controllers/syncthingMonitor.activity.test.ts src/controllers/syncthingMonitor.failures.test.ts src/controllers/gameLifecycleDecision.test.ts src/controllers/gameLifecycleController.test.ts src/surfaces/autoSyncStatusSurface.test.ts src/surfaces/autoSyncStatusSurface.suppression.test.ts",
+    "frontend_result": "Expected RED: 21 failures named the missing quiescence API/effect, pre-game semantic deduplication, launch settlement gating, safe interrupted-transfer decision, lifecycle provenance dwell, persistent conflict, explicit conflict_unresolved rendering, and active-transfer precedence.",
+    "frontend_log": "/tmp/sdh_ludusavi/pre-game-sync-status-correctness-red-vitest.log",
+    "diagram_command": "./run.sh uv run pytest tests/test_status_flow_diagram.py",
+    "diagram_result": "Expected RED: the lifecycle diagram lacked the unresolved-conflict copy and settle/recheck sequence; the focused Python run also triggered the repository-wide coverage threshold.",
+    "diagram_log": "/tmp/sdh_ludusavi/pre-game-sync-status-correctness-red-pytest.log"
+  },
+  "design_decisions": [
+    "Readiness and quiescence are separate generation-scoped promises; every terminal path settles both so callers cannot be stranded.",
+    "Pre-game waits return a discriminated result with activity provenance so unavailable-before-activity stays benign while failure-after-activity is unsafe.",
+    "Only an observed-and-settled watch discards the first check and reruns check_game_start, and both wait and recheck execute under PauseLeaseHandle.runProtected().",
+    "Status completion carries explicit lifecycle provenance; dwell eligibility is recorded only for lifecycle_exit backed_up completion.",
+    "Active conflict and dismissed conflict use separate status kinds because their visibility contracts differ."
+  ],
+  "results": {
+    "implementation": "Implemented typed pre-game settlement, bounded cancellation-safe waiting, protected post-settlement rechecks, status precedence, phase-specific dwell, and explicit conflict dismissal.",
+    "dependencies": "No dependency changes.",
+    "release": "No release was dispatched during the implementation round; approved finalization owns merge, push, and development prerelease publication.",
+    "deferred_work": "Steam Deck verification is deferred until the approved development prerelease is published, as required by the plan."
+  },
+  "validation": [
+    {
+      "command": "./run.sh pnpm exec vitest run src/controllers/syncthingMonitorMachine.test.ts src/controllers/syncthingMonitor.initialization.test.ts src/controllers/syncthingMonitor.activity.test.ts src/controllers/syncthingMonitor.failures.test.ts src/controllers/syncthingMonitor.handoffCleanup.test.ts",
+      "result": "Passed: 100 tests."
+    },
+    {
+      "command": "./run.sh pnpm exec vitest run src/controllers/gameLifecycleDecision.test.ts src/controllers/gameLifecycleController.test.ts",
+      "result": "Passed: 46 tests before the final controller regression additions; the complete focused/full result is recorded below."
+    },
+    {
+      "command": "./run.sh pnpm exec vitest run src/surfaces/autoSyncStatusSurface.test.ts src/surfaces/autoSyncStatusSurface.suppression.test.ts src/controllers/gameLifecycleController.test.ts",
+      "result": "Passed: 72 tests before the final controller regression additions; the complete focused/full result is recorded below."
+    },
+    {
+      "command": "./run.sh pnpm run typecheck",
+      "result": "Passed after correcting the regression-test state annotation."
+    },
+    {
+      "command": "scripts/orchestration/run-quality-gates (first implementation run)",
+      "result": "All frontend gates and 686 Python tests passed; the run correctly failed because the three expanded TypeScript modules exceeded their existing line budgets. The implementation was consolidated without changing any budget."
+    },
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_module_size_budgets.py",
+      "result": "Passed with gameLifecycleController.tsx at 450 lines, gameLifecycleDecision.ts at 255 lines, and syncthingMonitor.ts at 565 lines."
+    },
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_status_flow_diagram.py",
+      "result": "Passed: 4 documentation-contract tests. Coverage was disabled only for this focused run; the full gate below enforced repository coverage."
+    },
+    {
+      "command": "scripts/orchestration/run-quality-gates",
+      "result": "Passed: 283 Vitest tests, TypeScript typecheck, frontend build, Ruff check/format, ty, 687 pytest tests, 87.66% coverage, module budgets, and review-note deletion integrity."
+    }
+  ]
+}

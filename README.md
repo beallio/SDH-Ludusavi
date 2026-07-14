@@ -7,7 +7,7 @@ SDH-Ludusavi is a Decky Loader plugin that surfaces Ludusavi save backup and res
 - **Automatic Sync**: Restores your save if the backup is newer before a game starts, and automatically performs a backup after you exit.
 - **SteamOS Integration**: Shows compact progress strips for background sync events, just like official Steam Cloud sync.
 - **Syncthing Activity**: Shows Syncthing sync status (downloading, uploading, or complete) on the autosync status strip when Syncthing is configured and running.
-- **Launch Gate**: Pauses game launch if a save conflict is detected, allowing you to choose which save to keep.
+- **Launch Gate**: Pauses game launch for save conflicts and observed incoming Syncthing activity, verifying stable backup files before deciding which save to use.
 - **Manual Control**: Force a backup for any Ludusavi-managed game at any time, and restore from any snapshot through the Backup Browser.
 - **Backup Browser**: View historical backup snapshots for a game directly in the plugin and selectively perform a point-in-time restore.
 - **Unified Logging**: View backend and frontend logs directly within the plugin's "View Logs" modal. Optionally enable **Debug Logging** for verbose diagnostics.
@@ -90,6 +90,7 @@ Backups and restores are limited to 15 minutes (status checks to 5 minutes); if 
 - **Needs first backup**: Ludusavi recognizes the game, but no backup has been created yet.
 - **Skipped — local save is already current**: The plugin detected that your local save matches or is newer than the backup, so no restore was performed.
 - **Skipped — recency is ambiguous**: The plugin couldn't determine which save is newer and will prompt you to choose. This also occurs when your local save and the backup have both changed (for example, after playing in Desktop Mode); the plugin only restores automatically when the backup is clearly newer, and otherwise pauses the launch so you can choose.
+- **Sync Skipped — Conflict Unresolved**: You dismissed the conflict prompt without choosing a save, so the plugin deliberately made no save changes and resumed the game.
 - **Syncthing Downloading**: Syncthing is downloading/applying backup folder data.
 - **Syncthing Uploading**: Syncthing is uploading/serving backup folder data to a remote peer.
 - **Syncthing Complete**: Syncthing synchronization has settled locally. This confirms there is no longer active transfer or scanning on the Steam Deck, but it does NOT guarantee that remote devices have finished downloading the save.
@@ -100,6 +101,11 @@ Backups and restores are limited to 15 minutes (status checks to 5 minutes); if 
 When Syncthing is not configured, the plugin silently reports the normal local-backup result without a Syncthing warning. Peer connectivity, not internet connectivity, controls these warnings: Syncthing monitoring runs whenever at least one device sharing the backup folder is connected (including over LAN without internet), and is skipped when none are.
 
 Syncthing activity statuses reflect only the Syncthing folder that contains Ludusavi's configured backup path. Traffic in other Syncthing folders is excluded, even when those folders are shared with the same remote peer.
+
+If incoming activity is already visible during a launch check, the game remains paused
+until that folder settles. The plugin then verifies the save again and uses only the
+fresh result; it does not restore from a preview captured while Syncthing was changing
+the backup folder.
 
 ## License
 
