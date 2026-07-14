@@ -297,6 +297,14 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       }
 
       if (result.status === "skipped") {
+        if (result.reason === "conflict_unresolved") {
+          api.publish("conflict_unresolved", {
+            ...options,
+            source: "rpc_result",
+            resultStatus: result.status,
+          });
+          return;
+        }
         if (result.reason === "local_current") {
           api.publish("has_backup", {
             ...options,
