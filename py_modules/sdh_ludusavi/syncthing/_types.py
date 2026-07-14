@@ -31,7 +31,6 @@ DEFAULT_ACTIVE_WINDOW_SECONDS = 15.0
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_EVENT_TIMEOUT_SECONDS = 1.0
 DEFAULT_STATUS_POLL_INTERVAL_SECONDS = 1.0
-DEFAULT_MIN_RATE_BYTES_PER_SECOND = 32768.0
 
 COMMON_SYNCTHING_FLATPAK_IDS = [
     "me.kozec.syncthingtk",
@@ -113,15 +112,7 @@ class RemoteProgress:
 
 
 @dataclass(frozen=True)
-class ConnectionRates:
-    in_bytes_per_second: float
-    out_bytes_per_second: float
-
-
-@dataclass(frozen=True)
 class ConnectionSnapshot:
-    in_bytes_total: int
-    out_bytes_total: int
     # Device IDs whose Syncthing "connected" field is true. Backend-only:
     # never log these or return them through RPC.
     connected_devices: frozenset[str] = frozenset()
@@ -154,8 +145,6 @@ class ActivityStatus:
     receive_needed: bool
     downloading: bool
     uploading: bool
-    aggregate_downloading: bool
-    aggregate_uploading: bool
     active_remote_devices: int
     active_remote_files: int
     active_download_files: int
@@ -165,7 +154,6 @@ class ActivityStatus:
     sequence_change_recent: bool
     scan_progress_recent: bool
     runtime: FolderRuntime
-    rates: ConnectionRates
 
 
 # ==========================================
