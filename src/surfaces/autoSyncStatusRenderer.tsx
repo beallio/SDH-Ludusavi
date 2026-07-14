@@ -5,6 +5,7 @@ export const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
   backing_up: "BACKING UP LOCAL SAVE",
   restoring: "RESTORING BACKUP SAVE",
   conflict: "SAVE CONFLICT",
+  conflict_unresolved: "SYNC SKIPPED — CONFLICT UNRESOLVED",
   has_backup: "GAME SAVE UP TO DATE",
   unknown: "UNKNOWN",
   error: "UNABLE TO SYNC",
@@ -38,12 +39,15 @@ export function isSyncthingStatus(status: AutoSyncStatusKind): boolean {
 }
 
 export function shouldAutoHideStatus(status: AutoSyncStatusKind): boolean {
-  return !isSyncthingActiveStatus(status);
+  return status !== "conflict" && !isSyncthingActiveStatus(status);
 }
 
 
 
 export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
+  if (status === "conflict" || status === "conflict_unresolved") {
+    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M10 1.7 19 18.3H1z" fill="currentColor"/><path d="M10 6.2v5.8" stroke="#0b151f" stroke-width="2.1" stroke-linecap="round"/><circle cx="10" cy="15.1" r="1.15" fill="#0b151f"/></svg>';
+  }
   if (status === "has_backup") {
     return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 10.2 8.5 12.7 14.2 7" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   }
@@ -118,7 +122,7 @@ body {
   box-sizing: border-box;
 }
 .text { display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; min-width: 245px; }
-.icon { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" || state.status === "conflict" || state.status === "syncthing_unavailable" || state.status === "syncthing_folder_not_found" || state.status === "syncthing_no_peers" ? "#f59e0b" : "#1a9fff"}; }
+.icon { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" || state.status === "conflict" || state.status === "conflict_unresolved" || state.status === "syncthing_unavailable" || state.status === "syncthing_folder_not_found" || state.status === "syncthing_no_peers" ? "#f59e0b" : "#1a9fff"}; }
 .icon svg { width: 100%; height: 100%; display: block; }
 @keyframes spin {
   0% { transform: rotate(0deg); }

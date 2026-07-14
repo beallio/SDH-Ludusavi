@@ -34,9 +34,43 @@ describe("SyncthingMonitor", () => {
       expect.objectContaining({
         cancel: expect.any(Function),
         activatePostGameHandoff: expect.any(Function),
+        waitForPreGameQuiescence: expect.any(Function),
       }),
     );
     expect(session).not.toHaveProperty("generation");
+  });
+
+  it("returns idle immediately for an initialized idle pre-game watch", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1" });
+    mockRpc.pollWatch.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: {
+        status: "IDLE",
+        folder_state: "idle",
+        update_in_progress: false,
+        settled: true,
+        downloading: false,
+        uploading: false,
+        timestamp_unix: 1,
+      },
+    });
+
+    const session = monitor.start("pre_game", "Hades", "1145300");
+    const result = await session.waitForPreGameQuiescence(1_000);
+
+    expect(result).toEqual({ status: "idle", activityObserved: false });
+    expect(mockRpc.stopWatch).not.toHaveBeenCalled();
+  });
+
+  it("rejects pre-game waiting on a post-game session without changing handoff behavior", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1" });
+    const session = monitor.start("post_game", "Hades", "1145300");
+
+    await expect(session.waitForPreGameQuiescence(1_000)).resolves.toEqual({
+      status: "stale",
+      activityObserved: false,
+    });
   });
 
   afterEach(() => {
