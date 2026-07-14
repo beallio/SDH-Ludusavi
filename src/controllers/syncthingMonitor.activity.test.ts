@@ -26,6 +26,47 @@ describe("SyncthingMonitor", () => {
     mockOnStatus = vi.fn();
     monitor = new SyncthingMonitor(mockRpc as unknown as SyncthingRpc, mockOnStatus);
   });
+
+  it("keeps a pre-game quiescence wait pending until the third settled sample", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1" });
+    mockRpc.pollWatch
+      .mockResolvedValueOnce({
+        status: "activity",
+        watch_id: "w1",
+        sample: { status: "ACTIVE_TRANSFER", folder_state: "syncing", uploading: false, downloading: true, update_in_progress: false, settled: false, timestamp_unix: 1 },
+      })
+      .mockResolvedValueOnce({ status: "activity", watch_id: "w1", sample: { status: "IDLE", folder_state: "idle", uploading: false, downloading: false, update_in_progress: false, settled: true, timestamp_unix: 2 } })
+      .mockResolvedValueOnce({ status: "activity", watch_id: "w1", sample: { status: "IDLE", folder_state: "idle", uploading: false, downloading: false, update_in_progress: false, settled: true, timestamp_unix: 3 } })
+      .mockResolvedValueOnce({ status: "activity", watch_id: "w1", sample: { status: "IDLE", folder_state: "idle", uploading: false, downloading: false, update_in_progress: false, settled: true, timestamp_unix: 4 } });
+
+    const session = monitor.start("pre_game", "Hades", "1145300");
+    const wait = session.waitForPreGameQuiescence(10_000);
+    let resolved = false;
+    void wait.then(() => { resolved = true; });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(resolved).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(500);
+    await expect(wait).resolves.toEqual({ status: "settled", activityObserved: true });
+    expect(mockRpc.stopWatch).toHaveBeenCalledWith("w1");
+  });
+
+  it("deduplicates same-direction pre-game publications across timestamps", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1" });
+    mockRpc.pollWatch
+      .mockResolvedValueOnce({ status: "activity", watch_id: "w1", sample: { status: "ACTIVE_TRANSFER", folder_state: "syncing", uploading: false, downloading: true, update_in_progress: false, settled: false, timestamp_unix: 1 } })
+      .mockResolvedValueOnce({ status: "activity", watch_id: "w1", sample: { status: "ACTIVE_TRANSFER", folder_state: "syncing", uploading: false, downloading: true, update_in_progress: false, settled: false, timestamp_unix: 2 } })
+      .mockResolvedValueOnce({ status: "activity", watch_id: "w1", sample: { status: "ACTIVE_TRANSFER", folder_state: "syncing", uploading: true, downloading: false, update_in_progress: false, settled: false, timestamp_unix: 3 } });
+
+    monitor.start("pre_game", "Hades", "1145300");
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(mockOnStatus.mock.calls.map((call: any[]) => call[0])).toEqual([
+      "syncthing_downloading",
+      "syncthing_uploading",
+    ]);
+  });
   it("post-game upload before activation is buffered and not published", async () => {
     mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
     mockRpc.pollWatch.mockResolvedValue({
