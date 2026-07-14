@@ -44,7 +44,7 @@ LAUNCH_GATE_LEASE_TTL_SECONDS = 30.0
 # Watchdog: The frontend should renew a lease every this many seconds.
 LAUNCH_GATE_RENEW_INTERVAL_SECONDS = 5.0
 
-# Watchdog: resume a SIGSTOPped game after this long UNCONDITIONALLY, even if
+# Watchdog: thaw a frozen Steam app scope after this long UNCONDITIONALLY, even if
 # an operation still claims to be running. Sized to outlast the longest legal
 # operation so it only fires when something is genuinely wedged.
 WATCHDOG_ABSOLUTE_RESUME_SECONDS = LUDUSAVI_OPERATION_TIMEOUT_SECONDS + 60.0
