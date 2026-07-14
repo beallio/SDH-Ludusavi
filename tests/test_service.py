@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import ast
 import json
 import logging
-import signal
 import threading
 import time
 from pathlib import Path
@@ -15,16 +13,49 @@ from sdh_ludusavi.persistence import JsonSettingsStore
 from sdh_ludusavi.types import GameStatus
 
 
-@pytest.fixture(autouse=True)
-def mock_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    from sdh_ludusavi.watchdog import _ProcessIdentity
+class FakeScopeController:
+    def __init__(self) -> None:
+        from sdh_ludusavi.launch_gate import SteamAppScope
 
-    monkeypatch.setattr("sdh_ludusavi.watchdog.os.geteuid", lambda: 1000, raising=False)
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog._read_process_identity",
-        lambda pid: _ProcessIdentity(12345, 1000),
-        raising=False,
-    )
+        self.scope_type = SteamAppScope
+        self.discover_calls: list[int] = []
+        self.freeze_calls: list[object] = []
+        self.thaw_calls: list[object] = []
+
+    def discover(self, pid: int):
+        self.discover_calls.append(pid)
+        return self.scope_type(
+            unit=f"app-steam-app123-{pid}.scope",
+            cgroup_path=f"/user.slice/app.slice/app-steam-app123-{pid}.scope",
+            device=1,
+            inode=pid,
+            root_pid=pid,
+        )
+
+    def freeze(self, scope):
+        from sdh_ludusavi.launch_gate import ScopeTransitionResult
+
+        self.freeze_calls.append(scope)
+        return ScopeTransitionResult(True)
+
+    def thaw(self, scope):
+        from sdh_ludusavi.launch_gate import ScopeTransitionResult
+
+        self.thaw_calls.append(scope)
+        return ScopeTransitionResult(True)
+
+    def freeze_requested(self, scope) -> bool:
+        return True
+
+    def wait_for_frozen(self, scope, expected: bool):
+        from sdh_ludusavi.launch_gate import ScopeTransitionResult
+
+        return ScopeTransitionResult(expected)
+
+
+@pytest.fixture(autouse=True)
+def fake_scope_controller(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sdh_ludusavi.watchdog.SystemdScopeController", FakeScopeController)
 
 
 class FakeAdapter:
@@ -346,108 +377,64 @@ def test_ludusavi_adapter_initialization_is_thread_safe(tmp_path: Path) -> None:
     assert len({id(adapter) for adapter in adapters}) == 1
 
 
-def test_pause_and_resume_game_process_signal_process_tree(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_pause_and_resume_game_process_freezes_exact_scope(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
-    signals: list[tuple[int, signal.Signals]] = []
-
-    monkeypatch.setattr("sdh_ludusavi.watchdog._process_tree", lambda pid: [100, 101, 201, 102])
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
-    )
+    controller = service._watchdog._scope_controller
 
     res = service.pause_game_process(100)
     assert res["status"] == "paused"
     assert res["pid"] == 100
     assert "lease_id" in res
     assert service.resume_game_process(100) == {"status": "resumed", "pid": 100}
-
-    assert signals == [
-        (100, signal.SIGSTOP),
-        (101, signal.SIGSTOP),
-        (201, signal.SIGSTOP),
-        (102, signal.SIGSTOP),
-        (100, signal.SIGCONT),
-        (101, signal.SIGCONT),
-        (201, signal.SIGCONT),
-        (102, signal.SIGCONT),
-    ]
+    assert controller.discover_calls == [100]
+    assert controller.thaw_calls == controller.freeze_calls
 
 
 @pytest.mark.parametrize("pid", [0, -1, 1])
 def test_pause_game_process_rejects_invalid_signal_pids(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     pid: int,
 ) -> None:
     service = service_with_state(tmp_path)
-    calls: list[tuple[int, signal.Signals]] = []
-
-    def capture_signal_tree(target_pid: int, sig: signal.Signals) -> bool:
-        calls.append((target_pid, sig))
-        return True
-
-    monkeypatch.setattr("sdh_ludusavi.watchdog._send_signal_tree", capture_signal_tree)
+    controller = service._watchdog._scope_controller
 
     result = service.pause_game_process(pid)
 
     assert result["status"] == "failed"
     assert "message" in result
     assert "pid" not in result
-    assert calls == []
+    assert controller.discover_calls == []
     assert service._watchdog._paused_pids == {}
 
 
 @pytest.mark.parametrize("pid", [0, -1, 1])
 def test_resume_game_process_rejects_invalid_signal_pids(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     pid: int,
 ) -> None:
-    from sdh_ludusavi.watchdog import _ProcessIdentity
-
     service = service_with_state(tmp_path)
-    service._watchdog._paused_pids[99] = (_ProcessIdentity(12345, 1000), 123.0)
-    calls: list[tuple[int, signal.Signals]] = []
-
-    def capture_signal_tree(target_pid: int, sig: signal.Signals) -> bool:
-        calls.append((target_pid, sig))
-        return True
-
-    monkeypatch.setattr("sdh_ludusavi.watchdog._send_signal_tree", capture_signal_tree)
+    controller = service._watchdog._scope_controller
 
     result = service.resume_game_process(pid)
 
     assert result["status"] == "failed"
     assert "message" in result
     assert "pid" not in result
-    assert calls == []
-    from sdh_ludusavi.watchdog import _ProcessIdentity
-
-    assert service._watchdog._paused_pids == {99: (_ProcessIdentity(12345, 1000), 123.0)}
+    assert controller.thaw_calls == []
 
 
 def test_signal_process_methods_reject_pid_above_os_signal_range(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = service_with_state(tmp_path)
-    calls: list[tuple[int, signal.Signals]] = []
-
-    def capture_signal_tree(target_pid: int, sig: signal.Signals) -> bool:
-        calls.append((target_pid, sig))
-        return True
-
-    monkeypatch.setattr("sdh_ludusavi.watchdog._send_signal_tree", capture_signal_tree)
+    controller = service._watchdog._scope_controller
 
     pause_result = service.pause_game_process("2147483648")
     resume_result = service.resume_game_process("2147483648")
 
     assert pause_result["status"] == "failed"
     assert resume_result["status"] == "failed"
-    assert calls == []
+    assert controller.discover_calls == []
     assert service._watchdog._paused_pids == {}
 
 
@@ -504,260 +491,18 @@ def test_coerce_signal_pid_accepts_valid_integer_strings(value: object, expected
     assert watchdog_mod._coerce_signal_pid(value) == expected
 
 
-def test_signal_process_tree_snapshots_process_table_once(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    service = service_with_state(tmp_path)
-    listdir_calls: list[str] = []
-    signals: list[tuple[int, signal.Signals]] = []
-
-    # Simulate /proc with PIDs: 100 (ppid=1), 101 (ppid=100), 102 (ppid=100), 201 (ppid=101)
-    proc_status: dict[str, str] = {
-        "100": "Name:\tbash\nPid:\t100\nPPid:\t1\n",
-        "101": "Name:\tgame\nPid:\t101\nPPid:\t100\n",
-        "102": "Name:\twine\nPid:\t102\nPPid:\t100\n",
-        "201": "Name:\tchild\nPid:\t201\nPPid:\t101\n",
-    }
-
-    def fake_listdir(path: str) -> list[str]:
-        listdir_calls.append(path)
-        return ["1", "100", "101", "102", "201", "self", "sys"]
-
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog._read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str)
-    )
-    monkeypatch.setattr("sdh_ludusavi.watchdog.os.listdir", fake_listdir)
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
-    )
-
-    res = service.pause_game_process(100)
-    assert res["status"] == "paused"
-    assert res["pid"] == 100
-    assert "lease_id" in res
-
-    assert len(listdir_calls) == 1
-    assert signals == [
-        (100, signal.SIGSTOP),
-        (101, signal.SIGSTOP),
-        (201, signal.SIGSTOP),
-        (102, signal.SIGSTOP),
-    ]
-
-
-def test_signal_process_tree_falls_back_to_root_when_snapshot_fails(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    service = service_with_state(tmp_path)
-    signals: list[tuple[int, signal.Signals]] = []
-
-    def fail_listdir(path: str) -> list[str]:
-        raise OSError("/proc unavailable")
-
-    monkeypatch.setattr("sdh_ludusavi.watchdog.os.listdir", fail_listdir)
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
-    )
-
-    res = service.pause_game_process(100)
-    assert res["status"] == "paused"
-    assert res["pid"] == 100
-    assert "lease_id" in res
-
-    assert signals == [(100, signal.SIGSTOP)]
-
-
-def _parse_ppid(proc_status: dict[str, str], pid_str: str) -> int | None:
-    """Test helper: extract PPid from fake /proc status content."""
-    content = proc_status.get(pid_str)
-    if content is None:
-        return None
-    for line in content.splitlines():
-        if line.startswith("PPid:"):
-            return int(line.split(":")[1])
-    return None
-
-
-def test_process_tree_reads_proc_filesystem(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Verify _process_tree builds a correct tree from mocked /proc entries."""
-    import sdh_ludusavi.watchdog as watchdog_mod
-
-    proc_status: dict[str, str] = {
-        "1": "Name:\tinit\nPid:\t1\nPPid:\t0\n",
-        "100": "Name:\tbash\nPid:\t100\nPPid:\t1\n",
-        "101": "Name:\tgame\nPid:\t101\nPPid:\t100\n",
-        "102": "Name:\twine\nPid:\t102\nPPid:\t100\n",
-        "201": "Name:\tchild\nPid:\t201\nPPid:\t101\n",
-    }
-
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog.os.listdir",
-        lambda path: ["1", "100", "101", "102", "201", "self", "sys"],
-    )
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog._read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str)
-    )
-
-    result = watchdog_mod._process_tree(100)
-
-    assert result == [100, 101, 201, 102]
-
-
-def test_process_tree_skips_vanished_processes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Processes that vanish between listdir and read are silently skipped."""
-    import sdh_ludusavi.watchdog as watchdog_mod
-
-    proc_status: dict[str, str] = {
-        "100": "Name:\tbash\nPid:\t100\nPPid:\t1\n",
-        "101": "Name:\tgame\nPid:\t101\nPPid:\t100\n",
-        # 102 intentionally missing — simulates vanished process
-    }
-
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog.os.listdir",
-        lambda path: ["100", "101", "102"],
-    )
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog._read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str)
-    )
-
-    result = watchdog_mod._process_tree(100)
-
-    assert result == [100, 101]
-
-
-def test_process_tree_ignores_cycles(monkeypatch: pytest.MonkeyPatch) -> None:
-    import sdh_ludusavi.watchdog as watchdog_mod
-
-    proc_status: dict[str, str] = {
-        "100": "Name:\tbash\nPid:\t100\nPPid:\t201\n",
-        "101": "Name:\tgame\nPid:\t101\nPPid:\t100\n",
-        "102": "Name:\twine\nPid:\t102\nPPid:\t100\n",
-        "201": "Name:\tchild\nPid:\t201\nPPid:\t101\n",
-    }
-
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog.os.listdir",
-        lambda path: ["100", "101", "102", "201"],
-    )
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog._read_ppid", lambda pid_str: _parse_ppid(proc_status, pid_str)
-    )
-
-    assert watchdog_mod._process_tree(100) == [100, 101, 201, 102]
-
-
-def test_process_tree_falls_back_on_listdir_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """If os.listdir('/proc') raises OSError, fall back to [pid]."""
-    import sdh_ludusavi.watchdog as watchdog_mod
-
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog.os.listdir",
-        lambda path: (_ for _ in ()).throw(OSError("/proc unavailable")),
-    )
-
-    result = watchdog_mod._process_tree(42)
-
-    assert result == [42]
-
-
-def test_read_ppid_parses_stat_file(tmp_path: Path) -> None:
-    """_read_ppid extracts PPID from compact /proc stat content."""
-    from sdh_ludusavi.watchdog import _read_ppid
-
-    proc_dir = tmp_path / "proc" / "12345"
-    proc_dir.mkdir(parents=True)
-    (proc_dir / "stat").write_text("12345 (bash) S 100 12345 12345 0 -1\n", encoding="utf-8")
-
-    assert _read_ppid("12345", proc_root=str(tmp_path / "proc")) == 100
-
-
-def test_read_ppid_parses_stat_comm_with_spaces_and_parentheses(tmp_path: Path) -> None:
-    """The /proc stat parser must not split the parenthesized comm field naively."""
-    from sdh_ludusavi.watchdog import _read_ppid
-
-    proc_dir = tmp_path / "proc" / "12345"
-    proc_dir.mkdir(parents=True)
-    (proc_dir / "stat").write_text(
-        "12345 (game process) name) S 100 12345 12345 0 -1\n",
-        encoding="utf-8",
-    )
-
-    assert _read_ppid("12345", proc_root=str(tmp_path / "proc")) == 100
-
-
-def test_read_ppid_returns_none_on_malformed_stat(tmp_path: Path) -> None:
-    """Malformed /proc stat content is treated like a vanished process."""
-    from sdh_ludusavi.watchdog import _read_ppid
-
-    proc_dir = tmp_path / "proc" / "12345"
-    proc_dir.mkdir(parents=True)
-    (proc_dir / "stat").write_text("12345 (bash) S not-a-ppid\n", encoding="utf-8")
-
-    assert _read_ppid("12345", proc_root=str(tmp_path / "proc")) is None
-
-
-def test_read_ppid_returns_none_on_missing_file() -> None:
-    """_read_ppid returns None for a nonexistent PID."""
-    from sdh_ludusavi.watchdog import _read_ppid
-
-    assert _read_ppid("999999999") is None
-
-
-def test_process_tree_has_no_subprocess_usage() -> None:
-    """Static regression: _process_tree and _read_ppid must not use subprocess."""
-    source = Path("py_modules/sdh_ludusavi/watchdog.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-
-    target_funcs = {"_process_tree", "_read_ppid"}
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name in target_funcs:
-            names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
-            attrs = {n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)}
-            assert "subprocess" not in names, f"{node.name} must not reference subprocess"
-            assert "Popen" not in attrs, f"{node.name} must not reference Popen"
-            assert "communicate" not in attrs, f"{node.name} must not reference communicate"
-
-
-def test_read_ppid_uses_proc_stat_not_status() -> None:
-    """Static regression: parent PID reads should use compact /proc stat files."""
-    source = Path("py_modules/sdh_ludusavi/watchdog.py").read_text(encoding="utf-8")
-    read_ppid_source = source[source.index("def _read_ppid") : source.index("def _process_tree")]
-
-    assert "/stat" in read_ppid_source
-    assert "/status" not in read_ppid_source
-
-
 def test_resume_all_paused_processes_resumes_remaining_pids(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = service_with_state(tmp_path)
-    signals: list[tuple[int, signal.Signals]] = []
-
-    monkeypatch.setattr("sdh_ludusavi.watchdog._process_tree", lambda pid: [pid])
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
-    )
+    controller = service._watchdog._scope_controller
 
     service.pause_game_process(100)
     service.pause_game_process(200)
     service.resume_all_paused_processes()
 
-    assert signals == [
-        (100, signal.SIGSTOP),
-        (200, signal.SIGSTOP),
-        (100, signal.SIGCONT),
-        (200, signal.SIGCONT),
-    ]
+    assert [scope.root_pid for scope in controller.freeze_calls] == [100, 200]
+    assert [scope.root_pid for scope in controller.thaw_calls] == [100, 200]
 
 
 def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
@@ -1899,12 +1644,8 @@ def test_cache_keys_do_not_override_settings(tmp_path: Path) -> None:
     assert service._ludusavi_launcher_shortcut_id == 12345
 
 
-def test_watchdog_lazy_initialization_and_exit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_watchdog_lazy_initialization_and_exit(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
-    monkeypatch.setattr("sdh_ludusavi.watchdog._process_tree", lambda pid: [pid])
-    monkeypatch.setattr("sdh_ludusavi.watchdog.os.kill", lambda pid, sig: None)
 
     assert not service._watchdog._watchdog_active
     assert service._watchdog._watchdog_thread is None
@@ -1924,29 +1665,19 @@ def test_watchdog_lazy_initialization_and_exit(
     assert not service._watchdog._watchdog_thread.is_alive()
 
 
-def test_watchdog_auto_resumption_on_timeout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_watchdog_auto_resumption_on_timeout(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
-    signals: list[tuple[int, signal.Signals]] = []
-
-    monkeypatch.setattr("sdh_ludusavi.watchdog._process_tree", lambda pid: [pid])
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
-    )
+    controller = service._watchdog._scope_controller
 
     # Start by pausing a PID
     service.pause_game_process(123)
     assert 123 in service._watchdog._paused_pids
 
-    # Fast forward the paused timestamp to 20 seconds ago
-    from sdh_ludusavi.watchdog import _ProcessIdentity
-
     with service._watchdog._paused_pids_lock:
         from sdh_ludusavi.watchdog import _PauseLease
 
         service._watchdog._paused_pids[123] = _PauseLease(
-            identity=_ProcessIdentity(12345, 1000),
+            scope=controller.freeze_calls[0],
             paused_at=time.monotonic() - 20.0,
             lease_id="test",
             lease_deadline=time.monotonic() - 10.0,
@@ -1958,52 +1689,34 @@ def test_watchdog_auto_resumption_on_timeout(
             break
         time.sleep(0.01)
 
-    # Assert watchdog automatically resumed it via SIGCONT
     assert 123 not in service._watchdog._paused_pids
-    assert (123, signal.SIGCONT) in signals
+    assert [scope.root_pid for scope in controller.thaw_calls] == [123]
 
     # Clean up service stop
     service.stop()
 
 
-def test_watchdog_does_not_resume_during_active_operation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_watchdog_does_not_thaw_before_periodic_expiry_check(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
-    signals: list[tuple[int, signal.Signals]] = []
-
-    monkeypatch.setattr("sdh_ludusavi.watchdog._process_tree", lambda pid: [pid])
-    monkeypatch.setattr(
-        "sdh_ludusavi.watchdog.os.kill", lambda pid, sig: signals.append((pid, sig))
-    )
+    controller = service._watchdog._scope_controller
 
     # Pause a PID
     service.pause_game_process(123)
     assert 123 in service._watchdog._paused_pids
 
-    # Fast forward paused timestamp to 20 seconds ago
-    from sdh_ludusavi.watchdog import _ProcessIdentity
-
     with service._watchdog._paused_pids_lock:
         from sdh_ludusavi.watchdog import _PauseLease
 
         service._watchdog._paused_pids[123] = _PauseLease(
-            identity=_ProcessIdentity(12345, 1000),
+            scope=controller.freeze_calls[0],
             paused_at=time.monotonic() - 20.0,
             lease_id="test",
             lease_deadline=time.monotonic() - 10.0,
         )
 
-    # Simulate an active operation (like cloud sync) running
-    service._coordinator._operation.is_running = True
-
-    # Sleep for a short while (0.2s) and verify watchdog hasn't resumed the PID
     time.sleep(0.2)
     assert 123 in service._watchdog._paused_pids
-    assert (123, signal.SIGCONT) not in signals
-
-    # Mark the operation as finished
-    service._coordinator._operation.is_running = False
+    assert controller.thaw_calls == []
 
     # Wait for the watchdog to detect the inactive operation status and resume the PID
     for _ in range(200):
@@ -2012,7 +1725,7 @@ def test_watchdog_does_not_resume_during_active_operation(
         time.sleep(0.01)
 
     assert 123 not in service._watchdog._paused_pids
-    assert (123, signal.SIGCONT) in signals
+    assert [scope.root_pid for scope in controller.thaw_calls] == [123]
 
     service.stop()
 

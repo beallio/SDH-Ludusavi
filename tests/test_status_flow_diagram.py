@@ -58,14 +58,15 @@ def test_backup_conflict_resolution_flow_diagram_documents_launch_gate() -> None
     for required_text in [
         "Launch-Gated Backup Conflict Resolution",
         "App lifetime start",
-        "SIGSTOP",
+        "systemctl --user freeze",
+        "frozen Steam app scope",
         "check_game_start",
         "ambiguous_recency",
         "Conflict Detected",
         "Keep Local Save",
         "Restore Backup Save",
         "resolve_game_start_conflict",
-        "SIGCONT",
+        "systemctl --user thaw",
         "backupModifiedAt",
         "Ludusavi backup path",
     ]:
@@ -73,6 +74,9 @@ def test_backup_conflict_resolution_flow_diagram_documents_launch_gate() -> None
 
     assert "Download Cloud Save" not in source
     assert "Cloud Save" not in source
+    assert "SIGSTOP" not in source
+    assert "SIGCONT" not in source
+    assert "process tree" not in source
 
 
 def test_backup_conflict_resolution_flow_diagram_is_standalone_html() -> None:
