@@ -133,6 +133,31 @@ describe("SyncthingMonitorMachine", () => {
         expect(res.effects.resolveReadiness).toBe("ready");
       });
 
+      it("does not publish a transfer status for an idle sample", () => {
+        const state = {
+          ...createInitialWatchState("pre_game"),
+          step: "watching" as const,
+          initialized: true,
+          publicationEnabled: true,
+        };
+        const res = transition(state, {
+          type: "sample",
+          sample: {
+            timestamp_unix: 1,
+            folder_state: "idle",
+            uploading: false,
+            downloading: false,
+            update_in_progress: false,
+            status: "IDLE",
+            settled: true,
+          },
+        });
+
+        expect(res.state.latestStatus).toBe("idle");
+        expect(res.state.activityObserved).toBe(false);
+        expect(res.effects.publish).toBeNull();
+      });
+
       it("ignores duplicate timestamp when initialized", () => {
         const state = { ...createInitialWatchState("post_game"), step: "watching" as const, initialized: true, lastProcessedTimestamp: 1 };
         const res = transition(state, { type: "sample", sample: { timestamp_unix: 1 } as any });

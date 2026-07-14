@@ -15,7 +15,6 @@ from ._types import (
     FolderSelection,
     FolderRuntime,
     RemoteProgress,
-    ConnectionRates,
     ConnectionSnapshot,
     LocalActivity,
     ActivityStatus,
@@ -82,12 +81,6 @@ def get_connection_snapshot(api: SyncthingAPI) -> ConnectionSnapshot:
     data = api.get_json("/rest/system/connections", timeout=10)
     if not isinstance(data, dict):
         raise RuntimeError("Unexpected system connections response: not a JSON object")
-    in_bytes_total = 0
-    out_bytes_total = 0
-    total = data.get("total")
-    if isinstance(total, dict):
-        in_bytes_total = int(total.get("inBytesTotal", 0) or 0)
-        out_bytes_total = int(total.get("outBytesTotal", 0) or 0)
     # A missing or non-dict connections map must fail rather than read as
     # "all peers offline"; an empty connected set is a peer-availability signal.
     connections = data.get("connections")
@@ -99,15 +92,8 @@ def get_connection_snapshot(api: SyncthingAPI) -> ConnectionSnapshot:
         if isinstance(info, dict) and info.get("connected") is True
     )
     return ConnectionSnapshot(
-        in_bytes_total=in_bytes_total,
-        out_bytes_total=out_bytes_total,
         connected_devices=connected_devices,
     )
-
-
-def get_connection_totals(api: SyncthingAPI) -> tuple[int, int]:
-    snapshot = get_connection_snapshot(api)
-    return snapshot.in_bytes_total, snapshot.out_bytes_total
 
 
 def get_my_device_id(api: SyncthingAPI) -> str:
@@ -117,23 +103,6 @@ def get_my_device_id(api: SyncthingAPI) -> str:
     if not isinstance(my_id, str) or not my_id:
         raise RuntimeError("Unexpected system status response: missing myID")
     return my_id
-
-
-def compute_rates(
-    previous_totals: tuple[int, int] | None,
-    previous_time: float | None,
-    current_totals: tuple[int, int],
-    current_time: float,
-) -> ConnectionRates:
-    if previous_totals is None or previous_time is None:
-        return ConnectionRates(in_bytes_per_second=0.0, out_bytes_per_second=0.0)
-    elapsed = max(0.001, current_time - previous_time)
-    in_delta = max(0, current_totals[0] - previous_totals[0])
-    out_delta = max(0, current_totals[1] - previous_totals[1])
-    return ConnectionRates(
-        in_bytes_per_second=in_delta / elapsed,
-        out_bytes_per_second=out_delta / elapsed,
-    )
 
 
 def prune_remote_progress(
@@ -189,8 +158,6 @@ def compute_activity_status(
     remote_progress: dict[str, RemoteProgress],
     local_activity: LocalActivity,
     runtime: FolderRuntime,
-    rates: ConnectionRates,
-    min_rate_bytes_per_second: float,
     active_window_seconds: float,
     now: float,
 ) -> ActivityStatus:
@@ -214,9 +181,6 @@ def compute_activity_status(
         and now - local_activity.last_scan_progress_monotonic <= active_window_seconds
     )
 
-    aggregate_downloading = rates.in_bytes_per_second >= min_rate_bytes_per_second
-    aggregate_uploading = rates.out_bytes_per_second >= min_rate_bytes_per_second
-
     receive_needed = (
         runtime.need_bytes > 0 or runtime.need_total_items > 0 or runtime.need_deletes > 0
     )
@@ -228,22 +192,13 @@ def compute_activity_status(
         and now - local_activity.last_item_finished_monotonic <= 2.0
     )
 
-    recent_folder_mutation = (
-        local_change_recent
-        or local_index_recent
-        or sequence_change_recent
-        or bool(active_items)
-        or item_finished_recent
-    )
-
     downloading = (
         normalized_state == "syncing"
         or local_activity.active_download_files > 0
         or bool(active_items)
-        or (recent_folder_mutation and aggregate_downloading and normalized_state != "idle")
     )
 
-    uploading = bool(remote_progress) or (recent_folder_mutation and aggregate_uploading)
+    uploading = bool(remote_progress)
 
     active_transfer = downloading or uploading
     update_in_progress = (
@@ -292,8 +247,6 @@ def compute_activity_status(
         receive_needed=receive_needed,
         downloading=downloading,
         uploading=uploading,
-        aggregate_downloading=aggregate_downloading,
-        aggregate_uploading=aggregate_uploading,
         active_remote_devices=len(remote_progress),
         active_remote_files=sum(p.file_count for p in remote_progress.values()),
         active_download_files=local_activity.active_download_files,
@@ -303,7 +256,6 @@ def compute_activity_status(
         sequence_change_recent=sequence_change_recent,
         scan_progress_recent=scan_progress_recent,
         runtime=runtime,
-        rates=rates,
     )
 
 
