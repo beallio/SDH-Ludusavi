@@ -1,6 +1,8 @@
 # SDH-Ludusavi
 
-SDH-Ludusavi is a Decky Loader plugin that surfaces Ludusavi save backup and restore controls in the Steam Deck side panel.
+SDH-Ludusavi keeps your game saves protected without pulling you out of Game Mode. It brings Ludusavi's backup and restore tools into Decky Loader, checks for newer saves before launch, and backs up your progress when you quit.
+
+![SDH-Ludusavi demo](assets/demo.webp?cacheBuster=1)
 
 ## Features
 
