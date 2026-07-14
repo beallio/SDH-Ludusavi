@@ -1,365 +1,317 @@
 from __future__ import annotations
 
+import threading
 import time
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
 
 from sdh_ludusavi.watchdog import ProcessWatchdog, _PauseLease
 
 
-def mock_identity() -> object:
-    from sdh_ludusavi.watchdog import _ProcessIdentity
-
-    return _ProcessIdentity(12345, 1000)
-
-
-def test_process_watchdog_pause_resume() -> None:
-    log_mock = MagicMock()
-    with (
-        patch("sdh_ludusavi.watchdog.os.kill") as mock_kill,
-        patch("sdh_ludusavi.watchdog._process_tree", return_value=[4567]),
-        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
-        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
-    ):
-        wd = ProcessWatchdog(log_callback=log_mock)
-
-        # Pause pid 4567
-        res = wd.pause(4567)
-        assert res["status"] == "paused"
-        assert res["pid"] == 4567
-        assert "lease_id" in res
-        lease_id = res["lease_id"]
-        mock_kill.assert_called_with(4567, 19)
-
-        # Renew pid 4567
-        res_renew = wd.renew_pause(4567, lease_id)
-        assert res_renew["status"] == "renewed"
-        assert res_renew["pid"] == 4567
-
-        # Resume pid 4567
-        res_res = wd.resume(4567)
-        assert res_res["status"] == "resumed"
-        mock_kill.assert_called_with(4567, 18)
-
-        wd.stop()
+def scope(pid: int = 4567, *, inode: int = 10) -> SimpleNamespace:
+    return SimpleNamespace(
+        unit=f"app-steam-app123-{pid}.scope",
+        cgroup_path=f"/user.slice/app.slice/app-steam-app123-{pid}.scope",
+        device=1,
+        inode=inode,
+        root_pid=pid,
+    )
 
 
-def test_process_watchdog_auto_resume_expired_lease() -> None:
-    log_mock = MagicMock()
-
-    with (
-        patch("sdh_ludusavi.watchdog.os.kill") as mock_kill,
-        patch("sdh_ludusavi.watchdog._process_tree", return_value=[9999]),
-        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
-        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
-    ):
-        wd = ProcessWatchdog(log_callback=log_mock)
-
-        with wd._paused_pids_lock:
-            wd._paused_pids[9999] = _PauseLease(
-                identity=mock_identity(),
-                paused_at=time.monotonic() - 60.0,
-                lease_id="test",
-                lease_deadline=time.monotonic() - 10.0,
-            )
-
-        wd._check_and_resume_stuck_pids()
-
-        mock_kill.assert_called_with(9999, 18)
-        assert 9999 not in wd._paused_pids
-        wd.stop()
+def result(success: bool, reason: str = "", *, disappeared: bool = False) -> SimpleNamespace:
+    return SimpleNamespace(success=success, reason=reason, disappeared=disappeared)
 
 
-def test_process_watchdog_failed_resume() -> None:
-    log_mock = MagicMock()
-    with (
-        patch("sdh_ludusavi.watchdog._send_signal_tree", return_value=False),
-        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
-        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
-    ):
-        wd = ProcessWatchdog(log_callback=log_mock)
+class FakeScopeController:
+    def __init__(self) -> None:
+        self.scopes: dict[int, object] = {}
+        self.freeze_results: list[object] = []
+        self.thaw_results: list[object] = []
+        self.requested = True
+        self.frozen = True
+        self.discover_calls: list[int] = []
+        self.freeze_calls: list[object] = []
+        self.thaw_calls: list[object] = []
 
-        with wd._paused_pids_lock:
-            wd._paused_pids[7777] = _PauseLease(
-                identity=mock_identity(),
-                paused_at=time.monotonic(),
-                lease_id="test",
-                lease_deadline=time.monotonic() + 30.0,
-            )
+    def discover(self, pid: int) -> object:
+        self.discover_calls.append(pid)
+        discovered = self.scopes.get(pid)
+        if isinstance(discovered, BaseException):
+            raise discovered
+        return discovered or scope(pid)
 
-        res = wd.resume(7777)
-        assert res["status"] == "failed"
-        assert res["pid"] == 7777
-        assert "Unable to resume" in res["message"]
+    def freeze(self, target: object) -> object:
+        self.freeze_calls.append(target)
+        return self.freeze_results.pop(0) if self.freeze_results else result(True)
 
-        with wd._paused_pids_lock:
-            assert 7777 in wd._paused_pids
+    def thaw(self, target: object) -> object:
+        self.thaw_calls.append(target)
+        return self.thaw_results.pop(0) if self.thaw_results else result(True)
 
-        wd.stop()
+    def freeze_requested(self, target: object) -> bool:
+        return self.requested
 
-
-def test_watchdog_defers_resume_while_lease_valid() -> None:
-    """Paused with a valid lease must NOT be resumed."""
-    log_mock = MagicMock()
-
-    with (
-        patch("sdh_ludusavi.watchdog.os.kill") as mock_kill,
-        patch("sdh_ludusavi.watchdog._process_tree", return_value=[8888]),
-        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
-        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
-    ):
-        wd = ProcessWatchdog(log_callback=log_mock)
-
-        with wd._paused_pids_lock:
-            wd._paused_pids[8888] = _PauseLease(
-                identity=mock_identity(),
-                paused_at=time.monotonic(),
-                lease_id="test",
-                lease_deadline=time.monotonic() + 30.0,
-            )
-
-        wd._check_and_resume_stuck_pids()
-
-        mock_kill.assert_not_called()
-        assert 8888 in wd._paused_pids
-        wd.stop()
+    def wait_for_frozen(self, target: object, expected: bool) -> object:
+        return result(self.frozen is expected, "unexpected freezer state")
 
 
-def test_watchdog_resumes_past_absolute_ceiling_even_when_lease_valid() -> None:
-    """Paused longer than WATCHDOG_ABSOLUTE_RESUME_SECONDS with an operation
-    running (even if lease renewed): MUST be resumed, and the warning log must mention the absolute
-    ceiling."""
+def watchdog(controller: FakeScopeController | None = None) -> tuple[ProcessWatchdog, MagicMock]:
+    logger = MagicMock()
+    instance = ProcessWatchdog(
+        log_callback=logger, scope_controller=controller or FakeScopeController()
+    )
+    return instance, logger
+
+
+def test_pause_renew_resume_uses_scope_and_preserves_rpc_shape() -> None:
+    controller = FakeScopeController()
+    wd, logger = watchdog(controller)
+
+    paused = wd.pause(4567)
+    lease_id = paused["lease_id"]
+
+    assert paused == {
+        "status": "paused",
+        "pid": 4567,
+        "lease_id": lease_id,
+        "lease_ttl_seconds": 30.0,
+    }
+    assert wd.renew_pause(4567, lease_id) == {
+        "status": "renewed",
+        "pid": 4567,
+        "lease_ttl_seconds": 30.0,
+    }
+    assert wd.resume(4567, lease_id) == {"status": "resumed", "pid": 4567}
+    assert len(controller.freeze_calls) == 1
+    assert controller.thaw_calls == controller.freeze_calls
+    assert any("Froze Steam app scope" in call.args[1] for call in logger.call_args_list)
+    assert any("Thawed Steam app scope" in call.args[1] for call in logger.call_args_list)
+    wd.stop()
+
+
+def test_pause_fails_closed_when_scope_discovery_or_freeze_fails() -> None:
+    controller = FakeScopeController()
+    controller.scopes[4567] = RuntimeError("scope unavailable")
+    wd, _ = watchdog(controller)
+
+    discovered = wd.pause(4567)
+    assert discovered["status"] == "failed"
+    assert "scope unavailable" in discovered["message"]
+    assert wd._paused_pids == {}
+
+    controller.scopes[4567] = scope()
+    controller.freeze_results.append(result(False, "freeze verification timed out"))
+    frozen = wd.pause(4567)
+    assert frozen["status"] == "failed"
+    assert "freeze verification timed out" in frozen["message"]
+    assert wd._paused_pids == {}
+    wd.stop()
+
+
+def test_renew_survives_launcher_exit_without_rediscovery() -> None:
+    controller = FakeScopeController()
+    wd, _ = watchdog(controller)
+    lease_id = wd.pause(4567)["lease_id"]
+    controller.scopes[4567] = FileNotFoundError("launcher exited")
+
+    renewed = wd.renew_pause(4567, lease_id)
+
+    assert renewed["status"] == "renewed"
+    assert controller.discover_calls == [4567]
+    wd.resume(4567, lease_id)
+    wd.stop()
+
+
+def test_renew_rejects_wrong_lease_changed_identity_and_unexpected_thaw() -> None:
+    controller = FakeScopeController()
+    wd, _ = watchdog(controller)
+    lease_id = wd.pause(4567)["lease_id"]
+
+    assert wd.renew_pause(4567, "wrong")["message"] == "Lease ID mismatch"
+
+    controller.requested = False
+    unexpected = wd.renew_pause(4567, lease_id)
+    assert unexpected["status"] == "failed"
+    assert "no longer frozen" in unexpected["message"]
+
+    controller.requested = True
+    controller.frozen = False
+    incomplete = wd.renew_pause(4567, lease_id)
+    assert incomplete["status"] == "failed"
+    assert "unexpected freezer state" in incomplete["message"]
+    assert 4567 in wd._paused_pids
+    controller.frozen = True
+    wd.resume(4567, lease_id)
+    wd.stop()
+
+
+def test_same_scope_pause_rotates_lease_without_thaw_window() -> None:
+    controller = FakeScopeController()
+    wd, _ = watchdog(controller)
+    first = wd.pause(4567)
+    second = wd.pause(4567)
+
+    assert second["status"] == "paused"
+    assert second["lease_id"] != first["lease_id"]
+    assert len(controller.freeze_calls) == 1
+    assert controller.thaw_calls == []
+    wd.resume(4567, second["lease_id"])
+    wd.stop()
+
+
+def test_different_scope_identity_thaws_old_before_freezing_new() -> None:
+    controller = FakeScopeController()
+    wd, _ = watchdog(controller)
+    first = wd.pause(4567)
+    old_scope = controller.freeze_calls[0]
+    controller.scopes[4567] = scope(inode=99)
+
+    second = wd.pause(4567)
+
+    assert second["status"] == "paused"
+    assert second["lease_id"] != first["lease_id"]
+    assert controller.thaw_calls == [old_scope]
+    assert controller.freeze_calls[-1].inode == 99
+    wd.resume(4567, second["lease_id"])
+    wd.stop()
+
+
+def test_concurrent_resume_and_pause_are_serialized_without_thawing_new_lease() -> None:
+    controller = FakeScopeController()
+    wd, _ = watchdog(controller)
+    first_lease = wd.pause(4567)["lease_id"]
+    thaw_started = threading.Event()
+    allow_thaw = threading.Event()
+    original_thaw = controller.thaw
+
+    def blocking_thaw(target: object) -> object:
+        thaw_started.set()
+        assert allow_thaw.wait(timeout=1)
+        return original_thaw(target)
+
+    controller.thaw = blocking_thaw  # type: ignore[method-assign]
+    resume_result: dict[str, object] = {}
+    pause_result: dict[str, object] = {}
+    resume_thread = threading.Thread(
+        target=lambda: resume_result.update(wd.resume(4567, first_lease))
+    )
+    pause_thread = threading.Thread(target=lambda: pause_result.update(wd.pause(4567)))
+
+    resume_thread.start()
+    assert thaw_started.wait(timeout=1)
+    pause_thread.start()
+    time.sleep(0.02)
+    assert controller.discover_calls == [4567]
+    allow_thaw.set()
+    resume_thread.join(timeout=1)
+    pause_thread.join(timeout=1)
+
+    assert resume_result["status"] == "resumed"
+    assert pause_result["status"] == "paused"
+    assert 4567 in wd._paused_pids
+    assert wd._paused_pids[4567].lease_id == pause_result["lease_id"]
+    assert len(controller.thaw_calls) == 1
+    assert len(controller.freeze_calls) == 2
+    wd.resume(4567, pause_result["lease_id"])
+    assert len(controller.thaw_calls) == 2
+    wd.stop()
+
+
+def test_failed_thaw_retains_lease_for_retry() -> None:
+    controller = FakeScopeController()
+    controller.thaw_results.extend([result(False, "manager busy"), result(True)])
+    wd, _ = watchdog(controller)
+    lease_id = wd.pause(4567)["lease_id"]
+
+    failed = wd.resume(4567, lease_id)
+    assert failed["status"] == "failed"
+    assert "manager busy" in failed["message"]
+    assert 4567 in wd._paused_pids
+
+    assert wd.resume(4567, lease_id)["status"] == "resumed"
+    assert 4567 not in wd._paused_pids
+    wd.stop()
+
+
+def test_disappeared_scope_is_safe_idempotent_resume() -> None:
+    controller = FakeScopeController()
+    controller.thaw_results.append(result(True, disappeared=True))
+    wd, _ = watchdog(controller)
+    lease_id = wd.pause(4567)["lease_id"]
+
+    assert wd.resume(4567, lease_id) == {"status": "resumed", "pid": 4567}
+    assert wd._paused_pids == {}
+    wd.stop()
+
+
+@pytest.mark.parametrize("reason", ["lease expired", "absolute ceiling"])
+def test_watchdog_automatically_thaws_expired_scope(reason: str) -> None:
     from sdh_ludusavi.constants import WATCHDOG_ABSOLUTE_RESUME_SECONDS
 
-    log_mock = MagicMock()
+    controller = FakeScopeController()
+    wd, logger = watchdog(controller)
+    now = time.monotonic()
+    paused_at = (
+        now - (WATCHDOG_ABSOLUTE_RESUME_SECONDS + 1) if reason == "absolute ceiling" else now
+    )
+    deadline = now + 30 if reason == "absolute ceiling" else now - 1
+    wd._paused_pids[4567] = _PauseLease(scope(), paused_at, "lease", deadline)
 
-    with (
-        patch("sdh_ludusavi.watchdog.os.kill") as mock_kill,
-        patch("sdh_ludusavi.watchdog._process_tree", return_value=[7777]),
-        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
-        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
-    ):
-        wd = ProcessWatchdog(log_callback=log_mock)
+    wd._check_and_resume_stuck_pids()
 
-        with wd._paused_pids_lock:
-            wd._paused_pids[7777] = _PauseLease(
-                identity=mock_identity(),
-                paused_at=time.monotonic() - (WATCHDOG_ABSOLUTE_RESUME_SECONDS + 1),
-                lease_id="test",
-                lease_deadline=time.monotonic() + 30.0,  # recently renewed
-            )
-
-        wd._check_and_resume_stuck_pids()
-
-        mock_kill.assert_called_with(7777, 18)
-        assert 7777 not in wd._paused_pids
-
-        # Check that the warning log mentions the absolute ceiling
-        called_with_absolute = False
-        for call in log_mock.call_args_list:
-            if call[0][0] == "warning" and "absolute ceiling" in call[0][1]:
-                called_with_absolute = True
-                break
-        assert called_with_absolute, "Warning log must mention the absolute ceiling"
-
-        wd.stop()
-
-
-def test_watchdog_identity_mismatch() -> None:
-    log_mock = MagicMock()
-
-    with (
-        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
-        patch("sdh_ludusavi.watchdog.os.kill"),
-        patch("sdh_ludusavi.watchdog._process_tree", return_value=[4567]),
-    ):
-        wd = ProcessWatchdog(log_callback=log_mock)
-
-        # Identity is none
-        with patch("sdh_ludusavi.watchdog._read_process_identity", return_value=None):
-            res = wd.pause(4567)
-            assert res["status"] == "failed"
-            assert "verify process identity" in res["message"]
-
-        # Identity uid mismatch
-        from sdh_ludusavi.watchdog import _ProcessIdentity
-
-        with patch(
-            "sdh_ludusavi.watchdog._read_process_identity", return_value=_ProcessIdentity(123, 9999)
-        ):
-            res = wd.pause(4567)
-            assert res["status"] == "failed"
-            assert "verify process identity" in res["message"]
-
-        # Re-use mismatch
-        with patch(
-            "sdh_ludusavi.watchdog._read_process_identity", return_value=_ProcessIdentity(123, 1000)
-        ):
-            res_pause = wd.pause(4567)
-            lease_id = res_pause["lease_id"]
-
-        with patch(
-            "sdh_ludusavi.watchdog._read_process_identity", return_value=_ProcessIdentity(999, 1000)
-        ):
-            res = wd.resume(4567)
-            assert res["status"] == "failed"
-            assert "identity mismatch" in res["message"]
-
-        # Re-use mismatch on renew
-        with patch(
-            "sdh_ludusavi.watchdog._read_process_identity", return_value=_ProcessIdentity(123, 1000)
-        ):
-            res_pause = wd.pause(4567)
-            lease_id = res_pause["lease_id"]
-
-        with patch(
-            "sdh_ludusavi.watchdog._read_process_identity", return_value=_ProcessIdentity(999, 1000)
-        ):
-            res = wd.renew_pause(4567, lease_id)
-            assert res["status"] == "failed"
-            assert "identity mismatch" in res["message"]
-
-        # Bad lease ID
-        with patch(
-            "sdh_ludusavi.watchdog._read_process_identity", return_value=_ProcessIdentity(123, 1000)
-        ):
-            res_pause = wd.pause(4567)
-            res = wd.renew_pause(4567, "wrong")
-            assert res["status"] == "failed"
-            assert "Lease ID mismatch" in res["message"]
-
-        wd.stop()
-
-
-def test_watchdog_serialize_pause_and_resume() -> None:
-    import threading
-    import signal
-
-    log_mock = MagicMock()
-    with (
-        patch("sdh_ludusavi.watchdog.os.kill"),
-        patch("sdh_ludusavi.watchdog._process_tree", return_value=[4567]),
-        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
-        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
-    ):
-        wd = ProcessWatchdog(log_callback=log_mock)
-
-        with wd._paused_pids_lock:
-            wd._paused_pids[4567] = _PauseLease(
-                identity=mock_identity(),
-                paused_at=time.monotonic(),
-                lease_id="old_lease",
-                lease_deadline=time.monotonic() + 30.0,
-            )
-
-        signal_order = []
-        resume_ready = threading.Event()
-        pause_started = threading.Event()
-
-        def mock_send_signal_tree(pid, sig, root_identity=None):
-            signal_order.append(sig)
-            if sig == signal.SIGCONT:
-                resume_ready.set()
-                pause_started.wait()
-                time.sleep(0.05)
-            return True
-
-        with patch("sdh_ludusavi.watchdog._send_signal_tree", side_effect=mock_send_signal_tree):
-
-            def run_resume():
-                wd.resume(4567, "old_lease")
-
-            def run_pause():
-                pause_started.set()
-                wd.pause(4567)
-
-            t_resume = threading.Thread(target=run_resume)
-            t_pause = threading.Thread(target=run_pause)
-
-            t_resume.start()
-            resume_ready.wait()
-            t_pause.start()
-
-            t_resume.join()
-            t_pause.join()
-
-        # The lock serializes them: resume must finish (sending SIGCONT) before pause can send SIGSTOP
-        assert signal_order == [signal.SIGCONT, signal.SIGSTOP]
-        with wd._paused_pids_lock:
-            assert 4567 in wd._paused_pids
-            assert wd._paused_pids[4567].lease_id != "old_lease"
-
-        wd.stop()
-
-
-def test_watchdog_failed_sigcont_allows_retry() -> None:
-    log_mock = MagicMock()
-
-    with (
-        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
-        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
-    ):
-        wd = ProcessWatchdog(log_callback=log_mock)
-
-        with wd._paused_pids_lock:
-            wd._paused_pids[4567] = _PauseLease(
-                identity=mock_identity(),
-                paused_at=time.monotonic(),
-                lease_id="test_lease",
-                lease_deadline=time.monotonic() + 30.0,
-            )
-
-        # First resume fails
-        with patch("sdh_ludusavi.watchdog._send_signal_tree", return_value=False) as mock_send_fail:
-            res1 = wd.resume(4567)
-            assert res1["status"] == "failed"
-            mock_send_fail.assert_called_once()
-
-        # Lease remains
-        with wd._paused_pids_lock:
-            assert 4567 in wd._paused_pids
-            assert wd._paused_pids[4567].lease_id == "test_lease"
-
-        # Second resume succeeds
-        with patch("sdh_ludusavi.watchdog._send_signal_tree", return_value=True) as mock_send_succ:
-            res2 = wd.resume(4567)
-            assert res2["status"] == "resumed"
-            mock_send_succ.assert_called_once()
-
-        # Lease is removed
-        with wd._paused_pids_lock:
-            assert 4567 not in wd._paused_pids
-
-        wd.stop()
+    assert 4567 not in wd._paused_pids
+    assert len(controller.thaw_calls) == 1
+    assert any(reason in call.args[1] for call in logger.call_args_list)
+    wd.stop()
 
 
 def test_watchdog_rechecks_expiry_after_late_renewal() -> None:
-    log_mock = MagicMock()
-    with (
-        patch("sdh_ludusavi.watchdog.os.geteuid", return_value=1000),
-        patch("sdh_ludusavi.watchdog._read_process_identity", return_value=mock_identity()),
-    ):
-        wd = ProcessWatchdog(log_callback=log_mock)
-        with wd._paused_pids_lock:
-            wd._paused_pids[4567] = _PauseLease(
-                identity=mock_identity(),
-                paused_at=time.monotonic(),
-                lease_id="renewed_lease",
-                lease_deadline=time.monotonic() - 1.0,
-            )
+    controller = FakeScopeController()
+    wd, _ = watchdog(controller)
+    wd._paused_pids[4567] = _PauseLease(scope(), time.monotonic(), "lease", time.monotonic() - 1)
+    pid_lock = wd._get_pid_lock(4567)
 
-        pid_lock = wd._get_pid_lock(4567)
+    def renew_before_transition(_pid: int) -> threading.Lock:
+        wd._paused_pids[4567].lease_deadline = time.monotonic() + 30
+        return pid_lock
 
-        def renew_before_transition(_pid: int):
-            with wd._paused_pids_lock:
-                wd._paused_pids[4567].lease_deadline = time.monotonic() + 30.0
-            return pid_lock
+    wd._get_pid_lock = renew_before_transition  # type: ignore[method-assign]
+    wd._check_and_resume_stuck_pids()
 
-        with (
-            patch.object(wd, "_get_pid_lock", side_effect=renew_before_transition),
-            patch("sdh_ludusavi.watchdog._send_signal_tree") as send_signal,
-        ):
-            wd._check_and_resume_stuck_pids()
+    assert controller.thaw_calls == []
+    assert 4567 in wd._paused_pids
 
-        send_signal.assert_not_called()
-        with wd._paused_pids_lock:
-            assert wd._paused_pids[4567].lease_id == "renewed_lease"
+
+def test_stop_thaws_all_scopes_and_retains_retryable_failure() -> None:
+    controller = FakeScopeController()
+    controller.thaw_results.extend([result(False, "busy"), result(True)])
+    wd, _ = watchdog(controller)
+    wd._paused_pids[100] = _PauseLease(scope(100), 1.0, "a", 2.0)
+    wd._paused_pids[200] = _PauseLease(scope(200), 1.0, "b", 2.0)
+
+    wd.stop()
+
+    assert 100 in wd._paused_pids
+    assert 200 not in wd._paused_pids
+
+
+@pytest.mark.parametrize("pid", [True, False, 1, 0, -1, 2.5, "abc", 2_147_483_648])
+def test_invalid_pid_fails_without_scope_discovery(pid: object) -> None:
+    controller = FakeScopeController()
+    wd, _ = watchdog(controller)
+
+    assert wd.pause(pid)["status"] == "failed"  # type: ignore[arg-type]
+    assert wd.resume(pid)["status"] == "failed"  # type: ignore[arg-type]
+    assert controller.discover_calls == []
+
+
+def test_no_pid_signal_fallback_remains() -> None:
+    source = Path("py_modules/sdh_ludusavi/watchdog.py").read_text()
+
+    assert "os.kill" not in source
+    assert "SIGSTOP" not in source
+    assert "SIGCONT" not in source
+    assert "_process_tree" not in source
