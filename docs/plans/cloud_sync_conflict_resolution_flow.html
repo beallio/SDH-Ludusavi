@@ -82,8 +82,8 @@
   <main>
     <h1>Launch-Gated Backup Conflict Resolution</h1>
     <p>
-      This chart documents the game-start path that pauses the game process,
-      resolves Ludusavi backup recency, and resumes the game in every outcome.
+      This chart documents the game-start path that freezes the complete Steam app scope,
+      resolves Ludusavi backup recency, and thaws the scope in every outcome.
     </p>
 
     <section aria-labelledby="startup-gate">
@@ -91,7 +91,7 @@
       <div class="flow">
         <div class="node"><strong>App lifetime start</strong><p>Steam reports a game start with app ID and process instance.</p></div>
         <div class="arrow">&darr;</div>
-        <div class="node warn"><strong>SIGSTOP</strong><p>Pause the game process tree before checking save state.</p></div>
+        <div class="node warn"><strong><code>systemctl --user freeze</code></strong><p>Verify the frozen Steam app scope before checking save state. Processes that join the cgroup later inherit the freeze.</p></div>
         <div class="arrow">&darr;</div>
         <div class="node"><strong><code>check_game_start</code></strong><p>Compare local save against the Ludusavi backup save.</p></div>
         <div class="arrow">&darr;</div>
@@ -101,7 +101,7 @@
           <span><strong>No action</strong><p>Skip restore or report current save.</p></span>
         </div>
         <div class="arrow">&darr;</div>
-        <div class="node ok"><strong>SIGCONT</strong><p>Resume the process in a cleanup path.</p></div>
+        <div class="node ok"><strong><code>systemctl --user thaw</code></strong><p>Verify the exact Steam app scope is thawed in a cleanup path.</p></div>
       </div>
     </section>
 
