@@ -25,7 +25,7 @@ export type WatchMachineEvent =
   | { type: "watch_allocation_failed"; reason?: string }
   | { type: "sample"; sample: SyncthingActivitySample | null }
   | { type: "poll_failed"; reason?: string }
-  | { type: "cancel" }
+  | { type: "cancel"; reason?: string }
   | { type: "handoff_confirmed" }
   | { type: "handoff_finished" }
   | { type: "pending_activity_timeout" };
@@ -33,6 +33,7 @@ export type WatchMachineEvent =
 export type WatchMachineEffects = Readonly<{
   publish: { status: AutoSyncStatusKind; source: "context" | "timeout" | "rpc_result" } | null;
   resolveReadiness: "ready" | "unavailable" | null;
+  resolveQuiescence: "settled" | "unavailable" | null;
   stopWatch: boolean;
   clearPendingTimer: boolean;
   schedulePendingTimer: boolean;
@@ -101,6 +102,7 @@ export function transition(
   let effects: WatchMachineEffects = {
     publish: null,
     resolveReadiness: null,
+    resolveQuiescence: null,
     stopWatch: false,
     clearPendingTimer: false,
     schedulePendingTimer: false,
@@ -128,7 +130,11 @@ export function transition(
         event.reason && ACTIONABLE_UNAVAILABLE_REASONS.has(event.reason)
           ? event.reason
           : "initialization_failed";
-      effects = { ...effects, resolveReadiness: "unavailable" };
+      effects = {
+        ...effects,
+        resolveReadiness: "unavailable",
+        resolveQuiescence: "unavailable",
+      };
       break;
     }
 
@@ -181,7 +187,8 @@ export function transition(
         sample.status === "PREPARING" ||
         sample.status === "INDEXING_OR_SEQUENCE_UPDATE";
       
-      if (state.phase === "post_game" && postGameMutation && !state.mutationObserved) {
+      const relevantMutation = state.phase === "post_game" ? postGameMutation : hasActivity;
+      if (relevantMutation && !state.mutationObserved) {
         nextState.mutationObserved = true;
       }
 
@@ -205,6 +212,7 @@ export function transition(
           newStatus = "complete";
           nextState.completionObserved = true;
           nextState.step = "complete";
+          effects = { ...effects, resolveQuiescence: "settled" };
         }
       } else {
         nextState.settledCount = 0;
@@ -236,13 +244,15 @@ export function transition(
         effects = { ...effects, nextPoll: nextState.completionObserved ? "none" : "active" };
         if (nextState.completionObserved) effects = { ...effects, stopWatch: true };
       } else {
-        if (newStatus === "downloading" || newStatus === "uploading") {
+        const semanticStatusChanged = newStatus !== state.latestStatus;
+        nextState.latestStatus = newStatus;
+        if (semanticStatusChanged && (newStatus === "downloading" || newStatus === "uploading")) {
           effects = {
             ...effects,
             publish: { status: `syncthing_${newStatus}` as AutoSyncStatusKind, source: "context" },
             nextPoll: "active"
           };
-        } else if (newStatus === "complete") {
+        } else if (semanticStatusChanged && newStatus === "complete") {
           effects = {
             ...effects,
             publish: { status: "syncthing_complete", source: "context" },
@@ -264,6 +274,7 @@ export function transition(
         nextState.unavailableReason = event.reason;
       }
       effects = { ...effects, stopWatch: true };
+      effects = { ...effects, resolveQuiescence: "unavailable" };
       if (!state.initialized) {
         effects = { ...effects, resolveReadiness: "unavailable" };
       }
@@ -283,7 +294,15 @@ export function transition(
       if (state.step === "cancelled") break;
       nextState.step = "cancelled";
       nextState.publicationEnabled = false;
-      effects = { ...effects, resolveReadiness: "unavailable", stopWatch: true };
+      if (event.reason) {
+        nextState.unavailableReason = event.reason;
+      }
+      effects = {
+        ...effects,
+        resolveReadiness: "unavailable",
+        resolveQuiescence: "unavailable",
+        stopWatch: true,
+      };
       break;
     }
 
