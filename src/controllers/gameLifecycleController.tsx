@@ -19,13 +19,14 @@ import { log } from "../utils/logging";
 import { isRpcStatus } from "../utils/rpc";
 import {
   SyncthingMonitor,
+  PRE_GAME_QUIESCENCE_TIMEOUT_MS,
   mapSyncthingFailureReason,
   type SyncthingRpc,
   type SyncthingWatchSession,
 } from "./syncthingMonitor";
-
 import {
   evaluateStartCheck,
+  evaluatePreGameQuiescence,
   evaluateStartRestore,
   evaluateStartConflictResolution,
   getStartCleanup,
@@ -37,7 +38,6 @@ import {
   type ExitState,
   type LifecycleCommand,
 } from "./gameLifecycleDecision";
-
 type StatusOptions = {
   source: "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";
   gameName?: string;
@@ -45,16 +45,13 @@ type StatusOptions = {
   tracked?: boolean;
   resultStatus?: OperationResult["status"] | LifecycleCheckResult["status"] | RpcStatus["status"];
 };
-
 type AutoSyncStatusSurface = {
   publish: (status: AutoSyncStatusKind, options: StatusOptions) => void;
   hide: (options?: Partial<StatusOptions>) => void;
-  complete: (
-    result: OperationResult | LifecycleCheckResult,
-    options: Pick<StatusOptions, "gameName" | "appID" | "tracked">,
-  ) => void;
+  complete: (result: OperationResult | LifecycleCheckResult, options: Pick<
+    StatusOptions, "gameName" | "appID" | "tracked"
+  > & { lifecycle: "lifecycle_start" | "lifecycle_exit" }) => void;
 };
-
 type LifecycleRpc = {
   checkGameStart: (gameName: string, appID?: string) => Promise<RpcResult<LifecycleCheckResult>>;
   restoreGameOnStart: (gameName: string, appID?: string) => Promise<RpcResult<OperationResult>>;
@@ -72,7 +69,6 @@ type LifecycleRpc = {
   getSyncthingActivity: (watchID: string) => Promise<RpcResult<SyncthingPollResult>>;
   stopSyncthingActivityWatch: (watchID: string) => Promise<RpcResult<SyncthingPollResult>>;
 };
-
 type GameLifecycleControllerDependencies = {
   store: LudusaviStateStore;
   rpc: LifecycleRpc;
@@ -82,7 +78,6 @@ type GameLifecycleControllerDependencies = {
   syncGlobalHistory: () => Promise<void>;
   ensureStateReady?: () => Promise<void>;
 };
-
 function createEpochGuardedSurface(
   surface: AutoSyncStatusSurface,
   epoch: number,
@@ -134,7 +129,6 @@ export function createGameLifecycleController(
   let lifecycleEpoch = 0;
   let activeMonitorEpoch = 0;
   const activeLeases = new Set<PauseLeaseHandle>();
-
   const isStaleLifecycle = (epoch: number, phase: "start" | "exit", name: string) => {
     if (epoch === lifecycleEpoch) return false;
     log(
@@ -145,9 +139,7 @@ export function createGameLifecycleController(
     );
     return true;
   };
-
   const syncthingRpc: SyncthingRpc = { startWatch, pollWatch, stopWatch };
-
   const syncthingMonitor = new SyncthingMonitor(syncthingRpc, (status, options) => {
     if (activeMonitorEpoch === lifecycleEpoch) {
       rawPublish(status, {
@@ -158,7 +150,6 @@ export function createGameLifecycleController(
       });
     }
   });
-
   const isTracked = (name: string, appID: string) => {
     return ludusaviStore.isTracked(
       name,
@@ -177,17 +168,14 @@ export function createGameLifecycleController(
       },
     );
   };
-
   function shouldPublishAutoSyncStatusBeforeRpc(store: LudusaviStateStore, tracked: boolean) {
     return store.shouldPublishAutoSyncStatusBeforeRpc(tracked);
   }
-
   function logPreRpcStatusBarSuppressed(phase: "start" | "exit", name: string, tracked: boolean) {
     const snapshot = ludusaviStore.getSnapshot();
     const detail = `tracked=${tracked} autoSyncNotificationsEnabled=${snapshot.autoSyncNotificationsEnabled} trackedNames=${snapshot.trackedNames?.size ?? 0} trackedAppIDs=${snapshot.trackedAppIDs?.size ?? 0}`;
     log("info", `Pre-check status bar not shown on ${phase} for ${name}: ${detail}`, "lifecycle", name);
   }
-
   const handleAppStart = async (name: string, appID: string, instanceID?: number) => {
     const epoch = ++lifecycleEpoch;
     if (ludusaviStore.getSnapshot().trackingReadiness === "cold") {
@@ -201,26 +189,22 @@ export function createGameLifecycleController(
       complete: completeAutoSyncStatus,
       hide: hideAutoSyncStatus,
     } = createEpochGuardedSurface(statusSurface, epoch, () => lifecycleEpoch);
-
     const trackingReadiness = ludusaviStore.getSnapshot().trackingReadiness;
     const isTrackingReady = trackingReadiness === "ready";
     const tracked = isTracked(name, appID);
     const guardCandidate = tracked || !isTrackingReady;
     log("info", `App started: ${name} (${appID}) tracked=${tracked} tracking_readiness=${trackingReadiness} guard_candidate=${guardCandidate}`);
-
     if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
       publishAutoSyncStatus("checking", { source: "lifecycle_start", gameName: name, appID, tracked });
     } else {
       logPreRpcStatusBarSuppressed("start", name, tracked);
     }
-
     const autoSyncEnabled = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
     let preGameWatch: SyncthingWatchSession | null = null;
     let state: StartState = {
       name, appID, instanceID, tracked, autoSyncEnabled,
       paused: false, watchActive: false, retainPreGameWatch: false
     };
-
     let pauseHandle: PauseLeaseHandle | undefined;
     try {
       const shouldPauseLaunch = autoSyncEnabled && guardCandidate && typeof instanceID === "number" && instanceID > 1;
@@ -236,7 +220,6 @@ export function createGameLifecycleController(
           activeLeases.add(pauseHandle);
         }
       }
-
       if (autoSyncEnabled && guardCandidate) {
         activeMonitorEpoch = epoch;
         preGameWatch = syncthingMonitor.start("pre_game", name, appID);
@@ -247,7 +230,7 @@ export function createGameLifecycleController(
         for (const cmd of cmds) {
           if (cmd.type === "publishStatus") publishAutoSyncStatus(cmd.status as any, { source: "lifecycle_start", gameName: name, appID, tracked, resultStatus: cmd.resultStatus as any });
           else if (cmd.type === "hideStatus") hideAutoSyncStatus({ source: "hide", gameName: name, appID, tracked, resultStatus: cmd.resultStatus as any });
-          else if (cmd.type === "completeStatus") completeAutoSyncStatus(cmd.result, { gameName: name, appID, tracked });
+          else if (cmd.type === "completeStatus") completeAutoSyncStatus(cmd.result, { lifecycle: "lifecycle_start", gameName: name, appID, tracked });
           else if (cmd.type === "notifyFailure") notifyFailure("SDH-Ludusavi Auto-sync", cmd.result ? summarizeOperationResult(cmd.result, "Auto-sync") : (cmd.fallbackMessage || "Operation failed"));
         }
       };
@@ -260,6 +243,28 @@ export function createGameLifecycleController(
       let checkResult: RpcResult<LifecycleCheckResult> = await withLease(() => checkGameStart(name, appID));
       if (isStaleLifecycle(epoch, "start", name)) return;
       log("info", `check_game_start result for ${name} (${appID}): ${summarizeLifecycleResult(checkResult)}`, "lifecycle", name);
+
+      if (pauseHandle && preGameWatch) {
+        const quiescence = await pauseHandle.runProtected(() =>
+          preGameWatch!.waitForPreGameQuiescence(PRE_GAME_QUIESCENCE_TIMEOUT_MS),
+        );
+        if (isStaleLifecycle(epoch, "start", name)) return;
+        if (quiescence.status === "stale") return;
+        const quiescenceDecision = evaluatePreGameQuiescence(quiescence);
+        execCmds(quiescenceDecision.commands);
+        if (quiescenceDecision.abort) {
+          await preGameWatch.cancel("pre_game_quiescence_failed");
+          preGameWatch = null;
+          state.watchActive = false;
+          return;
+        }
+        if (quiescence.status === "settled") {
+          publishAutoSyncStatus("checking", { source: "lifecycle_start", gameName: name, appID, tracked });
+          checkResult = await pauseHandle.runProtected(() => checkGameStart(name, appID));
+          if (isStaleLifecycle(epoch, "start", name)) return;
+          log("info", `check_game_start post-settlement recheck for ${name} (${appID}): ${summarizeLifecycleResult(checkResult)}`, "lifecycle", name);
+        }
+      }
 
       const dec1 = evaluateStartCheck(state, checkResult);
       execCmds(dec1.commands);
@@ -358,7 +363,7 @@ export function createGameLifecycleController(
       for (const cmd of cmds) {
         if (cmd.type === "publishStatus") publishAutoSyncStatus(cmd.status as any, { source: cmd.status.startsWith("syncthing") ? "lifecycle_exit" : "lifecycle_exit", gameName: name, appID, tracked, resultStatus: cmd.resultStatus as any });
         else if (cmd.type === "hideStatus") hideAutoSyncStatus({ source: "hide", gameName: name, appID, tracked, resultStatus: cmd.resultStatus as any });
-        else if (cmd.type === "completeStatus") completeAutoSyncStatus(cmd.result, { gameName: name, appID, tracked });
+        else if (cmd.type === "completeStatus") completeAutoSyncStatus(cmd.result, { lifecycle: "lifecycle_exit", gameName: name, appID, tracked });
         else if (cmd.type === "notifyFailure") notifyFailure("SDH-Ludusavi Auto-sync", cmd.result ? summarizeOperationResult(cmd.result, "Auto-sync") : (cmd.fallbackMessage || "Operation failed"));
       }
     };
@@ -398,7 +403,7 @@ export function createGameLifecycleController(
                  gameName: name, appID, tracked, resultStatus: cmd.resultStatus as any
                });
             } else if (cmd.type === "completeStatus") {
-               completeAutoSyncStatus(cmd.result, { gameName: name, appID, tracked });
+               completeAutoSyncStatus(cmd.result, { lifecycle: "lifecycle_exit", gameName: name, appID, tracked });
             }
           }
           Object.assign(state, dec3.stateUpdates);
