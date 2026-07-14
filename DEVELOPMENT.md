@@ -178,6 +178,21 @@ The updater architecture enforces strict boundaries between domain models, trans
 - **Service Isolation**: The `SDHLudusaviService` acts merely as a facade. It holds an instance of `PluginUpdater` and delegates RPC methods to it. Updater modules never import the service or access private service fields.
 - **Unchanged Persistence**: While the logic is decomposed, the data schema in `cache.json` and `settings.json` remains entirely backward-compatible and unchanged. `main.py` simply acts as an async adapter passing calls to the facade.
 
+### Backend: Syncthing Connectivity and Activity
+
+Syncthing watch startup resolves the deepest configured folder containing Ludusavi's
+backup path. The `/rest/system/connections` endpoint is used only to intersect currently
+connected device IDs with the remote devices configured for that folder. Its global and
+per-device byte counters are intentionally ignored because a single connection can carry
+traffic for multiple folders.
+
+BrowserView activity and transfer direction instead come from folder-scoped sources:
+`/rest/db/status?folder=<folder-id>` and events whose `folder` matches the resolved
+folder. Watched-folder syncing/download/item evidence indicates downloading, and
+non-empty watched-folder `RemoteDownloadProgress` indicates uploading. Scan, index,
+sequence, and need signals may keep an update in progress without inventing a transfer
+direction.
+
 ### Frontend: Steam Runtime and View Ownership
 The frontend strictly isolates untyped runtime access and splits massive components by responsibility:
 - **Steam Runtime Validation**: All direct accesses to private global objects like `(window as any).SteamClient` are banned outside `steamRuntime.ts`. This module safely guards, wraps, and exposes the required Steam runtime methods, preventing fatal crashes during render.

@@ -53,6 +53,14 @@ deselected Ludusavi game). While the user is deciding on a save conflict, a rene
 pause lease ensures the backend watchdog does not automatically resume the game before 
 the UI resolves.
 
+Syncthing BrowserView activity is scoped in the backend to the deepest configured
+Syncthing folder containing Ludusavi's backup path. `/rest/system/connections` is a
+relevant-peer availability source only: its global and per-device byte counters never
+determine activity or transfer direction. Watched-folder state from `/rest/db/status`
+and folder-tagged `DownloadProgress`, `RemoteDownloadProgress`, state, scan, item, and
+index events are the only activity sources. Events and traffic from another Syncthing
+folder are excluded even when both folders share the same remote device.
+
 ## Core Data Structures
 
 - `AutoSyncStatusKind`: `checking`, `backing_up`, `restoring`, `conflict`, `has_backup`, `unknown`, `error`, `syncthing_downloading`, `syncthing_uploading`, or `syncthing_complete`.

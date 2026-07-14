@@ -1,0 +1,81 @@
+{
+  "date": "2026-07-13",
+  "task_objective": "Isolate Syncthing BrowserView activity and transfer direction to the Syncthing folder containing Ludusavi's configured backup path while preserving relevant-peer connectivity handling and the frontend RPC contract.",
+  "files_modified": [
+    "DEVELOPMENT.md",
+    "README.md",
+    "docs/agent_conversations/2026-07-13_syncthing-folder-activity-isolation.json",
+    "docs/specs/custom_status_bar_ui.md",
+    "py_modules/sdh_ludusavi/syncthing/__init__.py",
+    "py_modules/sdh_ludusavi/syncthing/_types.py",
+    "py_modules/sdh_ludusavi/syncthing/activity.py",
+    "py_modules/sdh_ludusavi/syncthing/watcher.py",
+    "src/controllers/syncthingMonitorMachine.test.ts",
+    "tests/test_activity.py",
+    "tests/test_syncthing.py",
+    "tests/test_watcher.py"
+  ],
+  "tests_added": [
+    "Connection byte totals cannot create downloading, uploading, or ACTIVE_TRANSFER after a watched-folder sequence/index mutation.",
+    "Unrelated-folder RemoteDownloadProgress, StateChanged, FolderSummary, FolderScanProgress, ItemStarted, ItemFinished, LocalChangeDetected, and LocalIndexUpdated events do not mutate watched-folder activity.",
+    "DownloadProgress entries for another folder neither start nor clear watched-folder downloads; watched-folder entries start them and the final empty payload clears them.",
+    "Watched-folder DownloadProgress and RemoteDownloadProgress preserve download and upload direction for a peer shared with another folder.",
+    "A watcher tick ignores high and changing connection totals plus another folder's event while retaining positive watched-folder progress behavior.",
+    "An idle frontend sample with no update, upload, or download evidence publishes no transfer status."
+  ],
+  "red_tests": {
+    "command": "./run.sh uv run pytest tests/test_activity.py tests/test_syncthing.py",
+    "result": "Expected RED: test_connection_rates_cannot_create_transfer_direction_from_folder_mutation failed because status.downloading was True and status was ACTIVE_TRANSFER; 29 other tests passed. The subset also triggered the repository-wide coverage threshold, as expected for a partial run.",
+    "log": "/tmp/sdh_ludusavi/syncthing-folder-activity-isolation-red.log",
+    "watcher_command": "./run.sh uv run pytest --no-cov tests/test_watcher.py -k ignores_other_folder_traffic_shared_with_relevant_peer",
+    "watcher_result": "Expected RED: the serialized sample reported downloading=True from aggregate connection traffic.",
+    "watcher_log": "/tmp/sdh_ludusavi/syncthing-folder-activity-isolation-watcher-red.log"
+  },
+  "design_decisions": [
+    "ConnectionSnapshot now carries only connected device IDs. Global and per-device connection byte counters, rate state, rate computation, thresholds, aggregate transfer fields, and compatibility exports were removed.",
+    "SyncthingWatch retains the last known connected-device set when the connections endpoint fails and still terminates when no configured peer for the resolved backup folder is connected.",
+    "Downloading is derived only from watched-folder syncing state, watched-folder DownloadProgress, or watched-folder active items. Uploading is derived only from non-expired watched-folder RemoteDownloadProgress.",
+    "Scan, local change, local index, sequence change, need counters, item-finished grace, preparing states, and error states still affect update and settlement without inventing transfer direction.",
+    "The serialized SyncthingActivitySample fields and frontend production code remain unchanged."
+  ],
+  "results": {
+    "implementation": "Connection polling is connectivity-only, separate-folder traffic is isolated even for a shared peer, watched-folder direction remains functional, and relevant-peer behavior is preserved.",
+    "dependencies": "No dependency changes.",
+    "release": "No version, tag, packaging workflow, or release change.",
+    "deferred_work": "On-device Steam Deck verification is deferred until an environment with two Syncthing folders sharing a peer, Decky, and Game Mode is available. Automated mocked API and event coverage is complete."
+  },
+  "validation": [
+    {
+      "command": "scripts/orchestration/run-quality-gates (baseline)",
+      "result": "Passed: 259 Vitest tests, frontend typecheck/build, Ruff check/format, ty, 675 pytest tests, 86.96% coverage, and review-note deletion check."
+    },
+    {
+      "command": "./run.sh uv run pytest tests/test_activity.py tests/test_syncthing.py tests/test_watcher.py",
+      "result": "All 64 test assertions passed; the partial command exited nonzero only because whole-project coverage for this subset was 15.87%, below the repository-wide 83% threshold."
+    },
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_activity.py tests/test_syncthing.py tests/test_watcher.py",
+      "result": "Passed: 64 tests."
+    },
+    {
+      "command": "./run.sh pnpm run test:unit -- src/controllers/syncthingMonitorMachine.test.ts src/controllers/syncthingMonitor.activity.test.ts src/controllers/syncthingMonitor.failures.test.ts",
+      "result": "Passed: Vitest ran all 31 test files and all 260 tests passed."
+    },
+    {
+      "command": "./run.sh pnpm run verify",
+      "result": "Passed: dependency audits, frozen install, build, 260 Vitest tests, and TypeScript typecheck."
+    },
+    {
+      "command": "rg -n \"ConnectionRates|compute_rates|get_connection_totals|aggregate_downloading|aggregate_uploading|in_bytes_total|out_bytes_total\" py_modules tests",
+      "result": "No matches (expected rg exit code 1)."
+    },
+    {
+      "command": "git diff --check",
+      "result": "Passed."
+    },
+    {
+      "command": "scripts/orchestration/run-quality-gates",
+      "result": "Passed: 260 Vitest tests, frontend typecheck/build, Ruff check/format, ty, 687 pytest tests, 87.66% coverage, and review-note deletion check."
+    }
+  ]
+}
