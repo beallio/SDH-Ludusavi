@@ -190,6 +190,29 @@ The updater architecture enforces strict boundaries between domain models, trans
 - **Service Isolation**: The `SDHLudusaviService` acts merely as a facade. It holds an instance of `PluginUpdater` and delegates RPC methods to it. Updater modules never import the service or access private service fields.
 - **Unchanged Persistence**: While the logic is decomposed, the data schema in `cache.json` and `settings.json` remains entirely backward-compatible and unchanged. `main.py` simply acts as an async adapter passing calls to the facade.
 
+### Backend: Launch-Gate Scope Freezing
+
+The launch gate requires a unified cgroup v2 hierarchy and a user systemd manager that
+supports `systemctl --user freeze` and `systemctl --user thaw`. The backend derives the
+authoritative `app-steam-app<appid>-<pid>.scope` from the launch PID's own `/proc` cgroup
+membership, accepts only the current user's exact scope beneath `app.slice`, and records its
+directory device/inode identity. It never accepts a caller-provided unit or freezes a parent
+slice.
+
+A pause succeeds only after `cgroup.freeze` reports the requested state and the `frozen`
+field in `cgroup.events` reports completion. Commands and state polling have short bounded
+timeouts. Missing systemd or cgroup support, an invalid/stale identity, and any incomplete
+transition fail closed; there is no PID-signal fallback that can report a successful gate.
+Renewals verify the stored scope rather than requiring the launcher PID to remain alive, and
+resume, lease expiry, the absolute watchdog ceiling, and plugin shutdown thaw that same scope.
+
+Successful transitions are logged as `Froze Steam app scope ... for root PID ...` and
+`Thawed Steam app scope ... for root PID ...`. Discovery, transition, renewal, or automatic
+thaw failures are bounded warning/error diagnostics without raw cgroup paths, command
+environments, or unbounded command output. The log analyzer accepts both these messages and
+historical process-tree messages so the stable `launch_gate.lease_expired` and
+`launch_gate.resume_before_resolution` findings remain comparable across versions.
+
 ### Backend: Syncthing Connectivity and Activity
 
 Syncthing watch startup resolves the deepest configured folder containing Ludusavi's

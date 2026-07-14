@@ -1,0 +1,89 @@
+{
+  "date": "2026-07-14",
+  "task_objective": "Freeze and verify the complete Steam app systemd scope for the duration of the renewable launch-gate lease, so processes that join after launch cannot escape save verification or conflict resolution.",
+  "files_modified": [
+    "DEVELOPMENT.md",
+    "docs/agent_conversations/2026-07-14_freeze-steam-app-scope-during-launch-gate.json",
+    "docs/plans/cloud_sync_conflict_resolution_flow.html",
+    "docs/specs/custom_status_bar_ui.md",
+    "py_modules/sdh_ludusavi/constants.py",
+    "py_modules/sdh_ludusavi/launch_gate.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "py_modules/sdh_ludusavi/watchdog.py",
+    "scripts/analyze_plugin_logs.py",
+    "tests/test_analyze_plugin_logs.py",
+    "tests/test_launch_gate.py",
+    "tests/test_launch_gate_scope.py",
+    "tests/test_module_size_budgets.py",
+    "tests/test_service.py",
+    "tests/test_status_flow_diagram.py",
+    "tests/test_watchdog.py"
+  ],
+  "tests_added": [
+    "Synthetic unified-cgroup discovery and ownership validation",
+    "Exact Steam app scope and cgroup-root traversal/symlink rejection",
+    "Bounded systemctl argv, timeout, environment, and failure behavior",
+    "Requested/completed freezer-state polling and idempotent disappearance",
+    "Scope lease renewal after launcher exit and unexpected-thaw rejection",
+    "Same-scope rotation, PID-reuse identity transition, thaw retry, expiry, ceiling, stop, and concurrent pause/resume behavior",
+    "Same-scope lease rotation preserves the original absolute-ceiling timestamp",
+    "Plugin shutdown retries retained thaw failures to a fixed bound and logs terminal failure",
+    "Invalid UTF-8 freezer state and path-resolution loops remain inside bounded controller results",
+    "Historical and scope-freeze launch-gate log correlation",
+    "Verified scope freeze/thaw diagram terminology"
+  ],
+  "red_evidence": [
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_launch_gate_scope.py",
+      "result": "Expected collection failure: ModuleNotFoundError for sdh_ludusavi.launch_gate before the controller existed.",
+      "artifact": "/tmp/sdh_ludusavi/freeze-scope-red.log"
+    },
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_watchdog.py",
+      "result": "Expected 21 failures: ProcessWatchdog did not accept a scope controller and still contained the PID-signal fallback.",
+      "artifact": "/tmp/sdh_ludusavi/freeze-watchdog-red.log"
+    },
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_analyze_plugin_logs.py tests/test_status_flow_diagram.py",
+      "result": "Expected two failures: new scope logs were not correlated and the diagram still promised SIGSTOP/SIGCONT behavior.",
+      "artifact": "/tmp/sdh_ludusavi/freeze-docs-red.log"
+    },
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_watchdog.py",
+      "result": "Review round 01 RED: three failures proved same-scope rotation reset the absolute-ceiling origin and stop performed only one thaw pass without a terminal exhausted-retry log.",
+      "artifact": "/tmp/sdh_ludusavi/freeze-scope-review01-watchdog-red.log"
+    },
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_launch_gate_scope.py",
+      "result": "Review round 01 RED: five failures proved invalid UTF-8 discovery files and synthetic path-resolution loops escaped as raw exceptions.",
+      "artifact": "/tmp/sdh_ludusavi/freeze-scope-review01-controller-red.log"
+    }
+  ],
+  "design_decisions": [
+    "Discover the authoritative unit only from the launch PID unified cgroup entry and accept one exact current-user app.slice Steam scope.",
+    "Store cgroup device/inode identity and revalidate the exact path before every state read or systemd transition.",
+    "Use systemctl user freeze/thaw with argv execution, bounded output/timeouts, and user-bus defaults only when Decky did not supply them.",
+    "Declare a gate successful only when cgroup.freeze and cgroup.events agree on the completed state; best-effort thaw partial freezes.",
+    "Rotate a verified same-scope lease without a thaw window; thaw a different stored identity before freezing the replacement.",
+    "Preserve the first freeze timestamp when rotating an identical scope so lease renewal cannot extend the unconditional watchdog ceiling.",
+    "Retain leases after retryable thaw failures and remove them only after verified thaw or confirmed scope disappearance.",
+    "On shutdown, retry retained leases three times with short bounded delays; retain and explicitly log any scope whose thaw remains unconfirmed after the final attempt.",
+    "Normalize invalid UTF-8 and pathlib resolution-loop failures at the controller boundary, while preserving best-effort thaw after a partial freeze.",
+    "Replace obsolete PID-tree service tests because the plan explicitly removes that runtime behavior; public RPC signatures and result shapes remain unchanged.",
+    "Preserve historical analyzer grammar alongside the new scope-transition grammar and stable finding IDs."
+  ],
+  "results": {
+    "baseline": "690 passed at 87.66% coverage",
+    "focused": "191 plan-listed focused tests passed before the final concurrency regression was added; the watchdog suite then passed 22 tests",
+    "full_python": "724 passed at 87.97% coverage",
+    "frontend": "31 Vitest files and 286 tests passed; TypeScript checking, production build, and supply-chain verification passed",
+    "package": "Local out/SDH-Ludusavi.zip built and passed validate_plugin_zip.py",
+    "review_01_focused": "200 plan-listed focused tests passed",
+    "review_01_quality_gates": "31 Vitest files and 286 frontend tests passed; TypeScript, production build, Ruff, formatting, ty, and 733 Python tests at 88.29% coverage passed",
+    "review_01_package": "Local out/SDH-Ludusavi.zip rebuilt and passed validate_plugin_zip.py after the correction round",
+    "dependencies": "No Python, TypeScript, or package dependency changes",
+    "api_compatibility": "Pause, renew, and resume RPC names, arguments, and successful result fields are unchanged"
+  },
+  "field_context": "The sanitized incident example remains app-steam-app3156562597-12992.scope with root PID 12992; the implementation does not copy raw device logs or device paths.",
+  "deferred_on_device_verification": "Installation, development release dispatch, and Steam Deck acceptance are intentionally deferred until separately authorized. Field verification must prove later Steam/Proton PIDs remain frozen during an unanswered conflict and that every resolution/unload/expiry path thaws exactly once."
+}

@@ -1,0 +1,24 @@
+{
+  "date": "2026-07-14",
+  "task_objective": "Review the latest Steam Deck conflict-at-launch logs and make the README introduction and demo presentation more approachable.",
+  "files_modified": [
+    "README.md",
+    "assets/demo.webp",
+    "docs/agent_conversations/2026-07-14_review-conflict-launch-and-update-readme.json"
+  ],
+  "tests_added": [],
+  "design_decisions": [
+    "Keep the investigation read-only and cross-check plugin claims against Steam's process, compatibility, and journal logs.",
+    "Treat the one-time SIGSTOP process-tree snapshot as insufficient when Steam can add later processes to the app scope.",
+    "Prefer freezing the Steam user-systemd app scope in a future fix so processes attached after the initial launch event inherit the gate.",
+    "Place the user-provided assets/demo.webp directly below the opening description so readers see the plugin before the feature list.",
+    "Rewrite the opening as a user-centered description of the plugin's everyday value instead of an implementation-oriented definition.",
+    "Add a cache-buster to the README demo reference for the next release."
+  ],
+  "results": [
+    "The plugin log reported PID 12992 paused through conflict selection, but Steam logs proved that PIDs 13305 and 13311 were added later and Wolverine.exe initialized before the user selected a resolution.",
+    "Confirmed a launch-gate coverage defect: the current success log means at least one process was signaled, not that every process associated with the Steam app remained stopped.",
+    "Verified SteamOS systemd 257 supports user-unit freeze and thaw for a scope-level correction.",
+    "Updated the README introduction and added the demo image near the top."
+  ]
+}
