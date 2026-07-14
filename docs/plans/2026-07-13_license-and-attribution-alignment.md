@@ -17,9 +17,9 @@ Keep licensing responsibilities separated by role:
 - record SDH-GameSync as design inspiration for the game-launch pause and pre-launch save check,
   without implying that its code is bundled;
 - preserve the vendored pyludusavi MIT license in its dist-info directory;
-- describe bundled frontend libraries and API-only integrations in `NOTICE` without claiming
+- describe bundled frontend libraries and API-only integrations in `NOTICE.md` without claiming
   ownership or relicensing them;
-- include `NOTICE` in source and Decky release artifacts.
+- include `NOTICE.md` in source and Decky release artifacts.
 
 ## Core Data Structures
 
@@ -27,10 +27,10 @@ No runtime data structures change. The authoritative legal/documentation surface
 
 - `LICENSE`: project MIT terms followed by the retained decky-ludusavi and Decky template
   BSD-3-Clause terms;
-- `NOTICE`: repository URLs, roles, versions where pinned, licenses, and bundled/non-bundled
+- `NOTICE.md`: repository URLs, roles, versions where pinned, licenses, and bundled/non-bundled
   status;
 - `package.json` and `pyproject.toml`: project license metadata;
-- packaging required-file lists: artifact inclusion and validation of `NOTICE`.
+- packaging required-file lists: artifact inclusion and validation of `NOTICE.md`.
 
 ## Public Interfaces
 
@@ -44,7 +44,7 @@ vendored metadata, installed package metadata, and authoritative upstream reposi
 
 ## Testing Strategy
 
-1. Add regression assertions requiring `NOTICE`, MIT project metadata, and notice inclusion in
+1. Add regression assertions requiring `NOTICE.md`, MIT project metadata, and notice inclusion in
    generated/validated Decky ZIPs.
 2. Run the focused protocol and packaging tests to confirm they fail before implementation.
 3. Update licensing, documentation, packaging, and validation surfaces.

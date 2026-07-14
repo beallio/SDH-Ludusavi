@@ -17,7 +17,7 @@ def test_decky_required_plugin_files_exist():
         "package.json",
         "main.py",
         "LICENSE",
-        "NOTICE",
+        "NOTICE.md",
         "rollup.config.js",
         "tsconfig.json",
         "src/index.tsx",
@@ -38,7 +38,7 @@ def test_project_license_metadata_is_mit() -> None:
 
 
 def test_notice_preserves_project_lineage_and_design_credit() -> None:
-    notice = Path("NOTICE").read_text(encoding="utf-8")
+    notice = Path("NOTICE.md").read_text(encoding="utf-8")
     license_text = Path("LICENSE").read_text(encoding="utf-8")
 
     assert "https://github.com/GedasFX/decky-ludusavi" in notice

@@ -13,7 +13,7 @@ ARCHIVE_ROOT = "SDH-Ludusavi"
 
 REQUIRED_FILES = (
     "LICENSE",
-    "NOTICE",
+    "NOTICE.md",
     "main.py",
     "package.json",
     "plugin.json",

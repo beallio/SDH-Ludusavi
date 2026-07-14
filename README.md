@@ -103,4 +103,4 @@ Syncthing activity statuses reflect only the Syncthing folder that contains Ludu
 
 ## License
 
-Project-authored code is available under the MIT License. Retained portions from decky-ludusavi and the Decky plugin template remain under BSD-3-Clause, and bundled third-party components retain their own licenses. See [LICENSE](LICENSE) and [NOTICE](NOTICE) for project lineage, design inspiration, and third-party attribution. For technical documentation, see [DEVELOPMENT.md](DEVELOPMENT.md).
+Project-authored code is available under the MIT License. Retained portions from decky-ludusavi and the Decky plugin template remain under BSD-3-Clause, and bundled third-party components retain their own licenses. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for project lineage, design inspiration, and third-party attribution. For technical documentation, see [DEVELOPMENT.md](DEVELOPMENT.md).
