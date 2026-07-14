@@ -28,7 +28,10 @@ viewport, and toggles BrowserView visibility with the autosync state. The Browse
 owner is normalized through known Decky/Steam wrapper shapes, including `m_browserView`,
 before required methods are used.
 
-Module-level timers own status expiry. Running states and active Syncthing statuses hide after a 10-second watchdog, result states hide after 2 seconds, hide events clear pending timers, and plugin dismount clears pending timers before destroying the BrowserView.
+Module-level timers own status expiry. Running states have a 930-second safety ceiling,
+active Syncthing statuses remain visible until the monitor replaces them, result states
+hide after 2 seconds, hide events clear pending timers, and plugin dismount clears
+pending timers before destroying the BrowserView.
 
 BrowserView updates hide the reused BrowserView before loading each new visible
 `data:text/html` document. Identical visible statuses are deduplicated and do not navigate, hide, or replay the reveal delay. For genuine status transitions, the view is revealed only after a short guarded delay so the previous status document, such as `GAME SAVE UP TO DATE`, cannot flash before a new `VERIFYING GAME SAVE` document finishes navigating. The reveal callback is
@@ -53,6 +56,13 @@ deselected Ludusavi game). While the user is deciding on a save conflict, a rene
 pause lease ensures the backend watchdog does not automatically resume the game before 
 the UI resolves.
 
+The same renewable lease protects pre-game Syncthing settlement. An initialized idle
+watch adds no launch delay. If relevant folder activity is observed, the launch stays
+paused until three distinct settled samples arrive, `VERIFYING GAME SAVE` is published
+again, and `check_game_start` is rerun against stable backup files. An interrupted active
+transfer fails safely with `UNABLE TO SYNC`; it never acts on the preview captured while
+the folder was changing.
+
 Syncthing BrowserView activity is scoped in the backend to the deepest configured
 Syncthing folder containing Ludusavi's backup path. `/rest/system/connections` is a
 relevant-peer availability source only: its global and per-device byte counters never
@@ -63,7 +73,9 @@ folder are excluded even when both folders share the same remote device.
 
 ## Core Data Structures
 
-- `AutoSyncStatusKind`: `checking`, `backing_up`, `restoring`, `conflict`, `has_backup`, `unknown`, `error`, `syncthing_downloading`, `syncthing_uploading`, or `syncthing_complete`.
+- `AutoSyncStatusKind`: `checking`, `backing_up`, `restoring`, `conflict`,
+  `conflict_unresolved`, `has_backup`, `unknown`, `error`,
+  `syncthing_downloading`, `syncthing_uploading`, or `syncthing_complete`.
 - `AutoSyncStatusSource`: lifecycle, RPC result, timeout, or hide provenance.
 - `AutoSyncStatusState`: current strip status, visibility, and provenance.
 - `AutoSyncStatusBrowserViewOwner`: wrapper shape used to normalize the BrowserView
@@ -79,8 +91,9 @@ offset is 2.625% of viewport height. On a 1280x800 Steam Deck OLED viewport, thi
 maps to a 38px strip at `y=741` and a 21px bottom menu bar at `y=779-799`. The icon
 plus text are centered horizontally as one group, with a stable text-group width so
 status changes do not visibly shift the strip. Checking, upload/download, and success
-states use Steam Blue (`#66c0f4`), `unknown` uses a distinct warning color
-(`#f59e0b`), and `error` remains red (`#ef4444`).
+states use Steam Blue (`#66c0f4`), while `unknown`, `conflict`, and
+`conflict_unresolved` use the amber warning color (`#f59e0b`), and `error` remains red
+(`#ef4444`).
 
 ## Public Interfaces
 
@@ -106,7 +119,9 @@ Autosync status strip behavior:
 - Restore needed after launch check: show `RESTORING BACKUP SAVE`.
 - Backup needed after exit check: show `BACKING UP LOCAL SAVE`.
 - Ambiguous launch recency: show `SAVE CONFLICT` while the user chooses between
-  keeping the local save and restoring the Ludusavi backup save.
+  keeping the local save and restoring the Ludusavi backup save. This state does not
+  auto-hide while the modal remains open.
+- Dismissed conflict: show `SYNC SKIPPED — CONFLICT UNRESOLVED` in amber for 2 seconds.
 - Successful autosync result or current save state: show `GAME SAVE UP TO DATE` for
   2 seconds.
 - Syncthing downloading activity: show `SYNCTHING DOWNLOADING` with cloud-down icon.
@@ -115,6 +130,13 @@ Autosync status strip behavior:
 - Unknown/non-actionable save state: show `UNKNOWN` for 2 seconds.
 - Failed or unsafe-to-sync state: show `UNABLE TO SYNC` and emit one Decky failure
   toast.
+
+During launch, visible `SYNCTHING DOWNLOADING` or `SYNCTHING UPLOADING` activity takes
+precedence over a stale `local_current` result. After observed incoming activity settles,
+the launch flow is observe, settle, recheck, decide, then resume. The 900 ms
+`GAME SAVE UP TO DATE` dwell applies only to a successful post-game `backed_up` result
+before the pending/uploading Syncthing handoff; it does not delay pre-game current or
+restored results.
 
 Checking and running states stay visible while their operation runs and are replaced
 when the operation's result is published. A stuck-bar safety ceiling force-hides them

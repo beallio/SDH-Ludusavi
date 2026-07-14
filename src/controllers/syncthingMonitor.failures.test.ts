@@ -187,6 +187,49 @@ describe("SyncthingMonitor", () => {
     expect(mockRpc.pollWatch).not.toHaveBeenCalled();
   });
 
+  it("distinguishes pre-activity unavailability for pre-game callers", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "skipped", reason: "no_connected_peers", message: "no peers" });
+    const session = monitor.start("pre_game", "Hades", "1145300");
+
+    await expect(session.waitForPreGameQuiescence(1_000)).resolves.toEqual({
+      status: "unavailable",
+      reason: "no_connected_peers",
+      activityObserved: false,
+    });
+  });
+
+  it("times out and cancels a pre-game watch after activity begins", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1" });
+    mockRpc.pollWatch.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: { status: "ACTIVE_TRANSFER", folder_state: "syncing", uploading: false, downloading: true, update_in_progress: false, settled: false, timestamp_unix: 1 },
+    });
+    const session = monitor.start("pre_game", "Hades", "1145300");
+    const resultPromise = session.waitForPreGameQuiescence(1_000);
+
+    await vi.advanceTimersByTimeAsync(1_100);
+
+    await expect(resultPromise).resolves.toEqual({ status: "timeout", activityObserved: true });
+    expect(mockRpc.stopWatch).toHaveBeenCalledWith("w1");
+  });
+
+  it("settles a superseded pre-game waiter as stale", async () => {
+    let resolveFirstAllocation: ((value: any) => void) | undefined;
+    mockRpc.startWatch
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirstAllocation = resolve; }))
+      .mockResolvedValueOnce({ status: "watching", watch_id: "w2" });
+    const first = monitor.start("pre_game", "Hades", "1145300");
+    const waiting = first.waitForPreGameQuiescence(10_000);
+
+    monitor.start("pre_game", "Celeste", "504230");
+    resolveFirstAllocation?.({ status: "watching", watch_id: "late" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await expect(waiting).resolves.toEqual({ status: "stale", activityObserved: false });
+    expect(mockRpc.stopWatch).toHaveBeenCalledWith("late");
+  });
+
   it("pre-game watch failure before activity does not publish has_backup", async () => {
     mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
     mockRpc.pollWatch

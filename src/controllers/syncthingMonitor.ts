@@ -37,26 +37,29 @@ export type StatusCallback = (
     appID: string;
   },
 ) => void;
-
 export type SyncthingMonitorGeneration = number;
-
 export type SyncthingWatchSession = Readonly<{
   phase: "pre_game" | "post_game";
   gameName: string;
   appID: string;
   cancel: (reason: string) => Promise<void>;
+  waitForPreGameQuiescence: (timeoutMs: number) => Promise<PreGameQuiescenceResult>;
   activatePostGameHandoff: (
     confirmationTimeoutMs: number,
   ) => Promise<PostGameHandoffResult>;
 }>;
-
+export type PreGameQuiescenceResult =
+  | { status: "idle"; activityObserved: false }
+  | { status: "settled"; activityObserved: true }
+  | { status: "unavailable"; reason: string; activityObserved: boolean }
+  | { status: "timeout"; activityObserved: boolean }
+  | { status: "stale"; activityObserved: boolean };
 export type PostGameHandoffResult =
   | { status: "pending" }
   | { status: "uploading" }
   | { status: "complete" }
   | { status: "unavailable"; reason: string }
   | { status: "stale" };
-
 class WatchContext {
   watchID: string | null = null;
   generation: SyncthingMonitorGeneration;
@@ -67,8 +70,9 @@ class WatchContext {
   handoffActivatedAt: number | null = null;
   resolveReadiness!: (result: "ready" | "unavailable") => void;
   readinessPromise!: Promise<"ready" | "unavailable">;
+  resolveQuiescence!: (result: "settled" | "unavailable") => void;
+  quiescencePromise!: Promise<"settled" | "unavailable">;
   state: WatchMachineState;
-
   constructor(
     generation: SyncthingMonitorGeneration,
     phase: "pre_game" | "post_game",
@@ -84,21 +88,21 @@ class WatchContext {
     this.readinessPromise = new Promise((resolve) => {
       this.resolveReadiness = resolve;
     });
+    this.quiescencePromise = new Promise((resolve) => {
+      this.resolveQuiescence = resolve;
+    });
   }
-
   get phase() {
     return this.state.phase;
   }
-
   get cancelled() {
     return this.state.step === "cancelled";
   }
 }
-
 const EMPTY_SAMPLE_RETRY_MS = 250;
 const ACTIVE_POLL_INTERVAL_MS = 500;
 const MAX_WATCH_DURATION_MS = 120_000;
-
+export const PRE_GAME_QUIESCENCE_TIMEOUT_MS = MAX_WATCH_DURATION_MS;
 export class SyncthingMonitor {
   private rpc: SyncthingRpc;
   private onStatus: StatusCallback;
@@ -106,7 +110,6 @@ export class SyncthingMonitor {
   private contexts = new Map<SyncthingMonitorGeneration, WatchContext>();
   private activePollTimeout: number | null = null;
   private pendingTimeoutID: number | null = null;
-
   constructor(rpc: SyncthingRpc, onStatus: StatusCallback) {
     this.rpc = rpc;
     this.onStatus = onStatus;
@@ -137,6 +140,8 @@ export class SyncthingMonitor {
       gameName,
       appID,
       cancel: (reason: string) => this.cancelGeneration(gen, reason),
+      waitForPreGameQuiescence: (timeoutMs: number) =>
+        this.waitForPreGameQuiescence(context, timeoutMs),
       activatePostGameHandoff: (confirmationTimeoutMs: number) =>
         this.activatePostGameHandoff(gen, confirmationTimeoutMs),
     };
@@ -148,6 +153,9 @@ export class SyncthingMonitor {
 
     if (effects.resolveReadiness !== null) {
       context.resolveReadiness(effects.resolveReadiness);
+    }
+    if (effects.resolveQuiescence !== null) {
+      context.resolveQuiescence(effects.resolveQuiescence);
     }
     
     if (effects.publish !== null) {
@@ -243,6 +251,71 @@ export class SyncthingMonitor {
     }
   }
 
+  private async waitForPreGameQuiescence(
+    context: WatchContext,
+    timeoutMs: number,
+  ): Promise<PreGameQuiescenceResult> {
+    const generation = context.generation;
+    if (context.phase !== "pre_game" || generation !== this.currentGeneration) {
+      return { status: "stale", activityObserved: context.state.activityObserved };
+    }
+
+    let timeoutID: number | null = null;
+    const timeoutPromise = new Promise<"timeout">((resolve) => {
+      timeoutID = window.setTimeout(() => resolve("timeout"), timeoutMs);
+    });
+
+    try {
+      if (!context.state.initialized && !context.cancelled) {
+        const readiness = await Promise.race([context.readinessPromise, timeoutPromise]);
+        if (readiness === "timeout") {
+          const activityObserved = context.state.activityObserved;
+          await this.cancelContext(context, "quiescence_timeout");
+          return { status: "timeout", activityObserved };
+        }
+      }
+
+      if (generation !== this.currentGeneration) {
+        return { status: "stale", activityObserved: context.state.activityObserved };
+      }
+      if (context.state.completionObserved) {
+        return { status: "settled", activityObserved: true };
+      }
+      if (context.cancelled) {
+        return {
+          status: "unavailable",
+          reason: context.state.unavailableReason,
+          activityObserved: context.state.activityObserved,
+        };
+      }
+      if (context.state.initialized && !context.state.activityObserved) {
+        return { status: "idle", activityObserved: false };
+      }
+
+      const outcome = await Promise.race([context.quiescencePromise, timeoutPromise]);
+      if (generation !== this.currentGeneration) {
+        return { status: "stale", activityObserved: context.state.activityObserved };
+      }
+      if (outcome === "timeout") {
+        const activityObserved = context.state.activityObserved;
+        await this.cancelContext(context, "quiescence_timeout");
+        return { status: "timeout", activityObserved };
+      }
+      if (outcome === "settled" || context.state.completionObserved) {
+        return { status: "settled", activityObserved: true };
+      }
+      return {
+        status: "unavailable",
+        reason: context.state.unavailableReason,
+        activityObserved: context.state.activityObserved,
+      };
+    } finally {
+      if (timeoutID !== null) {
+        window.clearTimeout(timeoutID);
+      }
+    }
+  }
+
   private maybeCleanupContext(context: WatchContext): void {
     if (canCleanup(context.state, context.generation !== this.currentGeneration)) {
       this.contexts.delete(context.generation);
@@ -317,6 +390,7 @@ export class SyncthingMonitor {
           void this.stopWatchSafe(startRes.watch_id);
         }
         context.resolveReadiness("unavailable");
+        context.resolveQuiescence("unavailable");
         return;
       }
 
@@ -353,7 +427,7 @@ export class SyncthingMonitor {
     }
     
     const wID = context.watchID;
-    const effects = this.dispatch(context, { type: "cancel" }, { releaseWatchID: true });
+    const effects = this.dispatch(context, { type: "cancel", reason }, { releaseWatchID: true });
     
     if (effects.stopWatch && wID !== null) {
       await this.stopWatchSafe(wID);
@@ -444,7 +518,7 @@ export class SyncthingMonitor {
         const hadActivity = context.state.activityObserved;
         this.dispatch(context, { type: "sample", sample: pollRes.sample || null }, { releaseWatchID: false });
         if (!hadActivity && context.state.activityObserved) {
-          log("info", `Syncthing upload activity observed: generation=${context.generation}`);
+          log("info", `Syncthing activity observed: generation=${context.generation}`);
         }
       } else {
         log("info", `Syncthing watch ${context.watchID} stopped by backend.`);
