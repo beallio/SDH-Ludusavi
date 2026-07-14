@@ -18,10 +18,18 @@ export const HAS_BACKUP_MIN_DWELL_MS = 900;
 
 export type AutoSyncStatusPublishOptions = {
   source: AutoSyncStatusSource;
+  lifecycle?: "lifecycle_start" | "lifecycle_exit";
   gameName?: string;
   appID?: string;
   tracked?: boolean;
   resultStatus?: OperationResult["status"] | LifecycleCheckResult["status"] | RpcStatus["status"];
+};
+
+export type AutoSyncStatusCompleteOptions = Omit<
+  AutoSyncStatusPublishOptions,
+  "source" | "resultStatus"
+> & {
+  lifecycle: "lifecycle_start" | "lifecycle_exit";
 };
 
 export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserViewApi) {
@@ -36,6 +44,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
   let autoSyncStatusTimedOut = false;
   let autoSyncStatusHideTimeoutID: number | null = null;
   let autoSyncStatusSyncTimeoutID: number | null = null;
+  let currentHasBackupLifecycle: "lifecycle_start" | "lifecycle_exit" | null = null;
 
   function clearDeferredAutoSyncStatus() {
     if (deferredAutoSyncStatusTimeoutID !== null) {
@@ -139,7 +148,10 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
     publish(status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions) {
       if (
         isSyncthingStatus(status) &&
+        options.source === "lifecycle_exit" &&
         currentAutoSyncStatusState.status === "has_backup" &&
+        currentAutoSyncStatusState.resultStatus === "backed_up" &&
+        currentHasBackupLifecycle === "lifecycle_exit" &&
         currentAutoSyncStatusState.visible &&
         autoSyncStatusShownAt !== null &&
         Date.now() - autoSyncStatusShownAt < HAS_BACKUP_MIN_DWELL_MS
@@ -160,6 +172,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
             clearDeferredAutoSyncStatus();
             if (!stateToApply) return;
             currentAutoSyncStatusState = stateToApply;
+            currentHasBackupLifecycle = null;
             statusView.setContext(currentAutoSyncStatusState);
             logAutoSyncStatusChange(currentAutoSyncStatusState);
             statusView.sync(currentAutoSyncStatusState);
@@ -171,6 +184,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       }
 
       clearDeferredAutoSyncStatus();
+      currentHasBackupLifecycle = status === "has_backup" ? (options.lifecycle ?? null) : null;
 
       const shouldResetSurface = shouldResetStatusStripSurfaceBeforeVerification(status, options);
       if (isLudusaviRunningStatus(status)) {
@@ -205,6 +219,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
 
     hide(options: Partial<AutoSyncStatusPublishOptions> = {}) {
       clearDeferredAutoSyncStatus();
+      currentHasBackupLifecycle = null;
       clearAutoSyncStatusSyncTimeout();
       clearAutoSyncStatusHideTimeout();
       
@@ -225,7 +240,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
 
     complete(
       result: OperationResult | LifecycleCheckResult,
-      options: Omit<AutoSyncStatusPublishOptions, "source" | "resultStatus">
+      options: AutoSyncStatusCompleteOptions
     ) {
       if (result.status === "failed") {
         api.publish("error", {
@@ -242,6 +257,23 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
           source: "rpc_result",
           resultStatus: result.status
         });
+        return;
+      }
+
+      if (
+        options.lifecycle === "lifecycle_start" &&
+        result.status === "skipped" &&
+        result.reason === "local_current" &&
+        currentAutoSyncStatusState.visible &&
+        (currentAutoSyncStatusState.status === "syncthing_downloading" ||
+          currentAutoSyncStatusState.status === "syncthing_uploading")
+      ) {
+        log(
+          "info",
+          `Final status for result 'local_current' suppressed: active pre-game Syncthing status has precedence`,
+          "autosync_status",
+          options.gameName,
+        );
         return;
       }
 
@@ -265,6 +297,14 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       }
 
       if (result.status === "skipped") {
+        if (result.reason === "conflict_unresolved") {
+          api.publish("conflict_unresolved", {
+            ...options,
+            source: "rpc_result",
+            resultStatus: result.status,
+          });
+          return;
+        }
         if (result.reason === "local_current") {
           api.publish("has_backup", {
             ...options,
@@ -301,6 +341,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
 
     dispose() {
       clearDeferredAutoSyncStatus();
+      currentHasBackupLifecycle = null;
       statusView.setContext(currentAutoSyncStatusState);
       currentAutoSyncStatusState = {
         status: "has_backup",

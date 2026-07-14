@@ -320,6 +320,16 @@
             <p class="node-copy">Compares local save recency against the existing backup.</p>
           </div>
 
+          <div class="node status">
+            <span class="node-title">Observe Syncthing activity</span>
+            <p class="node-copy">
+              If activity is already present, keep the launch paused. Wait for three settled samples
+              and publish verification again. Re-run check_game_start before deciding which save to use.
+              An initialized idle watch proceeds immediately with the original result.
+            </p>
+            <div class="strip">VERIFYING GAME SAVE</div>
+          </div>
+
           <div class="branch-grid" aria-label="Launch check outcomes">
             <div class="branch action">
               <strong>Backup is newer</strong>
@@ -341,7 +351,10 @@
 
             <div class="branch error">
               <strong>Ambiguous recency</strong>
-              <p><code>ambiguous_recency</code> asks the user to choose a save source.</p>
+              <p>
+                <code>ambiguous_recency</code> asks the user to choose a save source.
+                Dismissal reports <code>SYNC SKIPPED — CONFLICT UNRESOLVED</code>.
+              </p>
               <div class="strip error-strip">SAVE CONFLICT</div>
             </div>
           </div>
@@ -427,6 +440,11 @@
             <td><code>ambiguous_recency</code></td>
             <td><code>SAVE CONFLICT</code></td>
             <td>The plugin needs a user decision before moving save data.</td>
+          </tr>
+          <tr>
+            <td><code>conflict_unresolved</code></td>
+            <td><code>SYNC SKIPPED — CONFLICT UNRESOLVED</code></td>
+            <td>The modal was dismissed, so the plugin intentionally changed no save data.</td>
           </tr>
           <tr>
             <td><code>restored</code>, <code>backed_up</code>, <code>local_current</code></td>

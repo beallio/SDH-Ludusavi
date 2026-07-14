@@ -188,6 +188,7 @@ export type AutoSyncStatusKind =
   | "backing_up"
   | "restoring"
   | "conflict"
+  | "conflict_unresolved"
   | "has_backup"
   | "unknown"
   | "error"
