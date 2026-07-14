@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from sdh_ludusavi.constants import WATCHDOG_ABSOLUTE_RESUME_SECONDS
 from sdh_ludusavi.watchdog import ProcessWatchdog, _PauseLease
 
 
@@ -56,6 +57,14 @@ class FakeScopeController:
 
     def wait_for_frozen(self, target: object, expected: bool) -> object:
         return result(self.frozen is expected, "unexpected freezer state")
+
+
+class FakeClock:
+    def __init__(self, now: float = 100.0) -> None:
+        self.now = now
+
+    def monotonic(self) -> float:
+        return self.now
 
 
 def watchdog(controller: FakeScopeController | None = None) -> tuple[ProcessWatchdog, MagicMock]:
@@ -162,6 +171,27 @@ def test_same_scope_pause_rotates_lease_without_thaw_window() -> None:
     wd.stop()
 
 
+def test_same_scope_rotation_preserves_absolute_ceiling_origin() -> None:
+    controller = FakeScopeController()
+    clock = FakeClock()
+    logger = MagicMock()
+    wd = ProcessWatchdog(logger, scope_controller=controller, monotonic=clock.monotonic)
+    wd._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
+
+    wd.pause(4567)
+    first_paused_at = wd._paused_pids[4567].paused_at
+    clock.now += WATCHDOG_ABSOLUTE_RESUME_SECONDS - 1
+    rotated = wd.pause(4567)
+
+    assert wd._paused_pids[4567].paused_at == first_paused_at
+    clock.now += 2
+    wd._check_and_resume_stuck_pids()
+    assert 4567 not in wd._paused_pids
+    assert any("absolute ceiling" in call.args[1] for call in logger.call_args_list)
+    assert controller.thaw_calls == [controller.freeze_calls[0]]
+    assert rotated["status"] == "paused"
+
+
 def test_different_scope_identity_thaws_old_before_freezing_new() -> None:
     controller = FakeScopeController()
     wd, _ = watchdog(controller)
@@ -249,8 +279,6 @@ def test_disappeared_scope_is_safe_idempotent_resume() -> None:
 
 @pytest.mark.parametrize("reason", ["lease expired", "absolute ceiling"])
 def test_watchdog_automatically_thaws_expired_scope(reason: str) -> None:
-    from sdh_ludusavi.constants import WATCHDOG_ABSOLUTE_RESUME_SECONDS
-
     controller = FakeScopeController()
     wd, logger = watchdog(controller)
     now = time.monotonic()
@@ -285,7 +313,7 @@ def test_watchdog_rechecks_expiry_after_late_renewal() -> None:
     assert 4567 in wd._paused_pids
 
 
-def test_stop_thaws_all_scopes_and_retains_retryable_failure() -> None:
+def test_stop_retries_retained_scope_until_thaw_succeeds() -> None:
     controller = FakeScopeController()
     controller.thaw_results.extend([result(False, "busy"), result(True)])
     wd, _ = watchdog(controller)
@@ -294,8 +322,24 @@ def test_stop_thaws_all_scopes_and_retains_retryable_failure() -> None:
 
     wd.stop()
 
+    assert wd._paused_pids == {}
+    assert controller.thaw_calls == [scope(100), scope(200), scope(100)]
+
+
+def test_stop_bounds_retries_and_logs_retained_frozen_scope() -> None:
+    controller = FakeScopeController()
+    controller.thaw_results.extend([result(False, "busy")] * 3)
+    wd, logger = watchdog(controller)
+    wd._paused_pids[100] = _PauseLease(scope(100), 1.0, "a", 2.0)
+
+    wd.stop()
+
     assert 100 in wd._paused_pids
-    assert 200 not in wd._paused_pids
+    assert controller.thaw_calls == [scope(100)] * 3
+    assert any(
+        call.args[0] == "error" and "3 thaw attempts" in call.args[1]
+        for call in logger.call_args_list
+    )
 
 
 @pytest.mark.parametrize("pid", [True, False, 1, 0, -1, 2.5, "abc", 2_147_483_648])

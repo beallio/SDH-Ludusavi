@@ -14,6 +14,8 @@ from .launch_gate import ScopeTransitionResult, SteamAppScope, SystemdScopeContr
 
 LOGGER = logging.getLogger("sdh_ludusavi.service.watchdog")
 MAX_PID = 2_147_483_647
+SHUTDOWN_THAW_ATTEMPTS = 3
+SHUTDOWN_THAW_RETRY_SECONDS = 0.05
 
 
 class _ScopeController(Protocol):
@@ -109,10 +111,13 @@ class ProcessWatchdog:
 
             lease_id = secrets.token_urlsafe(16)
             now = self._monotonic()
+            paused_at = (
+                existing.paused_at if existing is not None and existing.scope == scope else now
+            )
             with self._paused_pids_lock:
                 self._paused_pids[valid_pid] = _PauseLease(
                     scope=scope,
-                    paused_at=now,
+                    paused_at=paused_at,
                     lease_id=lease_id,
                     lease_deadline=now + LAUNCH_GATE_LEASE_TTL_SECONDS,
                 )
@@ -218,7 +223,22 @@ class ProcessWatchdog:
         thread = self._watchdog_thread
         if thread is not None and thread.is_alive():
             thread.join(timeout=1.0)
-        self.resume_all()
+        for attempt in range(1, SHUTDOWN_THAW_ATTEMPTS + 1):
+            self.resume_all()
+            with self._paused_pids_lock:
+                retained = tuple(self._paused_pids.values())
+            if not retained:
+                return
+            if attempt < SHUTDOWN_THAW_ATTEMPTS:
+                time.sleep(SHUTDOWN_THAW_RETRY_SECONDS)
+        units = _bounded_reason(", ".join(lease.scope.unit for lease in retained))
+        self._log(
+            "error",
+            f"Shutdown left {len(retained)} Steam app scope lease(s) unconfirmed after "
+            f"{SHUTDOWN_THAW_ATTEMPTS} thaw attempts: {units}",
+            "launch_gate",
+            None,
+        )
 
     def _verified_frozen(self, scope: SteamAppScope) -> ScopeTransitionResult:
         if not self._scope_controller.freeze_requested(scope):
