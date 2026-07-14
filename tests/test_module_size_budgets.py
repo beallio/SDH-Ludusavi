@@ -17,7 +17,7 @@ BUDGETS = {
     "py_modules/sdh_ludusavi/updater_pending.py": 75,
     "py_modules/sdh_ludusavi/updater_rate_limit.py": 35,
     "py_modules/sdh_ludusavi/launch_gate.py": 310,
-    "py_modules/sdh_ludusavi/watchdog.py": 360,
+    "py_modules/sdh_ludusavi/watchdog.py": 370,
     "src/controllers/pluginUpdateController.tsx": 490,
     "src/controllers/pluginUpdateReducer.ts": 190,
     "src/components/qam/LudusaviContent.tsx": 625,

@@ -73,7 +73,7 @@ class SystemdScopeController:
             cgroup_text = (proc_dir / "cgroup").read_text(encoding="utf-8")
         except ScopeDiscoveryError:
             raise
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             raise ScopeDiscoveryError("Unable to read launch PID cgroup membership") from exc
 
         cgroup_path = _unified_cgroup_path(cgroup_text)
@@ -127,7 +127,7 @@ class SystemdScopeController:
             return False
         try:
             return self._read_requested(scope) == 1
-        except (OSError, ValueError):
+        except (OSError, ValueError, RuntimeError):
             return False
 
     def wait_for_frozen(self, scope: SteamAppScope, expected: bool) -> ScopeTransitionResult:
@@ -142,7 +142,7 @@ class SystemdScopeController:
             try:
                 requested = self._read_requested(scope)
                 completed = self._read_completed(scope)
-            except (OSError, ValueError):
+            except (OSError, ValueError, RuntimeError):
                 return ScopeTransitionResult(False, "Malformed or unreadable cgroup freezer state")
             if requested == expected_value and completed == expected_value:
                 return ScopeTransitionResult(True)
@@ -157,7 +157,7 @@ class SystemdScopeController:
             root = self._cgroup_root.resolve(strict=True)
             expected = root.joinpath(*parts)
             resolved = expected.resolve(strict=True)
-        except OSError as exc:
+        except (OSError, RuntimeError) as exc:
             raise ScopeDiscoveryError("Steam app scope is unavailable") from exc
         if resolved != expected or not resolved.is_relative_to(root):
             raise ScopeDiscoveryError("Steam app scope escapes the cgroup root")
@@ -172,7 +172,7 @@ class SystemdScopeController:
                 state_file.read_text(encoding="utf-8")
         except ScopeDiscoveryError:
             raise
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             raise ScopeDiscoveryError("Steam app scope has no readable freezer state") from exc
 
     def _scope_dir(self, scope: SteamAppScope) -> Path:
@@ -192,7 +192,7 @@ class SystemdScopeController:
             identity = path.stat()
         except FileNotFoundError:
             return "missing", "Steam app scope disappeared"
-        except (OSError, ValueError, ScopeDiscoveryError):
+        except (OSError, ValueError, RuntimeError, ScopeDiscoveryError):
             return "invalid", "Steam app scope path is invalid"
         if (identity.st_dev, identity.st_ino) != (scope.device, scope.inode):
             return "stale", "Steam app scope identity changed"

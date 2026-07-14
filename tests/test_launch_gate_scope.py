@@ -150,6 +150,31 @@ def test_discover_requires_freezer_state_files(scope_fs: ScopeFixture, missing: 
         scope_fs.controller().discover(PID)
 
 
+@pytest.mark.parametrize("filename", ["cgroup", "cgroup.freeze", "cgroup.events"])
+def test_discover_bounds_invalid_utf8(scope_fs: ScopeFixture, filename: str) -> None:
+    target = scope_fs.proc_dir / filename if filename == "cgroup" else scope_fs.scope_dir / filename
+    target.write_bytes(b"\xff")
+
+    with pytest.raises(ScopeDiscoveryError):
+        scope_fs.controller().discover(PID)
+
+
+def test_discover_bounds_path_resolution_runtime_error(
+    scope_fs: ScopeFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_resolve = Path.resolve
+
+    def failing_resolve(path: Path, strict: bool = False) -> Path:
+        if path == scope_fs.cgroup_root:
+            raise RuntimeError("synthetic symlink loop")
+        return original_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", failing_resolve)
+
+    with pytest.raises(ScopeDiscoveryError, match="unavailable"):
+        scope_fs.controller().discover(PID)
+
+
 def test_freeze_uses_exact_bounded_systemctl_command_and_default_bus(
     scope_fs: ScopeFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -244,6 +269,54 @@ def test_freeze_failure_best_effort_thaws_partial_transition(scope_fs: ScopeFixt
         ["systemctl", "--user", "thaw", UNIT],
     ]
     assert (scope_fs.scope_dir / "cgroup.freeze").read_text().strip() == "0"
+
+
+def test_freeze_invalid_state_bytes_fail_bounded_and_best_effort_thaw(
+    scope_fs: ScopeFixture,
+) -> None:
+    calls: list[list[str]] = []
+
+    def runner(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if argv[2] == "freeze":
+            (scope_fs.scope_dir / "cgroup.freeze").write_bytes(b"\xff")
+        else:
+            scope_fs.set_state(0, 0)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    controller = scope_fs.controller(command_runner=runner)
+    result = controller.freeze(controller.discover(PID))
+
+    assert result.success is False
+    assert result.reason == "Malformed or unreadable cgroup freezer state"
+    assert calls == [
+        ["systemctl", "--user", "freeze", UNIT],
+        ["systemctl", "--user", "thaw", UNIT],
+    ]
+
+
+def test_transition_bounds_path_resolution_runtime_error(
+    scope_fs: ScopeFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+    controller = scope_fs.controller(
+        command_runner=lambda argv, **kwargs: calls.append(argv)  # type: ignore[arg-type]
+    )
+    scope = controller.discover(PID)
+    original_resolve = Path.resolve
+
+    def failing_resolve(path: Path, strict: bool = False) -> Path:
+        if path == scope_fs.cgroup_root:
+            raise RuntimeError("synthetic symlink loop")
+        return original_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", failing_resolve)
+
+    result = controller.freeze(scope)
+
+    assert result.success is False
+    assert result.reason == "Steam app scope path is invalid"
+    assert calls == []
 
 
 @pytest.mark.parametrize("failure", ["missing", "timeout", "nonzero"])
