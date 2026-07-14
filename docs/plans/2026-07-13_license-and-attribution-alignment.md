@@ -13,7 +13,9 @@ documentation still contains a stale `v0.2.3` installation URL.
 Keep licensing responsibilities separated by role:
 
 - license project-authored SDH-Ludusavi code under MIT;
-- retain the Decky plugin template's BSD-3-Clause notice in `LICENSE`;
+- retain the BSD-3-Clause notices for decky-ludusavi and the Decky plugin template in `LICENSE`;
+- record SDH-GameSync as design inspiration for the game-launch pause and pre-launch save check,
+  without implying that its code is bundled;
 - preserve the vendored pyludusavi MIT license in its dist-info directory;
 - describe bundled frontend libraries and API-only integrations in `NOTICE` without claiming
   ownership or relicensing them;
@@ -23,7 +25,8 @@ Keep licensing responsibilities separated by role:
 
 No runtime data structures change. The authoritative legal/documentation surfaces are:
 
-- `LICENSE`: project MIT terms followed by the retained Decky template BSD-3-Clause terms;
+- `LICENSE`: project MIT terms followed by the retained decky-ludusavi and Decky template
+  BSD-3-Clause terms;
 - `NOTICE`: repository URLs, roles, versions where pinned, licenses, and bundled/non-bundled
   status;
 - `package.json` and `pyproject.toml`: project license metadata;

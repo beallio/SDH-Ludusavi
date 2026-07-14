@@ -37,6 +37,17 @@ def test_project_license_metadata_is_mit() -> None:
     assert "License :: OSI Approved :: MIT License" in project_data["project"]["classifiers"]
 
 
+def test_notice_preserves_project_lineage_and_design_credit() -> None:
+    notice = Path("NOTICE").read_text(encoding="utf-8")
+    license_text = Path("LICENSE").read_text(encoding="utf-8")
+
+    assert "https://github.com/GedasFX/decky-ludusavi" in notice
+    assert "originally began as a fork" in notice
+    assert "https://github.com/AkazaRenn/SDH-GameSync" in notice
+    assert "game-launch pause and pre-launch save-check concept" in notice
+    assert "Copyright (c) 2024-2025, GedasFX" in license_text
+
+
 def test_backend_package_uses_decky_py_modules_path():
     assert Path("py_modules/sdh_ludusavi").is_dir()
     assert Path("py_modules/pyludusavi").is_dir()

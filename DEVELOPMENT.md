@@ -67,11 +67,14 @@ The package is written to `out/SDH-Ludusavi.zip` and contains a top-level `SDH-L
 
 ## Licensing and Provenance
 
-Project-authored SDH-Ludusavi code is licensed under MIT. The repository started from the
-SteamDeckHomebrew Decky plugin template, whose retained portions remain BSD-3-Clause. Vendored
-`pyludusavi` remains MIT-licensed under its own included license. Frontend libraries, icon sets,
-external runtime integrations, and SteamGridDB artwork retain their respective upstream terms.
-Keep `LICENSE` and `NOTICE` synchronized with dependency, asset, and packaging changes.
+Project-authored SDH-Ludusavi code is licensed under MIT. The project originally began as a fork
+of GedasFX/decky-ludusavi, and retained portions from that project and the underlying
+SteamDeckHomebrew Decky plugin template remain BSD-3-Clause. Vendored `pyludusavi` remains
+MIT-licensed under its own included license. Frontend libraries, icon sets, external runtime
+integrations, and SteamGridDB artwork retain their respective upstream terms. SDH-GameSync is
+credited as design inspiration for the game-launch pause and pre-launch save-check concept; no
+SDH-GameSync code is bundled. Keep `LICENSE` and `NOTICE` synchronized with dependency, asset,
+and packaging changes.
 
 ### Release Packaging and Workflows
 
