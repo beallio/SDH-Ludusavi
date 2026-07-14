@@ -71,6 +71,22 @@ describe("AutoSyncStatusSurface Status Pending Upload", () => {
     expect(shouldAutoHideStatus("syncthing_uploading")).toBe(false);
     expect(shouldAutoHideStatus("syncthing_downloading")).toBe(false);
     expect(shouldAutoHideStatus("syncthing_complete")).toBe(true);
+    expect(shouldAutoHideStatus("conflict")).toBe(false);
+    expect(shouldAutoHideStatus("conflict_unresolved")).toBe(true);
+  });
+
+  it("defines and renders the explicit unresolved-conflict warning", () => {
+    expect(autoSyncStatusText.conflict_unresolved).toBe("SYNC SKIPPED — CONFLICT UNRESOLVED");
+    const html = renderAutoSyncStatusHtml({
+      status: "conflict_unresolved",
+      visible: true,
+      source: "rpc_result",
+    });
+    expect(html).toContain("SYNC SKIPPED — CONFLICT UNRESOLVED");
+    expect(html).toContain("#f59e0b");
+    expect(iconSvgForAutoSyncStatus("conflict_unresolved")).toBe(
+      iconSvgForAutoSyncStatus("conflict"),
+    );
   });
 
   it("defines distinct local-backup warnings", () => {
@@ -261,6 +277,27 @@ describe("AutoSyncStatusSurface Dwell Time", () => {
     surface.publish("syncthing_uploading", { source: "lifecycle_start" });
     expect(mockStatusView.sync).toHaveBeenCalledWith(
       expect.objectContaining({ status: "syncthing_uploading" }),
+    );
+  });
+
+  it("keeps conflict visible and auto-hides conflict_unresolved normally", () => {
+    surface.publish("conflict", { source: "lifecycle_start" });
+    mockStatusView.sync.mockClear();
+    vi.advanceTimersByTime(RESULT_HIDE_DELAY_MS + 1);
+    expect(mockStatusView.sync).not.toHaveBeenCalledWith(
+      expect.objectContaining({ visible: false }),
+    );
+
+    surface.complete(
+      { status: "skipped", reason: "conflict_unresolved", game: "Hades" },
+      { lifecycle: "lifecycle_start", gameName: "Hades", appID: "1145300", tracked: true },
+    );
+    expect(mockStatusView.sync).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "conflict_unresolved", visible: true }),
+    );
+    vi.advanceTimersByTime(RESULT_HIDE_DELAY_MS);
+    expect(mockStatusView.sync).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "conflict_unresolved", visible: false }),
     );
   });
 
