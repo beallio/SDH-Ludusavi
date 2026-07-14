@@ -33,7 +33,7 @@ You have two options for manual installation through the Decky Loader's Develope
 - **Option A: Install from URL**
   1. In the Decky Settings, go to the **Developer** tab.
   2. Select **Install from URL**.
-  3. Enter the URL for the latest SDH-Ludusavi release ZIP from GitHub Releases (e.g., `https://github.com/beallio/SDH-Ludusavi/releases/download/v0.2.3/SDH-Ludusavi-v0.2.3.zip`) and click **Install**.
+  3. Enter the URL for the desired SDH-Ludusavi release ZIP from GitHub Releases (for example, `https://github.com/beallio/SDH-Ludusavi/releases/download/vX.Y.Z/SDH-Ludusavi-vX.Y.Z.zip`) and click **Install** after replacing `X.Y.Z` with the release version.
 
 - **Option B: Install from Local ZIP**
   1. Download the latest versioned `SDH-Ludusavi-vX.Y.Z.zip` to your Steam Deck.
@@ -52,15 +52,15 @@ Once installed, the plugin can handle updates directly from the UI:
 
 ## Prerequisites
 
-- **Decky Loader**: Installed and running on your Steam Deck.
-- **Ludusavi Flatpak**: This plugin requires the Ludusavi Flatpak to manage saves. You can install it from the Discover store or via terminal:
+- **[Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)**: Installed and running on your Steam Deck.
+- **[Ludusavi Flatpak](https://flathub.org/apps/com.github.mtkennerly.ludusavi)**: This plugin requires the Ludusavi Flatpak to manage saves. You can install it from the Discover store or via terminal:
   ```bash
   flatpak install flathub com.github.mtkennerly.ludusavi
   ```
 
 ## Recommended Workflow (The "Gold Standard")
 
-For the best experience, we recommend pairing SDH-Ludusavi with **SyncThingy** to ensure your saves are synchronized across devices without the lag or offline limitations of traditional cloud providers.
+For the best experience, we recommend pairing SDH-Ludusavi with **[SyncThingy](https://flathub.org/apps/com.github.zocker_160.SyncThingy)** to ensure your saves are synchronized across devices without the lag or offline limitations of traditional cloud providers.
 
 ### 1. Setup SyncThingy
 1. Install the SyncThingy Flatpak:
@@ -103,4 +103,4 @@ Syncthing activity statuses reflect only the Syncthing folder that contains Ludu
 
 ## License
 
-GPL-3.0-only - See [LICENSE](LICENSE) for details. For technical details, see [DEVELOPMENT.md](DEVELOPMENT.md).
+Project-authored code is available under the MIT License. Retained Decky plugin template portions remain under BSD-3-Clause, and bundled third-party components retain their own licenses. See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details. For technical documentation, see [DEVELOPMENT.md](DEVELOPMENT.md).

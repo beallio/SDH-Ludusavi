@@ -1,3 +1,5 @@
+import json
+import tomllib
 from pathlib import Path
 
 
@@ -15,6 +17,7 @@ def test_decky_required_plugin_files_exist():
         "package.json",
         "main.py",
         "LICENSE",
+        "NOTICE",
         "rollup.config.js",
         "tsconfig.json",
         "src/index.tsx",
@@ -23,6 +26,15 @@ def test_decky_required_plugin_files_exist():
         "py_modules/pyludusavi-0.3.0.dist-info/licenses/LICENSE",
     ]:
         assert Path(required_path).exists()
+
+
+def test_project_license_metadata_is_mit() -> None:
+    package_data = json.loads(Path("package.json").read_text(encoding="utf-8"))
+    project_data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+
+    assert package_data["license"] == "MIT"
+    assert project_data["project"]["license"] == {"text": "MIT"}
+    assert "License :: OSI Approved :: MIT License" in project_data["project"]["classifiers"]
 
 
 def test_backend_package_uses_decky_py_modules_path():
