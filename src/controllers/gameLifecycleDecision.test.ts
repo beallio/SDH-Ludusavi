@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { evaluateStartCheck, evaluateExitCheck, getStartCleanup, getExitCleanup } from "./gameLifecycleDecision";
+import { evaluateStartCheck, evaluateStartConflictResolution, evaluatePreGameQuiescence, evaluateExitCheck, getStartCleanup, getExitCleanup } from "./gameLifecycleDecision";
 import type { StartState, ExitState } from "./gameLifecycleDecision";
 
 describe("gameLifecycleDecision", () => {
@@ -31,6 +31,30 @@ describe("gameLifecycleDecision", () => {
       const decision = evaluateStartCheck({ ...baseState, paused: false }, { status: "needed", operation: "restore" });
       expect(decision.commands).toContainEqual(expect.objectContaining({ type: "completeStatus" }));
       expect(decision.commands).toContainEqual(expect.objectContaining({ type: "notifyFailure" }));
+    });
+
+    it("maps an interrupted active pre-game transfer to one safe failure", () => {
+      const decision = evaluatePreGameQuiescence({ status: "timeout", activityObserved: true });
+      expect(decision).toEqual({
+        commands: [
+          { type: "publishStatus", status: "error" },
+          {
+            type: "notifyFailure",
+            fallbackMessage: "Launch verification could not safely complete after incoming save activity.",
+          },
+        ],
+        abort: true,
+      });
+    });
+
+    it("maps conflict dismissal to the explicit unresolved result", () => {
+      const decision = evaluateStartConflictResolution(baseState, null);
+      expect(decision.commands).toEqual([
+        {
+          type: "completeStatus",
+          result: { status: "skipped", game: "Test Game", reason: "conflict_unresolved" },
+        },
+      ]);
     });
     
     it("evaluates cleanup: leaves no paused process or unowned watch", () => {
