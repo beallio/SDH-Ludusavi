@@ -52,9 +52,13 @@ hydration guarantees settings and game lists are loaded before standard classifi
 If tracking data fails to load or is cold, the frontend conservatively guards the game 
 launch and shows the running strip before calling the backend, hiding it immediately if 
 the backend returns a silent skip (e.g., disabled autosync, unmatched game, or a 
-deselected Ludusavi game). While the user is deciding on a save conflict, a renewable 
-pause lease ensures the backend watchdog does not automatically resume the game before 
-the UI resolves.
+deselected Ludusavi game). Before save inspection begins, the backend discovers the launch
+PID's exact Steam app scope, freezes it through the user systemd manager, and verifies the
+cgroup v2 requested and completed freezer states. The renewable lease owns that stable scope
+identity while the user is deciding on a save conflict, so later Steam/Proton processes join
+the already-frozen cgroup. If discovery, freeze, or verification is unavailable, the gate
+fails safely and the frontend does not restore, back up, or resolve a conflict while the game
+loads.
 
 The same renewable lease protects pre-game Syncthing settlement. An initialized idle
 watch adds no launch delay. If relevant folder activity is observed, the launch stays

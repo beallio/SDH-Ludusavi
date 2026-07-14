@@ -19,9 +19,14 @@ APP_STARTED_RE = re.compile(
 CHECK_RESULT_RE = re.compile(
     r"check_game_start result for\s+(?P<game>.*?)\s+\((?P<app_id>\d+)\):\s*(?P<payload>\{.*\})\s*$"
 )
-PAUSE_RE = re.compile(r"Paused game process tree rooted at PID\s+(?P<pid>\d+)")
+PAUSE_RE = re.compile(
+    r"(?:Paused game process tree rooted at|Froze Steam app scope "
+    r"app-steam-app[0-9]+-[0-9]+\.scope for root)\s+PID\s+(?P<pid>\d+)"
+)
 WATCHDOG_RE = re.compile(
-    r"Watchdog detected PID\s+(?P<pid>\d+)\s+suspended for .*?\((?P<reason>[^)]+)\)\.\s+Resuming automatically\."
+    r"Watchdog detected (?:Steam app scope app-steam-app[0-9]+-[0-9]+\.scope for root )?"
+    r"PID\s+(?P<pid>\d+)\s+(?:suspended|frozen) for .*?\((?P<reason>[^)]+)\)\.\s+"
+    r"(?:Resuming|Thawing) automatically\."
 )
 ACTION_RE = re.compile(
     r"(?:\[(?P<game>[^\]]+)\]\s+)?(?:backup:\s+Kept local save|restore:\s+Restored)"
