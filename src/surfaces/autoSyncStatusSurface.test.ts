@@ -222,24 +222,54 @@ describe("AutoSyncStatusSurface Dwell Time", () => {
     vi.unstubAllGlobals();
   });
 
-  it("delays syncthing_pending_upload behind has_backup dwell time", () => {
-    surface.publish("has_backup", { source: "rpc_result", resultStatus: "backed_up" });
+  const completePostGameBackup = () => {
+    surface.complete(
+      { status: "backed_up", game: "Hades" },
+      { lifecycle: "lifecycle_exit", gameName: "Hades", appID: "1145300", tracked: true },
+    );
+  };
+
+  it("delays the post-game Syncthing handoff behind the backed-up dwell time", () => {
+    completePostGameBackup();
     expect(mockStatusView.sync).toHaveBeenCalledWith(expect.objectContaining({ status: "has_backup" }));
     
     mockStatusView.sync.mockClear();
-    surface.publish("syncthing_pending_upload", { source: "test" });
+    surface.publish("syncthing_pending_upload", { source: "lifecycle_exit" });
     expect(mockStatusView.sync).not.toHaveBeenCalled();
 
     vi.advanceTimersByTime(HAS_BACKUP_MIN_DWELL_MS);
     expect(mockStatusView.sync).toHaveBeenCalledWith(expect.objectContaining({ status: "syncthing_pending_upload" }));
   });
 
+  it("does not apply the post-game dwell to pre-game current or restored results", () => {
+    surface.complete(
+      { status: "skipped", reason: "local_current", game: "Hades" },
+      { lifecycle: "lifecycle_start", gameName: "Hades", appID: "1145300", tracked: true },
+    );
+    mockStatusView.sync.mockClear();
+    surface.publish("syncthing_downloading", { source: "lifecycle_start" });
+    expect(mockStatusView.sync).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "syncthing_downloading" }),
+    );
+
+    mockStatusView.sync.mockClear();
+    surface.complete(
+      { status: "restored", game: "Hades" },
+      { lifecycle: "lifecycle_start", gameName: "Hades", appID: "1145300", tracked: true },
+    );
+    mockStatusView.sync.mockClear();
+    surface.publish("syncthing_uploading", { source: "lifecycle_start" });
+    expect(mockStatusView.sync).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "syncthing_uploading" }),
+    );
+  });
+
   it("coalesces multiple syncthing publishes during the dwell time", () => {
-    surface.publish("has_backup", { source: "rpc_result", resultStatus: "backed_up" });
+    completePostGameBackup();
     mockStatusView.sync.mockClear();
 
-    surface.publish("syncthing_pending_upload", { source: "test" });
-    surface.publish("syncthing_uploading", { source: "test" });
+    surface.publish("syncthing_pending_upload", { source: "lifecycle_exit" });
+    surface.publish("syncthing_uploading", { source: "lifecycle_exit" });
 
     vi.advanceTimersByTime(HAS_BACKUP_MIN_DWELL_MS);
     expect(mockStatusView.sync).toHaveBeenCalledTimes(1);
@@ -247,10 +277,10 @@ describe("AutoSyncStatusSurface Dwell Time", () => {
   });
 
   it("applies error immediately and cancels deferral", () => {
-    surface.publish("has_backup", { source: "rpc_result", resultStatus: "backed_up" });
+    completePostGameBackup();
     mockStatusView.sync.mockClear();
 
-    surface.publish("syncthing_pending_upload", { source: "test" });
+    surface.publish("syncthing_pending_upload", { source: "lifecycle_exit" });
     surface.publish("error", { source: "rpc_result" });
     expect(mockStatusView.sync).toHaveBeenCalledWith(expect.objectContaining({ status: "error" }));
 
@@ -260,10 +290,10 @@ describe("AutoSyncStatusSurface Dwell Time", () => {
   });
 
   it("cancels deferral on hide", () => {
-    surface.publish("has_backup", { source: "rpc_result", resultStatus: "backed_up" });
+    completePostGameBackup();
     mockStatusView.sync.mockClear();
 
-    surface.publish("syncthing_pending_upload", { source: "test" });
+    surface.publish("syncthing_pending_upload", { source: "lifecycle_exit" });
     surface.hide();
 
     mockStatusView.sync.mockClear();
