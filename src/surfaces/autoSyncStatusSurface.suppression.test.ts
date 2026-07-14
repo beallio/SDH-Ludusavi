@@ -72,7 +72,7 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
 
     surface.complete(
       { status: "backed_up", game: "Hades" },
-      { gameName: "Hades", appID: "1145300", tracked: true },
+      { lifecycle: "lifecycle_exit", gameName: "Hades", appID: "1145300", tracked: true },
     );
 
     const messages = loggedMessages();
@@ -132,7 +132,7 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
 
     surface.complete(
       { status: "backed_up", game: "Hades" },
-      { gameName: "Hades", appID: "1145300", tracked: true },
+      { lifecycle: "lifecycle_exit", gameName: "Hades", appID: "1145300", tracked: true },
     );
 
     const messages = loggedMessages();
@@ -156,7 +156,7 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
 
     surface.complete(
       { status: "backed_up", game: "GameB" },
-      { gameName: "GameB", appID: "2", tracked: true },
+      { lifecycle: "lifecycle_exit", gameName: "GameB", appID: "2", tracked: true },
     );
 
     const messages = loggedMessages();
@@ -168,12 +168,32 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
     const surface = freshSurface();
     surface.complete(
       { status: "paused" as any, game: "Hades" },
-      { gameName: "Hades", appID: "1145300", tracked: true },
+      { lifecycle: "lifecycle_start", gameName: "Hades", appID: "1145300", tracked: true },
     );
 
     const messages = loggedMessages();
     expect(
       messages.some((message) => message.includes("paused") && message.includes("unhandled")),
     ).toBe(true);
+  });
+
+  it("suppresses stale pre-game local_current while a transfer is visible", () => {
+    const surface = freshSurface();
+    surface.publish("syncthing_downloading", {
+      source: "lifecycle_start",
+      gameName: "Hades",
+      appID: "1145300",
+      tracked: true,
+    });
+    logMock.mockClear();
+
+    surface.complete(
+      { status: "skipped", reason: "local_current", game: "Hades" },
+      { lifecycle: "lifecycle_start", gameName: "Hades", appID: "1145300", tracked: true },
+    );
+
+    const messages = loggedMessages();
+    expect(messages.some((message) => message.includes("suppressed") && message.includes("local_current"))).toBe(true);
+    expect(messages.some((message) => message.includes("status=has_backup"))).toBe(false);
   });
 });

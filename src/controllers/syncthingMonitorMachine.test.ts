@@ -6,7 +6,8 @@ import {
   canCleanup,
   handoffOutcome,
   mapSyncthingFailureReason,
-  WatchPhase
+  WatchPhase,
+  WatchMachineState,
 } from "./syncthingMonitorMachine";
 
 describe("SyncthingMonitorMachine", () => {
@@ -41,6 +42,7 @@ describe("SyncthingMonitorMachine", () => {
         expect(res.effects).toEqual({
           publish: null,
           resolveReadiness: null,
+          resolveQuiescence: null,
           stopWatch: false,
           clearPendingTimer: false,
           schedulePendingTimer: false,
@@ -158,6 +160,108 @@ describe("SyncthingMonitorMachine", () => {
         expect(res.effects.publish).toBeNull();
       });
 
+      it("tracks pre-game activity without resolving quiescence", () => {
+        const state = {
+          ...createInitialWatchState("pre_game"),
+          step: "watching" as const,
+          initialized: true,
+          publicationEnabled: true,
+        };
+        const res = transition(state, {
+          type: "sample",
+          sample: {
+            timestamp_unix: 1,
+            folder_state: "syncing",
+            uploading: false,
+            downloading: true,
+            update_in_progress: true,
+            status: "ACTIVE_TRANSFER",
+            settled: false,
+          },
+        });
+
+        expect(res.state.activityObserved).toBe(true);
+        expect(res.state.mutationObserved).toBe(true);
+        expect(res.state.settledCount).toBe(0);
+        expect(res.effects.resolveQuiescence).toBeNull();
+      });
+
+      it("resolves pre-game quiescence after three distinct settled samples", () => {
+        let state: WatchMachineState = {
+          ...createInitialWatchState("pre_game"),
+          step: "watching" as const,
+          initialized: true,
+          publicationEnabled: true,
+        };
+        state = transition(state, {
+          type: "sample",
+          sample: {
+            timestamp_unix: 1,
+            folder_state: "syncing",
+            uploading: true,
+            downloading: false,
+            update_in_progress: false,
+            status: "ACTIVE_TRANSFER",
+            settled: false,
+          },
+        }).state;
+
+        let result = transition(state, {
+          type: "sample",
+          sample: { timestamp_unix: 2, folder_state: "idle", uploading: false, downloading: false, update_in_progress: false, status: "IDLE", settled: true },
+        });
+        result = transition(result.state, {
+          type: "sample",
+          sample: { timestamp_unix: 3, folder_state: "idle", uploading: false, downloading: false, update_in_progress: false, status: "IDLE", settled: true },
+        });
+        expect(result.effects.resolveQuiescence).toBeNull();
+        result = transition(result.state, {
+          type: "sample",
+          sample: { timestamp_unix: 4, folder_state: "idle", uploading: false, downloading: false, update_in_progress: false, status: "IDLE", settled: true },
+        });
+
+        expect(result.state.completionObserved).toBe(true);
+        expect(result.effects.resolveQuiescence).toBe("settled");
+      });
+
+      it("deduplicates repeated pre-game semantic states but preserves direction changes", () => {
+        let state = {
+          ...createInitialWatchState("pre_game"),
+          step: "watching" as const,
+          initialized: true,
+          publicationEnabled: true,
+        };
+        let result = transition(state, {
+          type: "sample",
+          sample: { timestamp_unix: 1, folder_state: "syncing", uploading: false, downloading: true, update_in_progress: false, status: "ACTIVE_TRANSFER", settled: false },
+        });
+        expect(result.effects.publish?.status).toBe("syncthing_downloading");
+
+        result = transition(result.state, {
+          type: "sample",
+          sample: { timestamp_unix: 2, folder_state: "syncing", uploading: false, downloading: true, update_in_progress: false, status: "ACTIVE_TRANSFER", settled: false },
+        });
+        expect(result.effects.publish).toBeNull();
+
+        result = transition(result.state, {
+          type: "sample",
+          sample: { timestamp_unix: 3, folder_state: "syncing", uploading: true, downloading: false, update_in_progress: false, status: "ACTIVE_TRANSFER", settled: false },
+        });
+        expect(result.effects.publish?.status).toBe("syncthing_uploading");
+
+        result = transition(result.state, {
+          type: "sample",
+          sample: { timestamp_unix: 4, folder_state: "idle", uploading: false, downloading: false, update_in_progress: false, status: "IDLE", settled: true },
+        });
+        expect(result.state.latestStatus).toBe("idle");
+
+        result = transition(result.state, {
+          type: "sample",
+          sample: { timestamp_unix: 5, folder_state: "syncing", uploading: false, downloading: true, update_in_progress: false, status: "ACTIVE_TRANSFER", settled: false },
+        });
+        expect(result.effects.publish?.status).toBe("syncthing_downloading");
+      });
+
       it("ignores duplicate timestamp when initialized", () => {
         const state = { ...createInitialWatchState("post_game"), step: "watching" as const, initialized: true, lastProcessedTimestamp: 1 };
         const res = transition(state, { type: "sample", sample: { timestamp_unix: 1 } as any });
@@ -266,6 +370,18 @@ describe("SyncthingMonitorMachine", () => {
         const state = { ...createInitialWatchState("post_game"), step: "watching" as const, initialized: true, publicationEnabled: true };
         const res = transition(state, { type: "poll_failed", reason: "api_unavailable" });
         expect(res.effects.publish).toEqual({ status: "syncthing_unavailable", source: "rpc_result" });
+      });
+
+      it("resolves pre-game quiescence unavailable after activity", () => {
+        const state = {
+          ...createInitialWatchState("pre_game"),
+          step: "watching" as const,
+          initialized: true,
+          activityObserved: true,
+          mutationObserved: true,
+        };
+        const res = transition(state, { type: "poll_failed", reason: "api_unavailable" });
+        expect(res.effects.resolveQuiescence).toBe("unavailable");
       });
     });
 
