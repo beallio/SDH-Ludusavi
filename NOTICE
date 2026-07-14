@@ -10,18 +10,37 @@ Project license
 ---------------
 
 Project-authored SDH-Ludusavi source code is licensed under the MIT License.
-The retained Decky plugin template portions remain subject to the BSD 3-Clause
-License. Both license texts are in LICENSE.
+Retained portions from decky-ludusavi and the Decky plugin template remain
+subject to the BSD 3-Clause License. The applicable license texts and copyright
+notices are in LICENSE.
 
 Source and template lineage
 ---------------------------
 
+GedasFX/decky-ludusavi
+  Repository: https://github.com/GedasFX/decky-ludusavi
+  Role: SDH-Ludusavi originally began as a fork of this Decky Ludusavi plugin
+        and has since been substantially rewritten.
+  License: BSD-3-Clause
+  Copyright: 2024-2025 GedasFX
+
 SteamDeckHomebrew/decky-plugin-template
   Repository: https://github.com/SteamDeckHomebrew/decky-plugin-template
-  Role: SDH-Ludusavi was initialized from this template. Retained portions
-        include the Decky plugin layout, build configuration, and type stubs.
+  Role: Underlying template lineage shared with decky-ludusavi. Retained
+        portions include the Decky plugin layout, build configuration, and
+        type stubs.
   License: BSD-3-Clause
   Copyright: Steam Deck Homebrew
+
+Design inspiration
+------------------
+
+AkazaRenn/SDH-GameSync
+  Repository: https://github.com/AkazaRenn/SDH-GameSync
+  Role: The game-launch pause and pre-launch save-check concept was inspired
+        by SDH-GameSync's approach of stopping a launching game while save data
+        is synchronized, then resuming it. This is conceptual attribution; no
+        SDH-GameSync code is bundled or claimed to have been copied.
 
 Vendored source
 ---------------
