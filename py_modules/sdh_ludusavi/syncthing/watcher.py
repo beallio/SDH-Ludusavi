@@ -14,11 +14,9 @@ from ._types import (
     FolderRuntime,
     RemoteProgress,
     LocalActivity,
-    ConnectionRates,
     ConnectionSnapshot,
     DEFAULT_EVENT_TIMEOUT_SECONDS,
     DEFAULT_ACTIVE_WINDOW_SECONDS,
-    DEFAULT_MIN_RATE_BYTES_PER_SECOND,
 )
 from .activity import (
     get_initial_folder_state_and_runtime,
@@ -27,7 +25,6 @@ from .activity import (
     get_connection_snapshot,
     get_my_device_id,
     get_folder_status,
-    compute_rates,
     prune_remote_progress,
     prune_local_activity,
     compute_activity_status,
@@ -90,9 +87,6 @@ class SyncthingWatch:
         self.runtime = FolderRuntime()
         self.remote_progress: dict[str, RemoteProgress] = {}
         self.local_activity = LocalActivity(active_items={})
-        self.rates = ConnectionRates(0.0, 0.0)
-        self.previous_totals: tuple[int, int] | None = None
-        self.previous_totals_time: float | None = None
         self.connected_devices: frozenset[str] = (
             initial_snapshot.connected_devices if initial_snapshot else frozenset()
         )
@@ -147,11 +141,11 @@ class SyncthingWatch:
             self._tick(time.monotonic())
 
     def _tick(self, now: float) -> None:
-        # 1. Capture a monotonic timestamp for connection and folder polling.
+        # 1. Capture a monotonic timestamp for folder polling.
         now_pre = now
 
-        # 2. Poll connection totals and compute rates.
-        self._tick_connections(now_pre)
+        # 2. Poll relevant-peer connectivity.
+        self._tick_connectivity()
 
         # 2b. Stop with a terminal result if every relevant peer disconnected.
         if self.folder.device_ids and not set(self.folder.device_ids) & self.connected_devices:
@@ -189,22 +183,13 @@ class SyncthingWatch:
         # 7. Compute and atomically assign the latest sample using the post-event state.
         self._tick_sample(now_post)
 
-    def _tick_connections(self, now: float) -> None:
+    def _tick_connectivity(self) -> None:
         try:
             snapshot = get_connection_snapshot(self.api)
-            current_totals = (snapshot.in_bytes_total, snapshot.out_bytes_total)
-            self.rates = compute_rates(
-                self.previous_totals,
-                self.previous_totals_time,
-                current_totals,
-                now,
-            )
-            self.previous_totals = current_totals
-            self.previous_totals_time = now
             self.connected_devices = snapshot.connected_devices
         # Intentionally broad; keeps the last known connected-device set
         except Exception:
-            self.rates = ConnectionRates(0.0, 0.0)
+            return
 
     def _tick_folder_status(self, now: float) -> None:
         try:
@@ -233,8 +218,6 @@ class SyncthingWatch:
                 remote_progress=self.remote_progress,
                 local_activity=self.local_activity,
                 runtime=self.runtime,
-                rates=self.rates,
-                min_rate_bytes_per_second=DEFAULT_MIN_RATE_BYTES_PER_SECOND,
                 active_window_seconds=DEFAULT_ACTIVE_WINDOW_SECONDS,
                 now=now,
             )

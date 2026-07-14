@@ -16,7 +16,6 @@ from sdh_ludusavi.syncthing import (
     FolderRuntime,
     RemoteProgress,
     LocalActivity,
-    ConnectionRates,
 )
 
 
@@ -151,8 +150,6 @@ def test_compute_activity_status() -> None:
         remote_progress={},
         local_activity=LocalActivity(),
         runtime=FolderRuntime(sequence=10),
-        rates=ConnectionRates(0.0, 0.0),
-        min_rate_bytes_per_second=32768.0,
         active_window_seconds=15.0,
         now=now,
     )
@@ -167,8 +164,6 @@ def test_compute_activity_status() -> None:
         remote_progress={},
         local_activity=LocalActivity(active_download_files=1),
         runtime=FolderRuntime(sequence=10),
-        rates=ConnectionRates(50000.0, 0.0),
-        min_rate_bytes_per_second=32768.0,
         active_window_seconds=15.0,
         now=now,
     )
@@ -183,8 +178,6 @@ def test_compute_activity_status() -> None:
         remote_progress={"peer1": RemoteProgress("peer1", file_count=1, last_seen_monotonic=now)},
         local_activity=LocalActivity(),
         runtime=FolderRuntime(sequence=10),
-        rates=ConnectionRates(0.0, 50000.0),
-        min_rate_bytes_per_second=32768.0,
         active_window_seconds=15.0,
         now=now,
     )
@@ -199,8 +192,6 @@ def test_compute_activity_status() -> None:
         remote_progress={},
         local_activity=LocalActivity(),
         runtime=FolderRuntime(sequence=10),
-        rates=ConnectionRates(0.0, 0.0),
-        min_rate_bytes_per_second=32768.0,
         active_window_seconds=15.0,
         now=now,
     )
@@ -214,8 +205,6 @@ def test_compute_activity_status() -> None:
         remote_progress={},
         local_activity=LocalActivity(),
         runtime=FolderRuntime(sequence=10, need_bytes=100),
-        rates=ConnectionRates(0.0, 0.0),
-        min_rate_bytes_per_second=32768.0,
         active_window_seconds=15.0,
         now=now,
     )
@@ -229,8 +218,6 @@ def test_compute_activity_status() -> None:
         remote_progress={},
         local_activity=LocalActivity(),
         runtime=FolderRuntime(sequence=12),
-        rates=ConnectionRates(0.0, 0.0),
-        min_rate_bytes_per_second=32768.0,
         active_window_seconds=15.0,
         now=now,
     )

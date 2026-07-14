@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import time
 import threading
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from sdh_ludusavi.syncthing.watcher import SyncthingWatch, SyncthingWatchManager
 from sdh_ludusavi.syncthing.config import SyncthingNotConfiguredError
@@ -11,7 +11,6 @@ from sdh_ludusavi.syncthing import (
     FolderSelection,
     FolderRuntime,
     LocalActivity,
-    ConnectionRates,
     ConnectionSnapshot,
 )
 
@@ -35,7 +34,7 @@ def test_watch_manager(mock_resolve_path, mock_resolve_creds) -> None:
 
     manager = SyncthingWatchManager()
 
-    # Mock get_initial_folder_state_and_runtime, get_event_cursor, get_connection_totals
+    # Mock initial folder state, event cursor, and relevant-peer connectivity.
     with (
         patch("sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime") as mock_init,
         patch("sdh_ludusavi.syncthing.watcher.get_event_cursor") as mock_cursor,
@@ -47,7 +46,7 @@ def test_watch_manager(mock_resolve_path, mock_resolve_creds) -> None:
         mock_init.return_value = ("idle", FolderRuntime(sequence=5))
         mock_cursor.return_value = 100
         mock_my_id.return_value = "LOCAL-DEVICE"
-        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
+        mock_snapshot.return_value = ConnectionSnapshot(connected_devices=frozenset({"DEV-A"}))
         mock_status.return_value = {"state": "idle", "sequence": 5}
         mock_events.return_value = []
 
@@ -149,7 +148,7 @@ def test_watch_start_returns_bounded_detection_grace(mock_resolve_path, mock_res
         mock_init.return_value = ("idle", FolderRuntime(sequence=5))
         mock_cursor.return_value = 100
         mock_my_id.return_value = "LOCAL-DEVICE"
-        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
+        mock_snapshot.return_value = ConnectionSnapshot(connected_devices=frozenset({"DEV-A"}))
         mock_status.return_value = {"state": "idle", "sequence": 5}
         mock_events.return_value = []
 
@@ -184,7 +183,7 @@ def test_watch_start_clamps_rescan_detection_grace(mock_resolve_path, mock_resol
         patch("sdh_ludusavi.syncthing.watcher.get_my_device_id", return_value="LOCAL-DEVICE"),
         patch(
             "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
-            return_value=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+            return_value=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
         ),
         patch.object(SyncthingWatch, "start"),
     ):
@@ -242,7 +241,7 @@ def test_watcher_sample_timing_and_failures(mock_resolve_path, mock_resolve_cred
     ):
         mock_init.return_value = ("idle", FolderRuntime(sequence=5))
         mock_my_id.return_value = "LOCAL-DEVICE"
-        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
+        mock_snapshot.return_value = ConnectionSnapshot(connected_devices=frozenset({"DEV-A"}))
         mock_status.return_value = {"state": "idle", "sequence": 5}
         mock_events.return_value = []
 
@@ -285,7 +284,7 @@ def test_watcher_sample_timing_and_failures(mock_resolve_path, mock_resolve_cred
     ):
         mock_init.return_value = ("idle", FolderRuntime(sequence=5))
         mock_my_id.return_value = "LOCAL-DEVICE"
-        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
+        mock_snapshot.return_value = ConnectionSnapshot(connected_devices=frozenset({"DEV-A"}))
         mock_status.return_value = {"state": "idle", "sequence": 5}
         mock_events.return_value = []
 
@@ -330,7 +329,7 @@ def test_event_processing_before_sample_serialization(
         mock_init.return_value = ("idle", FolderRuntime(sequence=5))
         mock_cursor.return_value = 100
         mock_my_id.return_value = "LOCAL-DEVICE"
-        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
+        mock_snapshot.return_value = ConnectionSnapshot(connected_devices=frozenset({"DEV-A"}))
         mock_status.return_value = {"state": "idle", "sequence": 5}
         mock_events.return_value = [
             {
@@ -355,7 +354,6 @@ def test_event_processing_before_sample_serialization(
         watch.runtime = FolderRuntime(sequence=5)
         watch.remote_progress = {}
         watch.local_activity = LocalActivity(active_items={})
-        watch.rates = ConnectionRates(0.0, 0.0)
         watch._tick(time.monotonic())
 
         assert watch.latest_sample["sample"]["folder_state"] == "syncing"
@@ -414,7 +412,7 @@ def test_strict_folder_status_initialization_failure(mock_resolve_path, mock_res
     ):
         mock_cursor.return_value = 100
         mock_my_id.return_value = "LOCAL-DEVICE"
-        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
+        mock_snapshot.return_value = ConnectionSnapshot(connected_devices=frozenset({"DEV-A"}))
         mock_status.return_value = {"state": "idle", "sequence": 5}
         mock_events.return_value = []
 
@@ -469,7 +467,7 @@ def test_watch_manager_classifies_no_connected_peers(
     mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
     mock_my_id.return_value = "LOCAL-DEVICE"
     mock_resolve_path.return_value = _shared_folder(("DEV-A", "DEV-B"))
-    mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset())
+    mock_snapshot.return_value = ConnectionSnapshot(connected_devices=frozenset())
 
     result = SyncthingWatchManager().start_watch(
         "post_game", "Hades", "1145300", "/home/deck/Sync/Hades"
@@ -492,7 +490,9 @@ def test_watch_manager_ignores_unrelated_connected_devices(
     mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
     mock_my_id.return_value = "LOCAL-DEVICE"
     mock_resolve_path.return_value = _shared_folder(("DEV-A",))
-    mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"UNRELATED-DEVICE"}))
+    mock_snapshot.return_value = ConnectionSnapshot(
+        connected_devices=frozenset({"UNRELATED-DEVICE"})
+    )
 
     result = SyncthingWatchManager().start_watch(
         "post_game", "Hades", "1145300", "/home/deck/Sync/Hades"
@@ -512,7 +512,7 @@ def test_watch_manager_starts_with_one_relevant_peer_connected(
     mock_resolve_creds.return_value = ("http://127.0.0.1:8384", "test-key", None)
     mock_my_id.return_value = "LOCAL-DEVICE"
     mock_resolve_path.return_value = _shared_folder(("DEV-A", "DEV-B"))
-    mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-B"}))
+    mock_snapshot.return_value = ConnectionSnapshot(connected_devices=frozenset({"DEV-B"}))
 
     manager = SyncthingWatchManager()
     with patch.object(SyncthingWatch, "start"):
@@ -550,7 +550,7 @@ def _stopped_watch_for_tick(device_ids: tuple[str, ...]) -> SyncthingWatch:
         "1145300",
         _shared_folder(device_ids),
         None,
-        initial_snapshot=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+        initial_snapshot=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
     )
     watch.cursor = 100
     watch.folder_state = "idle"
@@ -563,7 +563,7 @@ def test_watch_stops_when_final_relevant_peer_disconnects() -> None:
 
     with patch(
         "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
-        return_value=ConnectionSnapshot(0, 0, frozenset()),
+        return_value=ConnectionSnapshot(connected_devices=frozenset()),
     ):
         watch._tick(time.monotonic())
 
@@ -578,7 +578,7 @@ def test_watch_continues_while_relevant_peer_connected() -> None:
     with (
         patch(
             "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
-            return_value=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+            return_value=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
         ),
         patch(
             "sdh_ludusavi.syncthing.watcher.get_folder_status",
@@ -610,6 +610,93 @@ def test_watch_keeps_last_known_peers_when_connections_poll_fails() -> None:
 
     assert watch.latest_sample["status"] == "activity"
     assert not watch.stop_event.is_set()
+
+
+def test_watch_ignores_other_folder_traffic_shared_with_relevant_peer() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    now = time.monotonic()
+    watch.api = Mock()
+    watch.api.get_json.side_effect = [
+        {
+            "total": {"inBytesTotal": 1_000_000, "outBytesTotal": 1_000_000},
+            "connections": {"DEV-A": {"connected": True}},
+        },
+        {
+            "total": {"inBytesTotal": 2_000_000, "outBytesTotal": 2_000_000},
+            "connections": {"DEV-A": {"connected": True}},
+        },
+    ]
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_folder_status",
+            side_effect=[
+                {"state": "sync-waiting", "sequence": 6},
+                {"state": "sync-waiting", "sequence": 7},
+            ],
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_events",
+            return_value=[
+                {
+                    "id": 101,
+                    "type": "RemoteDownloadProgress",
+                    "data": {
+                        "folder": "other-folder",
+                        "device": "DEV-A",
+                        "state": {"other.dat": {}},
+                    },
+                }
+            ],
+        ),
+    ):
+        watch._tick(now)
+        watch._tick(now + 1.0)
+
+    sample = watch.latest_sample["sample"]
+    assert sample["downloading"] is False
+    assert sample["uploading"] is False
+    assert sample["status"] != "ACTIVE_TRANSFER"
+
+
+def test_watch_preserves_watched_folder_download_and_upload_progress() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+            return_value=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_folder_status",
+            return_value={"state": "idle", "sequence": 5},
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_events",
+            return_value=[
+                {
+                    "id": 101,
+                    "type": "DownloadProgress",
+                    "data": {"test-folder": {"save.dat": {}}},
+                },
+                {
+                    "id": 102,
+                    "type": "RemoteDownloadProgress",
+                    "data": {
+                        "folder": "test-folder",
+                        "device": "DEV-A",
+                        "state": {"save.dat": {}},
+                    },
+                },
+            ],
+        ),
+    ):
+        watch._tick(time.monotonic())
+
+    sample = watch.latest_sample["sample"]
+    assert sample["downloading"] is True
+    assert sample["uploading"] is True
+    assert sample["status"] == "ACTIVE_TRANSFER"
 
 
 @patch("sdh_ludusavi.syncthing.watcher.resolve_api_credentials")
@@ -683,7 +770,7 @@ def test_watch_self_terminates_after_ttl() -> None:
         "1145300",
         _shared_folder(("DEV-A",)),
         None,
-        initial_snapshot=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+        initial_snapshot=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
         on_expired=on_expired,
     )
 
@@ -728,7 +815,7 @@ def test_manager_poll_returns_stopped_after_ttl_deregistration() -> None:
         mock_init.return_value = ("idle", FolderRuntime(sequence=5))
         mock_cursor.return_value = 100
         mock_my_id.return_value = "LOCAL-DEVICE"
-        mock_snapshot.return_value = ConnectionSnapshot(0, 0, frozenset({"DEV-A"}))
+        mock_snapshot.return_value = ConnectionSnapshot(connected_devices=frozenset({"DEV-A"}))
         mock_status.return_value = {"state": "idle", "sequence": 5}
         mock_events.return_value = []
 
@@ -762,7 +849,7 @@ def test_watch_within_ttl_does_not_expire() -> None:
     with (
         patch(
             "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
-            return_value=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+            return_value=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
         ),
         patch(
             "sdh_ludusavi.syncthing.watcher.get_folder_status",
@@ -787,7 +874,7 @@ def test_no_connected_peers_terminal_watch_stays_registered() -> None:
 
     with patch(
         "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
-        return_value=ConnectionSnapshot(0, 0, frozenset()),
+        return_value=ConnectionSnapshot(connected_devices=frozenset()),
     ):
         # We manually call _tick to simulate the disconnect path in the watch loop.
         # It should set stop_event but NOT call on_expired.
@@ -912,7 +999,7 @@ def test_same_signature_replacement_leaves_exactly_one_registered() -> None:
         ),
         patch(
             "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
-            return_value=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+            return_value=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
         ),
         patch.object(SyncthingWatch, "start"),
         patch.object(SyncthingWatch, "stop") as mock_stop,
@@ -950,7 +1037,7 @@ def test_cross_phase_replacement_supersedes_first_watch() -> None:
         ),
         patch(
             "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
-            return_value=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+            return_value=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
         ),
         patch.object(SyncthingWatch, "start"),
         patch.object(SyncthingWatch, "stop") as mock_stop,
@@ -988,7 +1075,7 @@ def test_different_game_does_not_get_stopped() -> None:
         ),
         patch(
             "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
-            return_value=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+            return_value=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
         ),
         patch.object(SyncthingWatch, "start"),
         patch.object(SyncthingWatch, "stop") as mock_stop,
@@ -1033,7 +1120,7 @@ def test_watch_manager_concurrent_same_signature_start(
         barrier.wait()
         # yield some time to let both threads wake up before racing for the lock
         time.sleep(0.05)
-        return ConnectionSnapshot(0, 0, frozenset({"DEV-B"}))
+        return ConnectionSnapshot(connected_devices=frozenset({"DEV-B"}))
 
     mock_snapshot.side_effect = mock_get_connection_snapshot
 
@@ -1070,7 +1157,7 @@ def test_watch_stop_on_never_started_watch() -> None:
         "1145300",
         _shared_folder(("DEV-A",)),
         None,
-        initial_snapshot=ConnectionSnapshot(0, 0, frozenset({"DEV-A"})),
+        initial_snapshot=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
     )
     # Never call watch.start()
     # Does not raise

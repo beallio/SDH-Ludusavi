@@ -99,6 +99,8 @@ Backups and restores are limited to 15 minutes (status checks to 5 minutes); if 
 
 When Syncthing is not configured, the plugin silently reports the normal local-backup result without a Syncthing warning. Peer connectivity, not internet connectivity, controls these warnings: Syncthing monitoring runs whenever at least one device sharing the backup folder is connected (including over LAN without internet), and is skipped when none are.
 
+Syncthing activity statuses reflect only the Syncthing folder that contains Ludusavi's configured backup path. Traffic in other Syncthing folders is excluded, even when those folders are shared with the same remote peer.
+
 ## License
 
 GPL-3.0-only - See [LICENSE](LICENSE) for details. For technical details, see [DEVELOPMENT.md](DEVELOPMENT.md).
