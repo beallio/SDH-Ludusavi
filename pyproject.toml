@@ -4,13 +4,13 @@ dynamic = ["version"]
 description = "Decky Loader plugin for Ludusavi save backup and restore controls"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "GPL-3.0-only" }
+license = { text = "MIT" }
 authors = [
     { name = "David Beall", email = "6121439+beallio@users.noreply.github.com" },
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
 ]
@@ -36,6 +36,7 @@ include = [
     "py_modules/sdh_ludusavi",
     "README.md",
     "LICENSE",
+    "NOTICE.md",
 ]
 
 [build-system]

@@ -27,7 +27,7 @@
     "deck"
   ],
   "author": "David Beall <6121439+beallio@users.noreply.github.com>",
-  "license": "GPL-3.0-only",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/beallio/SDH-Ludusavi/issues"
   },

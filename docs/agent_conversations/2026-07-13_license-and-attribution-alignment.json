@@ -1,0 +1,45 @@
+{
+  "date": "2026-07-13",
+  "task_objective": "Review public documentation, add repository and third-party attribution, and align the project license with the permissive licenses of the retained template and project-authored code.",
+  "files_modified": [
+    "DEVELOPMENT.md",
+    "LICENSE",
+    "NOTICE.md",
+    "README.md",
+    "package.json",
+    "pyproject.toml",
+    "scripts/package_plugin.py",
+    "scripts/validate_plugin_zip.py",
+    "tests/test_package_plugin.py",
+    "tests/test_protocol.py",
+    "tests/test_validate_plugin_zip.py",
+    "docs/plans/2026-07-13_license-and-attribution-alignment.md",
+    "docs/agent_conversations/2026-07-13_license-and-attribution-alignment.json"
+  ],
+  "tests_added": [
+    "Project license metadata must remain MIT in package.json and pyproject.toml.",
+    "NOTICE.md must exist as a required repository and Decky package file.",
+    "The ZIP validator must reject archives that omit NOTICE.md.",
+    "NOTICE.md must preserve the decky-ludusavi fork lineage and SDH-GameSync design credit, while LICENSE retains the GedasFX BSD copyright."
+  ],
+  "design_decisions": [
+    "License project-authored SDH-Ludusavi code under MIT and retain the decky-ludusavi and Decky plugin template BSD-3-Clause notices in LICENSE.",
+    "Record that SDH-Ludusavi began as a fork of GedasFX/decky-ludusavi and credit AkazaRenn/SDH-GameSync for the game-launch pause and pre-launch save-check concept without implying copied code.",
+    "Use renderable Markdown in NOTICE.md to distinguish template lineage, vendored source, frontend dependencies, runtime/API integrations, and artwork provenance without relicensing third-party work.",
+    "Keep the vendored pyludusavi MIT license in its existing dist-info location and require both LICENSE and NOTICE.md in every Decky ZIP.",
+    "Use a version-neutral GitHub release URL in README so installation documentation does not become stale after each release.",
+    "State explicitly that SteamGridDB artwork is not covered by the project MIT license."
+  ],
+  "results": {
+    "red_test": "The initial focused suite failed on missing notice coverage and stale license metadata; the Markdown follow-up failed on missing NOTICE.md and stale packaging contracts.",
+    "focused_tests": "24 passed with --no-cov after converting the notice to Markdown.",
+    "ruff": "Passed; 128 files already formatted.",
+    "ty": "Passed.",
+    "pytest": "690 passed; 87.69% coverage.",
+    "frontend": "31 files and 260 tests passed; TypeScript typecheck passed; no known pnpm audit vulnerabilities.",
+    "package_validation": "Release-style SDH-Ludusavi.zip validated with LICENSE, NOTICE.md, and the vendored pyludusavi license included.",
+    "markdown_rendering": "GitHub's Markdown API rendered NOTICE.md with headings, linked project names, nested lists, and inline code as intended.",
+    "attribution_follow_up": "The new lineage and design-credit regression test failed before the notice update and then passed; the focused protocol suite has 8 passing tests.",
+    "cache_policy": "All generated tooling state and validation artifacts remained under /tmp/sdh_ludusavi."
+  }
+}
