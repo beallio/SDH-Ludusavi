@@ -244,6 +244,58 @@ def test_different_scope_identity_thaws_old_before_freezing_new() -> None:
     wd.stop()
 
 
+def _failed_different_scope_rotation() -> tuple[
+    ProcessWatchdog, FakeScopeController, str, object, object
+]:
+    controller = FakeScopeController()
+    wd, _ = watchdog(controller)
+    first_lease_id = wd.pause(4567)["lease_id"]
+    old_scope = controller.freeze_calls[0]
+    new_scope = scope(inode=99)
+    controller.scopes[4567] = new_scope
+    controller.thaw_results.extend(
+        [result(False, "old manager busy"), result(False, "new manager busy")]
+    )
+
+    failed = wd.pause(4567)
+
+    assert failed["status"] == "failed"
+    assert "old manager busy" in failed["message"]
+    assert "new manager busy" in failed["message"]
+    return wd, controller, first_lease_id, old_scope, new_scope
+
+
+def test_failed_different_scope_rotation_tracks_both_scopes_for_retry() -> None:
+    wd, controller, lease_id, old_scope, new_scope = _failed_different_scope_rotation()
+
+    assert wd._paused_pids[4567].scopes == (old_scope, new_scope)
+    assert wd.pause(4567)["message"] == "Scope recovery is still pending"
+    assert wd._paused_pids[4567].scopes == (old_scope, new_scope)
+    assert wd.resume(4567, lease_id) == {"status": "resumed", "pid": 4567}
+    assert controller.thaw_calls == [old_scope, new_scope, old_scope, new_scope]
+    assert wd._paused_pids == {}
+    wd.stop()
+
+
+@pytest.mark.parametrize("cleanup", ["watchdog", "shutdown"])
+def test_failed_different_scope_rotation_tracks_both_scopes_for_automatic_cleanup(
+    cleanup: str,
+) -> None:
+    wd, controller, _, old_scope, new_scope = _failed_different_scope_rotation()
+    lease = wd._paused_pids[4567]
+    assert lease.scopes == (old_scope, new_scope)
+
+    if cleanup == "watchdog":
+        lease.lease_deadline = time.monotonic() - 1
+        wd._check_and_resume_stuck_pids()
+    else:
+        wd.stop()
+
+    assert controller.thaw_calls == [old_scope, new_scope, old_scope, new_scope]
+    assert wd._paused_pids == {}
+    wd.stop()
+
+
 def test_concurrent_resume_and_pause_are_serialized_without_thawing_new_lease() -> None:
     controller = FakeScopeController()
     wd, _ = watchdog(controller)
