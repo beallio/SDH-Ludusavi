@@ -1,0 +1,51 @@
+{
+  "date": "2026-07-14",
+  "task_objective": "Recognize Steam's exact launcher-service inheritance as a bounded pre-scope handoff while preserving strict Steam app scope discovery, bootstrap PID identity checks, verified freeze ordering, and fail-closed conflict behavior.",
+  "field_evidence": [
+    "Sanitized device evidence showed a validated launch PID temporarily inherited the current user's app.slice/steam-launcher.service cgroup immediately before user systemd created the transient Steam app scope.",
+    "The existing classifier treated that exact transitional path as a hard discovery failure, so acquisition resumed the bootstrap PID instead of polling through the bounded handoff window.",
+    "Raw device logs and save paths were not copied into the repository."
+  ],
+  "files_modified": [
+    "docs/agent_conversations/2026-07-14_recognize-steam-launcher-prescope-handoff.json",
+    "docs/plans/2026-07-14_recognize-steam-launcher-prescope-handoff.md",
+    "py_modules/sdh_ludusavi/launch_gate.py",
+    "tests/test_launch_gate_scope.py"
+  ],
+  "tests_added": [
+    "Exact current-user app.slice/steam-launcher.service discovery raises ScopeNotReadyError without returning a scope or invoking a systemd transition.",
+    "Launcher-service acquisition preserves SIGSTOP, bounded wait, exact app-scope freeze, frozen-state verification, and SIGCONT ordering while returning only the SteamAppScope.",
+    "Launcher-service timeout follows the bounded retry path, invokes no systemd transition, and resumes the unchanged bootstrap PID once.",
+    "Parameterized alternate services, wrong-user prefixes, child paths, suffixes, alternate spellings, and traversal-like paths remain immediate hard failures with no retry or freeze command.",
+    "The existing bare app.slice delayed handoff regression remains unchanged and passing."
+  ],
+  "red_evidence": [
+    {
+      "command": "./run.sh uv run pytest tests/test_launch_gate_scope.py -k 'launcher or scope_not_ready or delayed_scope'",
+      "result": "Expected RED: 3 behavior failures proved the literal launcher service was not retryable, successful acquisition could not reach the exact scope freeze, and the unchanged launcher state bypassed the bounded timeout path. Eight existing hard-failure and bare-app.slice cases passed; the focused selection also triggered the expected repository-wide coverage threshold.",
+      "artifact": "/tmp/sdh_ludusavi/recognize-steam-launcher-prescope-handoff-red.log"
+    }
+  ],
+  "design_decisions": [
+    "Keep SteamAppScope as the only successful discovery result and ScopeNotReadyError as the internal retry signal.",
+    "Allow only two normalized exact pre-scope tuples: the current user's bare app.slice and that same prefix with the literal terminal steam-launcher.service unit.",
+    "Leave the successful Steam app unit regex, scope construction, acquirer retry loop, PID identity validation, signal ordering, freezer verification, watchdog lease behavior, frontend behavior, and analyzer grammar unchanged.",
+    "Do not create or inspect a launcher-service cgroup directory and never pass that service to systemctl freeze."
+  ],
+  "commands_and_results": {
+    "baseline": "The plan commit hook passed Ruff, formatting, ty, and 763 Python tests at 88.43% coverage before production edits.",
+    "focused_classifier": "11 launcher, scope-not-ready, and delayed-scope tests passed with coverage disabled after RED was established.",
+    "focused_backend": "All 181 launch-gate, launch-scope, watchdog, and service tests passed; the partial coverage run reached 49.25% and therefore correctly required the no-coverage focused rerun.",
+    "analyzer": "All 18 analyzer tests passed with launch-gate acquisition and conflict-skipped detection unchanged.",
+    "frontend_contract": "All 11 gameLifecycleDecision tests passed with the existing fail-closed conflict toast behavior unchanged.",
+    "type_and_style": "Focused Ruff check, Ruff format check, and the full backend ty check passed.",
+    "quality_gate_recovery": "The first complete gate found launch_gate.py at 312 lines against its 310-line module budget. Compacting only the new allowed-path tuple restored the module to 309 lines; the focused module-budget and 11 handoff tests then passed. The captured failure is /tmp/sdh_ludusavi/recognize-steam-launcher-prescope-handoff-quality-gate-failure.log.",
+    "complete_quality_gate": "The complete orchestration gate passed: 31 frontend files and 286 tests, TypeScript checking, Rollup build, Ruff check and format, ty, 772 Python tests at 88.41% coverage, TDD enforcement, and review-note deletion protection.",
+    "dependencies": "No Python, JavaScript, system, privilege-helper, or upstream dependency was added.",
+    "api_compatibility": "Pause, renew, and resume RPC names, arguments, result shapes, frontend lifecycle decisions, and persisted schemas remain unchanged."
+  },
+  "remaining_limitations": [
+    "Synthetic tests cannot reproduce SteamOS scheduler timing, user-systemd migration timing, or visible game advancement on a Deck."
+  ],
+  "deferred_on_device_verification": "After orchestrator approval and installation of an implementation build, confirm the exact Steam app scope freezes before conflict handling, the modal appears without the launch-gate-unavailable toast, every decision or dismissal completes before one verified thaw, and strict log analysis reports no successful-incident launch-gate finding."
+}
