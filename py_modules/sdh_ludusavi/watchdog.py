@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import secrets
-import signal
 import threading
 import time
 from collections.abc import Callable
@@ -11,7 +10,7 @@ from pathlib import Path
 from .constants import LAUNCH_GATE_LEASE_TTL_SECONDS
 from .launch_gate import ScopeTransitionResult, SteamAppScope, SystemdScopeController
 from .launch_gate_acquire import LaunchScopeAcquirer
-from .launch_gate_process import _coerce_signal_pid, _is_stopped
+from .launch_gate_process import _coerce_signal_pid
 from .watchdog_lease import (
     _PauseLease,
     _ScopeAcquirer,
@@ -20,8 +19,10 @@ from .watchdog_lease import (
     _gate_held_message,
     _lease_expiry_reason,
     _release_gate,
+    _release_stop_only_identity,
     _retained_summary,
     _scope_thawed_message,
+    _stop_only_gate_failure,
 )
 
 SHUTDOWN_THAW_ATTEMPTS = 3
@@ -86,7 +87,7 @@ class ProcessWatchdog:
             if not acquired.success or (acquired.scope is None and not acquired.stop_only):
                 return self._acquisition_failure(valid_pid, acquired.reason)
             scope = acquired.scope
-
+            identity = acquired.identity if scope is None else None
             if existing is not None and existing.scope != scope:
                 released = (
                     self._scope_controller.thaw(existing.scope)
@@ -95,12 +96,11 @@ class ProcessWatchdog:
                 )
                 if not released.success:
                     if scope is None:
-                        try:
-                            self._signal(valid_pid, signal.SIGCONT)
-                            cleanup = ScopeTransitionResult(True)
-                        # Intentionally broad: signal failures must retain cleanup state.
-                        except Exception as exc:
-                            cleanup = ScopeTransitionResult(False, str(exc))
+                        cleanup = _release_stop_only_identity(
+                            self._signal,
+                            self._proc_root,
+                            identity,
+                        )
                     else:
                         cleanup = self._scope_controller.thaw(scope)
                     reason = f"Unable to thaw previous scope: {released.reason}"
@@ -117,7 +117,6 @@ class ProcessWatchdog:
                 self._remove_lease(valid_pid, existing)
                 if existing.scope is not None:
                     self._log_thawed(existing.scope)
-
             lease_id = secrets.token_urlsafe(16)
             now = self._monotonic()
             paused_at = (
@@ -129,6 +128,7 @@ class ProcessWatchdog:
                     paused_at=paused_at,
                     lease_id=lease_id,
                     lease_deadline=now + LAUNCH_GATE_LEASE_TTL_SECONDS,
+                    identity=identity,
                 )
             self._ensure_watchdog_running()
             self._log("info", _gate_held_message(scope, valid_pid), "launch_gate", None)
@@ -154,9 +154,9 @@ class ProcessWatchdog:
                 return self._lease_failure(valid_pid, "Process not paused")
             if lease.lease_id != lease_id:
                 return self._lease_failure(valid_pid, "Lease ID mismatch")
-
-            if lease.scope is None and not _is_stopped(self._proc_root, valid_pid):
-                return self._lease_failure(valid_pid, "Launch PID is no longer stopped")
+            stop_failure = _stop_only_gate_failure(self._proc_root, valid_pid, lease)
+            if lease.scope is None and stop_failure is not None:
+                return self._lease_failure(valid_pid, stop_failure)
             for owned_scope in lease.scopes:
                 verified = self._verified_frozen(owned_scope)
                 if not verified.success:
@@ -191,7 +191,7 @@ class ProcessWatchdog:
             if _lease_expiry_reason(lease, self._monotonic()) is not None:
                 return False
             if lease.scope is None:
-                return _is_stopped(self._proc_root, valid_pid)
+                return _stop_only_gate_failure(self._proc_root, valid_pid, lease) is None
             return self._verified_frozen(lease.scope).success
 
     def resume(self, pid: int, lease_id: str | None = None) -> dict[str, object]:
@@ -212,7 +212,9 @@ class ProcessWatchdog:
         if lease_id is not None and lease.lease_id != lease_id:
             return self._lease_failure(valid_pid, "Lease ID mismatch")
 
-        released = _release_gate(self._scope_controller, self._signal, valid_pid, lease)
+        released = _release_gate(
+            self._scope_controller, self._signal, valid_pid, lease, self._proc_root
+        )
         for thawed in released.thawed:
             self._log_thawed(thawed)
         if released.success:

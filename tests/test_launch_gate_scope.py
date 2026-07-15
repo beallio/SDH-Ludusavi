@@ -64,8 +64,10 @@ class ScopeFixture:
         state: str = "S",
     ) -> None:
         fields_after_command = [state, *("0" for _ in range(18)), str(start_ticks)]
-        (self.proc_dir / "stat").write_text(
-            f"{PID} ({command}) {' '.join(fields_after_command)}\n",
+        stat_text = f"{PID} ({command}) {' '.join(fields_after_command)}\n"
+        (self.proc_dir / "stat").write_text(stat_text, encoding="utf-8")
+        (self.proc_dir / "task" / str(PID) / "stat").write_text(
+            stat_text,
             encoding="utf-8",
         )
 
