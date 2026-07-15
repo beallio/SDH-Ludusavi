@@ -525,11 +525,9 @@ def test_launcher_service_handoff_uses_stop_only_gate_without_polling(
 ) -> None:
     LaunchScopeAcquirer, _ = _acquisition_types()
     events: list[str] = []
+    discover_calls = 0
     scope_fs.set_launcher_scope_not_ready()
     scope_fs.set_process_identity(state="T")
-
-    def wait(seconds: float) -> None:
-        events.append("wait")
 
     def runner(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         events.append("freeze")
@@ -540,17 +538,25 @@ def test_launcher_service_handoff_uses_stop_only_gate_without_polling(
         events.append(_signal_name(sig))
 
     controller = scope_fs.controller(command_runner=runner)
+    original_discover = controller.discover
+
+    def discover(pid: int) -> SteamAppScope:
+        nonlocal discover_calls
+        discover_calls += 1
+        return original_discover(pid)
+
+    controller.discover = discover  # type: ignore[method-assign]
     acquired = LaunchScopeAcquirer(
         controller,
         signal_sender=send,
         proc_root=scope_fs.proc_root,
         uid=UID,
-        wait=wait,
     ).acquire(PID)
 
     assert acquired.success is True
     assert acquired.scope is None
     assert acquired.stop_only is True
+    assert discover_calls == 1
     assert events == ["SIGSTOP"]
 
 
@@ -595,7 +601,6 @@ def test_launcher_service_near_misses_are_immediate_hard_failures(
     relative: str,
 ) -> None:
     LaunchScopeAcquirer, _ = _acquisition_types()
-    waits: list[float] = []
     signals: list[int] = []
     commands: list[list[str]] = []
     (scope_fs.proc_dir / "cgroup").write_text(f"0::/{relative}\n", encoding="utf-8")
@@ -607,11 +612,9 @@ def test_launcher_service_near_misses_are_immediate_hard_failures(
         signal_sender=lambda pid, sig: signals.append(sig),
         proc_root=scope_fs.proc_root,
         uid=UID,
-        wait=waits.append,
     ).acquire(PID)
 
     assert result.success is False
-    assert waits == []
     assert signals == [signal.SIGSTOP, signal.SIGCONT]
     assert commands == []
 
@@ -621,14 +624,9 @@ def test_prescope_acquisition_does_not_wait_for_scope_to_appear(
 ) -> None:
     LaunchScopeAcquirer, _ = _acquisition_types()
     events: list[str] = []
+    discover_calls = 0
     scope_fs.set_scope_not_ready()
     scope_fs.set_process_identity(state="T")
-
-    def wait(seconds: float) -> None:
-        events.append("wait")
-        (scope_fs.proc_dir / "cgroup").write_text(
-            f"0::/{scope_fs.relative.as_posix()}\n", encoding="utf-8"
-        )
 
     def runner(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         events.append(argv[2])
@@ -643,12 +641,19 @@ def test_prescope_acquisition_does_not_wait_for_scope_to_appear(
         events.append(_signal_name(sig))
 
     controller = scope_fs.controller(command_runner=runner)
+    original_discover = controller.discover
+
+    def discover(pid: int) -> SteamAppScope:
+        nonlocal discover_calls
+        discover_calls += 1
+        return original_discover(pid)
+
+    controller.discover = discover  # type: ignore[method-assign]
     acquirer = LaunchScopeAcquirer(
         controller,
         signal_sender=send,
         proc_root=scope_fs.proc_root,
         uid=UID,
-        wait=wait,
     )
 
     acquired = acquirer.acquire(PID)
@@ -656,6 +661,7 @@ def test_prescope_acquisition_does_not_wait_for_scope_to_appear(
     assert acquired.success is True
     assert acquired.scope is None
     assert acquired.stop_only is True
+    assert discover_calls == 1
     assert events == ["SIGSTOP"]
 
 
@@ -720,7 +726,6 @@ def test_scope_acquisition_does_not_retry_invalid_membership(
 ) -> None:
     LaunchScopeAcquirer, _ = _acquisition_types()
     signals: list[int] = []
-    waits: list[float] = []
     (scope_fs.proc_dir / "cgroup").write_text(cgroup_text)
 
     result = LaunchScopeAcquirer(
@@ -728,11 +733,9 @@ def test_scope_acquisition_does_not_retry_invalid_membership(
         signal_sender=lambda pid, sig: signals.append(sig),
         proc_root=scope_fs.proc_root,
         uid=UID,
-        wait=waits.append,
     ).acquire(PID)
 
     assert result.success is False
-    assert waits == []
     assert signals == [signal.SIGSTOP, signal.SIGCONT]
 
 
@@ -1047,8 +1050,6 @@ def test_synthetic_conflict_launch_stays_stopped_until_one_verified_resume(
         signal_sender=send,
         proc_root=scope_fs.proc_root,
         uid=UID,
-        monotonic=clock.monotonic,
-        wait=wait,
     )
     watchdog = ProcessWatchdog(
         lambda *args: None,

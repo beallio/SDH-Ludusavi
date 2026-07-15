@@ -63,7 +63,7 @@ class ProcessWatchdog:
             return self._pid_locks[pid]
 
     def pause(self, pid: int) -> dict[str, object]:
-        """Freeze the launch PID's complete Steam app scope."""
+        """Hold the launch with SIGSTOP or freeze its complete Steam app scope."""
         try:
             valid_pid = _coerce_signal_pid(pid)
         except ValueError as exc:

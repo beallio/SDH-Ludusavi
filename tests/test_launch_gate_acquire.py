@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import inspect
 import os
 import signal
+import time
 from pathlib import Path
 
 import pytest
@@ -17,7 +19,11 @@ PID = 12992
 
 
 class _ScopeNotReadyController:
+    def __init__(self) -> None:
+        self.discover_calls = 0
+
     def discover(self, pid: int) -> SteamAppScope:
+        self.discover_calls += 1
         raise ScopeNotReadyError("launch PID is still in steam-launcher.service")
 
 
@@ -73,17 +79,72 @@ def test_scope_not_ready_returns_stop_only_gate_without_resuming(tmp_path: Path)
 def test_scope_not_ready_does_not_poll_while_pid_is_stopped(tmp_path: Path) -> None:
     proc_root = tmp_path / "proc"
     _write_stopped_process(proc_root)
-    waits: list[float] = []
+    controller = _ScopeNotReadyController()
+
+    result = LaunchScopeAcquirer(
+        controller,
+        signal_sender=lambda pid, sig: None,
+        proc_root=proc_root,
+        uid=os.geteuid(),
+    ).acquire(PID)
+
+    assert result.success is True
+    assert result.stop_only is True
+    assert controller.discover_calls == 1
+
+
+def test_acquirer_constructor_does_not_expose_dead_polling_hooks() -> None:
+    parameters = inspect.signature(LaunchScopeAcquirer).parameters
+
+    assert "monotonic" not in parameters
+    assert "wait" not in parameters
+
+
+def test_scope_not_ready_does_not_sleep_while_pid_is_stopped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proc_root = tmp_path / "proc"
+    _write_stopped_process(proc_root)
+
+    def fail_on_sleep(seconds: float) -> None:
+        raise AssertionError(f"unexpected acquisition sleep: {seconds}")
+
+    monkeypatch.setattr(time, "sleep", fail_on_sleep)
 
     result = LaunchScopeAcquirer(
         _ScopeNotReadyController(),
         signal_sender=lambda pid, sig: None,
         proc_root=proc_root,
         uid=os.geteuid(),
-        monotonic=lambda: 0.0,
-        wait=waits.append,
     ).acquire(PID)
 
     assert result.success is True
     assert result.stop_only is True
-    assert waits == []
+
+
+def test_scope_not_ready_with_children_reports_unverified_prescope_gate(
+    tmp_path: Path,
+) -> None:
+    proc_root = tmp_path / "proc"
+    _write_stopped_process(proc_root)
+    (proc_root / str(PID) / "task" / str(PID) / "children").write_text(
+        "13001\n",
+        encoding="utf-8",
+    )
+    controller = _ScopeNotReadyController()
+    signals: list[int] = []
+
+    result = LaunchScopeAcquirer(
+        controller,
+        signal_sender=lambda pid, sig: signals.append(sig),
+        proc_root=proc_root,
+        uid=os.geteuid(),
+    ).acquire(PID)
+
+    assert result.success is False
+    assert result.reason == (
+        "Launch PID already has children; refusing an unverified pre-scope gate"
+    )
+    assert controller.discover_calls == 1
+    assert signals == [signal.SIGSTOP, signal.SIGCONT]

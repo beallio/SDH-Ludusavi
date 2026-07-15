@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import signal
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,8 +59,6 @@ class LaunchScopeAcquirer:
         signal_sender: Callable[[int, int], None] = os.kill,
         proc_root: str | Path = "/proc",
         uid: int | None = None,
-        monotonic: Callable[[], float] = time.monotonic,
-        wait: Callable[[float], None] = time.sleep,
     ) -> None:
         self._controller = controller
         self._signal = signal_sender
@@ -90,11 +87,12 @@ class LaunchScopeAcquirer:
                     raise ScopeDiscoveryError(
                         "Launch PID is not stopped after SIGSTOP; refusing an unverified gate"
                     ) from exc
-                if not _has_children(self._proc_root, identity.pid):
-                    self._require_same_identity(identity)
-                    result = ScopeAcquisitionResult(True, stop_only=True)
-                else:
-                    scope = self._controller.discover(identity.pid)
+                if _has_children(self._proc_root, identity.pid):
+                    raise ScopeDiscoveryError(
+                        "Launch PID already has children; refusing an unverified pre-scope gate"
+                    ) from exc
+                self._require_same_identity(identity)
+                result = ScopeAcquisitionResult(True, stop_only=True)
 
             if result is None:
                 if scope is None:
