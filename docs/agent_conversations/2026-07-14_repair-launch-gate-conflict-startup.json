@@ -16,12 +16,14 @@
     "py_modules/sdh_ludusavi/launch_gate_acquire.py",
     "py_modules/sdh_ludusavi/watchdog.py",
     "scripts/analyze_plugin_logs.py",
+    "scripts/check_frontend_supply_chain.sh",
     "tests/fixtures/plugin_logs/launch-gate-acquisition-failures.log",
     "tests/fixtures/plugin_logs/launch-gate-acquisition-success.log",
     "tests/test_analyze_plugin_logs.py",
     "tests/test_launch_gate_acquire.py",
     "tests/test_launch_gate_scope.py",
     "tests/test_module_size_budgets.py",
+    "tests/test_npm_supply_chain.py",
     "tests/test_service.py",
     "tests/test_status_flow_diagram.py",
     "tests/test_watchdog.py"
@@ -37,7 +39,8 @@
     "Same-scope lease rotation through the acquisition boundary while preserving the original absolute-ceiling timestamp and avoiding a thaw window",
     "Synthetic end-to-end watchdog ordering from bootstrap stop through delayed scope creation, sanitized verified freeze, conflict restore selection, and exactly one verified thaw",
     "Sanitized analyzer fixtures for acquisition failure, contaminated-environment freeze failure, standalone conflict-skipped notification, deduplication, and a clean verified handoff",
-    "Conflict-flow diagram requirements for temporary bootstrap hold, exact scope appearance, verified scope freeze, conflict decision, and scope thaw"
+    "Conflict-flow diagram requirements for temporary bootstrap hold, exact scope appearance, verified scope freeze, conflict decision, and scope thaw",
+    "Release-gate assertion that both moderate-severity pnpm audits report registry failures without failing the build"
   ],
   "red_evidence": [
     {
@@ -64,6 +67,11 @@
       "command": "./run.sh uv run pytest --no-cov tests/test_launch_gate_scope.py tests/test_watchdog.py",
       "result": "Review round 01 RED: 6 failures proved a failed SIGCONT was not retried, same-scope handoff failures thawed the prior lease, and dual rotation-thaw failures left the replacement scope untracked.",
       "artifact": "/tmp/sdh_ludusavi/repair-launch-gate-review-01-red.log"
+    },
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_npm_supply_chain.py -q",
+      "result": "Release recovery RED: 1 failure proved the supply-chain gate did not use pnpm's explicit registry-error handling after the configured audit endpoint began returning HTTP 410.",
+      "artifact": "GitHub Actions run 29380777694"
     }
   ],
   "design_decisions": [
@@ -75,6 +83,7 @@
     "Pass an existing lease scope into acquisition so same-scope rotation verifies the already-frozen scope without thawing or resetting the absolute ceiling; acquire a replacement scope before retiring a different old lease.",
     "Treat scope-freeze ownership separately from frozen-state verification: same-scope acquisition may verify a prior lease but may never thaw it when bootstrap handoff fails.",
     "Represent compensating-cleanup failures as recovery scopes on the original lease, block further acquisition until recovery completes, and make resume, renewal, watchdog expiry, and shutdown operate on every retained scope.",
+    "Keep moderate-severity vulnerability findings fatal while allowing pnpm registry transport/server failures to be reported without blocking packaging; frozen install and install-script validation remain mandatory.",
     "Keep frontend production code unchanged because its verified-pause and fail-closed conflict behavior remained correct in all focused tests.",
     "Deduplicate a backend acquisition/freeze warning and its downstream toast within one launch incident while retaining a standalone conflict-skipped finding and distinct findings across launches."
   ],
@@ -89,13 +98,14 @@
     "pre_commit_quality_gate": "758 Python tests passed; 31 frontend files and 286 tests passed; production build and TypeScript checking passed.",
     "review_round_01_focused": "87 launch-scope and watchdog tests passed after the requested cleanup corrections; the broader launch-scope, watchdog, service, and module-budget subset passed 172 tests, and ty passed.",
     "review_round_01_quality_gate": "The complete orchestration gate passed: 31 frontend files and 286 tests, TypeScript checking, Rollup build, Ruff check/format, ty, and 763 Python tests at 88.41% coverage.",
+    "release_gate_recovery": "GitHub Actions run 29380777694 passed the Python suite and failed only when pnpm 10.23.0 received HTTP 410 from its retired audit endpoint; the focused supply-chain suite then passed 8 tests after adding explicit registry-error handling.",
     "package": "scripts/package_plugin.py created out/SDH-Ludusavi.zip and validate_plugin_zip.py reported Success: ZIP is valid and compliant.",
     "dependencies": "No Python, JavaScript, system, privilege-helper, or upstream dependency was added.",
     "api_compatibility": "Pause, renew, and resume RPC names, arguments, failure shapes, and successful lease fields remain unchanged."
   },
   "remaining_limitations": [
-    "The npm registry returned HTTP 410 for pnpm 10.23.0's retired audit endpoint. The audit command was still attempted and reported the registry failure; hook runs used pnpm's explicit ignore-registry-errors mode so install-script validation, frozen install, build, frontend tests, typecheck, Python tests, and all other gates could complete. Repository tooling was not changed.",
+    "The npm registry returns HTTP 410 for pnpm 10.23.0's retired audit endpoint. The audit command is still attempted and reports the registry failure; explicit ignore-registry-errors mode allows install-script validation, frozen install, build, frontend tests, typecheck, Python tests, and all other gates to complete while vulnerability findings remain fatal.",
     "Synthetic tests cannot prove SteamOS scheduler timing, systemd manager behavior, Proton child creation, or visible game advancement on a Deck."
   ],
-  "deferred_on_device_verification": "Installation, GitHub push, tag, development release, and Steam Deck acceptance remain unauthorized and were not performed. After orchestrator approval and separate installation authorization, the field test must confirm the conflict modal remains open over a verified frozen scope, each choice completes before exactly one thaw, no private libcrypto failure occurs, unload/lease expiry recovers, and strict log analysis stays clean."
+  "deferred_on_device_verification": "GitHub push and a 0.3.7 development patch release were authorized for this workflow. Steam Deck acceptance remains deferred: after installation, confirm the conflict modal remains open over a verified frozen scope, each choice completes before exactly one thaw, no private libcrypto failure occurs, unload/lease expiry recovers, and strict log analysis stays clean."
 }
