@@ -22,6 +22,10 @@ class ScopeDiscoveryError(ValueError):
     """The launch PID cannot be mapped to a safe Steam app scope."""
 
 
+class ScopeNotReadyError(ScopeDiscoveryError):
+    """The launch PID is safely waiting in app.slice for its exact Steam scope."""
+
+
 @dataclass(frozen=True)
 class SteamAppScope:
     unit: str
@@ -222,6 +226,8 @@ class SystemdScopeController:
         env = dict(os.environ if self._environ is None else self._environ)
         env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{self._uid}")
         env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{self._uid}/bus")
+        if "LD_LIBRARY_PATH" in env:
+            env["LD_LIBRARY_PATH"] = ""
         try:
             completed = self._run(
                 argv,
@@ -278,6 +284,8 @@ def _validated_scope_parts(cgroup_path: str, uid: int) -> tuple[str, ...]:
         f"user@{uid}.service",
         "app.slice",
     )
+    if parts == expected_prefix and cgroup_path == "/" + "/".join(parts):
+        raise ScopeNotReadyError("Exact Steam app scope is not ready")
     if (
         len(parts) != 5
         or parts[:4] != expected_prefix
