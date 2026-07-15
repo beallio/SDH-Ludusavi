@@ -1,0 +1,5 @@
+[2026-07-14 16:25:00,100][INFO]: frontend: App started: Fictional Success Game (3156562600) tracked=true
+[2026-07-14 16:25:00,101][INFO]: launch_gate: Froze Steam app scope app-steam-app3156562600-7813.scope for root PID 7813
+[2026-07-14 16:25:00,102][INFO]: frontend: check_game_start result for Fictional Success Game (3156562600): {"status":"conflict","game":"Fictional Success Game"}
+[2026-07-14 16:25:05,103][INFO]: frontend: [Fictional Success Game] backup: Kept local save
+[2026-07-14 16:25:05,104][INFO]: launch_gate: Thawed Steam app scope app-steam-app3156562600-7813.scope for root PID 7813
