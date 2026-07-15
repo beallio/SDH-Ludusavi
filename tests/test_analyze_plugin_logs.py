@@ -190,6 +190,27 @@ def test_analyze_verified_scope_handoff_has_no_launch_gate_finding() -> None:
     ] == []
 
 
+def test_analyze_verified_stop_only_gate_has_no_launch_gate_finding() -> None:
+    data = run_json_fixture("launch-gate-stop-only-success.log")
+    module = load_analyze_module()
+    success_line = next(
+        line
+        for line in (FIXTURES_DIR / "launch-gate-stop-only-success.log")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if "Held launch PID" in line
+    )
+
+    assert [
+        finding
+        for finding in data["findings"]
+        if str(finding["rule_id"]).startswith("launch_gate.")
+    ] == []
+    match = module.PAUSE_RE.search(success_line)
+    assert match is not None
+    assert match.group("pid") == "7814"
+
+
 def test_analyze_launch_gate_acquisition_failures_make_strict_mode_fail() -> None:
     result = subprocess.run(
         [

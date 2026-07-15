@@ -1,6 +1,10 @@
 import { PauseGameProcessResult, RenewGameProcessPauseResult, RpcResult, ProcessSignalResult } from "../types";
 
 export interface PauseLeaseHandle {
+  /** Root PID whose launch gate is held. */
+  readonly pid: number;
+  /** Backend lease generation that owns the gate. */
+  readonly leaseId: string;
   /** Stop renewing and resume the process. */
   release(): Promise<void>;
   /** Promise that resolves with the loss reason if the lease is lost prematurely. */
@@ -108,6 +112,8 @@ export function createPauseLease(
   scheduleNext();
 
   return {
+    pid,
+    leaseId: lease_id,
     onLost,
     get state() { return state; },
     runProtected: async <T,>(thunk: () => Promise<T>): Promise<T> => {

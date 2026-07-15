@@ -889,13 +889,61 @@ def test_resolve_game_start_conflict_applies_selected_save(
     service = service_with_state(tmp_path, adapter)
     service.refresh_games()
     service.set_auto_sync_enabled(True)
+    gate_pid: int | None = None
+    gate_lease_id: str | None = None
+    if resolution == "restore_backup":
+        paused = service.pause_game_process(4567)
+        gate_pid = 4567
+        gate_lease_id = str(paused["lease_id"])
 
-    result = service.resolve_game_start_conflict("Hades", "1145360", resolution)
+    result = service.resolve_game_start_conflict(
+        "Hades",
+        "1145360",
+        resolution,
+        gate_pid,
+        gate_lease_id,
+    )
 
     assert result["status"] == expected_status
     assert result["game"] == "Hades"
     assert adapter.backups == expected_backups
     assert adapter.restores == expected_restores
+    service.resume_all_paused_processes()
+
+
+@pytest.mark.parametrize("gate_state", ["missing", "mismatched", "expired"])
+def test_restore_conflict_fails_closed_when_gate_is_not_valid(
+    tmp_path: Path,
+    gate_state: str,
+) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    gate_pid: int | None = None
+    gate_lease_id: str | None = None
+
+    if gate_state != "missing":
+        paused = service.pause_game_process(4567)
+        gate_pid = 4567
+        gate_lease_id = str(paused["lease_id"])
+        if gate_state == "mismatched":
+            gate_lease_id = "wrong-lease"
+        else:
+            service._watchdog._paused_pids[4567].lease_deadline = 0
+
+    result = service.resolve_game_start_conflict(
+        "Hades",
+        "1145360",
+        "restore_backup",
+        gate_pid,
+        gate_lease_id,
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "gate_lost"
+    assert adapter.restores == []
+    service.resume_all_paused_processes()
 
 
 def test_resolve_game_start_conflict_rejects_unknown_resolution(tmp_path: Path) -> None:

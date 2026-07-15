@@ -568,3 +568,78 @@ const store = getAppStore();
 const overview = store.GetAppOverviewByAppID(appId);
 steamClient.Apps.RunGame(overview.m_gameid, "", -1, 100);
 ```
+
+---
+
+## Two-Era Game Launch Gate
+
+Tracked game launches use different gate mechanisms before and after Steam creates the
+application scope:
+
+- **Era 1 (pre-scope):** The App-started notification identifies the bootstrap PID before
+  it has forked. The backend sends `SIGSTOP`, verifies that every
+  `/proc/<pid>/task/*/stat` reports state `T`, verifies that every
+  `/proc/<pid>/task/*/children` file is empty, and holds that PID stopped while conflict
+  resolution runs. This is a complete gate because no process tree exists yet.
+- **Era 2 (post-scope):** If the PID is already in an exact
+  `app-steam-app<id>-<pid>.scope`, the backend freezes and verifies that cgroup before it
+  sends `SIGCONT` to the bootstrap PID. The cgroup freeze covers processes that join the
+  scope later.
+
+The application scope cannot be created while the bootstrap PID is stopped: Steam's
+reaper must run before it can fork the runtime and create the scope. Waiting for the scope
+while holding `SIGSTOP` is therefore a deadlock, not a timeout-tuning problem. The
+pre-scope path must make one discovery attempt and retain the `SIGSTOP` gate when discovery
+reports that the exact scope is not ready.
+
+### SIGSTOP delivery timing
+
+`os.kill(pid, SIGSTOP)` returns when the signal has been queued, before the target
+necessarily reaches stopped state `T`. Steam Deck measurements on 2026-07-15 observed
+delivery in 0.16-0.87ms, including a child under continuous `fsync` I/O load. The era-1
+gate therefore polls process state for up to a named 100ms production bound. The transition
+normally converges; if it does not, acquisition fails closed and reports the last observed
+state. The bound is a generous tunable default based on device evidence, not proof that
+scheduler sleep cannot overshoot under load.
+
+This state wait is categorically different from waiting for the Steam app scope. `SIGSTOP`
+**causes** the state-`T` transition, so waiting for delivery normally converges. `SIGSTOP`
+**prevents** the stopped reaper from creating the Steam scope, so retrying scope discovery
+would restore the original deadlock. The pre-scope path performs exactly one discovery
+attempt.
+
+Only uppercase `T` is accepted. Lowercase `t` is a ptrace stop that the plugin does not own;
+a tracer can suppress or reinject the pending stop signal. Every thread must report `T`, not
+just the thread-group leader, because a sibling that is still running could fork during the
+delivery window. Synthetic `/proc` fixtures model state transitions deterministically but
+cannot reproduce kernel scheduling, so Linux integration tests also stop real single- and
+multi-threaded child processes and verify the production `/proc` waiter.
+
+The pre-scope safety checks have deliberate limits:
+
+- `/proc/<pid>/task/*/children` exposes first-level children only. A child that double-forks
+  and exits inside the sub-millisecond delivery window could reparent a grandchild out of
+  view. The all-task child scan remains a fail-closed best-effort check; this accepted edge
+  does not justify weakening it.
+- A plugin-owned freezeable cgroup was considered and rejected. Steam relocates the reaper
+  into `app-steam-app<id>-<pid>.scope` moments later, so a plugin cgroup would conflict with
+  Steam's placement.
+- Stop-only leases retain `(pid, owner uid, start ticks)` and re-verify that identity for
+  verification, renewal, and `SIGCONT` release. A full pidfd migration remains separate
+  work. In particular, PID reuse between initial identity capture and the first `SIGSTOP`
+  is a pre-existing signalling hole not addressed by this gate-delivery fix.
+
+Device evidence from three launches on 2026-07-14 shows that scope creation follows
+`SIGCONT`, not App-started:
+
+| Launch | App started | SIGCONT (gate gives up) | Scope created | After app-start | After SIGCONT |
+|---|---|---|---|---|---|
+| 19:45 (pid 4099) | 57.346 | 57.349 (~3ms hold) | 57.356 | +10ms | +7ms |
+| 22:13 (pid 5334) | 10.435 | 10.937 (~502ms hold) | 10.991 | +556ms | +54ms |
+| 22:21 (pid 6074) | 19.498 | 19.999 (~501ms hold) | 20.052 | +554ms | +53ms |
+
+Both gate types use renewable leases. Immediately before a conflict choice restores files
+into the game's save directory, the backend must verify that the exact lease is unexpired
+and that its gate is still held. A missing, mismatched, expired, resumed, or thawed gate
+fails closed with `gate_lost`; keeping the local save does not require this restore-side
+check because that path copies saves outward.
