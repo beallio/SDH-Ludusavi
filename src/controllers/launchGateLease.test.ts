@@ -38,6 +38,13 @@ describe("createPauseLease", () => {
     expect(() => createPauseLease(rpc, { ...validPause, lease_ttl_seconds: Infinity }, logger)).toThrow(/Invalid lease_ttl_seconds/);
   });
 
+  it("exposes the backend gate identity", () => {
+    const handle = createPauseLease(rpc, validPause, logger);
+
+    expect(handle.pid).toBe(123);
+    expect(handle.leaseId).toBe("test_lease");
+  });
+
   it("renews lease periodically until released, tracking a 60-second wait", async () => {
     rpc.renewGameProcessPause.mockResolvedValue({ status: "renewed", pid: 123, lease_ttl_seconds: 30 });
     rpc.resumeGameProcess.mockResolvedValue({ status: "resumed", pid: 123 });

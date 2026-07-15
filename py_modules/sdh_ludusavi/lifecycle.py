@@ -15,6 +15,10 @@ from sdh_ludusavi.game_names import sanitize_game_name
 LOGGER = logging.getLogger("sdh_ludusavi.service.lifecycle")
 
 
+def _deny_gate(_pid: int, _lease_id: str) -> bool:
+    return False
+
+
 def _parse_iso_timestamp(ts: object) -> datetime | None:
     """Parse an ISO-8601 timestamp to aware UTC, returning None if unparseable.
 
@@ -65,6 +69,7 @@ class LifecycleDependencies:
     log: Callable[..., None]
     skip: Callable[[str, str, str], dict[str, object]]
     conflict_metadata: Callable[[str], dict[str, object]]
+    verify_gate: Callable[[int, str], bool] = _deny_gate
 
 
 class GameLifecycleManager:
@@ -258,7 +263,12 @@ class GameLifecycleManager:
         return self._conflict_response(game.name, metadata)
 
     def resolve_game_start_conflict(
-        self, game_name: str, app_id: str | None, resolution: str
+        self,
+        game_name: str,
+        app_id: str | None,
+        resolution: str,
+        gate_pid: int | None = None,
+        gate_lease_id: str | None = None,
     ) -> dict[str, object]:
         """Apply the user's choice for an ambiguous launch recency conflict."""
         if resolution not in ("keep_local", "restore_backup"):
@@ -290,6 +300,12 @@ class GameLifecycleManager:
 
         if not game.has_backup:
             return self.dependencies.skip("start", game.name, "no_backup")
+        if (
+            gate_pid is None
+            or gate_lease_id is None
+            or not self.dependencies.verify_gate(gate_pid, gate_lease_id)
+        ):
+            return self.dependencies.skip("start", game.name, "gate_lost")
 
         return self._execute_operation(
             operation="restore",

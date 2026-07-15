@@ -74,7 +74,13 @@ export const resumeGameProcessCall = callable<
 >("resume_game_process");
 export const checkGameStartCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_start");
 export const restoreGameOnStartCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("restore_game_on_start");
-export const resolveGameStartConflictCall = callable<[gameName: string, app_id: string | undefined, resolution: ConflictResolution], RpcResult<OperationResult>>("resolve_game_start_conflict");
+export const resolveGameStartConflictCall = callable<[
+  gameName: string,
+  app_id: string | undefined,
+  resolution: ConflictResolution,
+  gatePid?: number,
+  gateLeaseId?: string,
+], RpcResult<OperationResult>>("resolve_game_start_conflict");
 export const checkGameExitCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_exit");
 export const backupGameOnExitCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("backup_game_on_exit");
 export const startSyncthingActivityWatchCall = callable<
