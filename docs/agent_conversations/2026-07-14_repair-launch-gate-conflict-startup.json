@@ -33,6 +33,7 @@
     "Explicit and inherited LD_LIBRARY_PATH clearing in the systemctl child while preserving supplied user-bus values and caller environments",
     "Acquisition result invariants and watchdog lease creation only from a successful result containing a verified scope",
     "Same-scope lease rotation through the acquisition boundary while preserving the original absolute-ceiling timestamp and avoiding a thaw window",
+    "Synthetic end-to-end watchdog ordering from bootstrap stop through delayed scope creation, sanitized verified freeze, conflict restore selection, and exactly one verified thaw",
     "Sanitized analyzer fixtures for acquisition failure, contaminated-environment freeze failure, standalone conflict-skipped notification, deduplication, and a clean verified handoff",
     "Conflict-flow diagram requirements for temporary bootstrap hold, exact scope appearance, verified scope freeze, conflict decision, and scope thaw"
   ],
@@ -76,7 +77,7 @@
     "analyzer": "18 analyzer tests passed, including strict failure fixtures and a strict clean verified-handoff fixture.",
     "diagram_and_analyzer": "22 status-flow and analyzer tests passed.",
     "type_and_style": "Ruff check, Ruff format, ty, module-size budgets, exception-boundary enforcement, and the repository TDD checker passed.",
-    "pre_commit_quality_gate": "757 Python tests passed at 88.16% coverage; 31 frontend files and 286 tests passed; production build and TypeScript checking passed.",
+    "pre_commit_quality_gate": "758 Python tests passed; 31 frontend files and 286 tests passed; production build and TypeScript checking passed.",
     "package": "scripts/package_plugin.py created out/SDH-Ludusavi.zip and validate_plugin_zip.py reported Success: ZIP is valid and compliant.",
     "dependencies": "No Python, JavaScript, system, privilege-helper, or upstream dependency was added.",
     "api_compatibility": "Pause, renew, and resume RPC names, arguments, failure shapes, and successful lease fields remain unchanged."

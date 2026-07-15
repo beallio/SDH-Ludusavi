@@ -814,3 +814,76 @@ def test_scope_acquisition_post_handoff_failure_thaws_once(scope_fs: ScopeFixtur
     assert "handoff" in result.reason.casefold()
     assert signals == [signal.SIGSTOP, signal.SIGCONT]
     assert controller.thaw_calls == [scope]
+
+
+def test_synthetic_conflict_launch_stays_frozen_until_one_verified_thaw(
+    scope_fs: ScopeFixture,
+) -> None:
+    from sdh_ludusavi.launch_gate_acquire import LaunchScopeAcquirer
+    from sdh_ludusavi.watchdog import ProcessWatchdog
+
+    clock = FakeClock()
+    events: list[str] = []
+    captured_environment: dict[str, str] = {}
+    scope_fs.set_scope_not_ready()
+
+    def wait(seconds: float) -> None:
+        events.append("scope_not_ready")
+        clock.wait(seconds)
+        (scope_fs.proc_dir / "cgroup").write_text(
+            f"0::/{scope_fs.relative.as_posix()}\n", encoding="utf-8"
+        )
+
+    def runner(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        action = argv[2]
+        events.append(action)
+        captured_environment.update(kwargs["env"])
+        scope_fs.set_state(1, 1) if action == "freeze" else scope_fs.set_state(0, 0)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def send(pid: int, sig: int) -> None:
+        events.append(_signal_name(sig))
+        if sig == signal.SIGCONT:
+            assert (scope_fs.scope_dir / "cgroup.freeze").read_text().strip() == "1"
+
+    controller = scope_fs.controller(
+        command_runner=runner,
+        environ={
+            "LD_LIBRARY_PATH": "/tmp/_MEI-synthetic",
+            "XDG_RUNTIME_DIR": "/run/user/test",
+            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/test/bus",
+        },
+    )
+    acquirer = LaunchScopeAcquirer(
+        controller,
+        signal_sender=send,
+        proc_root=scope_fs.proc_root,
+        uid=UID,
+        monotonic=clock.monotonic,
+        wait=wait,
+    )
+    watchdog = ProcessWatchdog(
+        lambda *args: None,
+        scope_controller=controller,
+        scope_acquirer=acquirer,
+        monotonic=clock.monotonic,
+    )
+    watchdog._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
+
+    paused = watchdog.pause(PID)
+    assert paused["status"] == "paused"
+    assert (scope_fs.scope_dir / "cgroup.freeze").read_text().strip() == "1"
+    events.extend(["conflict_detected", "restore_selected"])
+    assert watchdog.resume(PID, paused["lease_id"]) == {"status": "resumed", "pid": PID}
+
+    assert events == [
+        "SIGSTOP",
+        "scope_not_ready",
+        "freeze",
+        "SIGCONT",
+        "conflict_detected",
+        "restore_selected",
+        "thaw",
+    ]
+    assert captured_environment["LD_LIBRARY_PATH"] == ""
+    assert (scope_fs.scope_dir / "cgroup.freeze").read_text().strip() == "0"
