@@ -1,0 +1,45 @@
+{
+  "date": "2026-07-15",
+  "task_objective": "Wait for asynchronous SIGSTOP delivery before accepting the pre-scope launch gate, require a full thread-group stop, and bind long-lived stop-only leases to process identity.",
+  "files_modified": [
+    "docs/plans/2026-07-15_await-sigstop-delivery.md",
+    "py_modules/sdh_ludusavi/launch_gate_acquire.py",
+    "py_modules/sdh_ludusavi/launch_gate_process.py",
+    "py_modules/sdh_ludusavi/watchdog.py",
+    "py_modules/sdh_ludusavi/watchdog_lease.py",
+    "tests/test_launch_gate_acquire.py",
+    "tests/test_launch_gate_process.py",
+    "tests/test_launch_gate_scope.py",
+    "tests/test_launch_gate_signal_integration.py",
+    "tests/test_watchdog.py",
+    "tests/test_watchdog_lease.py",
+    "docs/specs/sdh_ludusavi_launcher.md",
+    "docs/agent_conversations/2026-07-15_await-sigstop-delivery.json"
+  ],
+  "tests_added": [
+    "A delayed synthetic proc state reproduces R-to-T signal delivery and proves acquisition waits instead of checking immediately.",
+    "Deterministic fake-clock coverage verifies immediate T, R-to-T convergence, strict timeout, D, Z, ptrace t with TracerPid, unreadable and disappearing stat files, staggered multi-thread stops, and an empty task list.",
+    "Injected monotonic and wait callbacks are observed directly, while an immediate full stop proves wait is not called.",
+    "Linux real-process integration coverage verifies SIGSTOP against single- and multi-threaded child processes with nested cleanup.",
+    "Stop-only lease verification, renewal, and release accept a matching identity and reject a replaced start_ticks value without sending SIGCONT."
+  ],
+  "design_decisions": [
+    "The waiter polls only for the state transition caused by SIGSTOP; scope discovery remains a single attempt because SIGSTOP prevents Steam scope creation.",
+    "Only uppercase T is accepted, and every task stat must report T before the child scan runs.",
+    "The 100ms timeout and 0.5ms poll interval are named constants based on measured 0.16-0.87ms Steam Deck delivery, not a claimed scheduler guarantee.",
+    "Stop-only leases retain LaunchProcessIdentity and skip SIGCONT when pid, owner uid, or start ticks no longer match.",
+    "The old test_acquirer_constructor_does_not_expose_dead_polling_hooks test was deleted because it incorrectly prohibited the live clock injection required here. It was replaced with an assertion that injected wait is actually called; the existing discover_calls == 1 assertion continues to guard against forbidden scope polling.",
+    "The shared launch-gate scope fixture now writes per-task stat state because the production invariant intentionally strengthened from leader-only to all threads.",
+    "Identity and release helpers remain in watchdog_lease.py so watchdog.py stays within its enforced 370-line maintainability budget."
+  ],
+  "mutation_results": [
+    "Replacing the bounded waiter with an immediate _is_stopped check made test_scope_not_ready_waits_for_sigstop_delivery fail with state=R.",
+    "Ignoring the injected wait made test_acquirer_uses_injected_wait_until_sigstop_is_delivered fail because the observed wait list was empty.",
+    "Accepting only the leader's T state made test_wait_until_stopped_requires_every_thread_to_stop fail because no poll occurred while the sibling remained R.",
+    "Dropping identity verification from verify_gate made test_stop_only_lease_rejects_reused_pid_and_does_not_send_sigcont fail because the replaced PID was incorrectly accepted."
+  ],
+  "results": {
+    "automated": "Both atomic implementation commits passed repository protocol hooks: ruff, formatting, ty, 818 Python tests at 88.51% coverage, 287 frontend tests, TypeScript checking, and frontend build/package validation.",
+    "on_device": "Deferred and outstanding. A Steam Deck run must first verify the installed build version, then confirm the black-screen conflict hold, restore-before-start behavior, cancellation resume, plugin-unload resume, and expected launch-gate log messages. A green synthetic and real-child suite is not evidence that the complete Steam launch path works on device."
+  }
+}
