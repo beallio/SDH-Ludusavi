@@ -568,3 +568,41 @@ const store = getAppStore();
 const overview = store.GetAppOverviewByAppID(appId);
 steamClient.Apps.RunGame(overview.m_gameid, "", -1, 100);
 ```
+
+---
+
+## Two-Era Game Launch Gate
+
+Tracked game launches use different gate mechanisms before and after Steam creates the
+application scope:
+
+- **Era 1 (pre-scope):** The App-started notification identifies the bootstrap PID before
+  it has forked. The backend sends `SIGSTOP`, verifies that `/proc/<pid>/stat` reports state
+  `T`, verifies that every `/proc/<pid>/task/*/children` file is empty, and holds that PID
+  stopped while conflict resolution runs. This is a complete gate because no process tree
+  exists yet.
+- **Era 2 (post-scope):** If the PID is already in an exact
+  `app-steam-app<id>-<pid>.scope`, the backend freezes and verifies that cgroup before it
+  sends `SIGCONT` to the bootstrap PID. The cgroup freeze covers processes that join the
+  scope later.
+
+The application scope cannot be created while the bootstrap PID is stopped: Steam's
+reaper must run before it can fork the runtime and create the scope. Waiting for the scope
+while holding `SIGSTOP` is therefore a deadlock, not a timeout-tuning problem. The
+pre-scope path must make one discovery attempt and retain the `SIGSTOP` gate when discovery
+reports that the exact scope is not ready.
+
+Device evidence from three launches on 2026-07-14 shows that scope creation follows
+`SIGCONT`, not App-started:
+
+| Launch | App started | SIGCONT (gate gives up) | Scope created | After app-start | After SIGCONT |
+|---|---|---|---|---|---|
+| 19:45 (pid 4099) | 57.346 | 57.349 (~3ms hold) | 57.356 | +10ms | +7ms |
+| 22:13 (pid 5334) | 10.435 | 10.937 (~502ms hold) | 10.991 | +556ms | +54ms |
+| 22:21 (pid 6074) | 19.498 | 19.999 (~501ms hold) | 20.052 | +554ms | +53ms |
+
+Both gate types use renewable leases. Immediately before a conflict choice restores files
+into the game's save directory, the backend must verify that the exact lease is unexpired
+and that its gate is still held. A missing, mismatched, expired, resumed, or thawed gate
+fails closed with `gate_lost`; keeping the local save does not require this restore-side
+check because that path copies saves outward.

@@ -271,11 +271,22 @@ class Plugin:
         )
 
     async def resolve_game_start_conflict(
-        self, game_name: str, app_id: str | None = None, resolution: str = ""
+        self,
+        game_name: str,
+        app_id: str | None = None,
+        resolution: str = "",
+        gate_pid: int | None = None,
+        gate_lease_id: str | None = None,
     ) -> dict[str, object]:
         return await self._call(
             "resolve_game_start_conflict",
-            lambda: self._service().resolve_game_start_conflict(game_name, app_id, resolution),
+            lambda: self._service().resolve_game_start_conflict(
+                game_name,
+                app_id,
+                resolution,
+                gate_pid,
+                gate_lease_id,
+            ),
         )
 
     async def handle_game_exit(

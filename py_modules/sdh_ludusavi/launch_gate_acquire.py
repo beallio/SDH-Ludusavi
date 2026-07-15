@@ -2,25 +2,25 @@ from __future__ import annotations
 
 import os
 import signal
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from .launch_gate import (
-    MAX_PID,
-    MAX_REASON_LENGTH,
     ScopeDiscoveryError,
     ScopeNotReadyError,
     ScopeTransitionResult,
     SteamAppScope,
     _coerce_pid,
 )
-
-
-SCOPE_ACQUISITION_TIMEOUT_SECONDS = 0.5
-SCOPE_ACQUISITION_POLL_SECONDS = 0.02
+from .launch_gate_process import (
+    LaunchProcessIdentity,
+    _bounded_reason,
+    _has_children,
+    _is_stopped,
+    _parse_start_ticks,
+)
 
 
 class _ScopeController(Protocol):
@@ -36,21 +36,17 @@ class _ScopeController(Protocol):
 
 
 @dataclass(frozen=True)
-class LaunchProcessIdentity:
-    pid: int
-    owner_uid: int
-    start_ticks: int
-
-
-@dataclass(frozen=True)
 class ScopeAcquisitionResult:
     success: bool
     scope: SteamAppScope | None = None
+    stop_only: bool = False
     reason: str = ""
 
     def __post_init__(self) -> None:
-        if self.success and self.scope is None:
-            raise ValueError("successful scope acquisition requires a scope")
+        if self.scope is not None and self.stop_only:
+            raise ValueError("scope acquisition cannot be both scope-based and stop-only")
+        if self.success and self.scope is None and not self.stop_only:
+            raise ValueError("successful scope acquisition requires a scope or stop-only gate")
 
 
 class LaunchScopeAcquirer:
@@ -63,19 +59,11 @@ class LaunchScopeAcquirer:
         signal_sender: Callable[[int, int], None] = os.kill,
         proc_root: str | Path = "/proc",
         uid: int | None = None,
-        monotonic: Callable[[], float] = time.monotonic,
-        wait: Callable[[float], None] = time.sleep,
-        acquisition_timeout_seconds: float = SCOPE_ACQUISITION_TIMEOUT_SECONDS,
-        poll_seconds: float = SCOPE_ACQUISITION_POLL_SECONDS,
     ) -> None:
         self._controller = controller
         self._signal = signal_sender
         self._proc_root = Path(proc_root)
         self._uid = os.geteuid() if uid is None else uid
-        self._monotonic = monotonic
-        self._wait = wait
-        self._timeout = max(0.0, acquisition_timeout_seconds)
-        self._poll = max(0.001, poll_seconds)
 
     def acquire(
         self,
@@ -91,25 +79,42 @@ class LaunchScopeAcquirer:
             identity = self._capture_identity(pid)
             self._signal(identity.pid, signal.SIGSTOP)
             stop_sent = True
-            scope = self._wait_for_scope(identity)
-            self._require_same_identity(identity)
+            try:
+                scope = self._controller.discover(identity.pid)
+            except ScopeNotReadyError as exc:
+                self._require_same_identity(identity)
+                if not _is_stopped(self._proc_root, identity.pid):
+                    raise ScopeDiscoveryError(
+                        "Launch PID is not stopped after SIGSTOP; refusing an unverified gate"
+                    ) from exc
+                if _has_children(self._proc_root, identity.pid):
+                    raise ScopeDiscoveryError(
+                        "Launch PID already has children; refusing an unverified pre-scope gate"
+                    ) from exc
+                self._require_same_identity(identity)
+                result = ScopeAcquisitionResult(True, stop_only=True)
 
-            if scope == existing_scope:
-                verified = self._verify_frozen(scope, handoff=False)
-            else:
-                verified = self._controller.freeze(scope)
-            if not verified.success:
-                raise RuntimeError(verified.reason or "Unable to freeze Steam app scope")
-            owns_frozen_scope = scope != existing_scope
+            if result is None:
+                if scope is None:
+                    raise ScopeDiscoveryError("Steam app scope discovery returned no scope")
+                self._require_same_identity(identity)
 
-            self._require_same_scope(identity, scope)
-            self._signal(identity.pid, signal.SIGCONT)
-            stop_sent = False
+                if scope == existing_scope:
+                    verified = self._verify_frozen(scope, handoff=False)
+                else:
+                    verified = self._controller.freeze(scope)
+                if not verified.success:
+                    raise RuntimeError(verified.reason or "Unable to freeze Steam app scope")
+                owns_frozen_scope = scope != existing_scope
 
-            verified = self._verify_frozen(scope, handoff=True)
-            if not verified.success:
-                raise RuntimeError(verified.reason)
-            result = ScopeAcquisitionResult(True, scope=scope)
+                self._require_same_scope(identity, scope)
+                self._signal(identity.pid, signal.SIGCONT)
+                stop_sent = False
+
+                verified = self._verify_frozen(scope, handoff=True)
+                if not verified.success:
+                    raise RuntimeError(verified.reason)
+                result = ScopeAcquisitionResult(True, scope=scope)
         # Intentionally broad: every runtime acquisition failure must fail closed and unwind.
         except Exception as exc:
             result = ScopeAcquisitionResult(False, reason=_bounded_reason(exc))
@@ -131,20 +136,6 @@ class LaunchScopeAcquirer:
         if result is None:
             raise RuntimeError("Scope acquisition interrupted")
         return result
-
-    def _wait_for_scope(self, identity: LaunchProcessIdentity) -> SteamAppScope:
-        deadline = self._monotonic() + self._timeout
-        while True:
-            self._require_same_identity(identity)
-            try:
-                return self._controller.discover(identity.pid)
-            except ScopeNotReadyError as exc:
-                now = self._monotonic()
-                if now >= deadline:
-                    raise ScopeDiscoveryError(
-                        "Scope acquisition timed out before an exact Steam app scope appeared"
-                    ) from exc
-                self._wait(min(self._poll, max(0.0, deadline - now)))
 
     def _verify_frozen(
         self,
@@ -211,47 +202,3 @@ class LaunchScopeAcquirer:
         except Exception as exc:
             return f"Unable to release bootstrap signal: {_bounded_reason(exc)}"
         return ""
-
-
-def _parse_start_ticks(content: str, expected_pid: int) -> int:
-    open_paren = content.find("(")
-    close_paren = content.rfind(")")
-    if open_paren <= 0 or close_paren <= open_paren:
-        raise ScopeDiscoveryError("Launch PID stat identity is malformed")
-    if content[:open_paren].strip() != str(expected_pid):
-        raise ScopeDiscoveryError("Launch PID stat identity is malformed")
-    fields = content[close_paren + 1 :].split()
-    if len(fields) <= 19:
-        raise ScopeDiscoveryError("Launch PID stat identity is malformed")
-    try:
-        start_ticks = int(fields[19])
-    except ValueError as exc:
-        raise ScopeDiscoveryError("Launch PID stat identity is malformed") from exc
-    if start_ticks < 0:
-        raise ScopeDiscoveryError("Launch PID stat identity is malformed")
-    return start_ticks
-
-
-def _coerce_signal_pid(value: object) -> int:
-    if isinstance(value, bool):
-        raise ValueError("PID must be an integer, not a boolean")
-    if isinstance(value, int):
-        pid = value
-    elif isinstance(value, str):
-        try:
-            pid = int(value.strip())
-        except ValueError as exc:
-            raise ValueError("PID must be a valid integer string") from exc
-    elif isinstance(value, float):
-        raise ValueError("PID must be an integer, not a float")
-    else:
-        raise ValueError("PID must be an integer or integer string")
-    if pid <= 1:
-        raise ValueError(f"Refusing unsafe PID value: {pid}")
-    if pid > MAX_PID:
-        raise ValueError("PID value exceeds maximum 32-bit integer limit")
-    return pid
-
-
-def _bounded_reason(value: object) -> str:
-    return " ".join(str(value).split())[:MAX_REASON_LENGTH] or "Scope acquisition failed"

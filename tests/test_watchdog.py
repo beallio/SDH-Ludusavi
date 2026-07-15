@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import signal
 import threading
 import time
 from pathlib import Path
@@ -83,7 +84,7 @@ class FakeScopeAcquirer:
             frozen = self.controller.freeze(discovered)
             if not frozen.success:
                 return frozen
-        return SimpleNamespace(success=True, scope=discovered, reason="")
+        return SimpleNamespace(success=True, scope=discovered, stop_only=False, reason="")
 
 
 class FakeClock:
@@ -103,6 +104,12 @@ def watchdog(controller: FakeScopeController | None = None) -> tuple[ProcessWatc
         scope_acquirer=FakeScopeAcquirer(target_controller),
     )
     return instance, logger
+
+
+def write_process_state(proc_root: Path, pid: int, state: str) -> None:
+    proc_dir = proc_root / str(pid)
+    proc_dir.mkdir(parents=True, exist_ok=True)
+    (proc_dir / "stat").write_text(f"{pid} (bootstrap) {state} 0 0\n", encoding="utf-8")
 
 
 def test_pause_renew_resume_uses_scope_and_preserves_rpc_shape() -> None:
@@ -129,6 +136,129 @@ def test_pause_renew_resume_uses_scope_and_preserves_rpc_shape() -> None:
     assert any("Froze Steam app scope" in call.args[1] for call in logger.call_args_list)
     assert any("Thawed Steam app scope" in call.args[1] for call in logger.call_args_list)
     wd.stop()
+
+
+def test_stop_only_pause_renews_while_stopped_and_resumes_with_sigcont(
+    tmp_path: Path,
+) -> None:
+    controller = FakeScopeController()
+    acquirer = FakeScopeAcquirer(controller)
+    acquirer.results.append(SimpleNamespace(success=True, scope=None, stop_only=True, reason=""))
+    logger = MagicMock()
+    signals: list[tuple[int, int]] = []
+    proc_root = tmp_path / "proc"
+    write_process_state(proc_root, 4567, "T")
+    wd = ProcessWatchdog(
+        logger,
+        scope_controller=controller,
+        scope_acquirer=acquirer,
+        signal_sender=lambda pid, sig: signals.append((pid, sig)),
+        proc_root=proc_root,
+    )
+    wd._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
+
+    paused = wd.pause(4567)
+    lease_id = paused["lease_id"]
+
+    assert paused["status"] == "paused"
+    assert wd._paused_pids[4567].scope is None
+    assert wd._paused_pids[4567].scopes == ()
+    assert wd.renew_pause(4567, lease_id)["status"] == "renewed"
+    assert wd.resume(4567, lease_id) == {"status": "resumed", "pid": 4567}
+    assert signals == [(4567, signal.SIGCONT)]
+    assert controller.thaw_calls == []
+    assert any("SIGSTOP gate (pre-scope)" in call.args[1] for call in logger.call_args_list)
+
+
+def test_stop_only_renewal_fails_when_pid_is_no_longer_stopped(tmp_path: Path) -> None:
+    controller = FakeScopeController()
+    acquirer = FakeScopeAcquirer(controller)
+    acquirer.results.append(SimpleNamespace(success=True, scope=None, stop_only=True, reason=""))
+    proc_root = tmp_path / "proc"
+    write_process_state(proc_root, 4567, "T")
+    wd = ProcessWatchdog(
+        MagicMock(),
+        scope_controller=controller,
+        scope_acquirer=acquirer,
+        signal_sender=lambda pid, sig: None,
+        proc_root=proc_root,
+    )
+    wd._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
+    paused = wd.pause(4567)
+    write_process_state(proc_root, 4567, "S")
+
+    renewed = wd.renew_pause(4567, paused["lease_id"])
+
+    assert renewed["status"] == "failed"
+    assert "no longer stopped" in renewed["message"]
+
+
+def test_verify_gate_requires_matching_unexpired_frozen_scope() -> None:
+    controller = FakeScopeController()
+    clock = FakeClock()
+    wd = ProcessWatchdog(
+        MagicMock(),
+        scope_controller=controller,
+        scope_acquirer=FakeScopeAcquirer(controller),
+        monotonic=clock.monotonic,
+    )
+    wd._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
+    paused = wd.pause(4567)
+
+    assert wd.verify_gate(4567, paused["lease_id"]) is True
+    assert wd.verify_gate(4567, "wrong") is False
+    assert wd.verify_gate(9999, paused["lease_id"]) is False
+
+    clock.now += 31
+    assert wd.verify_gate(4567, paused["lease_id"]) is False
+
+
+def test_verify_gate_requires_stop_only_pid_to_still_be_stopped(tmp_path: Path) -> None:
+    controller = FakeScopeController()
+    proc_root = tmp_path / "proc"
+    write_process_state(proc_root, 4567, "T")
+    wd = ProcessWatchdog(
+        MagicMock(),
+        scope_controller=controller,
+        scope_acquirer=FakeScopeAcquirer(controller),
+        proc_root=proc_root,
+    )
+    wd._paused_pids[4567] = _PauseLease(None, time.monotonic(), "lease", time.monotonic() + 30)
+
+    assert wd.verify_gate(4567, "lease") is True
+    write_process_state(proc_root, 4567, "S")
+    assert wd.verify_gate(4567, "lease") is False
+
+
+@pytest.mark.parametrize("cleanup", ["resume_all", "stop", "watchdog"])
+def test_stop_only_cleanup_resumes_pid(
+    tmp_path: Path,
+    cleanup: str,
+) -> None:
+    clock = FakeClock()
+    signals: list[tuple[int, int]] = []
+    proc_root = tmp_path / "proc"
+    write_process_state(proc_root, 4567, "T")
+    wd = ProcessWatchdog(
+        MagicMock(),
+        scope_controller=FakeScopeController(),
+        scope_acquirer=FakeScopeAcquirer(FakeScopeController()),
+        signal_sender=lambda pid, sig: signals.append((pid, sig)),
+        proc_root=proc_root,
+        monotonic=clock.monotonic,
+    )
+    wd._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
+    wd._paused_pids[4567] = _PauseLease(None, 1.0, "lease", 2.0)
+
+    if cleanup == "resume_all":
+        wd.resume_all()
+    elif cleanup == "stop":
+        wd.stop()
+    else:
+        wd._check_and_resume_stuck_pids()
+
+    assert signals == [(4567, signal.SIGCONT)]
+    assert wd._paused_pids == {}
 
 
 def test_pause_fails_closed_when_scope_discovery_or_freeze_fails() -> None:
@@ -439,13 +569,12 @@ def test_invalid_pid_fails_without_scope_discovery(pid: object) -> None:
     assert controller.discover_calls == []
 
 
-def test_no_pid_signal_fallback_remains() -> None:
+def test_stop_only_signal_path_does_not_restore_process_tree_walking() -> None:
     source = Path("py_modules/sdh_ludusavi/watchdog.py").read_text()
 
-    assert "os.kill" not in source
-    assert "SIGSTOP" not in source
-    assert "SIGCONT" not in source
     assert "_process_tree" not in source
+    assert "signal.SIGSTOP" not in source
+    assert "signal.SIGCONT" in source
 
 
 def test_pause_creates_lease_only_from_successful_acquisition() -> None:
@@ -454,8 +583,13 @@ def test_pause_creates_lease_only_from_successful_acquisition() -> None:
     acquired_scope = scope()
     acquirer.results.extend(
         [
-            SimpleNamespace(success=False, scope=None, reason="scope acquisition timed out"),
-            SimpleNamespace(success=True, scope=acquired_scope, reason=""),
+            SimpleNamespace(
+                success=False,
+                scope=None,
+                stop_only=False,
+                reason="scope acquisition timed out",
+            ),
+            SimpleNamespace(success=True, scope=acquired_scope, stop_only=False, reason=""),
         ]
     )
     logger = MagicMock()
