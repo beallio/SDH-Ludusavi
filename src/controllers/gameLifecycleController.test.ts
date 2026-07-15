@@ -817,6 +817,8 @@ describe("GameLifecycleController", () => {
       "Hades",
       "1145300",
       "keep_local",
+      2,
+      "mock_lease",
     );
     expect(mockStatusSurface.publish).toHaveBeenCalledWith(
       "backing_up",

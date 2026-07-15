@@ -20,13 +20,13 @@ CHECK_RESULT_RE = re.compile(
     r"check_game_start result for\s+(?P<game>.*?)\s+\((?P<app_id>\d+)\):\s*(?P<payload>\{.*\})\s*$"
 )
 PAUSE_RE = re.compile(
-    r"(?:Paused game process tree rooted at|Froze Steam app scope "
-    r"app-steam-app[0-9]+-[0-9]+\.scope for root)\s+PID\s+(?P<pid>\d+)"
+    r"(?:(?:Paused game process tree rooted at|Froze Steam app scope "
+    r"app-steam-app[0-9]+-[0-9]+\.scope for root)\s+PID|Held launch PID)\s+(?P<pid>\d+)"
 )
 WATCHDOG_RE = re.compile(
-    r"Watchdog detected (?:Steam app scope app-steam-app[0-9]+-[0-9]+\.scope for root )?"
-    r"PID\s+(?P<pid>\d+)\s+(?:suspended|frozen) for .*?\((?P<reason>[^)]+)\)\.\s+"
-    r"(?:Resuming|Thawing) automatically\."
+    r"Watchdog detected (?:(?:Steam app scope app-steam-app[0-9]+-[0-9]+\.scope|"
+    r"SIGSTOP gate) for root )?PID\s+(?P<pid>\d+)\s+(?:suspended|frozen|held) for "
+    r".*?\((?P<reason>[^)]+)\)\.\s+(?:Resuming|Thawing|Releasing) automatically\."
 )
 GATE_FAILURE_RE = re.compile(
     r"Unable to (?P<operation>acquire frozen|discover|freeze) Steam app scope"

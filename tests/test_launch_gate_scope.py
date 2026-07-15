@@ -48,6 +48,9 @@ class ScopeFixture:
         )
         self.scope_dir = self.cgroup_root / self.relative
         self.proc_dir.mkdir(parents=True)
+        task_dir = self.proc_dir / "task" / str(PID)
+        task_dir.mkdir(parents=True)
+        (task_dir / "children").write_text("", encoding="utf-8")
         self.scope_dir.mkdir(parents=True)
         (self.proc_dir / "cgroup").write_text(f"0::/{self.relative.as_posix()}\n")
         self.set_process_identity()
@@ -58,8 +61,9 @@ class ScopeFixture:
         *,
         start_ticks: int = 987654,
         command: str = "game (bootstrap) process",
+        state: str = "S",
     ) -> None:
-        fields_after_command = ["S", *("0" for _ in range(18)), str(start_ticks)]
+        fields_after_command = [state, *("0" for _ in range(18)), str(start_ticks)]
         (self.proc_dir / "stat").write_text(
             f"{PID} ({command}) {' '.join(fields_after_command)}\n",
             encoding="utf-8",
@@ -516,60 +520,54 @@ def test_exact_steam_launcher_service_is_retryable_without_systemd_transition(
     assert commands == []
 
 
-def test_launcher_service_handoff_stops_then_freezes_exact_scope_then_releases(
+def test_launcher_service_handoff_uses_stop_only_gate_without_polling(
     scope_fs: ScopeFixture,
 ) -> None:
     LaunchScopeAcquirer, _ = _acquisition_types()
-    clock = FakeClock()
     events: list[str] = []
+    discover_calls = 0
     scope_fs.set_launcher_scope_not_ready()
-
-    def wait(seconds: float) -> None:
-        events.append("wait")
-        clock.wait(seconds)
-        (scope_fs.proc_dir / "cgroup").write_text(
-            f"0::/{scope_fs.relative.as_posix()}\n", encoding="utf-8"
-        )
+    scope_fs.set_process_identity(state="T")
 
     def runner(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert argv[2:] == ["freeze", UNIT]
         events.append("freeze")
-        scope_fs.set_state(1, 1)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     def send(pid: int, sig: int) -> None:
         assert pid == PID
-        if sig == signal.SIGCONT:
-            assert (scope_fs.scope_dir / "cgroup.freeze").read_text().strip() == "1"
-            assert "frozen 1" in (scope_fs.scope_dir / "cgroup.events").read_text()
         events.append(_signal_name(sig))
 
     controller = scope_fs.controller(command_runner=runner)
+    original_discover = controller.discover
+
+    def discover(pid: int) -> SteamAppScope:
+        nonlocal discover_calls
+        discover_calls += 1
+        return original_discover(pid)
+
+    controller.discover = discover  # type: ignore[method-assign]
     acquired = LaunchScopeAcquirer(
         controller,
         signal_sender=send,
         proc_root=scope_fs.proc_root,
         uid=UID,
-        monotonic=clock.monotonic,
-        wait=wait,
-        acquisition_timeout_seconds=0.2,
     ).acquire(PID)
 
     assert acquired.success is True
-    assert acquired.scope is not None
-    assert acquired.scope.unit == UNIT
-    assert acquired.scope.cgroup_path == f"/{scope_fs.relative.as_posix()}"
-    assert events == ["SIGSTOP", "wait", "freeze", "SIGCONT"]
+    assert acquired.scope is None
+    assert acquired.stop_only is True
+    assert discover_calls == 1
+    assert events == ["SIGSTOP"]
 
 
-def test_launcher_service_handoff_timeout_is_bounded_and_releases_original_pid(
+def test_launcher_service_not_ready_keeps_original_pid_stopped(
     scope_fs: ScopeFixture,
 ) -> None:
     LaunchScopeAcquirer, _ = _acquisition_types()
-    clock = FakeClock()
     signals: list[int] = []
     commands: list[list[str]] = []
     scope_fs.set_launcher_scope_not_ready()
+    scope_fs.set_process_identity(state="T")
 
     result = LaunchScopeAcquirer(
         scope_fs.controller(
@@ -578,17 +576,12 @@ def test_launcher_service_handoff_timeout_is_bounded_and_releases_original_pid(
         signal_sender=lambda pid, sig: signals.append(sig),
         proc_root=scope_fs.proc_root,
         uid=UID,
-        monotonic=clock.monotonic,
-        wait=clock.wait,
-        acquisition_timeout_seconds=0.05,
-        poll_seconds=0.02,
     ).acquire(PID)
 
-    assert result.success is False
-    assert "timed out" in result.reason.casefold()
-    assert len(result.reason) <= 180
-    assert clock.waits == 3
-    assert signals == [signal.SIGSTOP, signal.SIGCONT]
+    assert result.success is True
+    assert result.scope is None
+    assert result.stop_only is True
+    assert signals == [signal.SIGSTOP]
     assert commands == []
 
 
@@ -608,7 +601,6 @@ def test_launcher_service_near_misses_are_immediate_hard_failures(
     relative: str,
 ) -> None:
     LaunchScopeAcquirer, _ = _acquisition_types()
-    waits: list[float] = []
     signals: list[int] = []
     commands: list[list[str]] = []
     (scope_fs.proc_dir / "cgroup").write_text(f"0::/{relative}\n", encoding="utf-8")
@@ -620,29 +612,21 @@ def test_launcher_service_near_misses_are_immediate_hard_failures(
         signal_sender=lambda pid, sig: signals.append(sig),
         proc_root=scope_fs.proc_root,
         uid=UID,
-        wait=waits.append,
     ).acquire(PID)
 
     assert result.success is False
-    assert waits == []
     assert signals == [signal.SIGSTOP, signal.SIGCONT]
     assert commands == []
 
 
-def test_delayed_scope_acquisition_stops_then_freezes_then_releases(
+def test_prescope_acquisition_does_not_wait_for_scope_to_appear(
     scope_fs: ScopeFixture,
 ) -> None:
     LaunchScopeAcquirer, _ = _acquisition_types()
-    clock = FakeClock()
     events: list[str] = []
+    discover_calls = 0
     scope_fs.set_scope_not_ready()
-
-    def wait(seconds: float) -> None:
-        events.append("wait")
-        clock.wait(seconds)
-        (scope_fs.proc_dir / "cgroup").write_text(
-            f"0::/{scope_fs.relative.as_posix()}\n", encoding="utf-8"
-        )
+    scope_fs.set_process_identity(state="T")
 
     def runner(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         events.append(argv[2])
@@ -657,24 +641,28 @@ def test_delayed_scope_acquisition_stops_then_freezes_then_releases(
         events.append(_signal_name(sig))
 
     controller = scope_fs.controller(command_runner=runner)
+    original_discover = controller.discover
+
+    def discover(pid: int) -> SteamAppScope:
+        nonlocal discover_calls
+        discover_calls += 1
+        return original_discover(pid)
+
+    controller.discover = discover  # type: ignore[method-assign]
     acquirer = LaunchScopeAcquirer(
         controller,
         signal_sender=send,
         proc_root=scope_fs.proc_root,
         uid=UID,
-        monotonic=clock.monotonic,
-        wait=wait,
-        acquisition_timeout_seconds=0.2,
     )
 
     acquired = acquirer.acquire(PID)
 
     assert acquired.success is True
-    assert acquired.scope is not None
-    assert acquired.scope.unit == UNIT
-    assert events == ["SIGSTOP", "wait", "freeze", "SIGCONT"]
-    assert controller.freeze_requested(acquired.scope)
-    assert controller.wait_for_frozen(acquired.scope, expected=True).success
+    assert acquired.scope is None
+    assert acquired.stop_only is True
+    assert discover_calls == 1
+    assert events == ["SIGSTOP"]
 
 
 def test_immediate_scope_acquisition_has_no_execution_window(scope_fs: ScopeFixture) -> None:
@@ -703,29 +691,25 @@ def test_immediate_scope_acquisition_has_no_execution_window(scope_fs: ScopeFixt
     assert events == ["SIGSTOP", "freeze", "SIGCONT"]
 
 
-def test_scope_acquisition_timeout_is_bounded_and_releases_original_pid(
+def test_scope_not_ready_returns_verified_stop_only_gate(
     scope_fs: ScopeFixture,
 ) -> None:
     LaunchScopeAcquirer, _ = _acquisition_types()
-    clock = FakeClock()
     signals: list[int] = []
     scope_fs.set_scope_not_ready()
+    scope_fs.set_process_identity(state="T")
 
     result = LaunchScopeAcquirer(
         scope_fs.controller(),
         signal_sender=lambda pid, sig: signals.append(sig),
         proc_root=scope_fs.proc_root,
         uid=UID,
-        monotonic=clock.monotonic,
-        wait=clock.wait,
-        acquisition_timeout_seconds=0.05,
-        poll_seconds=0.02,
     ).acquire(PID)
 
-    assert result.success is False
-    assert "timed out" in result.reason.casefold()
-    assert len(result.reason) <= 180
-    assert signals == [signal.SIGSTOP, signal.SIGCONT]
+    assert result.success is True
+    assert result.scope is None
+    assert result.stop_only is True
+    assert signals == [signal.SIGSTOP]
 
 
 @pytest.mark.parametrize(
@@ -742,7 +726,6 @@ def test_scope_acquisition_does_not_retry_invalid_membership(
 ) -> None:
     LaunchScopeAcquirer, _ = _acquisition_types()
     signals: list[int] = []
-    waits: list[float] = []
     (scope_fs.proc_dir / "cgroup").write_text(cgroup_text)
 
     result = LaunchScopeAcquirer(
@@ -750,11 +733,9 @@ def test_scope_acquisition_does_not_retry_invalid_membership(
         signal_sender=lambda pid, sig: signals.append(sig),
         proc_root=scope_fs.proc_root,
         uid=UID,
-        wait=waits.append,
     ).acquire(PID)
 
     assert result.success is False
-    assert waits == []
     assert signals == [signal.SIGSTOP, signal.SIGCONT]
 
 
@@ -780,25 +761,23 @@ def test_scope_acquisition_never_resumes_replaced_or_exited_pid(
     replacement: str,
 ) -> None:
     LaunchScopeAcquirer, _ = _acquisition_types()
-    clock = FakeClock()
     signals: list[int] = []
     scope_fs.set_scope_not_ready()
 
-    def replace_process() -> None:
+    def send(pid: int, sig: int) -> None:
+        signals.append(sig)
+        if sig != signal.SIGSTOP:
+            return
         if replacement == "reuse":
-            scope_fs.set_process_identity(start_ticks=987655)
+            scope_fs.set_process_identity(start_ticks=987655, state="T")
         else:
             (scope_fs.proc_dir / "stat").unlink()
 
-    clock.on_wait = replace_process
     result = LaunchScopeAcquirer(
         scope_fs.controller(),
-        signal_sender=lambda pid, sig: signals.append(sig),
+        signal_sender=send,
         proc_root=scope_fs.proc_root,
         uid=UID,
-        monotonic=clock.monotonic,
-        wait=clock.wait,
-        acquisition_timeout_seconds=0.2,
     ).acquire(PID)
 
     assert result.success is False
@@ -1031,7 +1010,7 @@ def test_scope_acquisition_post_handoff_failure_thaws_once(scope_fs: ScopeFixtur
     assert controller.thaw_calls == [scope]
 
 
-def test_synthetic_conflict_launch_stays_frozen_until_one_verified_thaw(
+def test_synthetic_conflict_launch_stays_stopped_until_one_verified_resume(
     scope_fs: ScopeFixture,
 ) -> None:
     from sdh_ludusavi.launch_gate_acquire import LaunchScopeAcquirer
@@ -1039,8 +1018,8 @@ def test_synthetic_conflict_launch_stays_frozen_until_one_verified_thaw(
 
     clock = FakeClock()
     events: list[str] = []
-    captured_environment: dict[str, str] = {}
     scope_fs.set_scope_not_ready()
+    scope_fs.set_process_identity(state="T")
 
     def wait(seconds: float) -> None:
         events.append("scope_not_ready")
@@ -1052,14 +1031,11 @@ def test_synthetic_conflict_launch_stays_frozen_until_one_verified_thaw(
     def runner(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         action = argv[2]
         events.append(action)
-        captured_environment.update(kwargs["env"])
         scope_fs.set_state(1, 1) if action == "freeze" else scope_fs.set_state(0, 0)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     def send(pid: int, sig: int) -> None:
         events.append(_signal_name(sig))
-        if sig == signal.SIGCONT:
-            assert (scope_fs.scope_dir / "cgroup.freeze").read_text().strip() == "1"
 
     controller = scope_fs.controller(
         command_runner=runner,
@@ -1074,31 +1050,27 @@ def test_synthetic_conflict_launch_stays_frozen_until_one_verified_thaw(
         signal_sender=send,
         proc_root=scope_fs.proc_root,
         uid=UID,
-        monotonic=clock.monotonic,
-        wait=wait,
     )
     watchdog = ProcessWatchdog(
         lambda *args: None,
         scope_controller=controller,
         scope_acquirer=acquirer,
         monotonic=clock.monotonic,
+        signal_sender=send,
+        proc_root=scope_fs.proc_root,
     )
     watchdog._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
 
     paused = watchdog.pause(PID)
     assert paused["status"] == "paused"
-    assert (scope_fs.scope_dir / "cgroup.freeze").read_text().strip() == "1"
+    assert watchdog._paused_pids[PID].scope is None
     events.extend(["conflict_detected", "restore_selected"])
     assert watchdog.resume(PID, paused["lease_id"]) == {"status": "resumed", "pid": PID}
 
     assert events == [
         "SIGSTOP",
-        "scope_not_ready",
-        "freeze",
-        "SIGCONT",
         "conflict_detected",
         "restore_selected",
-        "thaw",
+        "SIGCONT",
     ]
-    assert captured_environment["LD_LIBRARY_PATH"] == ""
     assert (scope_fs.scope_dir / "cgroup.freeze").read_text().strip() == "0"
