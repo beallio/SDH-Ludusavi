@@ -10,6 +10,7 @@ import pytest
 
 from sdh_ludusavi.launch_gate import (
     ScopeDiscoveryError,
+    ScopeNotReadyError,
     SteamAppScope,
     SystemdScopeController,
 )
@@ -42,6 +43,9 @@ class ScopeFixture:
         self.cgroup_root = tmp_path / "cgroup"
         self.proc_dir = self.proc_root / str(PID)
         self.relative = Path(f"user.slice/user-{UID}.slice/user@{UID}.service/app.slice/{UNIT}")
+        self.launcher_relative = Path(
+            f"user.slice/user-{UID}.slice/user@{UID}.service/app.slice/steam-launcher.service"
+        )
         self.scope_dir = self.cgroup_root / self.relative
         self.proc_dir.mkdir(parents=True)
         self.scope_dir.mkdir(parents=True)
@@ -64,6 +68,11 @@ class ScopeFixture:
     def set_scope_not_ready(self) -> None:
         parent = self.relative.parent
         (self.proc_dir / "cgroup").write_text(f"0::/{parent.as_posix()}\n", encoding="utf-8")
+
+    def set_launcher_scope_not_ready(self) -> None:
+        (self.proc_dir / "cgroup").write_text(
+            f"0::/{self.launcher_relative.as_posix()}\n", encoding="utf-8"
+        )
 
     def set_state(self, requested: int, completed: int) -> None:
         (self.scope_dir / "cgroup.freeze").write_text(f"{requested}\n")
@@ -483,8 +492,6 @@ def _signal_name(value: int) -> str:
 def test_scope_not_ready_is_the_only_retryable_discovery_state(
     scope_fs: ScopeFixture,
 ) -> None:
-    from sdh_ludusavi.launch_gate import ScopeNotReadyError
-
     scope_fs.set_scope_not_ready()
     with pytest.raises(ScopeNotReadyError):
         scope_fs.controller().discover(PID)
@@ -493,6 +500,133 @@ def test_scope_not_ready_is_the_only_retryable_discovery_state(
     with pytest.raises(ScopeDiscoveryError) as malformed:
         scope_fs.controller().discover(PID)
     assert not isinstance(malformed.value, ScopeNotReadyError)
+
+
+def test_exact_steam_launcher_service_is_retryable_without_systemd_transition(
+    scope_fs: ScopeFixture,
+) -> None:
+    commands: list[list[str]] = []
+    scope_fs.set_launcher_scope_not_ready()
+
+    with pytest.raises(ScopeNotReadyError):
+        scope_fs.controller(
+            command_runner=lambda argv, **kwargs: commands.append(argv)  # type: ignore[arg-type]
+        ).discover(PID)
+
+    assert commands == []
+
+
+def test_launcher_service_handoff_stops_then_freezes_exact_scope_then_releases(
+    scope_fs: ScopeFixture,
+) -> None:
+    LaunchScopeAcquirer, _ = _acquisition_types()
+    clock = FakeClock()
+    events: list[str] = []
+    scope_fs.set_launcher_scope_not_ready()
+
+    def wait(seconds: float) -> None:
+        events.append("wait")
+        clock.wait(seconds)
+        (scope_fs.proc_dir / "cgroup").write_text(
+            f"0::/{scope_fs.relative.as_posix()}\n", encoding="utf-8"
+        )
+
+    def runner(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert argv[2:] == ["freeze", UNIT]
+        events.append("freeze")
+        scope_fs.set_state(1, 1)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def send(pid: int, sig: int) -> None:
+        assert pid == PID
+        if sig == signal.SIGCONT:
+            assert (scope_fs.scope_dir / "cgroup.freeze").read_text().strip() == "1"
+            assert "frozen 1" in (scope_fs.scope_dir / "cgroup.events").read_text()
+        events.append(_signal_name(sig))
+
+    controller = scope_fs.controller(command_runner=runner)
+    acquired = LaunchScopeAcquirer(
+        controller,
+        signal_sender=send,
+        proc_root=scope_fs.proc_root,
+        uid=UID,
+        monotonic=clock.monotonic,
+        wait=wait,
+        acquisition_timeout_seconds=0.2,
+    ).acquire(PID)
+
+    assert acquired.success is True
+    assert acquired.scope is not None
+    assert acquired.scope.unit == UNIT
+    assert acquired.scope.cgroup_path == f"/{scope_fs.relative.as_posix()}"
+    assert events == ["SIGSTOP", "wait", "freeze", "SIGCONT"]
+
+
+def test_launcher_service_handoff_timeout_is_bounded_and_releases_original_pid(
+    scope_fs: ScopeFixture,
+) -> None:
+    LaunchScopeAcquirer, _ = _acquisition_types()
+    clock = FakeClock()
+    signals: list[int] = []
+    commands: list[list[str]] = []
+    scope_fs.set_launcher_scope_not_ready()
+
+    result = LaunchScopeAcquirer(
+        scope_fs.controller(
+            command_runner=lambda argv, **kwargs: commands.append(argv)  # type: ignore[arg-type]
+        ),
+        signal_sender=lambda pid, sig: signals.append(sig),
+        proc_root=scope_fs.proc_root,
+        uid=UID,
+        monotonic=clock.monotonic,
+        wait=clock.wait,
+        acquisition_timeout_seconds=0.05,
+        poll_seconds=0.02,
+    ).acquire(PID)
+
+    assert result.success is False
+    assert "timed out" in result.reason.casefold()
+    assert len(result.reason) <= 180
+    assert clock.waits == 3
+    assert signals == [signal.SIGSTOP, signal.SIGCONT]
+    assert commands == []
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        f"user.slice/user-{UID}.slice/user@{UID}.service/app.slice/other.service",
+        f"user.slice/user-{UID + 1}.slice/user@{UID + 1}.service/app.slice/steam-launcher.service",
+        f"user.slice/user-{UID}.slice/user@{UID}.service/app.slice/steam-launcher.service/child",
+        f"user.slice/user-{UID}.slice/user@{UID}.service/app.slice/steam-launcher.service.scope",
+        f"user.slice/user-{UID}.slice/user@{UID}.service/app.slice/steam_launcher.service",
+        f"user.slice/user-{UID}.slice/user@{UID}.service/app.slice/../app.slice/steam-launcher.service",
+    ],
+)
+def test_launcher_service_near_misses_are_immediate_hard_failures(
+    scope_fs: ScopeFixture,
+    relative: str,
+) -> None:
+    LaunchScopeAcquirer, _ = _acquisition_types()
+    waits: list[float] = []
+    signals: list[int] = []
+    commands: list[list[str]] = []
+    (scope_fs.proc_dir / "cgroup").write_text(f"0::/{relative}\n", encoding="utf-8")
+
+    result = LaunchScopeAcquirer(
+        scope_fs.controller(
+            command_runner=lambda argv, **kwargs: commands.append(argv)  # type: ignore[arg-type]
+        ),
+        signal_sender=lambda pid, sig: signals.append(sig),
+        proc_root=scope_fs.proc_root,
+        uid=UID,
+        wait=waits.append,
+    ).acquire(PID)
+
+    assert result.success is False
+    assert waits == []
+    assert signals == [signal.SIGSTOP, signal.SIGCONT]
+    assert commands == []
 
 
 def test_delayed_scope_acquisition_stops_then_freezes_then_releases(
