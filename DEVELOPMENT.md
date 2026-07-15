@@ -193,25 +193,41 @@ The updater architecture enforces strict boundaries between domain models, trans
 ### Backend: Launch-Gate Scope Freezing
 
 The launch gate requires a unified cgroup v2 hierarchy and a user systemd manager that
-supports `systemctl --user freeze` and `systemctl --user thaw`. The backend derives the
-authoritative `app-steam-app<appid>-<pid>.scope` from the launch PID's own `/proc` cgroup
-membership, accepts only the current user's exact scope beneath `app.slice`, and records its
-directory device/inode identity. It never accepts a caller-provided unit or freezes a parent
-slice.
+supports `systemctl --user freeze` and `systemctl --user thaw`. Steam may publish its lifetime
+PID just before moving that process from the user's `app.slice` into its exact application
+scope. The backend validates that bootstrap PID's owner and `/proc/<pid>/stat` start ticks,
+temporarily stops only that PID, and polls for a short bounded interval. Only the safe,
+observed `app.slice` membership is retryable; malformed cgroups, changed PID identity, wrong
+ownership, path escapes, and invalid units fail immediately. The temporary process stop is a
+handoff mechanism and can never produce a successful pause result by itself.
+
+Once the exact scope appears, the backend derives the authoritative
+`app-steam-app<appid>-<pid>.scope` from the bootstrap PID's own `/proc` cgroup membership,
+accepts only the current user's exact scope beneath `app.slice`, and records its directory
+device/inode identity. It never accepts a caller-provided unit or freezes a parent slice.
+The `systemctl` child inherits the Deck user's explicit or default systemd bus values, but a
+Decky/PyInstaller `LD_LIBRARY_PATH` is cleared in the copied child environment without
+mutating the plugin process environment.
 
 A pause succeeds only after `cgroup.freeze` reports the requested state and the `frozen`
-field in `cgroup.events` reports completion. Commands and state polling have short bounded
-timeouts. Missing systemd or cgroup support, an invalid/stale identity, and any incomplete
-transition fail closed; there is no PID-signal fallback that can report a successful gate.
-Renewals verify the stored scope rather than requiring the launcher PID to remain alive, and
-resume, lease expiry, the absolute watchdog ceiling, and plugin shutdown thaw that same scope.
+field in `cgroup.events` reports completion. The bootstrap stop is released only after the
+same PID identity is confirmed inside that verified scope; the freezer state is checked again
+after release, so the process remains blocked by its cgroup. Commands, scope acquisition, and
+state polling have separate short bounded timeouts. Missing systemd or cgroup support, an
+invalid/stale identity, and any incomplete transition fail closed, unwind the original PID
+stop when its identity still matches, and best-effort thaw a partial scope. There is no
+PID-signal fallback that can report a successful gate. Renewals verify the stored scope rather
+than requiring the launcher PID to remain alive, and resume, lease expiry, the absolute
+watchdog ceiling, and plugin shutdown thaw that same scope.
 
 Successful transitions are logged as `Froze Steam app scope ... for root PID ...` and
-`Thawed Steam app scope ... for root PID ...`. Discovery, transition, renewal, or automatic
-thaw failures are bounded warning/error diagnostics without raw cgroup paths, command
-environments, or unbounded command output. The log analyzer accepts both these messages and
-historical process-tree messages so the stable `launch_gate.lease_expired` and
-`launch_gate.resume_before_resolution` findings remain comparable across versions.
+`Thawed Steam app scope ... for root PID ...`. Acquisition, discovery, transition, renewal,
+or automatic thaw failures are bounded warning/error diagnostics without raw cgroup paths,
+command environments, D-Bus addresses, or unbounded command output. The log analyzer emits
+the stable `launch_gate.scope_acquisition_failed`, `launch_gate.scope_freeze_failed`, and
+`launch_gate.conflict_skipped` findings for gate startup regressions. It also accepts
+historical process-tree messages so `launch_gate.lease_expired` and
+`launch_gate.resume_before_resolution` remain comparable across versions.
 
 ### Backend: Syncthing Connectivity and Activity
 

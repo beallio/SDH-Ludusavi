@@ -58,8 +58,10 @@ def test_backup_conflict_resolution_flow_diagram_documents_launch_gate() -> None
     for required_text in [
         "Launch-Gated Backup Conflict Resolution",
         "App lifetime start",
+        "Temporary bootstrap hold",
+        "Exact Steam app scope appears",
         "systemctl --user freeze",
-        "frozen Steam app scope",
+        "Verified Steam app scope freeze",
         "check_game_start",
         "ambiguous_recency",
         "Conflict Detected",

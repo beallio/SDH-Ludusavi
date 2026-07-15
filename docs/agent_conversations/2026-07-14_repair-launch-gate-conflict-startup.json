@@ -1,0 +1,89 @@
+{
+  "date": "2026-07-14",
+  "task_objective": "Bridge Steam's observed pre-scope launch window into a verified frozen exact Steam app scope, sanitize the systemctl child environment, preserve renewable scope leases and frontend fail-closed behavior, and make the log analyzer detect this regression class.",
+  "field_evidence": [
+    "Sanitized device evidence showed Steam lifetime PID 3973 announced immediately before app-steam-app3156562597-3973.scope was started, so one strict discovery attempt failed during normal ordering.",
+    "A separate sanitized launch for PID 7051 reached its exact scope but systemctl inherited a PyInstaller LD_LIBRARY_PATH and failed while loading its private libcrypto.so.3.",
+    "The frontend correctly skipped conflict mutation and displayed the launch-gate-unavailable toast because the backend had not returned a verified pause. Raw device logs were not copied into the repository."
+  ],
+  "files_modified": [
+    "DEVELOPMENT.md",
+    "docs/agent_conversations/2026-07-14_repair-launch-gate-conflict-startup.json",
+    "docs/plans/2026-07-14_repair-launch-gate-conflict-startup.md",
+    "docs/plans/cloud_sync_conflict_resolution_flow.html",
+    "docs/specs/custom_status_bar_ui.md",
+    "py_modules/sdh_ludusavi/launch_gate.py",
+    "py_modules/sdh_ludusavi/launch_gate_acquire.py",
+    "py_modules/sdh_ludusavi/watchdog.py",
+    "scripts/analyze_plugin_logs.py",
+    "tests/fixtures/plugin_logs/launch-gate-acquisition-failures.log",
+    "tests/fixtures/plugin_logs/launch-gate-acquisition-success.log",
+    "tests/test_analyze_plugin_logs.py",
+    "tests/test_launch_gate_acquire.py",
+    "tests/test_launch_gate_scope.py",
+    "tests/test_module_size_budgets.py",
+    "tests/test_service.py",
+    "tests/test_status_flow_diagram.py",
+    "tests/test_watchdog.py"
+  ],
+  "tests_added": [
+    "Delayed and immediate exact-scope acquisition ordering with bootstrap stop before discovery, verified scope freeze before bootstrap release, and frozen-state verification after handoff",
+    "Scope-not-ready retry classification and immediate rejection of malformed, non-unified, traversing, wrong-owner, changed-identity, and exited-PID states",
+    "Bounded timeout, stop/continue signal failures, freeze command failure, freezer verification failure, post-handoff failure, partial thaw, and at-most-once original-PID release behavior",
+    "Explicit and inherited LD_LIBRARY_PATH clearing in the systemctl child while preserving supplied user-bus values and caller environments",
+    "Acquisition result invariants and watchdog lease creation only from a successful result containing a verified scope",
+    "Same-scope lease rotation through the acquisition boundary while preserving the original absolute-ceiling timestamp and avoiding a thaw window",
+    "Sanitized analyzer fixtures for acquisition failure, contaminated-environment freeze failure, standalone conflict-skipped notification, deduplication, and a clean verified handoff",
+    "Conflict-flow diagram requirements for temporary bootstrap hold, exact scope appearance, verified scope freeze, conflict decision, and scope thaw"
+  ],
+  "red_evidence": [
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_launch_gate_scope.py tests/test_watchdog.py tests/test_service.py tests/test_main.py tests/test_compatibility.py",
+      "result": "Expected RED: 39 failures and 84 fixture errors exposed the missing acquisition module, retry type, watchdog boundary, lease invariant, and systemctl environment cleanup.",
+      "artifact": "/tmp/sdh_ludusavi/repair-launch-gate-red-backend.log"
+    },
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_analyze_plugin_logs.py",
+      "result": "Expected RED: 2 failures proved the analyzer emitted no acquisition/freeze/conflict-skipped finding and strict mode incorrectly returned success.",
+      "artifact": "/tmp/sdh_ludusavi/repair-launch-gate-red-analyzer.log"
+    },
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_status_flow_diagram.py",
+      "result": "Expected RED: 1 failure proved the conflict diagram omitted the temporary bootstrap hold and exact-scope handoff.",
+      "artifact": "/tmp/sdh_ludusavi/repair-launch-gate-diagram-red.log"
+    },
+    {
+      "command": "./run.sh uv run pytest --no-cov tests/test_launch_gate_acquire.py",
+      "result": "Expected RED: the new result type allowed success without a scope before its invariant was enforced.",
+      "artifact": "/tmp/sdh_ludusavi/repair-launch-gate-result-invariant-red.log"
+    }
+  ],
+  "design_decisions": [
+    "Retry only the exact current-user app.slice membership observed before Steam creates the application scope; keep every ownership, identity, grammar, hierarchy, path, and freezer validation strict.",
+    "Capture the bootstrap PID owner and proc start ticks before signaling, parse stat using the final closing parenthesis, and never signal a PID after that identity changes or disappears.",
+    "Use the PID stop only for the bounded handoff. A successful public pause requires exact-scope discovery, systemctl freeze, both freezer state confirmations, bootstrap release inside the frozen cgroup, and a post-handoff confirmation.",
+    "Centralize failure cleanup: best-effort thaw a scope acquired by this attempt, release the unchanged bootstrap PID at most once, bound all returned reasons, and propagate cancellation after cleanup.",
+    "Copy the systemctl environment, retain explicit or default XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS values, and replace a present LD_LIBRARY_PATH with an empty value without mutating os.environ.",
+    "Pass an existing lease scope into acquisition so same-scope rotation verifies the already-frozen scope without thawing or resetting the absolute ceiling; acquire a replacement scope before retiring a different old lease.",
+    "Keep frontend production code unchanged because its verified-pause and fail-closed conflict behavior remained correct in all focused tests.",
+    "Deduplicate a backend acquisition/freeze warning and its downstream toast within one launch incident while retaining a standalone conflict-skipped finding and distinct findings across launches."
+  ],
+  "commands_and_results": {
+    "baseline": "733 Python tests passed at 88.32% coverage before implementation; 31 frontend files and 286 tests passed with build and typecheck.",
+    "acquisition_and_controller": "84 tests passed for launch_gate_scope.py plus ludusavi.py; the acquisition/size subset passed 54 tests before later additions.",
+    "watchdog_rpc_boundary": "201 plan-listed launch-gate, watchdog, service, main, compatibility, and size-budget tests passed.",
+    "frontend_contract": "The 3 focused lifecycle/lease Vitest files passed all 62 tests without frontend production changes.",
+    "analyzer": "18 analyzer tests passed, including strict failure fixtures and a strict clean verified-handoff fixture.",
+    "diagram_and_analyzer": "22 status-flow and analyzer tests passed.",
+    "type_and_style": "Ruff check, Ruff format, ty, module-size budgets, exception-boundary enforcement, and the repository TDD checker passed.",
+    "pre_commit_quality_gate": "757 Python tests passed at 88.16% coverage; 31 frontend files and 286 tests passed; production build and TypeScript checking passed.",
+    "package": "scripts/package_plugin.py created out/SDH-Ludusavi.zip and validate_plugin_zip.py reported Success: ZIP is valid and compliant.",
+    "dependencies": "No Python, JavaScript, system, privilege-helper, or upstream dependency was added.",
+    "api_compatibility": "Pause, renew, and resume RPC names, arguments, failure shapes, and successful lease fields remain unchanged."
+  },
+  "remaining_limitations": [
+    "The npm registry returned HTTP 410 for pnpm 10.23.0's retired audit endpoint. The audit command was still attempted and reported the registry failure; hook runs used pnpm's explicit ignore-registry-errors mode so install-script validation, frozen install, build, frontend tests, typecheck, Python tests, and all other gates could complete. Repository tooling was not changed.",
+    "Synthetic tests cannot prove SteamOS scheduler timing, systemd manager behavior, Proton child creation, or visible game advancement on a Deck."
+  ],
+  "deferred_on_device_verification": "Installation, GitHub push, tag, development release, and Steam Deck acceptance remain unauthorized and were not performed. After orchestrator approval and separate installation authorization, the field test must confirm the conflict modal remains open over a verified frozen scope, each choice completes before exactly one thaw, no private libcrypto failure occurs, unload/lease expiry recovers, and strict log analysis stays clean."
+}

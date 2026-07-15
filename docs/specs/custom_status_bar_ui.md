@@ -50,15 +50,22 @@ inside SteamUI unless runtime testing proves the BrowserView surface is insuffic
 Lifecycle status publication must not depend solely on frontend tracking caches. Tracking
 hydration guarantees settings and game lists are loaded before standard classification.
 If tracking data fails to load or is cold, the frontend conservatively guards the game 
-launch and shows the running strip before calling the backend, hiding it immediately if 
-the backend returns a silent skip (e.g., disabled autosync, unmatched game, or a 
-deselected Ludusavi game). Before save inspection begins, the backend discovers the launch
-PID's exact Steam app scope, freezes it through the user systemd manager, and verifies the
-cgroup v2 requested and completed freezer states. The renewable lease owns that stable scope
-identity while the user is deciding on a save conflict, so later Steam/Proton processes join
-the already-frozen cgroup. If discovery, freeze, or verification is unavailable, the gate
-fails safely and the frontend does not restore, back up, or resolve a conflict while the game
-loads.
+launch and shows the running strip before calling the backend, hiding it immediately if
+the backend returns a silent skip (e.g., disabled autosync, unmatched game, or a
+deselected Ludusavi game). Before save inspection begins, the backend temporarily holds the
+validated Steam bootstrap PID while waiting a bounded interval for its exact Steam app scope.
+That process-level hold is only a startup handoff: the backend freezes the exact scope through
+the user systemd manager, verifies both cgroup v2 requested and completed freezer states,
+releases the bootstrap hold inside the frozen scope, and verifies the freeze again before the
+pause RPC can succeed. The renewable lease owns that stable scope identity while the user is
+deciding on a save conflict, so later Steam/Proton processes join the already-frozen cgroup.
+
+An expected differing-save conflict is shown only after that verified scope acquisition.
+If acquisition, discovery, freeze, handoff verification, or systemd execution is unavailable,
+the gate fails safely and the frontend does not restore, back up, or resolve a conflict while
+the game loads. The existing `Launch gate unavailable; conflict resolution skipped while game
+is loading.` notification remains the required visible failure state; it must not be hidden
+or replaced by an unverified conflict modal.
 
 The same renewable lease protects pre-game Syncthing settlement. An initialized idle
 watch adds no launch delay. If relevant folder activity is observed, the launch stays
