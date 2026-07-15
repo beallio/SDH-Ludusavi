@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .launch_gate import (
+    MAX_PID,
     MAX_REASON_LENGTH,
     ScopeDiscoveryError,
     ScopeNotReadyError,
@@ -85,7 +86,6 @@ class LaunchScopeAcquirer:
         scope: SteamAppScope | None = None
         result: ScopeAcquisitionResult | None = None
         stop_sent = False
-        continue_attempted = False
         owns_frozen_scope = False
         try:
             identity = self._capture_identity(pid)
@@ -100,10 +100,9 @@ class LaunchScopeAcquirer:
                 verified = self._controller.freeze(scope)
             if not verified.success:
                 raise RuntimeError(verified.reason or "Unable to freeze Steam app scope")
-            owns_frozen_scope = True
+            owns_frozen_scope = scope != existing_scope
 
             self._require_same_scope(identity, scope)
-            continue_attempted = True
             self._signal(identity.pid, signal.SIGCONT)
             stop_sent = False
 
@@ -116,19 +115,19 @@ class LaunchScopeAcquirer:
             result = ScopeAcquisitionResult(False, reason=_bounded_reason(exc))
         finally:
             failed = result is None or not result.success
+            if failed and stop_sent and identity is not None:
+                cleanup_error = self._release_if_same(identity)
+                if cleanup_error and result is not None:
+                    result = ScopeAcquisitionResult(
+                        False,
+                        reason=_bounded_reason(f"{cleanup_error}; {result.reason}"),
+                    )
             if failed and owns_frozen_scope and scope is not None:
                 try:
                     self._controller.thaw(scope)
                 # Intentionally broad: cleanup is best effort and must not hide the root failure.
                 except Exception:
                     pass
-            if failed and stop_sent and not continue_attempted and identity is not None:
-                cleanup_error = self._release_if_same(identity)
-                if cleanup_error and result is not None:
-                    result = ScopeAcquisitionResult(
-                        False,
-                        reason=_bounded_reason(f"{result.reason}; {cleanup_error}"),
-                    )
         if result is None:
             raise RuntimeError("Scope acquisition interrupted")
         return result
@@ -231,6 +230,27 @@ def _parse_start_ticks(content: str, expected_pid: int) -> int:
     if start_ticks < 0:
         raise ScopeDiscoveryError("Launch PID stat identity is malformed")
     return start_ticks
+
+
+def _coerce_signal_pid(value: object) -> int:
+    if isinstance(value, bool):
+        raise ValueError("PID must be an integer, not a boolean")
+    if isinstance(value, int):
+        pid = value
+    elif isinstance(value, str):
+        try:
+            pid = int(value.strip())
+        except ValueError as exc:
+            raise ValueError("PID must be a valid integer string") from exc
+    elif isinstance(value, float):
+        raise ValueError("PID must be an integer, not a float")
+    else:
+        raise ValueError("PID must be an integer or integer string")
+    if pid <= 1:
+        raise ValueError(f"Refusing unsafe PID value: {pid}")
+    if pid > MAX_PID:
+        raise ValueError("PID value exceeds maximum 32-bit integer limit")
+    return pid
 
 
 def _bounded_reason(value: object) -> str:

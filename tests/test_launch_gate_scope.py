@@ -691,7 +691,7 @@ def test_scope_acquisition_handles_stop_signal_failure_without_cleanup_signal(
     assert signals == [signal.SIGSTOP]
 
 
-def test_scope_acquisition_continue_signal_failure_thaws_without_retry(
+def test_scope_acquisition_continue_signal_failure_retries_cleanup_and_reports_failure(
     scope_fs: ScopeFixture,
 ) -> None:
     LaunchScopeAcquirer, _ = _acquisition_types()
@@ -717,8 +717,89 @@ def test_scope_acquisition_continue_signal_failure_thaws_without_retry(
 
     assert result.success is False
     assert "continue signal unavailable" in result.reason
-    assert signals == [signal.SIGSTOP, signal.SIGCONT]
+    assert "Unable to release bootstrap signal" in result.reason
+    assert signals == [signal.SIGSTOP, signal.SIGCONT, signal.SIGCONT]
     assert commands == ["freeze", "thaw"]
+
+
+def test_same_scope_sigcont_failure_preserves_existing_frozen_lease(
+    scope_fs: ScopeFixture,
+) -> None:
+    LaunchScopeAcquirer, _ = _acquisition_types()
+    existing_scope = scope_fs.controller().discover(PID)
+    scope_fs.set_state(1, 1)
+    thaw_calls: list[SteamAppScope] = []
+    signals: list[int] = []
+
+    class Controller:
+        def discover(self, pid: int) -> SteamAppScope:
+            return existing_scope
+
+        def freeze(self, target: SteamAppScope):
+            raise AssertionError("same-scope acquisition must not freeze again")
+
+        def freeze_requested(self, target: SteamAppScope) -> bool:
+            return True
+
+        def wait_for_frozen(self, target: SteamAppScope, expected: bool):
+            return SimpleNamespace(success=True, reason="")
+
+        def thaw(self, target: SteamAppScope):
+            thaw_calls.append(target)
+            return SimpleNamespace(success=True, reason="")
+
+    def send(pid: int, sig: int) -> None:
+        signals.append(sig)
+        if sig == signal.SIGCONT and signals.count(signal.SIGCONT) == 1:
+            raise OSError("continue signal unavailable")
+
+    result = LaunchScopeAcquirer(
+        Controller(),
+        signal_sender=send,
+        proc_root=scope_fs.proc_root,
+        uid=UID,
+    ).acquire(PID, existing_scope=existing_scope)
+
+    assert result.success is False
+    assert signals == [signal.SIGSTOP, signal.SIGCONT, signal.SIGCONT]
+    assert thaw_calls == []
+
+
+def test_same_scope_post_handoff_failure_preserves_existing_frozen_lease(
+    scope_fs: ScopeFixture,
+) -> None:
+    LaunchScopeAcquirer, _ = _acquisition_types()
+    existing_scope = scope_fs.controller().discover(PID)
+    freeze_checks = iter([True, False])
+    thaw_calls: list[SteamAppScope] = []
+
+    class Controller:
+        def discover(self, pid: int) -> SteamAppScope:
+            return existing_scope
+
+        def freeze(self, target: SteamAppScope):
+            raise AssertionError("same-scope acquisition must not freeze again")
+
+        def freeze_requested(self, target: SteamAppScope) -> bool:
+            return next(freeze_checks)
+
+        def wait_for_frozen(self, target: SteamAppScope, expected: bool):
+            return SimpleNamespace(success=True, reason="")
+
+        def thaw(self, target: SteamAppScope):
+            thaw_calls.append(target)
+            return SimpleNamespace(success=True, reason="")
+
+    result = LaunchScopeAcquirer(
+        Controller(),
+        signal_sender=lambda pid, sig: None,
+        proc_root=scope_fs.proc_root,
+        uid=UID,
+    ).acquire(PID, existing_scope=existing_scope)
+
+    assert result.success is False
+    assert "handoff" in result.reason.casefold()
+    assert thaw_calls == []
 
 
 def test_scope_acquisition_freeze_failure_thaws_and_releases_pid(

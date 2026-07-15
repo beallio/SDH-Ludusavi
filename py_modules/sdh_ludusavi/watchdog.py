@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import secrets
 import threading
 import time
@@ -11,23 +10,17 @@ from typing import Protocol
 from .constants import LAUNCH_GATE_LEASE_TTL_SECONDS, WATCHDOG_ABSOLUTE_RESUME_SECONDS
 from .launch_gate import ScopeTransitionResult, SteamAppScope, SystemdScopeController
 from .launch_gate_acquire import LaunchScopeAcquirer, ScopeAcquisitionResult
+from .launch_gate_acquire import _coerce_signal_pid
 
-
-LOGGER = logging.getLogger("sdh_ludusavi.service.watchdog")
-MAX_PID = 2_147_483_647
 SHUTDOWN_THAW_ATTEMPTS = 3
 SHUTDOWN_THAW_RETRY_SECONDS = 0.05
 
 
 class _ScopeController(Protocol):
     def discover(self, pid: int) -> SteamAppScope: ...
-
     def freeze(self, scope: SteamAppScope) -> ScopeTransitionResult: ...
-
     def thaw(self, scope: SteamAppScope) -> ScopeTransitionResult: ...
-
     def freeze_requested(self, scope: SteamAppScope) -> bool: ...
-
     def wait_for_frozen(self, scope: SteamAppScope, expected: bool) -> ScopeTransitionResult: ...
 
 
@@ -45,6 +38,11 @@ class _PauseLease:
     paused_at: float
     lease_id: str
     lease_deadline: float
+    recovery_scopes: tuple[SteamAppScope, ...] = ()
+
+    @property
+    def scopes(self) -> tuple[SteamAppScope, ...]:
+        return (self.scope, *self.recovery_scopes)
 
 
 class ProcessWatchdog:
@@ -88,6 +86,8 @@ class ProcessWatchdog:
         with self._get_pid_lock(valid_pid):
             with self._paused_pids_lock:
                 existing = self._paused_pids.get(valid_pid)
+            if existing is not None and existing.recovery_scopes:
+                return self._acquisition_failure(valid_pid, "Scope recovery is still pending")
             try:
                 acquired = self._scope_acquirer.acquire(
                     valid_pid,
@@ -107,6 +107,12 @@ class ProcessWatchdog:
                     reason = f"Unable to thaw previous scope: {released.reason}"
                     if not cleanup.success:
                         reason += f"; unable to thaw acquired scope: {cleanup.reason}"
+                        with self._paused_pids_lock:
+                            if (
+                                self._paused_pids.get(valid_pid) is existing
+                                and scope not in existing.scopes
+                            ):
+                                existing.recovery_scopes += (scope,)
                     return self._acquisition_failure(valid_pid, reason)
                 self._remove_lease(valid_pid, existing)
                 self._log_thawed(existing.scope)
@@ -153,9 +159,10 @@ class ProcessWatchdog:
             if lease.lease_id != lease_id:
                 return self._lease_failure(valid_pid, "Lease ID mismatch")
 
-            verified = self._verified_frozen(lease.scope)
-            if not verified.success:
-                return self._lease_failure(valid_pid, verified.reason)
+            for owned_scope in lease.scopes:
+                verified = self._verified_frozen(owned_scope)
+                if not verified.success:
+                    return self._lease_failure(valid_pid, verified.reason)
 
             now = self._monotonic()
             with self._paused_pids_lock:
@@ -187,20 +194,33 @@ class ProcessWatchdog:
         if lease_id is not None and lease.lease_id != lease_id:
             return self._lease_failure(valid_pid, "Lease ID mismatch")
 
-        thawed = self._scope_controller.thaw(lease.scope)
-        if not thawed.success:
-            reason = _bounded_reason(thawed.reason or "Unable to thaw Steam app scope")
+        retained: list[tuple[SteamAppScope, str]] = []
+        for owned_scope in lease.scopes:
+            thawed = self._scope_controller.thaw(owned_scope)
+            if thawed.success:
+                self._log_thawed(owned_scope)
+            else:
+                retained.append((owned_scope, thawed.reason))
+        if retained:
+            reason = _bounded_reason(
+                "; ".join(
+                    f"{scope.unit}: {detail or 'Unable to thaw Steam app scope'}"
+                    for scope, detail in retained
+                )
+            )
+            with self._paused_pids_lock:
+                if self._paused_pids.get(valid_pid) is lease:
+                    lease.scope = retained[0][0]
+                    lease.recovery_scopes = tuple(scope for scope, _ in retained[1:])
             self._log(
                 "warning",
-                f"Unable to thaw Steam app scope {lease.scope.unit} for root PID "
-                f"{valid_pid}: {reason}",
+                f"Unable to thaw Steam app scope for root PID {valid_pid}: {reason}",
                 "launch_gate",
                 None,
             )
             return {"status": "failed", "pid": valid_pid, "message": reason}
 
         self._remove_lease(valid_pid, lease)
-        self._log_thawed(lease.scope)
         return {"status": "resumed", "pid": valid_pid}
 
     def resume_all(self) -> None:
@@ -233,10 +253,11 @@ class ProcessWatchdog:
                 return
             if attempt < SHUTDOWN_THAW_ATTEMPTS:
                 time.sleep(SHUTDOWN_THAW_RETRY_SECONDS)
-        units = _bounded_reason(", ".join(lease.scope.unit for lease in retained))
+        retained_scopes = tuple(scope for lease in retained for scope in lease.scopes)
+        units = _bounded_reason(", ".join(scope.unit for scope in retained_scopes))
         self._log(
             "error",
-            f"Shutdown left {len(retained)} Steam app scope lease(s) unconfirmed after "
+            f"Shutdown left {len(retained_scopes)} Steam app scope lease(s) unconfirmed after "
             f"{SHUTDOWN_THAW_ATTEMPTS} thaw attempts: {units}",
             "launch_gate",
             None,
@@ -343,27 +364,6 @@ def _lease_expiry_reason(lease: _PauseLease, now: float) -> str | None:
     if now > lease.lease_deadline:
         return "lease expired"
     return None
-
-
-def _coerce_signal_pid(value: object) -> int:
-    if isinstance(value, bool):
-        raise ValueError("PID must be an integer, not a boolean")
-    if isinstance(value, int):
-        pid = value
-    elif isinstance(value, str):
-        try:
-            pid = int(value.strip())
-        except ValueError as exc:
-            raise ValueError("PID must be a valid integer string") from exc
-    elif isinstance(value, float):
-        raise ValueError("PID must be an integer, not a float")
-    else:
-        raise ValueError("PID must be an integer or integer string")
-    if pid <= 1:
-        raise ValueError(f"Refusing unsafe PID value: {pid}")
-    if pid > MAX_PID:
-        raise ValueError("PID value exceeds maximum 32-bit integer limit")
-    return pid
 
 
 def _bounded_reason(value: object) -> str:
