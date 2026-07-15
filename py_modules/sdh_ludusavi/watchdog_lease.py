@@ -3,11 +3,17 @@ from __future__ import annotations
 import signal
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from .constants import WATCHDOG_ABSOLUTE_RESUME_SECONDS
 from .launch_gate import ScopeTransitionResult, SteamAppScope
 from .launch_gate_acquire import ScopeAcquisitionResult
+from .launch_gate_process import (
+    LaunchProcessIdentity,
+    _matches_process_identity,
+    _thread_group_is_stopped,
+)
 
 
 class _ScopeController(Protocol):
@@ -32,6 +38,7 @@ class _PauseLease:
     paused_at: float
     lease_id: str
     lease_deadline: float
+    identity: LaunchProcessIdentity | None = None
     recovery_scopes: tuple[SteamAppScope, ...] = ()
 
     @property
@@ -49,19 +56,45 @@ class _GateRelease:
     retained: tuple[tuple[SteamAppScope, str], ...] = ()
 
 
+def _stop_only_gate_failure(
+    proc_root: str | Path,
+    pid: int,
+    lease: _PauseLease,
+) -> str | None:
+    if lease.identity is None or not _matches_process_identity(proc_root, lease.identity):
+        return "Launch PID identity changed"
+    if not _thread_group_is_stopped(proc_root, pid):
+        return "Launch PID is no longer stopped"
+    return None
+
+
+def _release_stop_only_identity(
+    signal_sender: Callable[[int, int], None],
+    proc_root: str | Path,
+    identity: LaunchProcessIdentity | None,
+) -> ScopeTransitionResult:
+    if identity is None:
+        return ScopeTransitionResult(False, "Stop-only lease has no process identity")
+    if not _matches_process_identity(proc_root, identity):
+        return ScopeTransitionResult(True)
+    try:
+        signal_sender(identity.pid, signal.SIGCONT)
+    # Intentionally broad: signal failures must retain the lease for retry.
+    except Exception as exc:
+        return ScopeTransitionResult(False, _bounded_reason(f"Unable to send SIGCONT: {exc}"))
+    return ScopeTransitionResult(True)
+
+
 def _release_gate(
     controller: _ScopeController,
     signal_sender: Callable[[int, int], None],
     pid: int,
     lease: _PauseLease,
+    proc_root: str | Path = "/proc",
 ) -> _GateRelease:
     if lease.scope is None:
-        try:
-            signal_sender(pid, signal.SIGCONT)
-        # Intentionally broad: signal failures must retain the lease for retry.
-        except Exception as exc:
-            return _GateRelease(False, _bounded_reason(f"Unable to send SIGCONT: {exc}"))
-        return _GateRelease(True)
+        released = _release_stop_only_identity(signal_sender, proc_root, lease.identity)
+        return _GateRelease(released.success, released.reason)
 
     thawed: list[SteamAppScope] = []
     retained: list[tuple[SteamAppScope, str]] = []

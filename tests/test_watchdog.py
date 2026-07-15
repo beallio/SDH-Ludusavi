@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import signal
 import threading
 import time
@@ -10,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from sdh_ludusavi.constants import WATCHDOG_ABSOLUTE_RESUME_SECONDS
+from sdh_ludusavi.launch_gate_process import LaunchProcessIdentity
 from sdh_ludusavi.watchdog import ProcessWatchdog, _PauseLease
 
 
@@ -106,10 +108,24 @@ def watchdog(controller: FakeScopeController | None = None) -> tuple[ProcessWatc
     return instance, logger
 
 
-def write_process_state(proc_root: Path, pid: int, state: str) -> None:
+def process_identity(pid: int = 4567, *, start_ticks: int = 987654) -> LaunchProcessIdentity:
+    return LaunchProcessIdentity(pid, os.geteuid(), start_ticks)
+
+
+def write_process_state(
+    proc_root: Path,
+    pid: int,
+    state: str,
+    *,
+    start_ticks: int = 987654,
+) -> None:
     proc_dir = proc_root / str(pid)
-    proc_dir.mkdir(parents=True, exist_ok=True)
-    (proc_dir / "stat").write_text(f"{pid} (bootstrap) {state} 0 0\n", encoding="utf-8")
+    task_dir = proc_dir / "task" / str(pid)
+    task_dir.mkdir(parents=True, exist_ok=True)
+    fields_after_command = [state, *("0" for _ in range(18)), str(start_ticks)]
+    stat_text = f"{pid} (bootstrap) {' '.join(fields_after_command)}\n"
+    (proc_dir / "stat").write_text(stat_text, encoding="utf-8")
+    (task_dir / "stat").write_text(stat_text, encoding="utf-8")
 
 
 def test_pause_renew_resume_uses_scope_and_preserves_rpc_shape() -> None:
@@ -143,7 +159,15 @@ def test_stop_only_pause_renews_while_stopped_and_resumes_with_sigcont(
 ) -> None:
     controller = FakeScopeController()
     acquirer = FakeScopeAcquirer(controller)
-    acquirer.results.append(SimpleNamespace(success=True, scope=None, stop_only=True, reason=""))
+    acquirer.results.append(
+        SimpleNamespace(
+            success=True,
+            scope=None,
+            stop_only=True,
+            reason="",
+            identity=process_identity(),
+        )
+    )
     logger = MagicMock()
     signals: list[tuple[int, int]] = []
     proc_root = tmp_path / "proc"
@@ -163,6 +187,8 @@ def test_stop_only_pause_renews_while_stopped_and_resumes_with_sigcont(
     assert paused["status"] == "paused"
     assert wd._paused_pids[4567].scope is None
     assert wd._paused_pids[4567].scopes == ()
+    assert wd._paused_pids[4567].identity == process_identity()
+    assert wd.verify_gate(4567, lease_id) is True
     assert wd.renew_pause(4567, lease_id)["status"] == "renewed"
     assert wd.resume(4567, lease_id) == {"status": "resumed", "pid": 4567}
     assert signals == [(4567, signal.SIGCONT)]
@@ -173,7 +199,15 @@ def test_stop_only_pause_renews_while_stopped_and_resumes_with_sigcont(
 def test_stop_only_renewal_fails_when_pid_is_no_longer_stopped(tmp_path: Path) -> None:
     controller = FakeScopeController()
     acquirer = FakeScopeAcquirer(controller)
-    acquirer.results.append(SimpleNamespace(success=True, scope=None, stop_only=True, reason=""))
+    acquirer.results.append(
+        SimpleNamespace(
+            success=True,
+            scope=None,
+            stop_only=True,
+            reason="",
+            identity=process_identity(),
+        )
+    )
     proc_root = tmp_path / "proc"
     write_process_state(proc_root, 4567, "T")
     wd = ProcessWatchdog(
@@ -223,7 +257,13 @@ def test_verify_gate_requires_stop_only_pid_to_still_be_stopped(tmp_path: Path) 
         scope_acquirer=FakeScopeAcquirer(controller),
         proc_root=proc_root,
     )
-    wd._paused_pids[4567] = _PauseLease(None, time.monotonic(), "lease", time.monotonic() + 30)
+    wd._paused_pids[4567] = _PauseLease(
+        None,
+        time.monotonic(),
+        "lease",
+        time.monotonic() + 30,
+        identity=process_identity(),
+    )
 
     assert wd.verify_gate(4567, "lease") is True
     write_process_state(proc_root, 4567, "S")
@@ -248,7 +288,13 @@ def test_stop_only_cleanup_resumes_pid(
         monotonic=clock.monotonic,
     )
     wd._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
-    wd._paused_pids[4567] = _PauseLease(None, 1.0, "lease", 2.0)
+    wd._paused_pids[4567] = _PauseLease(
+        None,
+        1.0,
+        "lease",
+        2.0,
+        identity=process_identity(),
+    )
 
     if cleanup == "resume_all":
         wd.resume_all()
@@ -259,6 +305,41 @@ def test_stop_only_cleanup_resumes_pid(
 
     assert signals == [(4567, signal.SIGCONT)]
     assert wd._paused_pids == {}
+
+
+def test_stop_only_lease_rejects_reused_pid_and_does_not_send_sigcont(
+    tmp_path: Path,
+) -> None:
+    controller = FakeScopeController()
+    acquirer = FakeScopeAcquirer(controller)
+    acquired_identity = process_identity(start_ticks=111)
+    acquirer.results.append(
+        SimpleNamespace(
+            success=True,
+            scope=None,
+            stop_only=True,
+            reason="",
+            identity=acquired_identity,
+        )
+    )
+    signals: list[tuple[int, int]] = []
+    proc_root = tmp_path / "proc"
+    write_process_state(proc_root, 4567, "T", start_ticks=111)
+    wd = ProcessWatchdog(
+        MagicMock(),
+        scope_controller=controller,
+        scope_acquirer=acquirer,
+        signal_sender=lambda pid, sig: signals.append((pid, sig)),
+        proc_root=proc_root,
+    )
+    wd._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
+    paused = wd.pause(4567)
+    write_process_state(proc_root, 4567, "T", start_ticks=222)
+
+    assert wd.verify_gate(4567, paused["lease_id"]) is False
+    assert wd.renew_pause(4567, paused["lease_id"])["status"] == "failed"
+    assert wd.resume(4567, paused["lease_id"]) == {"status": "resumed", "pid": 4567}
+    assert signals == []
 
 
 def test_pause_fails_closed_when_scope_discovery_or_freeze_fails() -> None:
@@ -570,11 +651,12 @@ def test_invalid_pid_fails_without_scope_discovery(pid: object) -> None:
 
 
 def test_stop_only_signal_path_does_not_restore_process_tree_walking() -> None:
-    source = Path("py_modules/sdh_ludusavi/watchdog.py").read_text()
+    watchdog_source = Path("py_modules/sdh_ludusavi/watchdog.py").read_text()
+    lease_source = Path("py_modules/sdh_ludusavi/watchdog_lease.py").read_text()
 
-    assert "_process_tree" not in source
-    assert "signal.SIGSTOP" not in source
-    assert "signal.SIGCONT" in source
+    assert "_process_tree" not in watchdog_source + lease_source
+    assert "signal.SIGSTOP" not in watchdog_source + lease_source
+    assert "signal.SIGCONT" in lease_source
 
 
 def test_pause_creates_lease_only_from_successful_acquisition() -> None:
