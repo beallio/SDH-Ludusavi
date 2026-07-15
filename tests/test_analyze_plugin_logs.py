@@ -169,6 +169,60 @@ def test_analyze_scope_freeze_and_thaw_watchdog_syntax(tmp_path: Path) -> None:
     }
 
 
+def test_analyze_launch_gate_acquisition_failures_are_targeted_and_deduplicated() -> None:
+    data = run_json_fixture("launch-gate-acquisition-failures.log")
+
+    assert [finding["rule_id"] for finding in data["findings"]] == [
+        "launch_gate.scope_acquisition_failed",
+        "launch_gate.scope_freeze_failed",
+        "launch_gate.conflict_skipped",
+    ]
+    assert all(finding["occurrences"] == 1 for finding in data["findings"])
+
+
+def test_analyze_verified_scope_handoff_has_no_launch_gate_finding() -> None:
+    data = run_json_fixture("launch-gate-acquisition-success.log")
+
+    assert [
+        finding
+        for finding in data["findings"]
+        if str(finding["rule_id"]).startswith("launch_gate.")
+    ] == []
+
+
+def test_analyze_launch_gate_acquisition_failures_make_strict_mode_fail() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/analyze_plugin_logs.py",
+            "--strict",
+            str(FIXTURES_DIR / "launch-gate-acquisition-failures.log"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "launch_gate.scope_acquisition_failed" in result.stdout
+    assert "launch_gate.scope_freeze_failed" in result.stdout
+    assert "launch_gate.conflict_skipped" in result.stdout
+
+
+def test_analyze_verified_scope_handoff_passes_strict_mode() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/analyze_plugin_logs.py",
+            "--strict",
+            str(FIXTURES_DIR / "launch-gate-acquisition-success.log"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+
+
 def test_analyze_strict_returns_1() -> None:
     result = subprocess.run(
         [

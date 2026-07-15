@@ -28,6 +28,13 @@ WATCHDOG_RE = re.compile(
     r"PID\s+(?P<pid>\d+)\s+(?:suspended|frozen) for .*?\((?P<reason>[^)]+)\)\.\s+"
     r"(?:Resuming|Thawing) automatically\."
 )
+GATE_FAILURE_RE = re.compile(
+    r"Unable to (?P<operation>acquire frozen|discover|freeze) Steam app scope"
+    r"(?: for root)? PID (?P<pid>\d+):\s*(?P<reason>.*)"
+)
+CONFLICT_SKIPPED_MESSAGE = (
+    "Launch gate unavailable; conflict resolution skipped while game is loading."
+)
 ACTION_RE = re.compile(
     r"(?:\[(?P<game>[^\]]+)\]\s+)?(?:backup:\s+Kept local save|restore:\s+Restored)"
 )
@@ -73,6 +80,7 @@ class _LaunchIncident:
     waiting_for_action: bool = False
     watchdog_line: int | None = None
     watchdog_reason: str | None = None
+    gate_failure_rule: str | None = None
     completed: bool = False
 
 
@@ -205,6 +213,78 @@ def analyze_logs(paths: list[Path], strict: bool = False) -> tuple[list[LogFindi
                         start_line=line_number,
                     )
                 )
+                continue
+
+            gate_failure = GATE_FAILURE_RE.search(message)
+            if gate_failure is not None:
+                reason = gate_failure.group("reason").casefold()
+                operation = gate_failure.group("operation")
+                is_freeze_failure = operation == "freeze" or any(
+                    marker in reason
+                    for marker in (
+                        "systemctl freeze",
+                        "freezer state",
+                        "freeze verification",
+                        "scope freeze",
+                    )
+                )
+                rule_id = (
+                    "launch_gate.scope_freeze_failed"
+                    if is_freeze_failure
+                    else "launch_gate.scope_acquisition_failed"
+                )
+                incident = next(
+                    (
+                        item
+                        for item in reversed(incidents)
+                        if not item.completed
+                        and item.gate_failure_rule is None
+                        and line_number - item.start_line <= MAX_INCIDENT_LINES
+                    ),
+                    None,
+                )
+                if incident is not None:
+                    incident.pid = gate_failure.group("pid")
+                    incident.gate_failure_rule = rule_id
+                incident_key = (
+                    incident.start_line
+                    if incident is not None
+                    else f"pid:{gate_failure.group('pid')}:{line_number}"
+                )
+                add_finding(
+                    (rule_id, str(path), incident_key),
+                    rule_id,
+                    "error",
+                    path,
+                    line_number,
+                    line,
+                )
+                continue
+
+            if CONFLICT_SKIPPED_MESSAGE in message:
+                incident = next(
+                    (
+                        item
+                        for item in reversed(incidents)
+                        if not item.completed
+                        and line_number - item.start_line <= MAX_INCIDENT_LINES
+                    ),
+                    None,
+                )
+                if incident is None or incident.gate_failure_rule is None:
+                    incident_key = (
+                        incident.start_line if incident is not None else f"line:{line_number}"
+                    )
+                    add_finding(
+                        ("launch_gate.conflict_skipped", str(path), incident_key),
+                        "launch_gate.conflict_skipped",
+                        "error",
+                        path,
+                        line_number,
+                        line,
+                    )
+                if incident is not None:
+                    incident.completed = True
                 continue
 
             pause_match = PAUSE_RE.search(message)
