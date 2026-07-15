@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from .launch_gate import MAX_PID, MAX_REASON_LENGTH, ScopeDiscoveryError
+
+# Steam Deck measurements put SIGSTOP delivery at 0.16-0.87ms, including under
+# fsync I/O load. 100ms is a generous tunable default, not a proven ceiling.
+SIGSTOP_DELIVERY_TIMEOUT_SECONDS = 0.1
+SIGSTOP_DELIVERY_POLL_SECONDS = 0.0005
 
 
 @dataclass(frozen=True)
@@ -32,16 +38,107 @@ def _parse_start_ticks(content: str, expected_pid: int) -> int:
     return start_ticks
 
 
-def _is_stopped(proc_root: str | Path, pid: int) -> bool:
+def _read_process_identity(
+    proc_root: str | Path,
+    pid: int,
+) -> LaunchProcessIdentity | None:
+    proc_dir = Path(proc_root) / str(pid)
     try:
-        content = (Path(proc_root) / str(pid) / "stat").read_text(encoding="utf-8")
+        owner_uid = proc_dir.stat().st_uid
+        stat_text = (proc_dir / "stat").read_text(encoding="utf-8")
+        start_ticks = _parse_start_ticks(stat_text, pid)
+    except (OSError, UnicodeError, ScopeDiscoveryError):
+        return None
+    return LaunchProcessIdentity(pid, owner_uid, start_ticks)
+
+
+def _matches_process_identity(
+    proc_root: str | Path,
+    expected: LaunchProcessIdentity,
+) -> bool:
+    return _read_process_identity(proc_root, expected.pid) == expected
+
+
+def _read_stat_state(stat_path: Path) -> str | None:
+    try:
+        content = stat_path.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
-        return False
+        return None
     close_paren = content.rfind(")")
     if close_paren < 0:
-        return False
+        return None
     fields = content[close_paren + 1 :].split()
-    return bool(fields) and fields[0] == "T"
+    return fields[0] if fields else None
+
+
+def _read_process_state(proc_root: str | Path, pid: int) -> str | None:
+    return _read_stat_state(Path(proc_root) / str(pid) / "stat")
+
+
+def _is_stopped(proc_root: str | Path, pid: int) -> bool:
+    return _read_process_state(proc_root, pid) == "T"
+
+
+def _read_thread_group_state(proc_root: str | Path, pid: int) -> str:
+    task_stats = sorted((Path(proc_root) / str(pid) / "task").glob("*/stat"))
+    if not task_stats:
+        return "unreadable"
+    states = tuple(_read_stat_state(path) for path in task_stats)
+    for state in states:
+        if state is None:
+            return "unreadable"
+        if state != "T":
+            return state
+    return "T"
+
+
+def _thread_group_is_stopped(proc_root: str | Path, pid: int) -> bool:
+    return _read_thread_group_state(proc_root, pid) == "T"
+
+
+def _read_tracer_pid(proc_root: str | Path, pid: int) -> str:
+    try:
+        status = (Path(proc_root) / str(pid) / "status").read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return "unreadable"
+    for line in status.splitlines():
+        name, separator, value = line.partition(":")
+        if separator and name == "TracerPid":
+            return value.strip() or "unreadable"
+    return "unreadable"
+
+
+def _wait_until_stopped(
+    proc_root: str | Path,
+    pid: int,
+    *,
+    timeout_seconds: float,
+    poll_seconds: float,
+    monotonic: Callable[[], float],
+    wait: Callable[[float], None],
+) -> str:
+    if timeout_seconds < 0:
+        raise ValueError("SIGSTOP delivery timeout cannot be negative")
+    if poll_seconds <= 0:
+        raise ValueError("SIGSTOP delivery poll interval must be positive")
+
+    deadline = monotonic() + timeout_seconds
+    observed = _read_thread_group_state(proc_root, pid)
+    if observed == "T":
+        return observed
+
+    while monotonic() < deadline:
+        remaining = deadline - monotonic()
+        wait(min(poll_seconds, remaining))
+        if monotonic() >= deadline:
+            break
+        observed = _read_thread_group_state(proc_root, pid)
+        if observed == "T":
+            return observed
+
+    if observed == "t":
+        return f"t; TracerPid={_read_tracer_pid(proc_root, pid)}"
+    return observed
 
 
 def _has_children(proc_root: str | Path, pid: int) -> bool:
