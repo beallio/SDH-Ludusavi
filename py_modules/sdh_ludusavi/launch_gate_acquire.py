@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import signal
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,11 +16,13 @@ from .launch_gate import (
     _coerce_pid,
 )
 from .launch_gate_process import (
+    SIGSTOP_DELIVERY_POLL_SECONDS,
+    SIGSTOP_DELIVERY_TIMEOUT_SECONDS,
     LaunchProcessIdentity,
     _bounded_reason,
     _has_children,
-    _is_stopped,
     _parse_start_ticks,
+    _wait_until_stopped,
 )
 
 
@@ -41,12 +44,15 @@ class ScopeAcquisitionResult:
     scope: SteamAppScope | None = None
     stop_only: bool = False
     reason: str = ""
+    identity: LaunchProcessIdentity | None = None
 
     def __post_init__(self) -> None:
         if self.scope is not None and self.stop_only:
             raise ValueError("scope acquisition cannot be both scope-based and stop-only")
         if self.success and self.scope is None and not self.stop_only:
             raise ValueError("successful scope acquisition requires a scope or stop-only gate")
+        if self.stop_only and self.identity is None:
+            raise ValueError("stop-only acquisition requires process identity")
 
 
 class LaunchScopeAcquirer:
@@ -59,11 +65,15 @@ class LaunchScopeAcquirer:
         signal_sender: Callable[[int, int], None] = os.kill,
         proc_root: str | Path = "/proc",
         uid: int | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+        wait: Callable[[float], None] = time.sleep,
     ) -> None:
         self._controller = controller
         self._signal = signal_sender
         self._proc_root = Path(proc_root)
         self._uid = os.geteuid() if uid is None else uid
+        self._monotonic = monotonic
+        self._wait = wait
 
     def acquire(
         self,
@@ -83,16 +93,30 @@ class LaunchScopeAcquirer:
                 scope = self._controller.discover(identity.pid)
             except ScopeNotReadyError as exc:
                 self._require_same_identity(identity)
-                if not _is_stopped(self._proc_root, identity.pid):
+                # SIGSTOP causes state T, so this normally converges and otherwise fails
+                # closed. By contrast, SIGSTOP prevents Steam from creating its app scope;
+                # discovery must never be retried while the process is stopped.
+                observed_state = _wait_until_stopped(
+                    self._proc_root,
+                    identity.pid,
+                    timeout_seconds=SIGSTOP_DELIVERY_TIMEOUT_SECONDS,
+                    poll_seconds=SIGSTOP_DELIVERY_POLL_SECONDS,
+                    monotonic=self._monotonic,
+                    wait=self._wait,
+                )
+                if observed_state != "T":
                     raise ScopeDiscoveryError(
-                        "Launch PID is not stopped after SIGSTOP; refusing an unverified gate"
+                        "Launch PID did not stop after SIGSTOP within "
+                        f"{SIGSTOP_DELIVERY_TIMEOUT_SECONDS * 1000:.0f}ms "
+                        f"(state={observed_state}); refusing an unverified gate"
                     ) from exc
+                self._require_same_identity(identity)
                 if _has_children(self._proc_root, identity.pid):
                     raise ScopeDiscoveryError(
                         "Launch PID already has children; refusing an unverified pre-scope gate"
                     ) from exc
                 self._require_same_identity(identity)
-                result = ScopeAcquisitionResult(True, stop_only=True)
+                result = ScopeAcquisitionResult(True, stop_only=True, identity=identity)
 
             if result is None:
                 if scope is None:
