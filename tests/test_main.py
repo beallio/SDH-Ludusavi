@@ -308,9 +308,14 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
             return {"status": "backed_up", "game": game_name}
 
         def resolve_game_start_conflict(
-            self, game_name: str, app_id: str | None, resolution: str
+            self,
+            game_name: str,
+            app_id: str | None,
+            resolution: str,
+            gate_pid: int | None = None,
+            gate_lease_id: str | None = None,
         ) -> dict[str, object]:
-            calls.append((f"resolve_{resolution}", game_name, app_id))
+            calls.append((f"resolve_{resolution}", game_name, app_id, gate_pid, gate_lease_id))
             return {"status": "restored", "game": game_name}
 
     monkeypatch.setattr(module, "SDHLudusaviService", CapturingService)
@@ -334,7 +339,9 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
             "status": "backed_up",
             "game": "Hades",
         }
-        assert await plugin.resolve_game_start_conflict("Hades", "1145360", "restore_backup") == {
+        assert await plugin.resolve_game_start_conflict(
+            "Hades", "1145360", "restore_backup", 4567, "lease"
+        ) == {
             "status": "restored",
             "game": "Hades",
         }
@@ -346,7 +353,7 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
         ("restore_start", "Hades", "1145360"),
         ("check_exit", "Hades", "1145360"),
         ("backup_exit", "Hades", "1145360"),
-        ("resolve_restore_backup", "Hades", "1145360"),
+        ("resolve_restore_backup", "Hades", "1145360", 4567, "lease"),
     ]
 
 

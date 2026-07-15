@@ -1,48 +1,32 @@
 from __future__ import annotations
 
+import os
 import secrets
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Protocol
+from pathlib import Path
 
-from .constants import LAUNCH_GATE_LEASE_TTL_SECONDS, WATCHDOG_ABSOLUTE_RESUME_SECONDS
+from .constants import LAUNCH_GATE_LEASE_TTL_SECONDS
 from .launch_gate import ScopeTransitionResult, SteamAppScope, SystemdScopeController
-from .launch_gate_acquire import LaunchScopeAcquirer, ScopeAcquisitionResult
-from .launch_gate_acquire import _coerce_signal_pid
+from .launch_gate_acquire import LaunchScopeAcquirer
+from .launch_gate_process import _coerce_signal_pid
+from .watchdog_lease import (
+    _PauseLease,
+    _ScopeAcquirer,
+    _ScopeController,
+    _bounded_reason,
+    _gate_held_message,
+    _lease_expiry_reason,
+    _release_gate,
+    _release_stop_only_identity,
+    _retained_summary,
+    _scope_thawed_message,
+    _stop_only_gate_failure,
+)
 
 SHUTDOWN_THAW_ATTEMPTS = 3
 SHUTDOWN_THAW_RETRY_SECONDS = 0.05
-
-
-class _ScopeController(Protocol):
-    def discover(self, pid: int) -> SteamAppScope: ...
-    def freeze(self, scope: SteamAppScope) -> ScopeTransitionResult: ...
-    def thaw(self, scope: SteamAppScope) -> ScopeTransitionResult: ...
-    def freeze_requested(self, scope: SteamAppScope) -> bool: ...
-    def wait_for_frozen(self, scope: SteamAppScope, expected: bool) -> ScopeTransitionResult: ...
-
-
-class _ScopeAcquirer(Protocol):
-    def acquire(
-        self,
-        pid: int,
-        existing_scope: SteamAppScope | None = None,
-    ) -> ScopeAcquisitionResult: ...
-
-
-@dataclass
-class _PauseLease:
-    scope: SteamAppScope
-    paused_at: float
-    lease_id: str
-    lease_deadline: float
-    recovery_scopes: tuple[SteamAppScope, ...] = ()
-
-    @property
-    def scopes(self) -> tuple[SteamAppScope, ...]:
-        return (self.scope, *self.recovery_scopes)
 
 
 class ProcessWatchdog:
@@ -54,11 +38,15 @@ class ProcessWatchdog:
         scope_controller: _ScopeController | None = None,
         scope_acquirer: _ScopeAcquirer | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        signal_sender: Callable[[int, int], None] = os.kill,
+        proc_root: str | Path = "/proc",
     ) -> None:
         self._log = log_callback
         self._scope_controller = scope_controller or SystemdScopeController()
         self._scope_acquirer = scope_acquirer or LaunchScopeAcquirer(self._scope_controller)
         self._monotonic = monotonic
+        self._signal = signal_sender
+        self._proc_root = Path(proc_root)
         self._paused_pids: dict[int, _PauseLease] = {}
         self._paused_pids_lock = threading.Lock()
         self._watchdog_active = False
@@ -76,7 +64,7 @@ class ProcessWatchdog:
             return self._pid_locks[pid]
 
     def pause(self, pid: int) -> dict[str, object]:
-        """Freeze the launch PID's complete Steam app scope."""
+        """Hold the launch with SIGSTOP or freeze its complete Steam app scope."""
         try:
             valid_pid = _coerce_signal_pid(pid)
         except ValueError as exc:
@@ -96,27 +84,39 @@ class ProcessWatchdog:
             # Intentionally broad: fail closed on any injected/runtime acquisition failure.
             except Exception as exc:
                 return self._acquisition_failure(valid_pid, str(exc))
-            if not acquired.success or acquired.scope is None:
+            if not acquired.success or (acquired.scope is None and not acquired.stop_only):
                 return self._acquisition_failure(valid_pid, acquired.reason)
             scope = acquired.scope
-
+            identity = acquired.identity if scope is None else None
             if existing is not None and existing.scope != scope:
-                released = self._scope_controller.thaw(existing.scope)
+                released = (
+                    self._scope_controller.thaw(existing.scope)
+                    if existing.scope is not None
+                    else ScopeTransitionResult(True)
+                )
                 if not released.success:
-                    cleanup = self._scope_controller.thaw(scope)
+                    if scope is None:
+                        cleanup = _release_stop_only_identity(
+                            self._signal,
+                            self._proc_root,
+                            identity,
+                        )
+                    else:
+                        cleanup = self._scope_controller.thaw(scope)
                     reason = f"Unable to thaw previous scope: {released.reason}"
                     if not cleanup.success:
-                        reason += f"; unable to thaw acquired scope: {cleanup.reason}"
-                        with self._paused_pids_lock:
-                            if (
-                                self._paused_pids.get(valid_pid) is existing
-                                and scope not in existing.scopes
-                            ):
-                                existing.recovery_scopes += (scope,)
+                        reason += f"; unable to release acquired gate: {cleanup.reason}"
+                        if scope is not None:
+                            with self._paused_pids_lock:
+                                if (
+                                    self._paused_pids.get(valid_pid) is existing
+                                    and scope not in existing.scopes
+                                ):
+                                    existing.recovery_scopes += (scope,)
                     return self._acquisition_failure(valid_pid, reason)
                 self._remove_lease(valid_pid, existing)
-                self._log_thawed(existing.scope)
-
+                if existing.scope is not None:
+                    self._log_thawed(existing.scope)
             lease_id = secrets.token_urlsafe(16)
             now = self._monotonic()
             paused_at = (
@@ -128,14 +128,10 @@ class ProcessWatchdog:
                     paused_at=paused_at,
                     lease_id=lease_id,
                     lease_deadline=now + LAUNCH_GATE_LEASE_TTL_SECONDS,
+                    identity=identity,
                 )
             self._ensure_watchdog_running()
-            self._log(
-                "info",
-                f"Froze Steam app scope {scope.unit} for root PID {valid_pid}",
-                "launch_gate",
-                None,
-            )
+            self._log("info", _gate_held_message(scope, valid_pid), "launch_gate", None)
             return {
                 "status": "paused",
                 "pid": valid_pid,
@@ -158,7 +154,9 @@ class ProcessWatchdog:
                 return self._lease_failure(valid_pid, "Process not paused")
             if lease.lease_id != lease_id:
                 return self._lease_failure(valid_pid, "Lease ID mismatch")
-
+            stop_failure = _stop_only_gate_failure(self._proc_root, valid_pid, lease)
+            if lease.scope is None and stop_failure is not None:
+                return self._lease_failure(valid_pid, stop_failure)
             for owned_scope in lease.scopes:
                 verified = self._verified_frozen(owned_scope)
                 if not verified.success:
@@ -175,6 +173,26 @@ class ProcessWatchdog:
                 "pid": valid_pid,
                 "lease_ttl_seconds": LAUNCH_GATE_LEASE_TTL_SECONDS,
             }
+
+    def verify_gate(self, pid: int, lease_id: str) -> bool:
+        """Confirm that the exact unexpired launch gate is still held."""
+        try:
+            valid_pid = _coerce_signal_pid(pid)
+        except ValueError:
+            return False
+        if not isinstance(lease_id, str) or not lease_id:
+            return False
+
+        with self._get_pid_lock(valid_pid):
+            with self._paused_pids_lock:
+                lease = self._paused_pids.get(valid_pid)
+            if lease is None or lease.lease_id != lease_id:
+                return False
+            if _lease_expiry_reason(lease, self._monotonic()) is not None:
+                return False
+            if lease.scope is None:
+                return _stop_only_gate_failure(self._proc_root, valid_pid, lease) is None
+            return self._verified_frozen(lease.scope).success
 
     def resume(self, pid: int, lease_id: str | None = None) -> dict[str, object]:
         """Thaw the exact scope stored by a matching pause lease."""
@@ -194,34 +212,29 @@ class ProcessWatchdog:
         if lease_id is not None and lease.lease_id != lease_id:
             return self._lease_failure(valid_pid, "Lease ID mismatch")
 
-        retained: list[tuple[SteamAppScope, str]] = []
-        for owned_scope in lease.scopes:
-            thawed = self._scope_controller.thaw(owned_scope)
-            if thawed.success:
-                self._log_thawed(owned_scope)
-            else:
-                retained.append((owned_scope, thawed.reason))
-        if retained:
-            reason = _bounded_reason(
-                "; ".join(
-                    f"{scope.unit}: {detail or 'Unable to thaw Steam app scope'}"
-                    for scope, detail in retained
-                )
-            )
-            with self._paused_pids_lock:
-                if self._paused_pids.get(valid_pid) is lease:
-                    lease.scope = retained[0][0]
-                    lease.recovery_scopes = tuple(scope for scope, _ in retained[1:])
+        released = _release_gate(
+            self._scope_controller, self._signal, valid_pid, lease, self._proc_root
+        )
+        for thawed in released.thawed:
+            self._log_thawed(thawed)
+        if released.success:
+            self._remove_lease(valid_pid, lease)
+            if lease.scope is not None:
+                return {"status": "resumed", "pid": valid_pid}
             self._log(
-                "warning",
-                f"Unable to thaw Steam app scope for root PID {valid_pid}: {reason}",
+                "info",
+                f"Released SIGSTOP gate for launch PID {valid_pid}",
                 "launch_gate",
                 None,
             )
-            return {"status": "failed", "pid": valid_pid, "message": reason}
+            return {"status": "resumed", "pid": valid_pid}
 
-        self._remove_lease(valid_pid, lease)
-        return {"status": "resumed", "pid": valid_pid}
+        if released.retained:
+            with self._paused_pids_lock:
+                if self._paused_pids.get(valid_pid) is lease:
+                    lease.scope = released.retained[0][0]
+                    lease.recovery_scopes = tuple(scope for scope, _ in released.retained[1:])
+        return self._lease_failure(valid_pid, released.reason)
 
     def resume_all(self) -> None:
         """Best-effort thaw for plugin unload or launch-gate failures."""
@@ -253,12 +266,11 @@ class ProcessWatchdog:
                 return
             if attempt < SHUTDOWN_THAW_ATTEMPTS:
                 time.sleep(SHUTDOWN_THAW_RETRY_SECONDS)
-        retained_scopes = tuple(scope for lease in retained for scope in lease.scopes)
-        units = _bounded_reason(", ".join(scope.unit for scope in retained_scopes))
+        units, attempts = _retained_summary(retained)
         self._log(
             "error",
-            f"Shutdown left {len(retained_scopes)} Steam app scope lease(s) unconfirmed after "
-            f"{SHUTDOWN_THAW_ATTEMPTS} thaw attempts: {units}",
+            f"Shutdown left {len(retained)} launch-gate lease(s) unconfirmed after "
+            f"{SHUTDOWN_THAW_ATTEMPTS} {attempts}: {units}",
             "launch_gate",
             None,
         )
@@ -288,12 +300,7 @@ class ProcessWatchdog:
                 self._paused_pids.pop(pid, None)
 
     def _log_thawed(self, scope: SteamAppScope) -> None:
-        self._log(
-            "info",
-            f"Thawed Steam app scope {scope.unit} for root PID {scope.root_pid}",
-            "launch_gate",
-            None,
-        )
+        self._log("info", _scope_thawed_message(scope), "launch_gate", None)
 
     def _ensure_watchdog_running(self) -> None:
         with self._paused_pids_lock:
@@ -340,10 +347,15 @@ class ProcessWatchdog:
                     if reason is None:
                         continue
                     frozen_for = now - lease.paused_at
+                    gate = (
+                        f"Steam app scope {lease.scope.unit}"
+                        if lease.scope is not None
+                        else "SIGSTOP gate"
+                    )
                     self._log(
                         "warning",
-                        f"Watchdog detected Steam app scope {lease.scope.unit} for root PID "
-                        f"{pid} frozen for {frozen_for:.0f}s ({reason}). Thawing automatically.",
+                        f"Watchdog detected {gate} for root PID {pid} held for "
+                        f"{frozen_for:.0f}s ({reason}). Releasing automatically.",
                         "watchdog",
                         None,
                     )
@@ -356,15 +368,3 @@ class ProcessWatchdog:
                     "watchdog",
                     None,
                 )
-
-
-def _lease_expiry_reason(lease: _PauseLease, now: float) -> str | None:
-    if now - lease.paused_at > WATCHDOG_ABSOLUTE_RESUME_SECONDS:
-        return "absolute ceiling"
-    if now > lease.lease_deadline:
-        return "lease expired"
-    return None
-
-
-def _bounded_reason(value: object) -> str:
-    return " ".join(str(value).split())[:180] or "Launch-gate transition failed"

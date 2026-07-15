@@ -123,6 +123,7 @@ class SDHLudusaviService:
                 log=self.log,
                 skip=lambda op, game, r: _skip(self, op, game, r),
                 conflict_metadata=lambda game_name: _conflict_metadata(self, game_name),
+                verify_gate=self._watchdog.verify_gate,
             )
         )
 
@@ -272,10 +273,21 @@ class SDHLudusaviService:
         return self._lifecycle.check_game_start(game_name, app_id)
 
     def resolve_game_start_conflict(
-        self, game_name: str, app_id: str | None, resolution: str
+        self,
+        game_name: str,
+        app_id: str | None,
+        resolution: str,
+        gate_pid: int | None = None,
+        gate_lease_id: str | None = None,
     ) -> dict[str, object]:
         """Apply the user's choice for an ambiguous launch recency conflict."""
-        return self._lifecycle.resolve_game_start_conflict(game_name, app_id, resolution)
+        return self._lifecycle.resolve_game_start_conflict(
+            game_name,
+            app_id,
+            resolution,
+            gate_pid,
+            gate_lease_id,
+        )
 
     def restore_game_on_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Restore a game's backup during launch after a check reports it is needed."""
