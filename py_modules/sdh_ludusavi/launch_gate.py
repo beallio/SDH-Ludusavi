@@ -16,6 +16,7 @@ FREEZER_POLL_SECONDS = 0.02
 MAX_PID = 2_147_483_647
 MAX_REASON_LENGTH = 180
 _UNIT_RE = re.compile(r"app-steam-app[0-9]+-[0-9]+\.scope\Z")
+_STEAM_LAUNCHER_UNIT = "steam-launcher.service"
 
 
 class ScopeDiscoveryError(ValueError):
@@ -23,7 +24,7 @@ class ScopeDiscoveryError(ValueError):
 
 
 class ScopeNotReadyError(ScopeDiscoveryError):
-    """The launch PID is safely waiting in app.slice for its exact Steam scope."""
+    """The launch PID is in an exact allowed pre-app-scope handoff path."""
 
 
 @dataclass(frozen=True)
@@ -284,7 +285,8 @@ def _validated_scope_parts(cgroup_path: str, uid: int) -> tuple[str, ...]:
         f"user@{uid}.service",
         "app.slice",
     )
-    if parts == expected_prefix and cgroup_path == "/" + "/".join(parts):
+    allowed_prescope_paths = (expected_prefix, (*expected_prefix, _STEAM_LAUNCHER_UNIT))
+    if parts in allowed_prescope_paths and cgroup_path == "/" + "/".join(parts):
         raise ScopeNotReadyError("Exact Steam app scope is not ready")
     if (
         len(parts) != 5
