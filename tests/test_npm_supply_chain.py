@@ -117,9 +117,11 @@ packages:
 def test_frontend_supply_chain_script_runs_audit_before_install() -> None:
     source = (ROOT / "scripts" / "check_frontend_supply_chain.sh").read_text(encoding="utf-8")
 
-    pre_install_audit = source.index("pnpm audit --audit-level moderate")
+    audit_command = "pnpm audit --audit-level moderate --ignore-registry-errors"
+    pre_install_audit = source.index(audit_command)
     install = source.index("pnpm install --frozen-lockfile --ignore-scripts")
     assert pre_install_audit < install
+    assert source.count(audit_command) == 2
     assert "scripts/check_pnpm_install_scripts.py pnpm-lock.yaml" in source
     assert "npx " not in source
 

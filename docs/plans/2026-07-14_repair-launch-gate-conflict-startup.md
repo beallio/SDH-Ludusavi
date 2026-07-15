@@ -715,3 +715,19 @@ Leave both markers in place after finalization:
 
 Any project-specific release step runs from the project's
 `scripts/orchestration-hooks/finalize-release` hook, invoked by finalize.
+
+## Release-gate recovery (2026-07-14)
+
+The first authorized dev-release run (`29380777694`) passed its backend suite but
+stopped before packaging because pnpm 10.23.0's legacy audit endpoint now returns HTTP
+410. The existing pnpm `--ignore-registry-errors` option preserves vulnerability
+failures while allowing registry transport/server failures to be reported without
+blocking an otherwise validated release.
+
+- Add a static regression assertion that both pre-install and post-install audits use
+  `--ignore-registry-errors` together with the existing `moderate` vulnerability level.
+- Verify the assertion fails before changing the supply-chain script.
+- Update only the two audit invocations; keep frozen installation, install-script
+  validation, build, typecheck, and frontend tests unchanged.
+- Re-run the complete quality gate, commit atomically, promote through `dev` and `main`,
+  then dispatch the dev release from the new main commit.
