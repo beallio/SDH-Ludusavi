@@ -1,0 +1,8 @@
+[2026-07-14 16:22:47,766][INFO]: frontend: App started: Fictional Discovery Game (3156562597) tracked=true
+[2026-07-14 16:22:47,767][WARNING]: launch_gate: Unable to acquire frozen Steam app scope for root PID 3973: Scope acquisition timed out before an exact Steam app scope appeared
+[2026-07-14 16:22:47,768][WARNING]: frontend: Launch gate unavailable; conflict resolution skipped while game is loading.
+[2026-07-14 16:23:10,100][INFO]: frontend: App started: Fictional Freeze Game (3156562598) tracked=true
+[2026-07-14 16:23:10,101][WARNING]: launch_gate: Unable to acquire frozen Steam app scope for root PID 7051: systemctl freeze failed: symbol lookup error for libcrypto.so.3
+[2026-07-14 16:23:10,102][WARNING]: frontend: Launch gate unavailable; conflict resolution skipped while game is loading.
+[2026-07-14 16:24:00,100][INFO]: frontend: App started: Fictional Toast Game (3156562599) tracked=true
+[2026-07-14 16:24:00,101][WARNING]: frontend: Launch gate unavailable; conflict resolution skipped while game is loading.
