@@ -10,6 +10,7 @@ from typing import Protocol
 
 from .constants import LAUNCH_GATE_LEASE_TTL_SECONDS, WATCHDOG_ABSOLUTE_RESUME_SECONDS
 from .launch_gate import ScopeTransitionResult, SteamAppScope, SystemdScopeController
+from .launch_gate_acquire import LaunchScopeAcquirer, ScopeAcquisitionResult
 
 
 LOGGER = logging.getLogger("sdh_ludusavi.service.watchdog")
@@ -30,6 +31,14 @@ class _ScopeController(Protocol):
     def wait_for_frozen(self, scope: SteamAppScope, expected: bool) -> ScopeTransitionResult: ...
 
 
+class _ScopeAcquirer(Protocol):
+    def acquire(
+        self,
+        pid: int,
+        existing_scope: SteamAppScope | None = None,
+    ) -> ScopeAcquisitionResult: ...
+
+
 @dataclass
 class _PauseLease:
     scope: SteamAppScope
@@ -45,10 +54,12 @@ class ProcessWatchdog:
         self,
         log_callback: Callable[[str, str, str | None, str | None], None],
         scope_controller: _ScopeController | None = None,
+        scope_acquirer: _ScopeAcquirer | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._log = log_callback
         self._scope_controller = scope_controller or SystemdScopeController()
+        self._scope_acquirer = scope_acquirer or LaunchScopeAcquirer(self._scope_controller)
         self._monotonic = monotonic
         self._paused_pids: dict[int, _PauseLease] = {}
         self._paused_pids_lock = threading.Lock()
@@ -75,39 +86,30 @@ class ProcessWatchdog:
             return {"status": "failed", "message": str(exc)}
 
         with self._get_pid_lock(valid_pid):
-            try:
-                scope = self._scope_controller.discover(valid_pid)
-            # Intentionally broad: fail closed on any injected/runtime discovery failure.
-            except Exception as exc:
-                reason = _bounded_reason(exc)
-                self._log(
-                    "warning",
-                    f"Unable to discover Steam app scope for root PID {valid_pid}: {reason}",
-                    "launch_gate",
-                    None,
-                )
-                return {"status": "failed", "pid": valid_pid, "message": reason}
-
             with self._paused_pids_lock:
                 existing = self._paused_pids.get(valid_pid)
+            try:
+                acquired = self._scope_acquirer.acquire(
+                    valid_pid,
+                    existing.scope if existing is not None else None,
+                )
+            # Intentionally broad: fail closed on any injected/runtime acquisition failure.
+            except Exception as exc:
+                return self._acquisition_failure(valid_pid, str(exc))
+            if not acquired.success or acquired.scope is None:
+                return self._acquisition_failure(valid_pid, acquired.reason)
+            scope = acquired.scope
 
-            if existing is not None and existing.scope == scope:
-                verified = self._verified_frozen(scope)
-                if not verified.success:
-                    return self._pause_failure(valid_pid, verified.reason)
-            else:
-                if existing is not None:
-                    released = self._scope_controller.thaw(existing.scope)
-                    if not released.success:
-                        return self._pause_failure(
-                            valid_pid, f"Unable to thaw previous scope: {released.reason}"
-                        )
-                    self._remove_lease(valid_pid, existing)
-                    self._log_thawed(existing.scope)
-
-                frozen = self._scope_controller.freeze(scope)
-                if not frozen.success:
-                    return self._pause_failure(valid_pid, frozen.reason)
+            if existing is not None and existing.scope != scope:
+                released = self._scope_controller.thaw(existing.scope)
+                if not released.success:
+                    cleanup = self._scope_controller.thaw(scope)
+                    reason = f"Unable to thaw previous scope: {released.reason}"
+                    if not cleanup.success:
+                        reason += f"; unable to thaw acquired scope: {cleanup.reason}"
+                    return self._acquisition_failure(valid_pid, reason)
+                self._remove_lease(valid_pid, existing)
+                self._log_thawed(existing.scope)
 
             lease_id = secrets.token_urlsafe(16)
             now = self._monotonic()
@@ -245,11 +247,11 @@ class ProcessWatchdog:
             return ScopeTransitionResult(False, "Steam app scope is no longer frozen")
         return self._scope_controller.wait_for_frozen(scope, expected=True)
 
-    def _pause_failure(self, pid: int, reason: str) -> dict[str, object]:
-        bounded = _bounded_reason(reason or "Unable to freeze Steam app scope")
+    def _acquisition_failure(self, pid: int, reason: str) -> dict[str, object]:
+        bounded = _bounded_reason(reason or "Unable to acquire frozen Steam app scope")
         self._log(
             "warning",
-            f"Unable to freeze Steam app scope for root PID {pid}: {bounded}",
+            f"Unable to acquire frozen Steam app scope for root PID {pid}: {bounded}",
             "launch_gate",
             None,
         )

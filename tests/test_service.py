@@ -53,9 +53,25 @@ class FakeScopeController:
         return ScopeTransitionResult(expected)
 
 
+class FakeScopeAcquirer:
+    def __init__(self, controller: FakeScopeController) -> None:
+        self.controller = controller
+
+    def acquire(self, pid: int, existing_scope=None):
+        from sdh_ludusavi.launch_gate_acquire import ScopeAcquisitionResult
+
+        scope = self.controller.discover(pid)
+        if scope != existing_scope:
+            frozen = self.controller.freeze(scope)
+            if not frozen.success:
+                return ScopeAcquisitionResult(False, reason=frozen.reason)
+        return ScopeAcquisitionResult(True, scope=scope)
+
+
 @pytest.fixture(autouse=True)
 def fake_scope_controller(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sdh_ludusavi.watchdog.SystemdScopeController", FakeScopeController)
+    monkeypatch.setattr("sdh_ludusavi.watchdog.LaunchScopeAcquirer", FakeScopeAcquirer)
 
 
 class FakeAdapter:
