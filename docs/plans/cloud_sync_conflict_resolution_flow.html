@@ -82,8 +82,9 @@
   <main>
     <h1>Launch-Gated Backup Conflict Resolution</h1>
     <p>
-      This chart documents the game-start path that freezes the complete Steam app scope,
-      resolves Ludusavi backup recency, and thaws the scope in every outcome.
+      This chart documents the game-start path that safely hands a Steam bootstrap process
+      into a verified frozen application scope, resolves Ludusavi backup recency, and thaws
+      the scope in every outcome.
     </p>
 
     <section aria-labelledby="startup-gate">
@@ -91,7 +92,11 @@
       <div class="flow">
         <div class="node"><strong>App lifetime start</strong><p>Steam reports a game start with app ID and process instance.</p></div>
         <div class="arrow">&darr;</div>
-        <div class="node warn"><strong><code>systemctl --user freeze</code></strong><p>Verify the frozen Steam app scope before checking save state. Processes that join the cgroup later inherit the freeze.</p></div>
+        <div class="node warn"><strong>Temporary bootstrap hold</strong><p>Validate the PID owner and start-time identity, then hold only that bootstrap process during a short bounded handoff. This is not a successful gate by itself.</p></div>
+        <div class="arrow">&darr;</div>
+        <div class="node"><strong>Exact Steam app scope appears</strong><p>Retry only the safe pre-scope <code>app.slice</code> state. Reject changed identity, malformed membership, and invalid paths immediately.</p></div>
+        <div class="arrow">&darr;</div>
+        <div class="node warn"><strong>Verified Steam app scope freeze</strong><p>Run <code>systemctl --user freeze</code> with a sanitized child environment, verify requested and completed cgroup freezer state, release the bootstrap hold inside the frozen scope, and verify again. Processes that join later inherit the freeze.</p></div>
         <div class="arrow">&darr;</div>
         <div class="node"><strong><code>check_game_start</code></strong><p>Compare local save against the Ludusavi backup save.</p></div>
         <div class="arrow">&darr;</div>

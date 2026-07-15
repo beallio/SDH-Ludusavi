@@ -59,6 +59,33 @@ class FakeScopeController:
         return result(self.frozen is expected, "unexpected freezer state")
 
 
+class FakeScopeAcquirer:
+    def __init__(self, controller: FakeScopeController) -> None:
+        self.controller = controller
+        self.calls: list[tuple[int, object | None]] = []
+        self.results: list[object] = []
+
+    def acquire(self, pid: int, existing_scope: object | None = None) -> object:
+        self.calls.append((pid, existing_scope))
+        if self.results:
+            return self.results.pop(0)
+        try:
+            discovered = self.controller.discover(pid)
+        except Exception as exc:
+            return result(False, str(exc))
+        if existing_scope == discovered:
+            if not self.controller.freeze_requested(discovered):
+                return result(False, "Steam app scope is no longer frozen")
+            verified = self.controller.wait_for_frozen(discovered, expected=True)
+            if not verified.success:
+                return verified
+        else:
+            frozen = self.controller.freeze(discovered)
+            if not frozen.success:
+                return frozen
+        return SimpleNamespace(success=True, scope=discovered, reason="")
+
+
 class FakeClock:
     def __init__(self, now: float = 100.0) -> None:
         self.now = now
@@ -69,8 +96,11 @@ class FakeClock:
 
 def watchdog(controller: FakeScopeController | None = None) -> tuple[ProcessWatchdog, MagicMock]:
     logger = MagicMock()
+    target_controller = controller or FakeScopeController()
     instance = ProcessWatchdog(
-        log_callback=logger, scope_controller=controller or FakeScopeController()
+        log_callback=logger,
+        scope_controller=target_controller,
+        scope_acquirer=FakeScopeAcquirer(target_controller),
     )
     return instance, logger
 
@@ -175,7 +205,12 @@ def test_same_scope_rotation_preserves_absolute_ceiling_origin() -> None:
     controller = FakeScopeController()
     clock = FakeClock()
     logger = MagicMock()
-    wd = ProcessWatchdog(logger, scope_controller=controller, monotonic=clock.monotonic)
+    wd = ProcessWatchdog(
+        logger,
+        scope_controller=controller,
+        scope_acquirer=FakeScopeAcquirer(controller),
+        monotonic=clock.monotonic,
+    )
     wd._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
 
     wd.pause(4567)
@@ -206,6 +241,58 @@ def test_different_scope_identity_thaws_old_before_freezing_new() -> None:
     assert controller.thaw_calls == [old_scope]
     assert controller.freeze_calls[-1].inode == 99
     wd.resume(4567, second["lease_id"])
+    wd.stop()
+
+
+def _failed_different_scope_rotation() -> tuple[
+    ProcessWatchdog, FakeScopeController, str, object, object
+]:
+    controller = FakeScopeController()
+    wd, _ = watchdog(controller)
+    first_lease_id = wd.pause(4567)["lease_id"]
+    old_scope = controller.freeze_calls[0]
+    new_scope = scope(inode=99)
+    controller.scopes[4567] = new_scope
+    controller.thaw_results.extend(
+        [result(False, "old manager busy"), result(False, "new manager busy")]
+    )
+
+    failed = wd.pause(4567)
+
+    assert failed["status"] == "failed"
+    assert "old manager busy" in failed["message"]
+    assert "new manager busy" in failed["message"]
+    return wd, controller, first_lease_id, old_scope, new_scope
+
+
+def test_failed_different_scope_rotation_tracks_both_scopes_for_retry() -> None:
+    wd, controller, lease_id, old_scope, new_scope = _failed_different_scope_rotation()
+
+    assert wd._paused_pids[4567].scopes == (old_scope, new_scope)
+    assert wd.pause(4567)["message"] == "Scope recovery is still pending"
+    assert wd._paused_pids[4567].scopes == (old_scope, new_scope)
+    assert wd.resume(4567, lease_id) == {"status": "resumed", "pid": 4567}
+    assert controller.thaw_calls == [old_scope, new_scope, old_scope, new_scope]
+    assert wd._paused_pids == {}
+    wd.stop()
+
+
+@pytest.mark.parametrize("cleanup", ["watchdog", "shutdown"])
+def test_failed_different_scope_rotation_tracks_both_scopes_for_automatic_cleanup(
+    cleanup: str,
+) -> None:
+    wd, controller, _, old_scope, new_scope = _failed_different_scope_rotation()
+    lease = wd._paused_pids[4567]
+    assert lease.scopes == (old_scope, new_scope)
+
+    if cleanup == "watchdog":
+        lease.lease_deadline = time.monotonic() - 1
+        wd._check_and_resume_stuck_pids()
+    else:
+        wd.stop()
+
+    assert controller.thaw_calls == [old_scope, new_scope, old_scope, new_scope]
+    assert wd._paused_pids == {}
     wd.stop()
 
 
@@ -359,3 +446,66 @@ def test_no_pid_signal_fallback_remains() -> None:
     assert "SIGSTOP" not in source
     assert "SIGCONT" not in source
     assert "_process_tree" not in source
+
+
+def test_pause_creates_lease_only_from_successful_acquisition() -> None:
+    controller = FakeScopeController()
+    acquirer = FakeScopeAcquirer(controller)
+    acquired_scope = scope()
+    acquirer.results.extend(
+        [
+            SimpleNamespace(success=False, scope=None, reason="scope acquisition timed out"),
+            SimpleNamespace(success=True, scope=acquired_scope, reason=""),
+        ]
+    )
+    logger = MagicMock()
+    wd = ProcessWatchdog(
+        logger,
+        scope_controller=controller,
+        scope_acquirer=acquirer,
+    )
+    wd._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
+
+    failed = wd.pause(4567)
+    assert failed == {
+        "status": "failed",
+        "pid": 4567,
+        "message": "scope acquisition timed out",
+    }
+    assert wd._paused_pids == {}
+    assert wd._watchdog_thread is None
+
+    paused = wd.pause(4567)
+    assert paused["status"] == "paused"
+    assert wd._paused_pids[4567].scope is acquired_scope
+    assert controller.discover_calls == []
+    assert controller.freeze_calls == []
+    assert (
+        len(
+            [
+                call
+                for call in logger.call_args_list
+                if "scope acquisition timed out" in call.args[1]
+            ]
+        )
+        == 1
+    )
+
+
+def test_same_scope_acquisition_rotation_receives_existing_verified_scope() -> None:
+    controller = FakeScopeController()
+    acquirer = FakeScopeAcquirer(controller)
+    logger = MagicMock()
+    wd = ProcessWatchdog(logger, scope_controller=controller, scope_acquirer=acquirer)
+    wd._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
+
+    first = wd.pause(4567)
+    original_paused_at = wd._paused_pids[4567].paused_at
+    second = wd.pause(4567)
+
+    assert first["lease_id"] != second["lease_id"]
+    assert acquirer.calls[0] == (4567, None)
+    assert acquirer.calls[1] == (4567, wd._paused_pids[4567].scope)
+    assert wd._paused_pids[4567].paused_at == original_paused_at
+    assert len(controller.freeze_calls) == 1
+    assert controller.thaw_calls == []
