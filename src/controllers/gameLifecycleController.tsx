@@ -3,18 +3,15 @@ import type {
   ConflictResolution,
   LifecycleCheckResult,
   OperationResult,
-  ProcessSignalResult,
-  PauseGameProcessResult,
   RpcResult,
   RpcStatus,
   AutoSyncStatusKind,
-  SyncthingWatchStartResult,
-  SyncthingPollResult,
 } from "../types";
 import type { LudusaviStateStore } from "../state/ludusaviState";
 import { summarizeOperationResult } from "../formatting/operationText";
 import { summarizeLifecycleResult } from "../formatting/lifecycleLogSummary";
 import { createSteamLifecycleSource } from "./steamLifecycleSource";
+import type { LifecycleRpc } from "./gameLifecycleRpc";
 import { log } from "../utils/logging";
 import { isRpcStatus } from "../utils/rpc";
 import {
@@ -51,23 +48,6 @@ type AutoSyncStatusSurface = {
   complete: (result: OperationResult | LifecycleCheckResult, options: Pick<
     StatusOptions, "gameName" | "appID" | "tracked"
   > & { lifecycle: "lifecycle_start" | "lifecycle_exit" }) => void;
-};
-type LifecycleRpc = {
-  checkGameStart: (gameName: string, appID?: string) => Promise<RpcResult<LifecycleCheckResult>>;
-  restoreGameOnStart: (gameName: string, appID?: string) => Promise<RpcResult<OperationResult>>;
-  resolveGameStartConflict: (
-    gameName: string,
-    appID: string | undefined,
-    resolution: ConflictResolution,
-  ) => Promise<RpcResult<OperationResult>>;
-  checkGameExit: (gameName: string, appID?: string) => Promise<RpcResult<LifecycleCheckResult>>;
-  backupGameOnExit: (gameName: string, appID?: string) => Promise<RpcResult<OperationResult>>;
-  pauseGameProcess: (pid: number) => Promise<RpcResult<PauseGameProcessResult>>;
-  resumeGameProcess: (pid: number, leaseId?: string) => Promise<RpcResult<ProcessSignalResult>>;
-  renewGameProcessPause: (pid: number, leaseId: string) => Promise<RpcResult<import("../types").RenewGameProcessPauseResult>>;
-  startSyncthingActivityWatch: (phase: string, gameName?: string, appID?: string) => Promise<RpcResult<SyncthingWatchStartResult>>;
-  getSyncthingActivity: (watchID: string) => Promise<RpcResult<SyncthingPollResult>>;
-  stopSyncthingActivityWatch: (watchID: string) => Promise<RpcResult<SyncthingPollResult>>;
 };
 type GameLifecycleControllerDependencies = {
   store: LudusaviStateStore;
@@ -295,7 +275,13 @@ export function createGameLifecycleController(
             preGameWatch = syncthingMonitor.start("pre_game", name, appID);
             state.watchActive = true;
           }
-          let conflictRes: RpcResult<OperationResult> = await withLease(() => resolveGameStartConflict(name, appID, resolution));
+          let conflictRes: RpcResult<OperationResult> = await withLease(() => resolveGameStartConflict(
+            name,
+            appID,
+            resolution,
+            pauseHandle?.pid,
+            pauseHandle?.leaseId,
+          ));
           if (isStaleLifecycle(epoch, "start", name)) return;
           const dec4 = evaluateStartConflictResolution(state, resolution, conflictRes);
           execCmds(dec4.commands);

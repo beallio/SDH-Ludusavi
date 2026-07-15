@@ -1,0 +1,51 @@
+{
+  "date": "2026-07-14",
+  "task_objective": "Replace the pre-scope freeze acquisition deadlock with a verified SIGSTOP-only launch gate while preserving cgroup freezing for already-created Steam app scopes.",
+  "files_modified": [
+    "main.py",
+    "py_modules/sdh_ludusavi/launch_gate_acquire.py",
+    "py_modules/sdh_ludusavi/launch_gate_process.py",
+    "py_modules/sdh_ludusavi/lifecycle.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "py_modules/sdh_ludusavi/watchdog.py",
+    "py_modules/sdh_ludusavi/watchdog_lease.py",
+    "scripts/analyze_plugin_logs.py",
+    "src/api/ludusaviRpc.ts",
+    "src/controllers/gameLifecycleController.tsx",
+    "src/controllers/gameLifecycleRpc.ts",
+    "src/controllers/launchGateLease.ts",
+    "tests/fixtures/plugin_logs/launch-gate-stop-only-success.log",
+    "tests/test_analyze_plugin_logs.py",
+    "tests/test_compatibility.py",
+    "tests/test_launch_gate_acquire.py",
+    "tests/test_launch_gate_process.py",
+    "tests/test_launch_gate_scope.py",
+    "tests/test_main.py",
+    "tests/test_service.py",
+    "tests/test_watchdog.py",
+    "tests/test_watchdog_lease.py",
+    "src/controllers/gameLifecycleController.test.ts",
+    "src/controllers/launchGateLease.test.ts",
+    "docs/specs/sdh_ludusavi_launcher.md"
+  ],
+  "tests_added": [
+    "Pre-scope acquisition succeeds as stop-only without polling or SIGCONT",
+    "Process stopped-state and child detection fail closed against synthetic proc roots",
+    "Stop-only lease renewal, explicit resume, watchdog cleanup, and unload cleanup",
+    "Copy-time gate verification rejects missing, mismatched, expired, resumed, or thawed gates",
+    "Frontend passes the lease PID and ID through conflict resolution",
+    "Log analyzer recognizes stop-only acquisition success"
+  ],
+  "design_decisions": [
+    "A ScopeNotReadyError after SIGSTOP is a successful era-1 gate only when the PID is verifiably stopped, has no children, and retains the captured identity.",
+    "The scope acquisition timeout and polling parameters were removed because waiting for scope creation while holding SIGSTOP is structurally deadlocked.",
+    "The pre-scope timeout assertions and wait-for-scope success contracts were inverted because waiting was the buggy behavior; era-2 freeze verification timeout coverage remains unchanged.",
+    "The facade signature inventory was updated because gate PID and lease ID are required additions to the conflict-resolution RPC contract.",
+    "Restore-backup conflict resolution fails closed with gate_lost, while keep-local remains independent of restore-side gate verification.",
+    "Process and lease helpers were extracted to preserve the existing module-size budgets instead of increasing them."
+  ],
+  "results": {
+    "automated": "Focused backend and frontend RED-GREEN suites passed before final repository quality gates.",
+    "on_device": "Deferred and outstanding. A Steam Deck run must confirm the black-screen hold, restore-before-start behavior, cancellation resume, and plugin-unload resume using a genuine save conflict."
+  }
+}

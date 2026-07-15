@@ -1,0 +1,5 @@
+[2026-07-14 16:30:00,100][INFO]: frontend: App started: Fictional Stop Gate Game (3156562601) tracked=true
+[2026-07-14 16:30:00,101][INFO]: launch_gate: Held launch PID 7814 with SIGSTOP gate (pre-scope)
+[2026-07-14 16:30:00,102][INFO]: frontend: check_game_start result for Fictional Stop Gate Game (3156562601): {"status":"conflict","game":"Fictional Stop Gate Game"}
+[2026-07-14 16:30:05,103][INFO]: frontend: [Fictional Stop Gate Game] restore: Restored
+[2026-07-14 16:30:05,104][INFO]: launch_gate: Released SIGSTOP gate for launch PID 7814
