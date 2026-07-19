@@ -861,6 +861,94 @@ def test_check_game_start_reports_restore_needed_without_restoring(tmp_path: Pat
     assert adapter.restores == []
 
 
+@pytest.mark.parametrize(
+    "entry_point",
+    [
+        "check_game_start",
+        "restore_game_on_start",
+        "resolve_game_start_conflict",
+        "check_game_exit",
+        "backup_game_on_exit",
+    ],
+)
+def test_disabled_game_skips_every_automatic_lifecycle_entry_point(
+    tmp_path: Path,
+    entry_point: str,
+) -> None:
+    adapter = FakeAdapter()
+    adapter.recency["Hades"] = "backup_newer"
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    service.set_game_sync_enabled("Hades", False)
+
+    if entry_point == "resolve_game_start_conflict":
+        result = service.resolve_game_start_conflict("Hades", None, "keep_local")
+    else:
+        result = getattr(service, entry_point)("Hades")
+
+    assert result == {
+        "status": "skipped",
+        "game": "Hades",
+        "reason": "game_sync_disabled",
+    }
+    assert adapter.backups == []
+    assert adapter.restores == []
+    assert service.get_game_history() == {}
+
+
+def test_global_auto_sync_disabled_wins_over_per_game_setting(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+    service.refresh_games()
+    service.set_game_sync_enabled("Hades", False)
+
+    results = [
+        service.check_game_start("Hades"),
+        service.restore_game_on_start("Hades"),
+        service.resolve_game_start_conflict("Hades", None, "keep_local"),
+        service.check_game_exit("Hades"),
+        service.backup_game_on_exit("Hades"),
+    ]
+
+    assert {result["reason"] for result in results} == {"auto_sync_disabled"}
+
+
+def test_enabled_game_lifecycle_checks_are_unaffected(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    adapter.recency["Hades"] = "backup_newer"
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+
+    assert service.check_game_start("Hades") == {
+        "status": "needed",
+        "operation": "restore",
+        "game": "Hades",
+    }
+    assert service.check_game_exit("Hades") == {
+        "status": "needed",
+        "operation": "backup",
+        "game": "Hades",
+    }
+
+
+def test_disabling_game_between_exit_check_and_backup_blocks_backup(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+
+    assert service.check_game_exit("Hades")["status"] == "needed"
+    service.set_game_sync_enabled("Hades", False)
+
+    assert service.backup_game_on_exit("Hades") == {
+        "status": "skipped",
+        "game": "Hades",
+        "reason": "game_sync_disabled",
+    }
+    assert adapter.backups == []
+
+
 def test_check_game_start_runs_recency_under_operation_lock(tmp_path: Path) -> None:
     adapter = FakeAdapter()
     service = service_with_state(tmp_path, adapter)
