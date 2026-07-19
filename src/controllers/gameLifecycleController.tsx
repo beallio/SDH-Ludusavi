@@ -340,7 +340,7 @@ export function createGameLifecycleController(
       state.watchActive = true;
     }
 
-    if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
+    if (!gameSyncDisabledExit && shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
       publishAutoSyncStatus("checking", { source: "lifecycle_exit", gameName: name, appID, tracked });
     } else {
       logPreRpcStatusBarSuppressed("exit", name, tracked);
