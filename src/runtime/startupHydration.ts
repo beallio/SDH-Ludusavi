@@ -56,6 +56,7 @@ export function createStartupHydration(deps: StartupHydrationDeps): StartupHydra
           "startup_settings_hydrated",
           {
             auto_sync_enabled: settings.auto_sync_enabled,
+            sync_disabled_games_count: settings.sync_disabled_games?.length ?? 0,
             selected_game: settings.selected_game,
             update_channel: settings.update_channel,
           },

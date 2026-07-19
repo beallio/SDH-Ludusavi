@@ -6,7 +6,7 @@ SDH-Ludusavi keeps your game saves protected without pulling you out of Game Mod
 
 ## Features
 
-- **Automatic Sync**: Restores your save if the backup is newer before a game starts, and automatically performs a backup after you exit.
+- **Automatic Sync**: Restores your save if the backup is newer before a game starts, and automatically performs a backup after you exit. Each Ludusavi-managed game also has a **Sync This Game** toggle that defaults to on. Turning it off blocks both the launch restore and exit backup for that game; the preference remains editable but has no effect while global Automatic Sync is off. With global sync on, launching a disabled game briefly shows **SAVE SYNC DISABLED FOR THIS GAME**.
 - **SteamOS Integration**: Shows compact progress strips for background sync events, just like official Steam Cloud sync.
 - **Syncthing Activity**: Shows Syncthing sync status (downloading, uploading, or complete) on the autosync status strip when Syncthing is configured and running.
 - **Launch Gate**: Pauses game launch for save conflicts and observed incoming Syncthing activity, verifying stable backup files before deciding which save to use.

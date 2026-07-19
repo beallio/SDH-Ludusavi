@@ -365,6 +365,7 @@ export function LudusaviContent({
   const {
     onGameChange,
     toggleAutoSync,
+    toggleGameSync,
     toggleAutomaticUpdateChecks,
     toggleNotificationSetting,
     toggleUpdateChannel,
@@ -555,7 +556,9 @@ export function LudusaviContent({
         selectedGame={selectedGame}
         selectedStatus={selectedStatus}
         selectedHistory={selectedHistory}
+        gameSyncEnabled={!(settings.sync_disabled_games ?? []).includes(selectedGame)}
         onGameChange={onGameChange}
+        onToggleGameSync={(enabled) => void toggleGameSync(selectedGame, enabled)}
         onForceBackup={() => void runForceOperation("Backup", forceBackupCall)}
         onBrowseBackups={() => {
           if (!selectedGame) return;

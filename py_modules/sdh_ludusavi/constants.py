@@ -11,6 +11,7 @@ DEFAULT_NOTIFICATION_SETTINGS: dict[str, bool] = {
 
 SETTINGS_KEYS = (
     "auto_sync_enabled",
+    "sync_disabled_games",
     "selected_game",
     "notifications",
     "update_channel",
