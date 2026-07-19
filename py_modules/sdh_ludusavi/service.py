@@ -122,6 +122,7 @@ class SDHLudusaviService:
                 is_coordinator_running=lambda: self._coordinator.is_running,
                 run_locked=self._run_locked,
                 is_auto_sync_enabled=lambda: self._auto_sync_enabled,
+                is_game_sync_enabled=lambda name: self.is_game_sync_enabled(name),
                 log=self.log,
                 skip=lambda op, game, r: _skip(self, op, game, r),
                 conflict_metadata=lambda game_name: _conflict_metadata(self, game_name),
@@ -527,7 +528,12 @@ def _skip(
     service: SDHLudusaviService, operation: str, game_name: str, reason: str
 ) -> dict[str, object]:
     service.log("info", f"Skipped {operation} for {game_name}: {reason}", operation, game_name)
-    if reason not in ("auto_sync_disabled", "operation_running", "unmatched_game"):
+    if reason not in (
+        "auto_sync_disabled",
+        "game_sync_disabled",
+        "operation_running",
+        "unmatched_game",
+    ):
         if operation in ("backup", "restore"):
             trigger = f"manual_{operation}"
         elif operation == "start":
