@@ -24,6 +24,7 @@ vi.mock("react/jsx-dev-runtime", () => ({
 vi.mock("../api/ludusaviRpc", () => {
   return {
     setAutoSyncEnabled: vi.fn(),
+    setGameSyncEnabledCall: vi.fn(),
     setNotificationSettings: vi.fn(),
     setSelectedGameCall: vi.fn(),
     setUpdateChannelCall: vi.fn(),
@@ -39,6 +40,7 @@ vi.stubGlobal("window", {
 describe("SettingsMutationRuntime", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -248,5 +250,115 @@ describe("SettingsMutationRuntime", () => {
     expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(true);
     expect(store.getSnapshot().settings?.selected_game).toBe("B");
     expect(store.getSnapshot().settings?.notifications.failures_errors).toBe(true);
+  });
+
+  function setupGameSync(disabledGames: string[] = []) {
+    const store = createLudusaviStateStore();
+    const runtime = createSettingsMutationRuntime();
+    const notifyFailure = vi.fn();
+    runtime.applySettings(store, {
+      auto_sync_enabled: true,
+      sync_disabled_games: disabledGames,
+    } as any);
+    const controller = runtime.createController({
+      ludusaviStore: store,
+      notifyFailure,
+    });
+    return { store, runtime, controller, notifyFailure };
+  }
+
+  it("optimistically updates one game and applies a successful result", async () => {
+    const rpc = await import("../api/ludusaviRpc");
+    const { store, controller } = setupGameSync();
+    vi.mocked(rpc.setGameSyncEnabledCall).mockResolvedValueOnce({
+      sync_disabled_games: ["Hades"],
+    } as any);
+
+    controller.toggleGameSync("Hades", false);
+    expect(store.getSnapshot().settings?.sync_disabled_games).toEqual(["Hades"]);
+
+    await vi.runAllTimersAsync();
+    expect(store.getSnapshot().settings?.sync_disabled_games).toEqual(["Hades"]);
+  });
+
+  it("rolls back only the failed game against hydrated persisted state", async () => {
+    const rpc = await import("../api/ludusaviRpc");
+    const { store, controller } = setupGameSync(["Hades"]);
+    vi.mocked(rpc.setGameSyncEnabledCall).mockRejectedValueOnce(new Error("RPC failed"));
+
+    controller.toggleGameSync("Celeste", false);
+    expect(store.getSnapshot().settings?.sync_disabled_games).toEqual(["Celeste", "Hades"]);
+
+    await vi.runAllTimersAsync();
+    expect(store.getSnapshot().settings?.sync_disabled_games).toEqual(["Hades"]);
+  });
+
+  it("keeps A persisted when A succeeds and B fails", async () => {
+    const rpc = await import("../api/ludusaviRpc");
+    const { store, controller } = setupGameSync();
+    vi.mocked(rpc.setGameSyncEnabledCall)
+      .mockResolvedValueOnce({ sync_disabled_games: ["A"] } as any)
+      .mockRejectedValueOnce(new Error("B failed"));
+
+    controller.toggleGameSync("A", false);
+    controller.toggleGameSync("B", false);
+    await vi.runAllTimersAsync();
+
+    expect(store.getSnapshot().settings?.sync_disabled_games).toEqual(["A"]);
+  });
+
+  it("applies a late success after timeout rollback", async () => {
+    const rpc = await import("../api/ludusaviRpc");
+    const { store, controller, notifyFailure } = setupGameSync();
+    const originalSetTimeout = window.setTimeout;
+    const originalClearTimeout = window.clearTimeout;
+    window.setTimeout = globalThis.setTimeout;
+    window.clearTimeout = globalThis.clearTimeout;
+    let resolveRpc: (settings: any) => void = () => {};
+    vi.mocked(rpc.setGameSyncEnabledCall).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRpc = resolve;
+      }),
+    );
+
+    controller.toggleGameSync("Hades", false);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(store.getSnapshot().settings?.sync_disabled_games).toEqual([]);
+    expect(notifyFailure).toHaveBeenCalledTimes(1);
+
+    resolveRpc({ sync_disabled_games: ["Hades"] });
+    await vi.runAllTimersAsync();
+    expect(store.getSnapshot().settings?.sync_disabled_games).toEqual(["Hades"]);
+    window.setTimeout = originalSetTimeout;
+    window.clearTimeout = originalClearTimeout;
+  });
+
+  it("tracks rapid toggles for different games independently", async () => {
+    const rpc = await import("../api/ludusaviRpc");
+    const { store, controller } = setupGameSync();
+    vi.mocked(rpc.setGameSyncEnabledCall)
+      .mockResolvedValueOnce({ sync_disabled_games: ["A"] } as any)
+      .mockResolvedValueOnce({ sync_disabled_games: ["A", "B"] } as any);
+
+    controller.toggleGameSync("A", false);
+    controller.toggleGameSync("B", false);
+    await vi.runAllTimersAsync();
+
+    expect(rpc.setGameSyncEnabledCall).toHaveBeenCalledTimes(2);
+    expect(store.getSnapshot().settings?.sync_disabled_games).toEqual(["A", "B"]);
+  });
+
+  it("rolls a failed same-game re-enable back to the preceding successful disable", async () => {
+    const rpc = await import("../api/ludusaviRpc");
+    const { store, controller } = setupGameSync();
+    vi.mocked(rpc.setGameSyncEnabledCall)
+      .mockResolvedValueOnce({ sync_disabled_games: ["A"] } as any)
+      .mockRejectedValueOnce(new Error("re-enable failed"));
+
+    controller.toggleGameSync("A", false);
+    controller.toggleGameSync("A", true);
+    await vi.runAllTimersAsync();
+
+    expect(store.getSnapshot().settings?.sync_disabled_games).toEqual(["A"]);
   });
 });
