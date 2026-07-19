@@ -85,6 +85,37 @@ describe("LudusaviStateStore", () => {
   });
 
   describe("Settings invariants", () => {
+    it("updates and hydrates displayed games without changing the persisted preference", () => {
+      const store = createLudusaviStateStore();
+      store.applySettings({
+        auto_sync_enabled: true,
+        sync_disabled_games: [],
+        selected_game: "Persisted",
+        notifications: {
+          enabled: true,
+          auto_sync_progress: true,
+          auto_sync_results: true,
+          manual_operations: true,
+          refresh_status: true,
+          failures_errors: true,
+        },
+        update_channel: "stable",
+        automatic_update_checks: true,
+        debug_logging: true,
+      });
+
+      store.setDisplayedGame("Displayed");
+      expect(store.getSnapshot().selectedGame).toBe("Displayed");
+      expect(store.getSnapshot().settings?.selected_game).toBe("Persisted");
+
+      const coldStore = createLudusaviStateStore();
+      coldStore.hydrateDisplayedGame("Seeded");
+      expect(coldStore.getSnapshot().selectedGame).toBe("Seeded");
+
+      coldStore.hydrateDisplayedGame("Ignored");
+      expect(coldStore.getSnapshot().selectedGame).toBe("Seeded");
+    });
+
     it("maintains consistency across snapshot and settings when fields are mutated", () => {
       const store = createLudusaviStateStore();
       
