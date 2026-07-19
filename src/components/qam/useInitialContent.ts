@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { RpcResult, Settings, RefreshResult, OperationStatus, GameStatus } from "../../types";
+import type { RpcResult, RpcStatus, Settings, RefreshResult, OperationStatus, GameStatus } from "../../types";
 import { log, logUiEvent } from "../../utils/logging";
 
 import { getInstalledAppIdsString } from "../../utils/steam";
@@ -21,6 +21,7 @@ export type InitialContentDependencies = {
   isGameCacheCurrentCall: (appIds: string) => Promise<any>;
   refreshGamesCall: (force: boolean, appIds?: string) => Promise<RpcResult<RefreshResult>>;
   applySettings: (settings: Settings) => void;
+  hydrateDisplayedGame: (gameName: string) => void;
   setGameHistory: (history: any) => void;
   setVersions: (versions: any) => void;
   setLudusaviCommand: (command: any) => void;
@@ -32,6 +33,7 @@ export type InitialContentDependencies = {
   setBusyLabel: (label: string | null) => void;
   isRpcStatus: <T>(result: RpcResult<T>) => boolean;
   logRpcStatus: (result: any, operation: string) => void;
+  logError: (message: string) => void;
 };
 
 export function useInitialContent(deps: InitialContentDependencies) {
@@ -81,16 +83,27 @@ export function useInitialContent(deps: InitialContentDependencies) {
   };
 
   const fetchInitialState = async (): Promise<RpcResult<Settings>> => {
-    const [loadedSettings, loadedHistory] = await Promise.all([
+    const [settingsResult, historyResult] = await Promise.allSettled([
       deps.getSettings(),
       deps.getGameHistoryCall()
     ]);
+    const failedResult = (operation: string, reason: unknown): RpcStatus => {
+      deps.logError(`Initial ${operation} request failed: ${reason}`);
+      return { status: "failed", reason: "exception", message: String(reason) };
+    };
+    const loadedSettings = settingsResult.status === "fulfilled"
+      ? settingsResult.value
+      : failedResult("settings", settingsResult.reason);
+    const loadedHistory = historyResult.status === "fulfilled"
+      ? historyResult.value
+      : failedResult("history", historyResult.reason);
 
     log("debug", `Loaded settings: ${JSON.stringify(loadedSettings)}`);
     if (deps.isRpcStatus(loadedSettings)) {
       deps.logRpcStatus(loadedSettings, "settings");
     } else {
       deps.applySettings(loadedSettings as Settings);
+      deps.hydrateDisplayedGame((loadedSettings as Settings).selected_game);
     }
 
     if (deps.isRpcStatus(loadedHistory)) {

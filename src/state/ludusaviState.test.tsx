@@ -85,13 +85,46 @@ describe("LudusaviStateStore", () => {
   });
 
   describe("Settings invariants", () => {
+    it("updates and hydrates displayed games without changing the persisted preference", () => {
+      const store = createLudusaviStateStore();
+      store.applySettings({
+        auto_sync_enabled: true,
+        sync_disabled_games: [],
+        selected_game: "Persisted",
+        notifications: {
+          enabled: true,
+          auto_sync_progress: true,
+          auto_sync_results: true,
+          manual_operations: true,
+          refresh_status: true,
+          failures_errors: true,
+        },
+        update_channel: "stable",
+        automatic_update_checks: true,
+        debug_logging: true,
+      });
+
+      store.setDisplayedGame("Displayed");
+      expect(store.getSnapshot().selectedGame).toBe("Displayed");
+      expect(store.getSnapshot().settings?.selected_game).toBe("Persisted");
+
+      const coldStore = createLudusaviStateStore();
+      coldStore.hydrateDisplayedGame("Seeded");
+      expect(coldStore.getSnapshot().selectedGame).toBe("Seeded");
+
+      coldStore.hydrateDisplayedGame("Ignored");
+      expect(coldStore.getSnapshot().selectedGame).toBe("Seeded");
+    });
+
     it("maintains consistency across snapshot and settings when fields are mutated", () => {
       const store = createLudusaviStateStore();
-      
+
       // Initial empty state has no settings but snapshot provides defaults for standalone fields
       expect(store.getSnapshot().settings).toBeNull();
+      store.setDisplayedGame("Existing display");
 
-      // Applying settings populates everything
+      // Applying settings populates persisted and derived settings without
+      // overwriting the ephemeral displayed game.
       store.applySettings({
         auto_sync_enabled: true,
         sync_disabled_games: [],
@@ -110,18 +143,18 @@ describe("LudusaviStateStore", () => {
       });
 
       let snap = store.getSnapshot();
-      expect(snap.selectedGame).toBe("Hades");
+      expect(snap.selectedGame).toBe("Existing display");
       expect(snap.settings?.selected_game).toBe("Hades");
       expect(snap.autoSyncNotificationsEnabled).toBe(true);
       expect(snap.settings?.auto_sync_enabled).toBe(true);
       expect(snap.notificationSettings.auto_sync_progress).toBe(false);
       expect(snap.settings?.notifications.auto_sync_progress).toBe(false);
 
-      // Mutating selected game updates both
-      store.setSelectedGame("Portal");
+      // Mutating the displayed game does not change the persisted preference.
+      store.setDisplayedGame("Portal");
       snap = store.getSnapshot();
       expect(snap.selectedGame).toBe("Portal");
-      expect(snap.settings?.selected_game).toBe("Portal");
+      expect(snap.settings?.selected_game).toBe("Hades");
 
       // Mutating auto sync updates both
       store.setAutoSyncEnabled(false);

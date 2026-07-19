@@ -137,7 +137,6 @@ export class LudusaviStateStore {
     const normalized = normalizeSettings(settings);
     this.commit({
       settings: normalized,
-      selectedGame: normalized.selected_game,
       autoSyncNotificationsEnabled: normalized.auto_sync_enabled,
       notificationSettings: normalized.notifications
     });
@@ -149,8 +148,14 @@ export class LudusaviStateStore {
     this.applySettings(next);
   }
 
-  setSelectedGame(selectedGame: string) {
-    this.patchSettings({ selected_game: selectedGame });
+  setDisplayedGame(selectedGame: string) {
+    this.commit({ selectedGame });
+  }
+
+  hydrateDisplayedGame(selectedGame: string) {
+    if (this.snapshot.selectedGame === "") {
+      this.commit({ selectedGame });
+    }
   }
 
   setAutoSyncEnabled(enabled: boolean) {

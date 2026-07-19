@@ -12,7 +12,7 @@ import { logUiEvent } from "../../utils/logging";
 export function selectCurrentSteamGameIfAvailable(
   currentGames: readonly GameStatus[],
   currentAliases: Record<string, string>,
-  setSelectedGame: (gameName: string) => void
+  setDisplayedGame: (gameName: string) => void
 ): boolean {
   const runningSession = getPreferredSteamGameSession();
   if (!runningSession) {
@@ -26,7 +26,7 @@ export function selectCurrentSteamGameIfAvailable(
     return false;
   }
 
-  setSelectedGame(runningGame.game.name);
+  setDisplayedGame(runningGame.game.name);
   logCurrentGameSelection(
     runningSession,
     runningGame.game,
@@ -45,7 +45,7 @@ export type UseSteamContextOptions = {
   settingsLoaded: boolean;
   operationInProgress: boolean;
   qamContentRef: React.RefObject<HTMLDivElement | null>;
-  setSelectedGame: (gameName: string) => void;
+  setDisplayedGame: (gameName: string) => void;
   resolveQamOpenSelection: (args: any) => "wait" | "consume" | "select";
 };
 
@@ -57,7 +57,7 @@ export function useSteamContext({
   settingsLoaded,
   operationInProgress,
   qamContentRef,
-  setSelectedGame,
+  setDisplayedGame,
   resolveQamOpenSelection
 }: UseSteamContextOptions) {
   const wasQuickAccessVisible = useRef(false);
@@ -103,7 +103,7 @@ export function useSteamContext({
       pendingCurrentGameSelection.current = false;
       return;
     }
-    selectCurrentSteamGameIfAvailable(games, gameAliases, setSelectedGame);
+    selectCurrentSteamGameIfAvailable(games, gameAliases, setDisplayedGame);
     pendingCurrentGameSelection.current = false;
-  }, [gameAliases, games, isQuickAccessVisible, operationInProgress, setSelectedGame, resolveQamOpenSelection]);
+  }, [gameAliases, games, isQuickAccessVisible, operationInProgress, setDisplayedGame, resolveQamOpenSelection]);
 }

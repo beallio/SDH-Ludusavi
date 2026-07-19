@@ -119,6 +119,33 @@ describe("SettingsMutationRuntime", () => {
     expect(notifyFailure).toHaveBeenCalled();
   });
 
+  it("keeps the displayed game when auto-sync returns a different persisted preference", async () => {
+    const store = createLudusaviStateStore();
+    const runtime = createSettingsMutationRuntime();
+    const rpc = await import("../api/ludusaviRpc");
+    runtime.applySettings(store, {
+      auto_sync_enabled: false,
+      selected_game: "B",
+      sync_disabled_games: [],
+    } as any);
+    store.setDisplayedGame("A");
+    const controller = runtime.createController({
+      ludusaviStore: store,
+      notifyFailure: vi.fn(),
+    });
+    vi.mocked(rpc.setAutoSyncEnabled).mockResolvedValueOnce({
+      auto_sync_enabled: true,
+      selected_game: "B",
+      sync_disabled_games: [],
+    } as any);
+
+    controller.toggleAutoSync(true);
+    await vi.runAllTimersAsync();
+
+    expect(store.getSnapshot().selectedGame).toBe("A");
+    expect(store.getSnapshot().settings?.selected_game).toBe("B");
+  });
+
 
   it("superseded RPC result does not clobber newer value", async () => {
     const store = createLudusaviStateStore();
@@ -216,18 +243,19 @@ describe("SettingsMutationRuntime", () => {
     // 3. notifications start (generation 3)
     controller.toggleNotificationSetting("failures_errors", true);
 
-    // Optimistically all are applied
+    // The displayed game updates optimistically, but the persisted preference
+    // remains unchanged until the selection RPC resolves.
     expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(true);
-    expect(store.getSnapshot().settings?.selected_game).toBe("B");
+    expect(store.getSnapshot().settings?.selected_game).toBe("A");
     expect(store.getSnapshot().settings?.notifications.failures_errors).toBe(true);
 
-    // 4. selectedGame succeeds! (generation 2 resolves)
+    // 4. selectedGame succeeds, but remains queued behind autoSync.
     resolveSelectedGame({ auto_sync_enabled: false, selected_game: "B", update_channel: "stable", notifications: { failures_errors: false } } as any);
     await vi.runAllTimersAsync();
 
-    // Since it was generation 2 (not latest, generation 3 is latest), it should ONLY merge selected_game.
-    // It should NOT clobber the optimistic notifications or autoSync.
-    expect(store.getSnapshot().settings?.selected_game).toBe("B");
+    // The resolved selection is not persisted into the settings mirror until
+    // the earlier mutation finishes and the queued selection is applied.
+    expect(store.getSnapshot().settings?.selected_game).toBe("A");
     expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(true);
     expect(store.getSnapshot().settings?.notifications.failures_errors).toBe(true);
 
@@ -279,6 +307,27 @@ describe("SettingsMutationRuntime", () => {
 
     await vi.runAllTimersAsync();
     expect(store.getSnapshot().settings?.sync_disabled_games).toEqual(["Hades"]);
+  });
+
+  it("keeps the displayed game when game sync returns a different persisted preference", async () => {
+    const rpc = await import("../api/ludusaviRpc");
+    const { store, runtime, controller } = setupGameSync();
+    runtime.applySettings(store, {
+      ...store.getSnapshot().settings,
+      selected_game: "B",
+    } as any);
+    store.setDisplayedGame("A");
+    vi.mocked(rpc.setGameSyncEnabledCall).mockResolvedValueOnce({
+      ...store.getSnapshot().settings,
+      selected_game: "B",
+      sync_disabled_games: ["A"],
+    } as any);
+
+    controller.toggleGameSync("A", false);
+    await vi.runAllTimersAsync();
+
+    expect(store.getSnapshot().selectedGame).toBe("A");
+    expect(store.getSnapshot().settings?.selected_game).toBe("B");
   });
 
   it("rolls back only the failed game against hydrated persisted state", async () => {
