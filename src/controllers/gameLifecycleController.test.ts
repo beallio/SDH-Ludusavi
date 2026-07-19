@@ -823,6 +823,10 @@ describe("GameLifecycleController", () => {
     expect(mockRpc.pauseGameProcess).not.toHaveBeenCalled();
     expect(mockRpc.startSyncthingActivityWatch).not.toHaveBeenCalled();
     expect(mockStore.isGameSyncDisabled).toHaveBeenCalledWith("Hades", "1145300");
+    expect(mockStatusSurface.publish).not.toHaveBeenCalledWith(
+      "checking",
+      expect.objectContaining({ source: "lifecycle_exit" }),
+    );
   });
 
   it("enabled game still pauses and starts initial, restarted, and post-game watches", async () => {

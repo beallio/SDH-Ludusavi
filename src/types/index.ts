@@ -190,6 +190,7 @@ export type AutoSyncStatusKind =
   | "restoring"
   | "conflict"
   | "conflict_unresolved"
+  | "game_sync_disabled"
   | "has_backup"
   | "unknown"
   | "error"
