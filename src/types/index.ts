@@ -44,6 +44,7 @@ export type UpdateCheckResult =
 
 export type Settings = {
   auto_sync_enabled: boolean;
+  sync_disabled_games: string[];
   selected_game: string;
   notifications: NotificationSettings;
   update_channel: UpdateChannel;
