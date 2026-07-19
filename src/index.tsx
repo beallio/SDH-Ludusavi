@@ -219,6 +219,7 @@ export default definePlugin(() => {
     getStoredSettings: () => ludusaviStore.getSnapshot().settings,
     isRpcStatus,
     applySettings: (settings) => runtime.settings.applySettings(ludusaviStore, settings),
+    hydrateDisplayedGame: (gameName) => ludusaviStore.hydrateDisplayedGame(gameName),
     applyTracking: (result) => ludusaviStore.applyRefreshResult(result),
     markTrackingFailed: () => ludusaviStore.markTrackingFailed(),
     logRpcStatus,

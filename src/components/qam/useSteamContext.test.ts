@@ -27,26 +27,26 @@ describe("useSteamContext", () => {
   it("selectCurrentSteamGameIfAvailable does nothing if no session", () => {
     vi.mocked(steamUtils.getPreferredSteamGameSession).mockReturnValue(null);
 
-    const setSelectedGame = vi.fn();
-    const result = selectCurrentSteamGameIfAvailable([], {}, setSelectedGame);
+    const setDisplayedGame = vi.fn();
+    const result = selectCurrentSteamGameIfAvailable([], {}, setDisplayedGame);
 
     expect(result).toBe(false);
-    expect(setSelectedGame).not.toHaveBeenCalled();
+    expect(setDisplayedGame).not.toHaveBeenCalled();
   });
 
   it("selectCurrentSteamGameIfAvailable selects game if found", () => {
     vi.mocked(steamUtils.getPreferredSteamGameSession).mockReturnValue({ appid: "123" } as any);
     vi.mocked(steamUtils.findGameForRunningSession).mockReturnValue({ game: { name: "Test" }, reason: "test" } as any);
 
-    const setSelectedGame = vi.fn();
-    const result = selectCurrentSteamGameIfAvailable([], {}, setSelectedGame);
+    const setDisplayedGame = vi.fn();
+    const result = selectCurrentSteamGameIfAvailable([], {}, setDisplayedGame);
 
     expect(result).toBe(true);
-    expect(setSelectedGame).toHaveBeenCalledWith("Test");
+    expect(setDisplayedGame).toHaveBeenCalledWith("Test");
   });
 
   it("mounts without errors", () => {
-    const setSelectedGame = vi.fn();
+    const setDisplayedGame = vi.fn();
     const resolveQamOpenSelection = vi.fn().mockReturnValue("wait");
 
     useSteamContext({
@@ -57,11 +57,11 @@ describe("useSteamContext", () => {
       settingsLoaded: true,
       operationInProgress: false,
       qamContentRef: { current: null },
-      setSelectedGame,
+      setDisplayedGame,
       resolveQamOpenSelection,
     });
 
-    expect(setSelectedGame).not.toHaveBeenCalled();
+    expect(setDisplayedGame).not.toHaveBeenCalled();
   });
 });
 

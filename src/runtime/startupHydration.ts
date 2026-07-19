@@ -16,6 +16,7 @@ export interface StartupHydrationDeps {
   getStoredSettings(): Settings | null;
   isRpcStatus(result: RpcResult<Settings> | RpcResult<RefreshResult>): result is RpcStatus;
   applySettings(settings: Settings): void;
+  hydrateDisplayedGame(gameName: string): void;
   applyTracking(result: RefreshResult): void;
   markTrackingFailed(): void;
   logRpcStatus(result: RpcStatus, operation: string): void;
@@ -52,6 +53,7 @@ export function createStartupHydration(deps: StartupHydrationDeps): StartupHydra
           return;
         }
         deps.applySettings(settings);
+        deps.hydrateDisplayedGame(settings.selected_game);
         deps.logUiEvent(
           "startup_settings_hydrated",
           {
