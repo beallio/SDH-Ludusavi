@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -39,6 +40,7 @@ class SDHLudusaviService:
 
         # 1. Local settings properties
         self._auto_sync_enabled = False
+        self._sync_disabled_games: set[str] = set()
         self._selected_game = ""
         self._debug_logging = True
         self._notification_settings = _coerce_notification_settings(DEFAULT_NOTIFICATION_SETTINGS)
@@ -187,6 +189,7 @@ class SDHLudusaviService:
         """Return the current plugin settings."""
         return {
             "auto_sync_enabled": self._auto_sync_enabled,
+            "sync_disabled_games": sorted(self._sync_disabled_games),
             "selected_game": self._selected_game,
             "debug_logging": self._debug_logging,
             "notifications": dict(self._notification_settings),
@@ -203,6 +206,38 @@ class SDHLudusaviService:
         self._save_state()
         self.log("info", f"Automatic sync {'enabled' if enabled else 'disabled'}")
         return self.get_settings()
+
+    def set_game_sync_enabled(self, game_name: str, enabled: bool) -> dict[str, Any]:
+        """Update one game's automatic sync opt-out without losing peer writes."""
+        name = sanitize_game_name(game_name)
+        if not name:
+            return self.get_settings()
+
+        from .persistence import StateLockTimeoutError
+
+        def mutate(settings: dict[str, Any]) -> dict[str, Any]:
+            disabled_games = _coerce_sync_disabled_games(settings.get("sync_disabled_games"))
+            if enabled:
+                disabled_games.discard(name)
+            else:
+                disabled_games.add(name)
+            return {**settings, "sync_disabled_games": sorted(disabled_games)}
+
+        try:
+            with self._state_lock:
+                persisted = self._persistence.mutate_settings(mutate)
+                self._sync_disabled_games = _coerce_sync_disabled_games(
+                    persisted.get("sync_disabled_games")
+                )
+        except (StateLockTimeoutError, OSError, json.JSONDecodeError) as exc:
+            self.log("warning", f"Skipping per-game sync update due to state error: {exc}")
+            return self.get_settings()
+
+        self.log("info", f"Per-game sync {'enabled' if enabled else 'disabled'} for {name}")
+        return self.get_settings()
+
+    def is_game_sync_enabled(self, game_name: str) -> bool:
+        return sanitize_game_name(game_name) not in self._sync_disabled_games
 
     def set_selected_game(self, game_name: str) -> dict[str, Any]:
         """Update the currently selected game and persist it to disk."""
@@ -370,6 +405,9 @@ class SDHLudusaviService:
         cache = data["cache"]
 
         self._auto_sync_enabled = bool(settings.get("auto_sync_enabled", False))
+        self._sync_disabled_games = _coerce_sync_disabled_games(
+            settings.get("sync_disabled_games", [])
+        )
         self._selected_game = str(settings.get("selected_game", ""))
         self._debug_logging = bool(settings.get("debug_logging", True))
         self._apply_log_level()
@@ -394,6 +432,7 @@ class SDHLudusaviService:
         with self._state_lock:
             settings_payload = {
                 "auto_sync_enabled": self._auto_sync_enabled,
+                "sync_disabled_games": sorted(self._sync_disabled_games),
                 "selected_game": self._selected_game,
                 "debug_logging": self._debug_logging,
                 "notifications": dict(self._notification_settings),
@@ -529,3 +568,11 @@ def _coerce_notification_settings(settings: object) -> dict[str, bool]:
         if isinstance(value, bool):
             coerced[key] = value
     return coerced
+
+
+def _coerce_sync_disabled_games(value: object) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    sanitized = {sanitize_game_name(entry) for entry in value if isinstance(entry, str)}
+    sanitized.discard("")
+    return sanitized
