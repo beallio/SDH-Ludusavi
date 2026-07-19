@@ -153,6 +153,16 @@ export class LudusaviStateStore {
     this.patchSettings({ selected_game: selectedGame });
   }
 
+  setDisplayedGame(selectedGame: string) {
+    this.commit({ selectedGame });
+  }
+
+  hydrateDisplayedGame(selectedGame: string) {
+    if (this.snapshot.selectedGame === "") {
+      this.commit({ selectedGame });
+    }
+  }
+
   setAutoSyncEnabled(enabled: boolean) {
     this.patchSettings({ auto_sync_enabled: enabled });
   }
