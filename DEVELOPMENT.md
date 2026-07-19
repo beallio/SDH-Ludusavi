@@ -137,6 +137,10 @@ The packaging automation produces the following versioned artifacts:
 
 Runtime settings are stored through Decky's `SettingsManager` in `DECKY_PLUGIN_SETTINGS_DIR/settings.json`. Runtime cache data is stored separately in `DECKY_PLUGIN_RUNTIME_DIR/cache.json`, including cached Ludusavi game status, app ID markers, shortcut IDs, and operation history. The plugin does not write mutable data under `DECKY_PLUGIN_DIR`, because Decky can replace that directory during updates. Tooling caches still live under `/tmp/sdh_ludusavi`.
 
+### Frontend Selected-Game State
+
+The frontend deliberately keeps two game-selection values with different lifetimes. `selectedGame` is ephemeral view state: it identifies the game currently displayed in the QAM and may change through Steam-context selection, refresh resolution, or a manual dropdown choice. `settings.selected_game` is the persisted fallback preference. Within frontend settings mutations, only `onGameChange` writes that preference. `applySettings` must never change `selectedGame`; hydration may seed the displayed game from the persisted preference only while the displayed value is empty.
+
 `plugin.json` does not request Decky's `_root` flag. The backend runs as the Decky user so the Ludusavi Flatpak can see that user's Ludusavi configuration, backup metadata, and Flatpak runtime state.
 
 ## Ludusavi Integration Details
