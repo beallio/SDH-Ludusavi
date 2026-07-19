@@ -49,7 +49,7 @@ import { LudusaviLauncherSection } from "./LudusaviLauncherSection";
 import { NotificationSettingsSection } from "./NotificationSettingsSection";
 import { QamStyles } from "./QamStyles";
 import { LogsSection, VersionsSection } from "./VersionAndLogsSection";
-import { resolveRefreshedSelection } from "./refreshSelection";
+import { resolveAppliedSelection } from "./refreshSelection";
 import { resolveQamOpenSelection } from "./qamOpenSelection";
 import { runOperationFinalize } from "./manualOperationFinalize";
 import { useSteamContext, selectCurrentSteamGameIfAvailable } from "./useSteamContext";
@@ -251,10 +251,11 @@ export function LudusaviContent({
       return true;
     }
 
-    const outcome = resolveRefreshedSelection({
+    const currentSelectedGame = ludusaviStore.getSnapshot().selectedGame;
+    const outcome = resolveAppliedSelection({
       games: cachedGames,
       preferredGame,
-      currentSelectedGame: selectedGame,
+      liveSelection: currentSelectedGame,
     });
     ludusaviStore.setDisplayedGame(outcome.game);
 
@@ -297,10 +298,11 @@ export function LudusaviContent({
       return true;
     }
 
-    const outcome = resolveRefreshedSelection({
+    const currentSelectedGame = ludusaviStore.getSnapshot().selectedGame;
+    const outcome = resolveAppliedSelection({
       games: result.games,
       preferredGame,
-      currentSelectedGame: selectedGame,
+      liveSelection: currentSelectedGame,
     });
     if (outcome.source === "first") {
       log("debug", `Defaulting selected game to ${outcome.game}`);
