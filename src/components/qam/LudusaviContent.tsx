@@ -178,6 +178,7 @@ export function LudusaviContent({
     isGameCacheCurrentCall,
     refreshGamesCall,
     applySettings: (settings) => runtime.settings.applySettings(ludusaviStore, settings),
+    hydrateDisplayedGame: (gameName) => ludusaviStore.hydrateDisplayedGame(gameName),
     setGameHistory: (history) => ludusaviStore.setGameHistory(history),
     setVersions: (versions) => ludusaviStore.setVersions(versions),
     setLudusaviCommand: (command) => ludusaviStore.setLudusaviCommand(command),
@@ -189,6 +190,7 @@ export function LudusaviContent({
     setBusyLabel,
     isRpcStatus,
     logRpcStatus,
+    logError: (message) => log("error", message),
   });
 
   const { refreshGames } = useGameRefresh({

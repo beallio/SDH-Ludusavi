@@ -34,6 +34,7 @@ function makeDeps(overrides: Partial<StartupHydrationDeps> = {}): StartupHydrati
     getStoredSettings: vi.fn().mockReturnValue(null),
     isRpcStatus,
     applySettings: vi.fn(),
+    hydrateDisplayedGame: vi.fn(),
     applyTracking: vi.fn(),
     markTrackingFailed: vi.fn(),
     logRpcStatus: vi.fn(),
@@ -52,6 +53,7 @@ describe("createStartupHydration", () => {
 
     expect(deps.applySettings).toHaveBeenCalledTimes(1);
     expect(deps.applySettings).toHaveBeenCalledWith(SETTINGS);
+    expect(deps.hydrateDisplayedGame).toHaveBeenCalledWith("Celeste");
     expect(deps.logUiEvent).toHaveBeenCalledWith(
       "startup_settings_hydrated",
       {
@@ -78,6 +80,7 @@ describe("createStartupHydration", () => {
     await hydration.ready;
 
     expect(deps.applySettings).not.toHaveBeenCalled();
+    expect(deps.hydrateDisplayedGame).not.toHaveBeenCalled();
     expect(deps.logUiEvent).toHaveBeenCalledWith("startup_settings_hydration_skipped", {
       reason: "state_already_populated",
     });
