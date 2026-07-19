@@ -1,0 +1,47 @@
+{
+  "date": "2026-07-19",
+  "task_objective": "Separate the QAM's ephemeral displayed-game selection from the persisted selected_game preference so unrelated settings mutations cannot move the panel to another game.",
+  "files_modified": [
+    "DEVELOPMENT.md",
+    "docs/plans/2026-07-19_selected-game-view-state.md",
+    "docs/agent_conversations/2026-07-19_selected-game-view-state.json",
+    "src/components/qam/LudusaviContent.tsx",
+    "src/components/qam/refreshSelection.test.ts",
+    "src/components/qam/refreshSelection.ts",
+    "src/components/qam/useInitialContent.test.ts",
+    "src/components/qam/useInitialContent.ts",
+    "src/components/qam/useSteamContext.test.ts",
+    "src/components/qam/useSteamContext.ts",
+    "src/index.tsx",
+    "src/runtime/startupHydration.test.ts",
+    "src/runtime/startupHydration.ts",
+    "src/settings/settingsMutationRuntime.test.ts",
+    "src/settings/settingsMutationRuntime.ts",
+    "src/state/ludusaviState.test.tsx",
+    "src/state/ludusaviState.tsx"
+  ],
+  "tests_added": [
+    "Store tests prove setDisplayedGame changes only selectedGame and hydrateDisplayedGame seeds only an empty display.",
+    "State invariant tests prove applySettings never changes the displayed game.",
+    "Refresh-selection tests cover valid live selection precedence, cold persisted preference selection, stale live selection fallback, and first-game fallback.",
+    "Startup and QAM hydration tests cover persisted-preference seeding without overwriting an existing display.",
+    "Initial-content tests prove settings and history request exceptions degrade independently and game-list synchronization still establishes a valid selection.",
+    "Settings mutation regressions prove both global Automatic Sync and per-game sync responses leave displayed game A unchanged when the backend preference remains B."
+  ],
+  "design_decisions": [
+    "selectedGame is ephemeral QAM view state; settings.selected_game remains the persisted fallback preference and is written only by the deliberate dropdown onGameChange path.",
+    "applySettings no longer derives selectedGame from settings. The old ludusaviState test expectation was inverted because it encoded the coupling that caused this bug, rather than desired behavior.",
+    "The onGameChange optimistic assertion now expects settings.selected_game to remain at its previous value until the RPC is applied. The related queued-resolution assertion also remains at the previous value until an earlier mutation leaves the serialized queue; these expectation changes describe the new persistence boundary rather than masking a failure.",
+    "Refresh application reads selectedGame live from the store. A valid live selection suppresses the persisted preference, while a stale live selection does not discard a valid persisted preference.",
+    "Both startup and QAM hydration route through hydrateDisplayedGame, so only a cold display is seeded and reopening the QAM preserves the last viewed game.",
+    "Settings and history fetches use Promise.allSettled and convert thrown requests into failed RPC-status values, allowing game-list synchronization and selection recovery to continue.",
+    "No backend or dependency changes were required."
+  ],
+  "results": {
+    "automated": "Task-specific red-green checks passed through the implementation commits, culminating in 313 frontend tests plus TypeScript typecheck. Every commit hook also passed Ruff, formatting, ty, 838 Python tests at 88.69% coverage, frontend supply-chain checks, build, and the complete frontend suite. The orchestration quality gate is run once more after this documentation commit before the round-complete marker is written.",
+    "dependencies": "No dependency changes.",
+    "scope": "Frontend-only; no py_modules backend file changed.",
+    "release": "No release, tag, push, or manual merge is part of this implementation round; approved orchestration finalization owns those actions.",
+    "on_device": "Deferred and not claimed as passed. Steam Deck verification must confirm that per-game sync, Automatic Sync, and notification toggles do not move the displayed game; manual dropdown selection persists; Steam-context auto-selection still works; two no-game QAM reopens keep the last viewed game; and pulled qam_opened logs report a sensible displayed selected_game value with the documented open-time timing."
+  }
+}
