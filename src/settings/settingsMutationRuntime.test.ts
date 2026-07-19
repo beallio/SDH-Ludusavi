@@ -119,6 +119,33 @@ describe("SettingsMutationRuntime", () => {
     expect(notifyFailure).toHaveBeenCalled();
   });
 
+  it("keeps the displayed game when auto-sync returns a different persisted preference", async () => {
+    const store = createLudusaviStateStore();
+    const runtime = createSettingsMutationRuntime();
+    const rpc = await import("../api/ludusaviRpc");
+    runtime.applySettings(store, {
+      auto_sync_enabled: false,
+      selected_game: "B",
+      sync_disabled_games: [],
+    } as any);
+    store.setDisplayedGame("A");
+    const controller = runtime.createController({
+      ludusaviStore: store,
+      notifyFailure: vi.fn(),
+    });
+    vi.mocked(rpc.setAutoSyncEnabled).mockResolvedValueOnce({
+      auto_sync_enabled: true,
+      selected_game: "B",
+      sync_disabled_games: [],
+    } as any);
+
+    controller.toggleAutoSync(true);
+    await vi.runAllTimersAsync();
+
+    expect(store.getSnapshot().selectedGame).toBe("A");
+    expect(store.getSnapshot().settings?.selected_game).toBe("B");
+  });
+
 
   it("superseded RPC result does not clobber newer value", async () => {
     const store = createLudusaviStateStore();
@@ -280,6 +307,27 @@ describe("SettingsMutationRuntime", () => {
 
     await vi.runAllTimersAsync();
     expect(store.getSnapshot().settings?.sync_disabled_games).toEqual(["Hades"]);
+  });
+
+  it("keeps the displayed game when game sync returns a different persisted preference", async () => {
+    const rpc = await import("../api/ludusaviRpc");
+    const { store, runtime, controller } = setupGameSync();
+    runtime.applySettings(store, {
+      ...store.getSnapshot().settings,
+      selected_game: "B",
+    } as any);
+    store.setDisplayedGame("A");
+    vi.mocked(rpc.setGameSyncEnabledCall).mockResolvedValueOnce({
+      ...store.getSnapshot().settings,
+      selected_game: "B",
+      sync_disabled_games: ["A"],
+    } as any);
+
+    controller.toggleGameSync("A", false);
+    await vi.runAllTimersAsync();
+
+    expect(store.getSnapshot().selectedGame).toBe("A");
+    expect(store.getSnapshot().settings?.selected_game).toBe("B");
   });
 
   it("rolls back only the failed game against hydrated persisted state", async () => {
