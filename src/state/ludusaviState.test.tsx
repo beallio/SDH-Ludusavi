@@ -118,11 +118,13 @@ describe("LudusaviStateStore", () => {
 
     it("maintains consistency across snapshot and settings when fields are mutated", () => {
       const store = createLudusaviStateStore();
-      
+
       // Initial empty state has no settings but snapshot provides defaults for standalone fields
       expect(store.getSnapshot().settings).toBeNull();
+      store.setDisplayedGame("Existing display");
 
-      // Applying settings populates everything
+      // Applying settings populates persisted and derived settings without
+      // overwriting the ephemeral displayed game.
       store.applySettings({
         auto_sync_enabled: true,
         sync_disabled_games: [],
@@ -141,18 +143,18 @@ describe("LudusaviStateStore", () => {
       });
 
       let snap = store.getSnapshot();
-      expect(snap.selectedGame).toBe("Hades");
+      expect(snap.selectedGame).toBe("Existing display");
       expect(snap.settings?.selected_game).toBe("Hades");
       expect(snap.autoSyncNotificationsEnabled).toBe(true);
       expect(snap.settings?.auto_sync_enabled).toBe(true);
       expect(snap.notificationSettings.auto_sync_progress).toBe(false);
       expect(snap.settings?.notifications.auto_sync_progress).toBe(false);
 
-      // Mutating selected game updates both
-      store.setSelectedGame("Portal");
+      // Mutating the displayed game does not change the persisted preference.
+      store.setDisplayedGame("Portal");
       snap = store.getSnapshot();
       expect(snap.selectedGame).toBe("Portal");
-      expect(snap.settings?.selected_game).toBe("Portal");
+      expect(snap.settings?.selected_game).toBe("Hades");
 
       // Mutating auto sync updates both
       store.setAutoSyncEnabled(false);
