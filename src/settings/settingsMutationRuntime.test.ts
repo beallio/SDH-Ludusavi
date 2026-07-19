@@ -216,18 +216,19 @@ describe("SettingsMutationRuntime", () => {
     // 3. notifications start (generation 3)
     controller.toggleNotificationSetting("failures_errors", true);
 
-    // Optimistically all are applied
+    // The displayed game updates optimistically, but the persisted preference
+    // remains unchanged until the selection RPC resolves.
     expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(true);
-    expect(store.getSnapshot().settings?.selected_game).toBe("B");
+    expect(store.getSnapshot().settings?.selected_game).toBe("A");
     expect(store.getSnapshot().settings?.notifications.failures_errors).toBe(true);
 
-    // 4. selectedGame succeeds! (generation 2 resolves)
+    // 4. selectedGame succeeds, but remains queued behind autoSync.
     resolveSelectedGame({ auto_sync_enabled: false, selected_game: "B", update_channel: "stable", notifications: { failures_errors: false } } as any);
     await vi.runAllTimersAsync();
 
-    // Since it was generation 2 (not latest, generation 3 is latest), it should ONLY merge selected_game.
-    // It should NOT clobber the optimistic notifications or autoSync.
-    expect(store.getSnapshot().settings?.selected_game).toBe("B");
+    // The resolved selection is not persisted into the settings mirror until
+    // the earlier mutation finishes and the queued selection is applied.
+    expect(store.getSnapshot().settings?.selected_game).toBe("A");
     expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(true);
     expect(store.getSnapshot().settings?.notifications.failures_errors).toBe(true);
 

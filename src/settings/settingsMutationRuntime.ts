@@ -473,7 +473,7 @@ export function createSettingsMutationRuntime() {
         logError: `Failed to persist selected game`,
         timeoutMessage: "Selecting game timed out",
         fallbackValue: lastPersistedSelectedGame ?? "",
-        optimisticUpdate: () => ludusaviStore.setSelectedGame(value),
+        optimisticUpdate: () => ludusaviStore.setDisplayedGame(value),
         rpcCall: () => setSelectedGameCall(value),
         applyResult: (res, isLatest) => {
           if (isLatest) applySettings(ludusaviStore, res);
@@ -483,7 +483,7 @@ export function createSettingsMutationRuntime() {
           }
         },
         rollbackUpdate: (fallback) => {
-          ludusaviStore.setSelectedGame(fallback);
+          ludusaviStore.setDisplayedGame(fallback);
           lastQueuedSelectedGame = fallback;
         },
         getPersistedValue: (res) => res.selected_game

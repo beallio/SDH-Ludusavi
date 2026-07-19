@@ -157,7 +157,7 @@ export function LudusaviContent({
     settingsLoaded: ludusaviState.settings !== null,
     operationInProgress: operationInProgress.current,
     qamContentRef,
-    setSelectedGame: (gameName) => ludusaviStore.setSelectedGame(gameName),
+    setDisplayedGame: (gameName) => ludusaviStore.setDisplayedGame(gameName),
     resolveQamOpenSelection,
   });
 
@@ -247,7 +247,7 @@ export function LudusaviContent({
 
     const cachedAliases = ludusaviState.gameAliases;
 
-    if (allowSteamContextSelection && selectCurrentSteamGameIfAvailable(cachedGames, cachedAliases, (gameName) => ludusaviStore.setSelectedGame(gameName))) {
+    if (allowSteamContextSelection && selectCurrentSteamGameIfAvailable(cachedGames, cachedAliases, (gameName) => ludusaviStore.setDisplayedGame(gameName))) {
       return true;
     }
 
@@ -256,7 +256,7 @@ export function LudusaviContent({
       preferredGame,
       currentSelectedGame: selectedGame,
     });
-    ludusaviStore.setSelectedGame(outcome.game);
+    ludusaviStore.setDisplayedGame(outcome.game);
 
     return true;
   };
@@ -292,7 +292,7 @@ export function LudusaviContent({
 
     if (
       allowSteamContextSelection &&
-      selectCurrentSteamGameIfAvailable(result.games, result.aliases || {}, (gameName) => ludusaviStore.setSelectedGame(gameName))
+      selectCurrentSteamGameIfAvailable(result.games, result.aliases || {}, (gameName) => ludusaviStore.setDisplayedGame(gameName))
     ) {
       return true;
     }
@@ -305,7 +305,7 @@ export function LudusaviContent({
     if (outcome.source === "first") {
       log("debug", `Defaulting selected game to ${outcome.game}`);
     }
-    ludusaviStore.setSelectedGame(outcome.game);
+    ludusaviStore.setDisplayedGame(outcome.game);
 
     return true;
   };
