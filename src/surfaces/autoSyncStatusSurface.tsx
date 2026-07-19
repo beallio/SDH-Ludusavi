@@ -305,6 +305,18 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
           });
           return;
         }
+        if (result.reason === "game_sync_disabled") {
+          if (options.lifecycle === "lifecycle_start") {
+            api.publish("game_sync_disabled", {
+              ...options,
+              source: "rpc_result",
+              resultStatus: result.status,
+            });
+          } else {
+            api.hide({ ...options, source: "hide" });
+          }
+          return;
+        }
         if (result.reason === "local_current") {
           api.publish("has_backup", {
             ...options,

@@ -34,6 +34,7 @@ describe("GameLifecycleController diagnostic logging", () => {
 
     mockStore = {
       isTracked: vi.fn().mockReturnValue(true),
+      isGameSyncDisabled: vi.fn().mockReturnValue(false),
       shouldPublishAutoSyncStatusBeforeRpc: vi.fn().mockReturnValue(true),
       getSnapshot: vi.fn().mockReturnValue({
         settings: { auto_sync_enabled: true },

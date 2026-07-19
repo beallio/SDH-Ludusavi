@@ -5,6 +5,7 @@ import { isRpcStatus } from "../utils/rpc";
 
 const SETTINGS: Settings = {
   auto_sync_enabled: true,
+  sync_disabled_games: ["Hades"],
   selected_game: "Celeste",
   notifications: {
     enabled: true,
@@ -55,6 +56,7 @@ describe("createStartupHydration", () => {
       "startup_settings_hydrated",
       {
         auto_sync_enabled: true,
+        sync_disabled_games_count: 1,
         selected_game: "Celeste",
         update_channel: "stable",
       },

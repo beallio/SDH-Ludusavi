@@ -30,6 +30,10 @@ export const getGameHistoryCall = callable<[], RpcResult<Record<string, GameOper
 export const setAutoSyncEnabled = callable<[enabled: boolean], RpcResult<Settings>>(
   "set_auto_sync_enabled"
 );
+export const setGameSyncEnabledCall = callable<
+  [gameName: string, enabled: boolean],
+  RpcResult<Settings>
+>("set_game_sync_enabled");
 export const setNotificationSettings = callable<
   [settings: NotificationSettings],
   RpcResult<Settings>

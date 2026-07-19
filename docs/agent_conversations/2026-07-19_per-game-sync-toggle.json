@@ -1,0 +1,62 @@
+{
+  "date": "2026-07-19",
+  "task_objective": "Add a persisted per-game Sync This Game opt-out that blocks automatic launch restore, exit backup, launch pause, and Syncthing watches while preserving global Automatic Sync behavior and showing a start-only informational notice.",
+  "files_modified": [
+    "README.md",
+    "docs/plans/2026-07-19_per-game-sync-toggle.md",
+    "docs/agent_conversations/2026-07-19_per-game-sync-toggle.json",
+    "main.py",
+    "py_modules/sdh_ludusavi/constants.py",
+    "py_modules/sdh_ludusavi/lifecycle.py",
+    "py_modules/sdh_ludusavi/persistence.py",
+    "py_modules/sdh_ludusavi/service.py",
+    "src/api/ludusaviRpc.ts",
+    "src/components/qam/GameSettingsSection.tsx",
+    "src/components/qam/LudusaviContent.tsx",
+    "src/controllers/gameLifecycleController.logging.test.ts",
+    "src/controllers/gameLifecycleController.test.ts",
+    "src/controllers/gameLifecycleController.tsx",
+    "src/controllers/gameLifecycleDecision.test.ts",
+    "src/runtime/startupHydration.test.ts",
+    "src/runtime/startupHydration.ts",
+    "src/settings/settingsMutationRuntime.test.ts",
+    "src/settings/settingsMutationRuntime.ts",
+    "src/state/ludusaviState.test.tsx",
+    "src/state/ludusaviState.tsx",
+    "src/surfaces/autoSyncStatusRenderer.tsx",
+    "src/surfaces/autoSyncStatusSurface.test.ts",
+    "src/surfaces/autoSyncStatusSurface.tsx",
+    "src/types/index.ts",
+    "tests/test_backup_browser.py",
+    "tests/test_compatibility.py",
+    "tests/test_decision_logging.py",
+    "tests/test_lifecycle.py",
+    "tests/test_main.py",
+    "tests/test_persistence.py",
+    "tests/test_recency_direction.py",
+    "tests/test_service.py"
+  ],
+  "tests_added": [
+    "Atomic settings mutation covers first write, sorted and de-duplicated membership, multi-instance merge preservation, re-enable behavior, fail-closed read errors, lock timeouts, per-entry load validation, and reload round trips.",
+    "All five automatic lifecycle entry points reject disabled games, global Automatic Sync remains authoritative, enabled games are unchanged, a late disable blocks backup_game_on_exit, and disabled skips do not record history.",
+    "Decky settings and RPC contract tests verify the new persisted key and async backend wrapper.",
+    "Frontend state tests cover malformed settings, sorted optimistic membership, numeric Steam IDs, aliases, exact names, eligible short-name fuzzy matching, ambiguous matches, empty registries, and the Hades versus Hades II app-ID case.",
+    "Mutation tests cover optimistic success, hydrated scoped rollback, independent A-success/B-failure, timeout with late success, different-game rapid toggles, and same-game disable-success/re-enable-failure convergence.",
+    "Lifecycle controller tests prove a disabled game performs no pause, initial pre-game watch, conflict-restart watch, or post-game watch while an enabled game retains all four behaviors.",
+    "Status tests verify the exact disabled notice, amber slash icon, normal auto-hide, start publication, explicit exit hide, exit pre-check suppression, and exclusion from silent skip reasons."
+  ],
+  "design_decisions": [
+    "Per-game state is an opt-out set keyed by sanitized canonical Ludusavi game name; absence therefore preserves the enabled default for existing installations.",
+    "PersistenceManager.mutate_settings performs one settings-only, fail-closed transaction so a sibling backend instance cannot erase another game's opt-out during Decky reload overlap.",
+    "Frontend canonical resolution follows backend priority: Steam app ID, alias, normalized exact name, then one backend-eligible fuzzy candidate; unresolved names conservatively retain launch guarding.",
+    "Per-game mutation sequencing is keyed by game name, every successful RPC refreshes the persisted cache, and rollback changes only the failed game using cache state at failure time.",
+    "Disabled games still call lifecycle check RPCs so the backend remains authoritative and can drive the start notice, but they never pause or create Syncthing watches.",
+    "game_sync_disabled is intentionally non-silent: start publishes the informational result, while exit explicitly hides the status and suppresses the frontend checking flash."
+  ],
+  "results": {
+    "automated": "The task-specific suites passed through the implementation commits, culminating in 304 frontend tests, TypeScript checking, frontend build/package validation, Ruff check/format, ty, and 838 Python tests at 88.69% coverage. The orchestration quality gate is run again after this documentation commit before the round-complete marker is written.",
+    "dependencies": "No dependency changes.",
+    "release": "No release, tag, push, or merge is part of this implementation round; approved orchestration finalization owns those actions.",
+    "on_device": "Deferred and not claimed as passed. Steam Deck verification must confirm toggle placement and selected-game updates, persistence through reload/force-quit and multi-game toggles, start-only notice auto-hide, no visible launch pause or restore, no exit backup/post-game watch/history/status strip, app-ID/alias/substring resolution parity, no notice when global Automatic Sync is off, and the new startup_settings_hydrated and App started log fields."
+  }
+}
