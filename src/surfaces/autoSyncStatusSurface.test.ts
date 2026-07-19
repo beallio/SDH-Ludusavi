@@ -25,9 +25,12 @@ describe("AutoSyncStatusSurface Status Pending Upload", () => {
     );
     expect(shouldAutoHideStatus("game_sync_disabled")).toBe(true);
 
+    // Lucide save-off glyph (lu/LuSaveOff), transcribed as a raw SVG string
+    // because the strip is injected HTML, not React.
     const icon = iconSvgForAutoSyncStatus("game_sync_disabled");
-    expect(icon).toContain('<circle cx="10" cy="10"');
-    expect(icon).toContain('stroke="#0b151f"');
+    expect(icon).toContain('viewBox="0 0 24 24"');
+    expect(icon).toContain('d="m2 2 20 20"');
+    expect(icon).toContain('stroke="currentColor"');
 
     const html = renderAutoSyncStatusHtml({
       status: "game_sync_disabled",

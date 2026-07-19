@@ -47,7 +47,12 @@ export function shouldAutoHideStatus(status: AutoSyncStatusKind): boolean {
 
 export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
   if (status === "game_sync_disabled") {
-    return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M5.5 14.5 14.5 5.5" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/></svg>';
+    // Lucide save-off (lu/LuSaveOff), transcribed from react-icons 5.6.0.
+    // This repo pins 5.3.0, which predates the glyph, and the strip is injected
+    // HTML rather than React, so the component itself cannot be used here.
+    // Upstream's 7th path ("M29.5 11.5s5 5 4 5") is omitted: it starts beyond
+    // the 24-wide viewBox and renders nothing.
+    return '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 13H8a1 1 0 0 0-1 1v7"/><path d="M14 8h1"/><path d="M17 21v-4"/><path d="m2 2 20 20"/><path d="M20.41 20.41A2 2 0 0 1 19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 .59-1.41"/><path d="M9 3h6.2a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V15"/></svg>';
   }
   if (status === "conflict" || status === "conflict_unresolved") {
     return '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M10 1.7 19 18.3H1z" fill="currentColor"/><path d="M10 6.2v5.8" stroke="#0b151f" stroke-width="2.1" stroke-linecap="round"/><circle cx="10" cy="15.1" r="1.15" fill="#0b151f"/></svg>';
