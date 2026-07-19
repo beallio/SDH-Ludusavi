@@ -1,0 +1,26 @@
+{
+  "date": "2026-07-19",
+  "task_objective": "Swap the per-game disabled status strip icon to the Lucide save-off glyph (lu/LuSaveOff), following on-device confirmation of the per-game sync toggle feature.",
+  "files_modified": [
+    "docs/plans/2026-07-19_disabled-notice-save-off-icon.md",
+    "docs/agent_conversations/2026-07-19_disabled-notice-save-off-icon.json",
+    "src/surfaces/autoSyncStatusRenderer.tsx",
+    "src/surfaces/autoSyncStatusSurface.test.ts"
+  ],
+  "tests_added": [
+    "Updated the existing per-game disabled notice test to assert the Lucide glyph: 24x24 viewBox, the 'm2 2 20 20' slash stroke, and stroke=\"currentColor\" so the amber .icon colour still applies. Red was confirmed before the implementation edit."
+  ],
+  "design_decisions": [
+    "The status strip is standalone HTML injected into a Steam browser view, not React, so icons are raw SVG strings. The react-icons component cannot be used; the glyph geometry was transcribed from the authoritative react-icons definition rather than hand-drawn.",
+    "No dependency bump. This repo pins react-icons 5.3.0, which predates LuSaveOff (it exposes only LuSave and LuSaveAll); geometry was taken from react-icons 5.6.0 already present on this machine. Because the consumer is a raw string, upgrading the package was unnecessary.",
+    "Upstream's 7th path ('M29.5 11.5s5 5 4 5') was omitted: it begins beyond the 24-wide viewBox and renders nothing. The omission is recorded in a code comment so the divergence from upstream is not mistaken for a transcription error.",
+    "The glyph is stroke-based while sibling icons are fill-based; stroke=\"currentColor\" keeps it inside the existing amber colour group, so no CSS change was needed.",
+    "The test-expectation change is required by the requested behavior change (the icon itself is the deliverable), not a test edited to mask an unrelated failure."
+  ],
+  "results": {
+    "automated": "Targeted suite green (28 tests), then full quality gates: pnpm test, pnpm run build, ruff check/format, ty, pytest.",
+    "dependencies": "No dependency changes.",
+    "scope_note": "The requested auto-hide extension (2s to 3s) was dropped at the user's direction after it was found to be a single shared constant (RESULT_HIDE_DELAY_MS) governing every terminal status strip rather than the disabled notice alone.",
+    "on_device": "The preceding per-game sync toggle feature was confirmed on hardware from pulled Deck logs: sync_disabled_games_count at hydration, game_sync_disabled skip on both start and exit, status published then auto-hidden on start, explicit hide on exit with no lingering strip, no pause or Syncthing watch, and correct app-ID resolution from the Steam launch name to the Ludusavi canonical name. This icon change itself is not yet visually confirmed on device."
+  }
+}
