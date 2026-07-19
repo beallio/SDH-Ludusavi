@@ -323,7 +323,7 @@ describe("AutoSyncStatusSurface Dwell Time", () => {
     );
   });
 
-  it("publishes the disabled notice on start and explicitly hides it on exit", () => {
+  it("publishes the disabled notice on both start and exit, and auto-hides it", () => {
     const disabledResult = {
       status: "skipped",
       reason: "game_sync_disabled",
@@ -356,7 +356,15 @@ describe("AutoSyncStatusSurface Dwell Time", () => {
       tracked: true,
     });
     expect(mockStatusView.sync).toHaveBeenCalledWith(
-      expect.objectContaining({ visible: false, source: "hide" }),
+      expect.objectContaining({ status: "game_sync_disabled", visible: true }),
+    );
+
+    // The exit notice must still auto-hide; a lingering strip after quitting
+    // was a real defect fixed earlier and must not regress.
+    mockStatusView.sync.mockClear();
+    vi.advanceTimersByTime(RESULT_HIDE_DELAY_MS + 1);
+    expect(mockStatusView.sync).toHaveBeenCalledWith(
+      expect.objectContaining({ visible: false }),
     );
   });
 

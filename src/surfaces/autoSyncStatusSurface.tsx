@@ -306,15 +306,15 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
           return;
         }
         if (result.reason === "game_sync_disabled") {
-          if (options.lifecycle === "lifecycle_start") {
-            api.publish("game_sync_disabled", {
-              ...options,
-              source: "rpc_result",
-              resultStatus: result.status,
-            });
-          } else {
-            api.hide({ ...options, source: "hide" });
-          }
+          // Published on both start and exit: the exit notice confirms no
+          // backup ran. The exit handler suppresses the pre-check "checking"
+          // publish for disabled games, so this replaces that flash rather
+          // than following it.
+          api.publish("game_sync_disabled", {
+            ...options,
+            source: "rpc_result",
+            resultStatus: result.status,
+          });
           return;
         }
         if (result.reason === "local_current") {

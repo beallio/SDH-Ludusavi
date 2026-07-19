@@ -1,0 +1,25 @@
+{
+  "date": "2026-07-19",
+  "task_objective": "Show the per-game disabled notice when exiting a disabled game, not only when starting one, reversing the earlier start-only decision.",
+  "files_modified": [
+    "README.md",
+    "docs/plans/2026-07-19_disabled-notice-on-exit.md",
+    "docs/agent_conversations/2026-07-19_disabled-notice-on-exit.json",
+    "src/surfaces/autoSyncStatusSurface.tsx",
+    "src/surfaces/autoSyncStatusSurface.test.ts"
+  ],
+  "tests_added": [
+    "Inverted the existing exit assertion from an explicit hide to a published game_sync_disabled status, and extended it to advance past RESULT_HIDE_DELAY_MS so the exit notice is proven to auto-hide. Red was confirmed before the implementation edit."
+  ],
+  "design_decisions": [
+    "Only the surface complete() mapping changed. Both check_game_start and check_game_exit already returned the same skip reason, and evaluateExitCheck already forwarded non-silent skips to completeStatus, so no backend or decision-layer change was required.",
+    "The exit handler's suppression of the pre-check 'checking' publish is retained: nothing is meaningfully verified for a disabled game, so the strip shows the disabled notice directly instead of flashing VERIFYING GAME SAVE first.",
+    "Auto-hide coverage was deliberately added to the exit path. A lingering exit strip was a real defect found during review of the original feature; publishing on exit re-enters that code path, so the regression guard is now explicit rather than implied."
+  ],
+  "results": {
+    "automated": "Targeted suite green (28 tests), then full quality gates: pnpm test, pnpm run build, ruff check/format, ty, pytest.",
+    "dependencies": "No dependency changes.",
+    "on_device": "Deferred and not claimed as passed. Deck verification should confirm the notice appears on quitting a disabled game and clears on its own, with no lingering strip.",
+    "known_issue_not_addressed": "A separate pre-existing defect was diagnosed during this session and deliberately left untouched: settings mutation responses call applySettings wholesale, which overwrites the displayed selected game because ludusaviState conflates ephemeral view selection with the persisted preference. That fix is being planned separately."
+  }
+}
