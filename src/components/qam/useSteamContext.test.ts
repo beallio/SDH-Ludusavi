@@ -1,4 +1,5 @@
 import { vi, describe, it, expect } from "vitest";
+import * as React from "react";
 import { useSteamContext, selectCurrentSteamGameIfAvailable } from "./useSteamContext";
 import { resolveQamOpenSelection } from "./qamOpenSelection";
 import * as steamUtils from "../../utils/steam";
@@ -7,7 +8,7 @@ vi.mock("react", () => ({
   useCallback: (fn: any) => fn,
   useState: (initial: any) => [initial, vi.fn()],
   useRef: (initial: any) => ({ current: initial }),
-  useEffect: (fn: any) => { fn(); },
+  useEffect: vi.fn((fn: any) => { fn(); }),
 }));
 
 vi.mock("../../utils/steam", () => ({
@@ -60,19 +61,30 @@ describe("useSteamContext", () => {
       qamContentRef: { current: null },
       setDisplayedGame,
       resolveQamOpenSelection,
-      explicitSelectionPending: false,
+      isExplicitSelectionPending: () => false,
       onExplicitSelectionConsumed: vi.fn(),
     });
 
     expect(setDisplayedGame).not.toHaveBeenCalled();
   });
 
-  it("consumes an explicit selection once without selecting the running game", () => {
+  it("reads explicit selection state when the selection effect runs", () => {
     vi.stubGlobal("window", { setTimeout: vi.fn() });
-    const setDisplayedGame = vi.fn();
     const onExplicitSelectionConsumed = vi.fn();
+    const queuedSelectionEffects: Array<() => void> = [];
+    let explicitSelectionPending = false;
+
+    vi.mocked(steamUtils.getPreferredSteamGameSession).mockReturnValue({ appid: "123" } as any);
+    vi.mocked(steamUtils.findGameForRunningSession).mockReturnValue({
+      game: { name: "Running Game" },
+      reason: "test",
+    } as any);
 
     try {
+      vi.mocked(React.useEffect)
+        .mockImplementationOnce((effect: any) => { effect(); })
+        .mockImplementationOnce((effect: any) => { queuedSelectionEffects.push(effect); });
+      const setDisplayedGameWhilePending = vi.fn();
       useSteamContext({
         isQuickAccessVisible: true,
         games: [{ name: "Test" } as any],
@@ -81,13 +93,40 @@ describe("useSteamContext", () => {
         settingsLoaded: true,
         operationInProgress: false,
         qamContentRef: { current: null },
-        setDisplayedGame,
+        setDisplayedGame: setDisplayedGameWhilePending,
         resolveQamOpenSelection,
-        explicitSelectionPending: true,
+        isExplicitSelectionPending: () => explicitSelectionPending,
         onExplicitSelectionConsumed,
       });
 
-      expect(setDisplayedGame).not.toHaveBeenCalled();
+      explicitSelectionPending = true;
+      queuedSelectionEffects.shift()?.();
+
+      expect(setDisplayedGameWhilePending).not.toHaveBeenCalled();
+      expect(onExplicitSelectionConsumed).toHaveBeenCalledTimes(1);
+
+      vi.mocked(React.useEffect)
+        .mockImplementationOnce((effect: any) => { effect(); })
+        .mockImplementationOnce((effect: any) => { queuedSelectionEffects.push(effect); });
+      const setDisplayedGameWithoutPending = vi.fn();
+      useSteamContext({
+        isQuickAccessVisible: true,
+        games: [{ name: "Test" } as any],
+        gameAliases: {},
+        selectedGame: "Test",
+        settingsLoaded: true,
+        operationInProgress: false,
+        qamContentRef: { current: null },
+        setDisplayedGame: setDisplayedGameWithoutPending,
+        resolveQamOpenSelection,
+        isExplicitSelectionPending: () => explicitSelectionPending,
+        onExplicitSelectionConsumed,
+      });
+
+      explicitSelectionPending = false;
+      queuedSelectionEffects.shift()?.();
+
+      expect(setDisplayedGameWithoutPending).toHaveBeenCalledWith("Running Game");
       expect(onExplicitSelectionConsumed).toHaveBeenCalledTimes(1);
     } finally {
       vi.unstubAllGlobals();
