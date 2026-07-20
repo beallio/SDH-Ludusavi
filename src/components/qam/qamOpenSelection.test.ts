@@ -9,6 +9,7 @@ describe("resolveQamOpenSelection", () => {
         pendingSelection: true,
         gameCount: 1,
         operationInProgress: false,
+        explicitSelectionPending: false,
       })
     ).toBe("wait");
   });
@@ -20,6 +21,7 @@ describe("resolveQamOpenSelection", () => {
         pendingSelection: false,
         gameCount: 1,
         operationInProgress: false,
+        explicitSelectionPending: false,
       })
     ).toBe("wait");
   });
@@ -31,6 +33,7 @@ describe("resolveQamOpenSelection", () => {
         pendingSelection: true,
         gameCount: 0,
         operationInProgress: false,
+        explicitSelectionPending: false,
       })
     ).toBe("wait");
   });
@@ -42,6 +45,7 @@ describe("resolveQamOpenSelection", () => {
         pendingSelection: true,
         gameCount: 1,
         operationInProgress: true,
+        explicitSelectionPending: false,
       })
     ).toBe("consume");
   });
@@ -53,7 +57,44 @@ describe("resolveQamOpenSelection", () => {
         pendingSelection: true,
         gameCount: 1,
         operationInProgress: false,
+        explicitSelectionPending: false,
       })
     ).toBe("select");
+  });
+
+  it("returns consume when an explicit selection is pending", () => {
+    expect(
+      resolveQamOpenSelection({
+        isQuickAccessVisible: true,
+        pendingSelection: true,
+        gameCount: 1,
+        operationInProgress: false,
+        explicitSelectionPending: true,
+      })
+    ).toBe("consume");
+  });
+
+  it("returns wait while hidden even when an explicit selection is pending", () => {
+    expect(
+      resolveQamOpenSelection({
+        isQuickAccessVisible: false,
+        pendingSelection: true,
+        gameCount: 1,
+        operationInProgress: false,
+        explicitSelectionPending: true,
+      })
+    ).toBe("wait");
+  });
+
+  it("returns consume before checking an operation in progress", () => {
+    expect(
+      resolveQamOpenSelection({
+        isQuickAccessVisible: true,
+        pendingSelection: true,
+        gameCount: 1,
+        operationInProgress: true,
+        explicitSelectionPending: true,
+      })
+    ).toBe("consume");
   });
 });
