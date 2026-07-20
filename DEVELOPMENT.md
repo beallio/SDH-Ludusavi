@@ -141,6 +141,8 @@ Runtime settings are stored through Decky's `SettingsManager` in `DECKY_PLUGIN_S
 
 The frontend deliberately keeps two game-selection values with different lifetimes. `selectedGame` is ephemeral view state: it identifies the game currently displayed in the QAM and may change through Steam-context selection, refresh resolution, or a manual dropdown choice. `settings.selected_game` is the persisted fallback preference. Within frontend settings mutations, only `onGameChange` writes that preference. `applySettings` must never change `selectedGame`; hydration may seed the displayed game from the persisted preference only while the displayed value is empty.
 
+A deliberate dropdown choice suppresses exactly one subsequent Steam-context auto-selection while the QAM is visible, preventing dropdown-induced visibility churn from replacing that choice with the running game. The suppression is one-shot: after it is consumed, a genuine QAM close and reopen still auto-selects the running game.
+
 `plugin.json` does not request Decky's `_root` flag. The backend runs as the Decky user so the Ludusavi Flatpak can see that user's Ludusavi configuration, backup metadata, and Flatpak runtime state.
 
 ## Ludusavi Integration Details
