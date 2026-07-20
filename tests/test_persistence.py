@@ -2,6 +2,7 @@ from __future__ import annotations
 from sdh_ludusavi.persistence import JsonSettingsStore
 
 import fcntl
+import json
 import threading
 import logging
 from pathlib import Path
@@ -34,6 +35,42 @@ def test_persistence_manager_split_storage(tmp_path: Path) -> None:
     data_reloaded = pm.load_all()
     assert data_reloaded["settings"]["auto_sync_enabled"] is True
     assert data_reloaded["cache"]["games"] == []
+
+
+def test_mutate_settings_updates_only_settings_under_one_transaction(tmp_path: Path) -> None:
+    settings_file = tmp_path / "settings.json"
+    cache_file = tmp_path / "cache.json"
+    settings_file.write_text('{"auto_sync_enabled": true}', encoding="utf-8")
+    cache_file.write_text('{"sentinel": true}', encoding="utf-8")
+    pm = PersistenceManager(
+        settings_store=JsonSettingsStore(settings_file),
+        cache_path=cache_file,
+    )
+
+    result = pm.mutate_settings(lambda settings: {**settings, "sync_disabled_games": ["Hades"]})
+
+    assert result == {
+        "auto_sync_enabled": True,
+        "sync_disabled_games": ["Hades"],
+    }
+    assert json.loads(settings_file.read_text(encoding="utf-8")) == result
+    assert cache_file.read_text(encoding="utf-8") == '{"sentinel": true}'
+
+
+def test_mutate_settings_propagates_invalid_json_without_writing(tmp_path: Path) -> None:
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text("{", encoding="utf-8")
+    pm = PersistenceManager(
+        settings_store=JsonSettingsStore(settings_file),
+        cache_path=tmp_path / "cache.json",
+    )
+
+    import pytest
+
+    with pytest.raises(json.JSONDecodeError):
+        pm.mutate_settings(lambda settings: {**settings, "sync_disabled_games": []})
+
+    assert settings_file.read_text(encoding="utf-8") == "{"
 
 
 def test_locked_creates_lock_file_and_is_reentrant(tmp_path: Path) -> None:

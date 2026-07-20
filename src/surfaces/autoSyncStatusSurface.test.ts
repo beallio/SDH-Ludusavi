@@ -19,6 +19,28 @@ vi.mock("@decky/ui", () => ({
 }));
 
 describe("AutoSyncStatusSurface Status Pending Upload", () => {
+  it("defines and renders the per-game disabled notice as an auto-hiding amber status", () => {
+    expect(autoSyncStatusText.game_sync_disabled).toBe(
+      "SAVE SYNC DISABLED FOR THIS GAME",
+    );
+    expect(shouldAutoHideStatus("game_sync_disabled")).toBe(true);
+
+    // Lucide save-off glyph (lu/LuSaveOff), transcribed as a raw SVG string
+    // because the strip is injected HTML, not React.
+    const icon = iconSvgForAutoSyncStatus("game_sync_disabled");
+    expect(icon).toContain('viewBox="0 0 24 24"');
+    expect(icon).toContain('d="m2 2 20 20"');
+    expect(icon).toContain('stroke="currentColor"');
+
+    const html = renderAutoSyncStatusHtml({
+      status: "game_sync_disabled",
+      visible: true,
+      source: "rpc_result",
+    });
+    expect(html).toContain("SAVE SYNC DISABLED FOR THIS GAME");
+    expect(html).toContain("#f59e0b");
+  });
+
   it("should have correct display text for syncthing_pending_upload", () => {
     expect(autoSyncStatusText.syncthing_pending_upload).toBe("SYNCTHING PREPARING");
   });
@@ -298,6 +320,51 @@ describe("AutoSyncStatusSurface Dwell Time", () => {
     vi.advanceTimersByTime(RESULT_HIDE_DELAY_MS);
     expect(mockStatusView.sync).toHaveBeenCalledWith(
       expect.objectContaining({ status: "conflict_unresolved", visible: false }),
+    );
+  });
+
+  it("publishes the disabled notice on both start and exit, and auto-hides it", () => {
+    const disabledResult = {
+      status: "skipped",
+      reason: "game_sync_disabled",
+      game: "Hades",
+    };
+
+    surface.complete(disabledResult, {
+      lifecycle: "lifecycle_start",
+      gameName: "Hades",
+      appID: "1145300",
+      tracked: true,
+    });
+    expect(mockStatusView.sync).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "game_sync_disabled", visible: true }),
+    );
+
+    mockStatusView.sync.mockClear();
+    surface.publish("checking", {
+      source: "lifecycle_exit",
+      gameName: "Hades",
+      appID: "1145300",
+      tracked: true,
+    });
+    vi.advanceTimersByTime(0);
+    mockStatusView.sync.mockClear();
+    surface.complete(disabledResult, {
+      lifecycle: "lifecycle_exit",
+      gameName: "Hades",
+      appID: "1145300",
+      tracked: true,
+    });
+    expect(mockStatusView.sync).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "game_sync_disabled", visible: true }),
+    );
+
+    // The exit notice must still auto-hide; a lingering strip after quitting
+    // was a real defect fixed earlier and must not regress.
+    mockStatusView.sync.mockClear();
+    vi.advanceTimersByTime(RESULT_HIDE_DELAY_MS + 1);
+    expect(mockStatusView.sync).toHaveBeenCalledWith(
+      expect.objectContaining({ visible: false }),
     );
   });
 

@@ -173,13 +173,14 @@ export function createGameLifecycleController(
     const isTrackingReady = trackingReadiness === "ready";
     const tracked = isTracked(name, appID);
     const guardCandidate = tracked || !isTrackingReady;
-    log("info", `App started: ${name} (${appID}) tracked=${tracked} tracking_readiness=${trackingReadiness} guard_candidate=${guardCandidate}`);
+    const autoSyncEnabled = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
+    const gameSyncDisabled = ludusaviStore.isGameSyncDisabled(name, appID);
+    log("info", `App started: ${name} (${appID}) tracked=${tracked} tracking_readiness=${trackingReadiness} guard_candidate=${guardCandidate} game_sync_disabled=${gameSyncDisabled}`);
     if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
       publishAutoSyncStatus("checking", { source: "lifecycle_start", gameName: name, appID, tracked });
     } else {
       logPreRpcStatusBarSuppressed("start", name, tracked);
     }
-    const autoSyncEnabled = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
     let preGameWatch: SyncthingWatchSession | null = null;
     let state: StartState = {
       name, appID, instanceID, tracked, autoSyncEnabled,
@@ -187,7 +188,7 @@ export function createGameLifecycleController(
     };
     let pauseHandle: PauseLeaseHandle | undefined;
     try {
-      const shouldPauseLaunch = autoSyncEnabled && guardCandidate && typeof instanceID === "number" && instanceID > 1;
+      const shouldPauseLaunch = autoSyncEnabled && !gameSyncDisabled && guardCandidate && typeof instanceID === "number" && instanceID > 1;
       if (shouldPauseLaunch) {
         const pauseResult = await pauseGameProcess(instanceID);
         if (!isRpcStatus(pauseResult) && pauseResult.status === "paused") {
@@ -200,7 +201,7 @@ export function createGameLifecycleController(
           activeLeases.add(pauseHandle);
         }
       }
-      if (autoSyncEnabled && guardCandidate) {
+      if (autoSyncEnabled && !gameSyncDisabled && guardCandidate) {
         activeMonitorEpoch = epoch;
         preGameWatch = syncthingMonitor.start("pre_game", name, appID);
         state.watchActive = true;
@@ -270,7 +271,7 @@ export function createGameLifecycleController(
         Object.assign(state, dec3.stateUpdates);
 
         if (resolution) {
-          if (autoSyncEnabled && guardCandidate) {
+          if (autoSyncEnabled && !ludusaviStore.isGameSyncDisabled(name, appID) && guardCandidate) {
             activeMonitorEpoch = epoch;
             preGameWatch = syncthingMonitor.start("pre_game", name, appID);
             state.watchActive = true;
@@ -324,22 +325,22 @@ export function createGameLifecycleController(
     const isTrackingReady = trackingReadiness === "ready";
     const tracked = isTracked(name, appID);
     const guardCandidate = tracked || !isTrackingReady;
-    log("info", `App exited: ${name} (${appID}) tracked=${tracked} tracking_readiness=${trackingReadiness} guard_candidate=${guardCandidate}`);
-
     const autoSyncEnabledExit = ludusaviStore.getSnapshot().settings?.auto_sync_enabled === true;
+    const gameSyncDisabledExit = ludusaviStore.isGameSyncDisabled(name, appID);
+    log("info", `App exited: ${name} (${appID}) tracked=${tracked} tracking_readiness=${trackingReadiness} guard_candidate=${guardCandidate} game_sync_disabled=${gameSyncDisabledExit}`);
     let postGameWatch: SyncthingWatchSession | null = null;
     let state: ExitState = {
       name, appID, tracked, autoSyncEnabled: autoSyncEnabledExit,
       watchActive: false, handoffTransferred: false
     };
 
-    if (autoSyncEnabledExit) {
+    if (autoSyncEnabledExit && !gameSyncDisabledExit) {
       activeMonitorEpoch = epoch;
       postGameWatch = syncthingMonitor.start("post_game", name, appID);
       state.watchActive = true;
     }
 
-    if (shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
+    if (!gameSyncDisabledExit && shouldPublishAutoSyncStatusBeforeRpc(ludusaviStore, tracked)) {
       publishAutoSyncStatus("checking", { source: "lifecycle_exit", gameName: name, appID, tracked });
     } else {
       logPreRpcStatusBarSuppressed("exit", name, tracked);

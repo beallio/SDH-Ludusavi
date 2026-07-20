@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { resolveRefreshedSelection } from "./refreshSelection";
+import {
+  resolveAppliedSelection,
+  resolveRefreshedSelection,
+} from "./refreshSelection";
 
 describe("resolveRefreshedSelection", () => {
   const games = [{ name: "A" }, { name: "B" }, { name: "C" }];
@@ -36,5 +39,48 @@ describe("resolveRefreshedSelection", () => {
       currentSelectedGame: "A",
     });
     expect(result).toEqual({ source: "none", game: "" });
+  });
+});
+
+describe("resolveAppliedSelection", () => {
+  const games = [{ name: "A" }, { name: "B" }];
+
+  it("keeps a valid live selection ahead of the persisted preference", () => {
+    expect(
+      resolveAppliedSelection({
+        games,
+        preferredGame: "B",
+        liveSelection: "A",
+      }),
+    ).toEqual({ source: "preferred", game: "A" });
+  });
+
+  it("uses the persisted preference when the live selection is empty", () => {
+    expect(
+      resolveAppliedSelection({
+        games,
+        preferredGame: "B",
+        liveSelection: "",
+      }),
+    ).toEqual({ source: "preferred", game: "B" });
+  });
+
+  it("uses a valid persisted preference when the live selection is stale", () => {
+    expect(
+      resolveAppliedSelection({
+        games,
+        preferredGame: "B",
+        liveSelection: "Z",
+      }),
+    ).toEqual({ source: "preferred", game: "B" });
+  });
+
+  it("falls back to the first game without a preference or live selection", () => {
+    expect(
+      resolveAppliedSelection({
+        games,
+        liveSelection: "",
+      }),
+    ).toEqual({ source: "first", game: "A" });
   });
 });

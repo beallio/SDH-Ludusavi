@@ -28,6 +28,7 @@ def test_game_lifecycle_delegates_to_dependencies() -> None:
         is_coordinator_running=is_coordinator_running,
         run_locked=run_locked,
         is_auto_sync_enabled=is_auto_sync_enabled,
+        is_game_sync_enabled=lambda _name: True,
         log=log,
         skip=skip,
         conflict_metadata=conflict_metadata,

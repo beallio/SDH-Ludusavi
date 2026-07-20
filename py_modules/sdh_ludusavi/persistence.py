@@ -7,7 +7,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Callable, Protocol, cast
 
 LOGGER = logging.getLogger("sdh_ludusavi.service.persistence")
 
@@ -198,6 +198,16 @@ class PersistenceManager:
         """Save settings payload."""
         with self._lock:
             self._settings_store.write(settings_data)
+
+    def mutate_settings(
+        self, mutator: Callable[[dict[str, Any]], dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Locked read-modify-write over the settings file only."""
+        with self._lock:
+            settings = cast(dict[str, Any], self._settings_store.read())
+            updated = mutator(settings)
+            self._settings_store.write(updated)
+            return updated
 
     def save_cache(self, cache_data: dict[str, Any]) -> None:
         """Save cache payload."""

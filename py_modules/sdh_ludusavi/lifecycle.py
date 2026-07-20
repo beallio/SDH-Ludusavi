@@ -66,6 +66,7 @@ class LifecycleDependencies:
     is_coordinator_running: Callable[[], bool]
     run_locked: Callable[..., Any]
     is_auto_sync_enabled: Callable[[], bool]
+    is_game_sync_enabled: Callable[[str], bool]
     log: Callable[..., None]
     skip: Callable[[str, str, str], dict[str, object]]
     conflict_metadata: Callable[[str], dict[str, object]]
@@ -196,6 +197,8 @@ class GameLifecycleManager:
         game = self.dependencies.registry.match_game(game_name, app_id=app_id)
         if game is None:
             return self.dependencies.skip("start", game_name, "unmatched_game")
+        if not self.dependencies.is_game_sync_enabled(game.name):
+            return self.dependencies.skip("start", game.name, "game_sync_disabled")
         if not game.has_backup:
             return self.dependencies.skip("start", game.name, "no_backup")
         if game.error:
@@ -282,6 +285,8 @@ class GameLifecycleManager:
         game = self.dependencies.registry.match_game(game_name, app_id=app_id)
         if game is None:
             return self.dependencies.skip("start", game_name, "unmatched_game")
+        if not self.dependencies.is_game_sync_enabled(game.name):
+            return self.dependencies.skip("start", game.name, "game_sync_disabled")
         if game.error:
             return self.dependencies.skip("start", game.name, "game_error")
 
@@ -334,6 +339,8 @@ class GameLifecycleManager:
         game = self.dependencies.registry.match_game(game_name, app_id=app_id)
         if game is None:
             return self.dependencies.skip("start", game_name, "unmatched_game")
+        if not self.dependencies.is_game_sync_enabled(game.name):
+            return self.dependencies.skip("start", game.name, "game_sync_disabled")
         if not game.has_backup:
             return self.dependencies.skip("start", game.name, "no_backup")
         if game.error:
@@ -375,6 +382,8 @@ class GameLifecycleManager:
         game = self.dependencies.registry.match_game(game_name, app_id=app_id)
         if game is None:
             return self.dependencies.skip("exit", game_name, "unmatched_game")
+        if not self.dependencies.is_game_sync_enabled(game.name):
+            return self.dependencies.skip("exit", game.name, "game_sync_disabled")
         if game.error:
             return self.dependencies.skip("exit", game.name, "game_error")
 
@@ -434,6 +443,8 @@ class GameLifecycleManager:
         game = self.dependencies.registry.match_game(game_name, app_id=app_id)
         if game is None:
             return self.dependencies.skip("exit", game_name, "unmatched_game")
+        if not self.dependencies.is_game_sync_enabled(game.name):
+            return self.dependencies.skip("exit", game.name, "game_sync_disabled")
         if game.error:
             return self.dependencies.skip("exit", game.name, "game_error")
 

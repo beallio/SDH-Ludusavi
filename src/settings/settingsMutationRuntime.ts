@@ -4,6 +4,7 @@ import { SingleDropdownOption } from "@decky/ui";
 import {
   setAutomaticUpdateChecksCall,
   setAutoSyncEnabled,
+  setGameSyncEnabledCall,
   setNotificationSettings,
   setSelectedGameCall,
   setUpdateChannelCall,
@@ -34,12 +35,14 @@ export function createSettingsMutationRuntime() {
   let settingsProcessing = false;
   let mutationGeneration = 0;
   let autoSyncSeq = 0;
+  const gameSyncSeq = new Map<string, number>();
   let notificationSeq = 0;
   let selectedGameSeq = 0;
   let updateChannelSeq = 0;
   let automaticUpdateChecksSeq = 0;
   let debugLoggingSeq = 0;
   let lastPersistedAutoSync: boolean | null = null;
+  let lastPersistedSyncDisabledGames: string[] | null = null;
   let lastPersistedNotifications: NotificationSettings | null = null;
   let lastPersistedUpdateChannel: UpdateChannel | null = null;
   let lastPersistedAutomaticUpdateChecks: boolean | null = null;
@@ -98,6 +101,7 @@ export function createSettingsMutationRuntime() {
     if (normalized.auto_sync_enabled !== undefined) {
       lastPersistedAutoSync = normalized.auto_sync_enabled;
     }
+    lastPersistedSyncDisabledGames = normalized.sync_disabled_games;
     if (normalized.notifications) {
       lastPersistedNotifications = normalized.notifications;
     }
@@ -171,7 +175,7 @@ export function createSettingsMutationRuntime() {
       rpcCall: () => Promise<T | import("../types").RpcStatus>;
       applyResult: (res: T, isLatestGeneration: boolean) => void;
       rollbackUpdate: (fallback: V) => void;
-      getPersistedValue: (res: T) => V;
+      getPersistedValue: (res: T) => V | string[];
     };
 
     const mutateSetting = <T extends Settings, V extends import("../utils/logging").LogFieldValue>({
@@ -229,9 +233,12 @@ export function createSettingsMutationRuntime() {
           }
           if (updateSeq === readSeq()) {
             applyResult(result as T, startedGeneration >= mutationGeneration);
+            const persistedValue = getPersistedValue(result as T);
             logSettingsEvent("settings_change_persisted", settingKey, {
               sequence: updateSeq,
-              value: getPersistedValue(result as T),
+              value: Array.isArray(persistedValue)
+                ? JSON.stringify(persistedValue)
+                : persistedValue,
             }, gameName ? "info" : undefined, gameName);
           } else {
             logSettingsEvent("settings_change_superseded", settingKey, {
@@ -277,6 +284,48 @@ export function createSettingsMutationRuntime() {
         },
         rollbackUpdate: (fallback) => ludusaviStore.setAutoSyncEnabled(fallback),
         getPersistedValue: (res) => res.auto_sync_enabled
+      });
+    };
+
+    const toggleGameSync = (gameName: string, enabled: boolean) => {
+      const updateSeq = (gameSyncSeq.get(gameName) ?? 0) + 1;
+      gameSyncSeq.set(gameName, updateSeq);
+      mutateSetting<Settings, boolean>({
+        updateSeq,
+        readSeq: () => gameSyncSeq.get(gameName) ?? 0,
+        settingKey: "sync_disabled_games",
+        settingValue: enabled,
+        gameName,
+        logExecute: `Executing game sync toggle for ${gameName} to ${enabled}`,
+        logLateResolution: `Late resolution of setGameSyncEnabledCall for ${gameName} to ${enabled} succeeded`,
+        logLateFailure: `Late failure of setGameSyncEnabledCall for ${gameName} to ${enabled}`,
+        logError: `Failed to toggle game sync for ${gameName}`,
+        timeoutMessage: "Setting game sync timed out",
+        fallbackValue: !(lastPersistedSyncDisabledGames ?? []).includes(gameName),
+        optimisticUpdate: () => ludusaviStore.setGameSyncEnabled(gameName, enabled),
+        rpcCall: async () => {
+          const res = await setGameSyncEnabledCall(gameName, enabled);
+          if (!isRpcStatus(res)) {
+            lastPersistedSyncDisabledGames = res.sync_disabled_games;
+          }
+          return res;
+        },
+        applyResult: (res, isLatest) => {
+          if (isLatest) {
+            applySettings(ludusaviStore, res);
+          } else {
+            ludusaviStore.setGameSyncEnabled(
+              gameName,
+              !res.sync_disabled_games.includes(gameName),
+            );
+          }
+        },
+        rollbackUpdate: () =>
+          ludusaviStore.setGameSyncEnabled(
+            gameName,
+            !(lastPersistedSyncDisabledGames ?? []).includes(gameName),
+          ),
+        getPersistedValue: (res) => res.sync_disabled_games,
       });
     };
 
@@ -424,7 +473,7 @@ export function createSettingsMutationRuntime() {
         logError: `Failed to persist selected game`,
         timeoutMessage: "Selecting game timed out",
         fallbackValue: lastPersistedSelectedGame ?? "",
-        optimisticUpdate: () => ludusaviStore.setSelectedGame(value),
+        optimisticUpdate: () => ludusaviStore.setDisplayedGame(value),
         rpcCall: () => setSelectedGameCall(value),
         applyResult: (res, isLatest) => {
           if (isLatest) applySettings(ludusaviStore, res);
@@ -434,7 +483,7 @@ export function createSettingsMutationRuntime() {
           }
         },
         rollbackUpdate: (fallback) => {
-          ludusaviStore.setSelectedGame(fallback);
+          ludusaviStore.setDisplayedGame(fallback);
           lastQueuedSelectedGame = fallback;
         },
         getPersistedValue: (res) => res.selected_game
@@ -444,6 +493,7 @@ export function createSettingsMutationRuntime() {
     return {
       onGameChange,
       toggleAutoSync,
+      toggleGameSync,
       toggleAutomaticUpdateChecks,
       toggleNotificationSetting,
       toggleUpdateChannel,
@@ -456,12 +506,14 @@ export function createSettingsMutationRuntime() {
     settingsProcessing = false;
     mutationGeneration = 0;
     autoSyncSeq = 0;
+    gameSyncSeq.clear();
     notificationSeq = 0;
     selectedGameSeq = 0;
     updateChannelSeq = 0;
     automaticUpdateChecksSeq = 0;
     debugLoggingSeq = 0;
     lastPersistedAutoSync = null;
+    lastPersistedSyncDisabledGames = null;
     lastPersistedNotifications = null;
     lastPersistedUpdateChannel = null;
     lastPersistedAutomaticUpdateChecks = null;

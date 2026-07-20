@@ -129,6 +129,7 @@ def _make_manager(
         is_coordinator_running=MagicMock(return_value=False),
         run_locked=MagicMock(side_effect=lambda _lock, _name, fn: fn()),
         is_auto_sync_enabled=MagicMock(return_value=True),
+        is_game_sync_enabled=lambda _name: True,
         log=MagicMock(),
         skip=MagicMock(return_value={"status": "skipped"}),
         conflict_metadata=MagicMock(
