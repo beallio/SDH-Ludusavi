@@ -14,7 +14,8 @@
   "tests_added": [
     "Decision-function tests prove an explicit selection consumes a visible pending arm instead of selecting, remains pending while hidden, and takes precedence over operation-in-progress handling.",
     "Existing decision cases now explicitly prove that false explicitSelectionPending preserves their prior wait, consume, and select outcomes.",
-    "The useSteamContext regression proves an explicit selection does not call the displayed-game setter and invokes onExplicitSelectionConsumed exactly once."
+    "The useSteamContext regression proves an explicit selection does not call the displayed-game setter and invokes onExplicitSelectionConsumed exactly once.",
+    "The review-round regression defers the selection effect, changes the ref-backed value after the hook call, and proves the effect consumes false-to-true state while selecting the running game for true-to-false state."
   ],
   "design_decisions": [
     "The fix uses the plan-mandated one-shot ref signal with no timer or QAM-close duration heuristic.",
@@ -22,10 +23,11 @@
     "The dropdown wrapper sets explicitSelectionRef before delegating to onGameChange, and useSteamContext clears the flag only when it consumes the pending auto-selection arm.",
     "The applyCachedRefreshResult and applyRefreshResult Steam-context selection paths were considered and deliberately excluded. Their allowSteamContextSelection=true callers are initial-load paths, not dropdown interactions, so both call sites remain unchanged.",
     "Known limitation accepted by the plan: if a future Steam build stops changing QAM visibility when the dropdown opens, the one-shot flag would be consumed by the next genuine reopen and one running-game auto-selection would be missed. No timeout was added.",
-    "No backend, dependency, GameSettingsSection, or refresh-path behavior changed."
+    "No backend, dependency, GameSettingsSection, or refresh-path behavior changed.",
+    "The review-round fix passes isExplicitSelectionPending as a getter and reads it once inside the selection effect. This avoids depending on a non-reactive render-time ref snapshot or incidental callback identity changes."
   ],
   "results": {
-    "tdd": "The focused red run failed because explicit selection still resolved to select and setDisplayedGame was called. After implementation, both focused test files passed all 12 tests and TypeScript typecheck passed.",
+    "tdd": "The initial focused red run failed because explicit selection still resolved to select and setDisplayedGame was called. In the review round, the deferred-effect regression failed because the snapshot-based API selected Running Game after the ref-backed value changed; after the getter implementation, both focused test files passed all 12 tests.",
     "automated": "The behavior-commit hook passed Ruff, formatting, ty, 839 Python tests at 88.69% coverage, frontend supply-chain checks, build, TypeScript typecheck, and 317 frontend tests. The orchestration quality gate is run once more after this documentation commit before the round-complete marker is written.",
     "dependencies": "No dependency changes.",
     "scope": "Frontend-only; no py_modules backend file changed, GameSettingsSection.tsx was untouched, and both refresh-path selectCurrentSteamGameIfAvailable call sites remain unchanged.",

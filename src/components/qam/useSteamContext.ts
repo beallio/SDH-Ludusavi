@@ -8,6 +8,7 @@ import {
   resetQuickAccessScroll
 } from "../../utils/steam";
 import { logUiEvent } from "../../utils/logging";
+
 export function selectCurrentSteamGameIfAvailable(
   currentGames: readonly GameStatus[],
   currentAliases: Record<string, string>,
@@ -46,7 +47,7 @@ export type UseSteamContextOptions = {
   qamContentRef: React.RefObject<HTMLDivElement | null>;
   setDisplayedGame: (gameName: string) => void;
   resolveQamOpenSelection: (args: any) => "wait" | "consume" | "select";
-  explicitSelectionPending: boolean;
+  isExplicitSelectionPending: () => boolean;
   onExplicitSelectionConsumed: () => void;
 };
 
@@ -60,7 +61,7 @@ export function useSteamContext({
   qamContentRef,
   setDisplayedGame,
   resolveQamOpenSelection,
-  explicitSelectionPending,
+  isExplicitSelectionPending,
   onExplicitSelectionConsumed
 }: UseSteamContextOptions) {
   const wasQuickAccessVisible = useRef(false);
@@ -93,6 +94,7 @@ export function useSteamContext({
   }, [isQuickAccessVisible, games.length, selectedGame, settingsLoaded, qamContentRef]);
 
   useEffect(() => {
+    const explicitSelectionPending = isExplicitSelectionPending();
     const action = resolveQamOpenSelection({
       isQuickAccessVisible,
       pendingSelection: pendingCurrentGameSelection.current,
@@ -112,9 +114,7 @@ export function useSteamContext({
     }
     selectCurrentSteamGameIfAvailable(games, gameAliases, setDisplayedGame);
     pendingCurrentGameSelection.current = false;
-  }, [
-    gameAliases, games, isQuickAccessVisible, operationInProgress,
-    setDisplayedGame, resolveQamOpenSelection,
-    explicitSelectionPending, onExplicitSelectionConsumed
+  }, [gameAliases, games, isQuickAccessVisible, operationInProgress, setDisplayedGame,
+    resolveQamOpenSelection, isExplicitSelectionPending, onExplicitSelectionConsumed
   ]);
 }

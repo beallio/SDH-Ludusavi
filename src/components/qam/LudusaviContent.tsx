@@ -160,7 +160,7 @@ export function LudusaviContent({
     qamContentRef,
     setDisplayedGame: (gameName) => ludusaviStore.setDisplayedGame(gameName),
     resolveQamOpenSelection,
-    explicitSelectionPending: explicitSelectionRef.current,
+    isExplicitSelectionPending: () => explicitSelectionRef.current,
     onExplicitSelectionConsumed: () => {
       explicitSelectionRef.current = false;
     },
