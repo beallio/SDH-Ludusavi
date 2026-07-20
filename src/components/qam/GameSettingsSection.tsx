@@ -4,7 +4,8 @@ import {
   Field,
   PanelSection,
   PanelSectionRow,
-  SingleDropdownOption
+  SingleDropdownOption,
+  ToggleField
 } from "@decky/ui";
 import type { ReactNode } from "react";
 
@@ -30,6 +31,8 @@ type GameSettingsSectionProps = {
   onGameChange: (data: SingleDropdownOption | string | null | undefined) => void;
   onForceBackup: () => void;
   onBrowseBackups: () => void;
+  gameSyncEnabled: boolean;
+  onToggleGameSync: (enabled: boolean) => void;
 };
 
 function CompactFieldLabel({ children }: { children: ReactNode }) {
@@ -45,7 +48,9 @@ export function GameSettingsSection({
   selectedHistory,
   onGameChange,
   onForceBackup,
-  onBrowseBackups
+  onBrowseBackups,
+  gameSyncEnabled,
+  onToggleGameSync
 }: GameSettingsSectionProps) {
   return (
     <PanelSection title="GAME">
@@ -167,6 +172,16 @@ export function GameSettingsSection({
         >
           Browse Backups
         </ButtonItem>
+      </PanelSectionRow>
+
+      <PanelSectionRow>
+        <ToggleField
+          label="Sync This Game"
+          description="Backs up and restores this game automatically. Requires Automatic Sync."
+          checked={gameSyncEnabled}
+          disabled={isBusy || !selectedStatus}
+          onChange={onToggleGameSync}
+        />
       </PanelSectionRow>
     </PanelSection>
   );

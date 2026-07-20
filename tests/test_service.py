@@ -200,9 +200,11 @@ def expected_settings(
     update_channel: str = "stable",
     automatic_update_checks: bool = True,
     debug_logging: bool = True,
+    sync_disabled_games: list[str] | None = None,
 ) -> dict[str, object]:
     return {
         "auto_sync_enabled": auto_sync_enabled,
+        "sync_disabled_games": sync_disabled_games or [],
         "selected_game": selected_game,
         "notifications": notifications or dict(DEFAULT_NOTIFICATIONS),
         "update_channel": update_channel,
@@ -532,6 +534,7 @@ def test_settings_persist_auto_sync_toggle(tmp_path: Path) -> None:
     assert reloaded.get_settings() == expected_settings(auto_sync_enabled=True)
     assert json.loads((tmp_path / "settings.json").read_text()) == {
         "auto_sync_enabled": True,
+        "sync_disabled_games": [],
         "selected_game": "",
         "notifications": DEFAULT_NOTIFICATIONS,
         "update_channel": "stable",
@@ -553,6 +556,7 @@ def test_persists_settings_and_cache_separately(tmp_path: Path) -> None:
 
     assert settings == {
         "auto_sync_enabled": True,
+        "sync_disabled_games": [],
         "selected_game": "Hades",
         "notifications": DEFAULT_NOTIFICATIONS,
         "update_channel": "stable",
@@ -593,6 +597,122 @@ def test_persists_settings_and_cache_separately(tmp_path: Path) -> None:
     assert "auto_sync_enabled" not in cache
     assert "selected_game" not in cache
     assert "notifications" not in cache
+
+
+def test_game_sync_defaults_enabled_and_first_disable_persists(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+
+    assert service.is_game_sync_enabled("Unknown Game") is True
+    result = service.set_game_sync_enabled("  Hades  ", False)
+
+    assert result == expected_settings(sync_disabled_games=["Hades"])
+    assert json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))[
+        "sync_disabled_games"
+    ] == ["Hades"]
+
+
+def test_game_sync_toggles_merge_across_service_instances(tmp_path: Path) -> None:
+    first = service_with_state(tmp_path)
+    concurrent = service_with_state(tmp_path)
+
+    first.set_game_sync_enabled("Hades", False)
+    concurrent.set_game_sync_enabled("Celeste", False)
+
+    assert concurrent.get_settings()["sync_disabled_games"] == ["Celeste", "Hades"]
+    assert json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))[
+        "sync_disabled_games"
+    ] == ["Celeste", "Hades"]
+
+    concurrent.set_game_sync_enabled("Celeste", True)
+
+    assert concurrent.get_settings()["sync_disabled_games"] == ["Hades"]
+    assert json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))[
+        "sync_disabled_games"
+    ] == ["Hades"]
+
+
+def test_game_sync_disable_and_enable_round_trip_through_reload(tmp_path: Path) -> None:
+    service_with_state(tmp_path).set_game_sync_enabled("Hades", False)
+
+    disabled = service_with_state(tmp_path)
+    assert disabled.is_game_sync_enabled("Hades") is False
+    disabled.set_game_sync_enabled("Hades", True)
+
+    enabled = service_with_state(tmp_path)
+    assert enabled.is_game_sync_enabled("Hades") is True
+    assert enabled.get_settings()["sync_disabled_games"] == []
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        (["Hades", 1, "", None, "   "], ["Hades"]),
+        ({"Hades": True}, []),
+        ("Hades", []),
+    ],
+)
+def test_game_sync_load_filters_each_persisted_entry(
+    tmp_path: Path,
+    raw_value: object,
+    expected: list[str],
+) -> None:
+    (tmp_path / "settings.json").write_text(
+        json.dumps({"sync_disabled_games": raw_value}),
+        encoding="utf-8",
+    )
+
+    service = service_with_state(tmp_path)
+
+    assert service.get_settings()["sync_disabled_games"] == expected
+
+
+def test_game_sync_transaction_read_error_leaves_memory_and_disk_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps({"sync_disabled_games": ["Hades"]}),
+        encoding="utf-8",
+    )
+    service = service_with_state(tmp_path)
+    original_read_text = Path.read_text
+
+    def fail_settings_read(path: Path, *args: object, **kwargs: object) -> str:
+        if path == settings_path:
+            raise OSError("transient read failure")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_settings_read)
+
+    result = service.set_game_sync_enabled("Celeste", False)
+
+    assert result["sync_disabled_games"] == ["Hades"]
+    assert json.loads(original_read_text(settings_path, encoding="utf-8"))[
+        "sync_disabled_games"
+    ] == ["Hades"]
+
+
+def test_game_sync_lock_timeout_leaves_state_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sdh_ludusavi.persistence import StateLockTimeoutError
+
+    service = service_with_state(tmp_path)
+    service.set_game_sync_enabled("Hades", False)
+
+    def timeout(_mutator: object) -> dict[str, object]:
+        raise StateLockTimeoutError("busy")
+
+    monkeypatch.setattr(service._persistence, "mutate_settings", timeout)
+
+    result = service.set_game_sync_enabled("Celeste", False)
+
+    assert result["sync_disabled_games"] == ["Hades"]
+    assert json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))[
+        "sync_disabled_games"
+    ] == ["Hades"]
 
 
 def test_does_not_load_old_combined_state_file(tmp_path: Path) -> None:
@@ -739,6 +859,94 @@ def test_check_game_start_reports_restore_needed_without_restoring(tmp_path: Pat
 
     assert result == {"status": "needed", "operation": "restore", "game": "Hades"}
     assert adapter.restores == []
+
+
+@pytest.mark.parametrize(
+    "entry_point",
+    [
+        "check_game_start",
+        "restore_game_on_start",
+        "resolve_game_start_conflict",
+        "check_game_exit",
+        "backup_game_on_exit",
+    ],
+)
+def test_disabled_game_skips_every_automatic_lifecycle_entry_point(
+    tmp_path: Path,
+    entry_point: str,
+) -> None:
+    adapter = FakeAdapter()
+    adapter.recency["Hades"] = "backup_newer"
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    service.set_game_sync_enabled("Hades", False)
+
+    if entry_point == "resolve_game_start_conflict":
+        result = service.resolve_game_start_conflict("Hades", None, "keep_local")
+    else:
+        result = getattr(service, entry_point)("Hades")
+
+    assert result == {
+        "status": "skipped",
+        "game": "Hades",
+        "reason": "game_sync_disabled",
+    }
+    assert adapter.backups == []
+    assert adapter.restores == []
+    assert service.get_game_history() == {}
+
+
+def test_global_auto_sync_disabled_wins_over_per_game_setting(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+    service.refresh_games()
+    service.set_game_sync_enabled("Hades", False)
+
+    results = [
+        service.check_game_start("Hades"),
+        service.restore_game_on_start("Hades"),
+        service.resolve_game_start_conflict("Hades", None, "keep_local"),
+        service.check_game_exit("Hades"),
+        service.backup_game_on_exit("Hades"),
+    ]
+
+    assert {result["reason"] for result in results} == {"auto_sync_disabled"}
+
+
+def test_enabled_game_lifecycle_checks_are_unaffected(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    adapter.recency["Hades"] = "backup_newer"
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+
+    assert service.check_game_start("Hades") == {
+        "status": "needed",
+        "operation": "restore",
+        "game": "Hades",
+    }
+    assert service.check_game_exit("Hades") == {
+        "status": "needed",
+        "operation": "backup",
+        "game": "Hades",
+    }
+
+
+def test_disabling_game_between_exit_check_and_backup_blocks_backup(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+
+    assert service.check_game_exit("Hades")["status"] == "needed"
+    service.set_game_sync_enabled("Hades", False)
+
+    assert service.backup_game_on_exit("Hades") == {
+        "status": "skipped",
+        "game": "Hades",
+        "reason": "game_sync_disabled",
+    }
+    assert adapter.backups == []
 
 
 def test_check_game_start_runs_recency_under_operation_lock(tmp_path: Path) -> None:

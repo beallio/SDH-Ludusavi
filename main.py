@@ -30,6 +30,7 @@ class DeckySettingsStore:
         self._manager.read()
         return {
             "auto_sync_enabled": self._manager.getSetting("auto_sync_enabled", False),
+            "sync_disabled_games": self._manager.getSetting("sync_disabled_games", []),
             "selected_game": self._manager.getSetting("selected_game", ""),
             "notifications": self._manager.getSetting(
                 "notifications", dict(DEFAULT_NOTIFICATION_SETTINGS)
@@ -80,6 +81,12 @@ class Plugin:
     async def set_auto_sync_enabled(self, enabled: bool) -> dict[str, Any]:
         return await self._call(
             "set_auto_sync_enabled", lambda: self._service().set_auto_sync_enabled(enabled)
+        )
+
+    async def set_game_sync_enabled(self, game_name: str, enabled: bool) -> dict[str, Any]:
+        return await self._call(
+            "set_game_sync_enabled",
+            lambda: self._service().set_game_sync_enabled(game_name, enabled),
         )
 
     async def set_selected_game(self, game_name: str) -> dict[str, Any]:

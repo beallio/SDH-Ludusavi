@@ -85,15 +85,49 @@ describe("LudusaviStateStore", () => {
   });
 
   describe("Settings invariants", () => {
-    it("maintains consistency across snapshot and settings when fields are mutated", () => {
+    it("updates and hydrates displayed games without changing the persisted preference", () => {
       const store = createLudusaviStateStore();
-      
-      // Initial empty state has no settings but snapshot provides defaults for standalone fields
-      expect(store.getSnapshot().settings).toBeNull();
-
-      // Applying settings populates everything
       store.applySettings({
         auto_sync_enabled: true,
+        sync_disabled_games: [],
+        selected_game: "Persisted",
+        notifications: {
+          enabled: true,
+          auto_sync_progress: true,
+          auto_sync_results: true,
+          manual_operations: true,
+          refresh_status: true,
+          failures_errors: true,
+        },
+        update_channel: "stable",
+        automatic_update_checks: true,
+        debug_logging: true,
+      });
+
+      store.setDisplayedGame("Displayed");
+      expect(store.getSnapshot().selectedGame).toBe("Displayed");
+      expect(store.getSnapshot().settings?.selected_game).toBe("Persisted");
+
+      const coldStore = createLudusaviStateStore();
+      coldStore.hydrateDisplayedGame("Seeded");
+      expect(coldStore.getSnapshot().selectedGame).toBe("Seeded");
+
+      coldStore.hydrateDisplayedGame("Ignored");
+      expect(coldStore.getSnapshot().selectedGame).toBe("Seeded");
+    });
+
+    it("maintains consistency across snapshot and settings when fields are mutated", () => {
+      const store = createLudusaviStateStore();
+
+      // Initial empty state has no settings but snapshot provides defaults for standalone fields
+      expect(store.getSnapshot().settings).toBeNull();
+      store.setDisplayedGame("Existing display");
+
+      // Applying settings populates persisted and derived settings without
+      // overwriting the ephemeral displayed game.
+      store.applySettings({
+        auto_sync_enabled: true,
+        sync_disabled_games: [],
         selected_game: "Hades",
         notifications: {
           enabled: true,
@@ -109,18 +143,18 @@ describe("LudusaviStateStore", () => {
       });
 
       let snap = store.getSnapshot();
-      expect(snap.selectedGame).toBe("Hades");
+      expect(snap.selectedGame).toBe("Existing display");
       expect(snap.settings?.selected_game).toBe("Hades");
       expect(snap.autoSyncNotificationsEnabled).toBe(true);
       expect(snap.settings?.auto_sync_enabled).toBe(true);
       expect(snap.notificationSettings.auto_sync_progress).toBe(false);
       expect(snap.settings?.notifications.auto_sync_progress).toBe(false);
 
-      // Mutating selected game updates both
-      store.setSelectedGame("Portal");
+      // Mutating the displayed game does not change the persisted preference.
+      store.setDisplayedGame("Portal");
       snap = store.getSnapshot();
       expect(snap.selectedGame).toBe("Portal");
-      expect(snap.settings?.selected_game).toBe("Portal");
+      expect(snap.settings?.selected_game).toBe("Hades");
 
       // Mutating auto sync updates both
       store.setAutoSyncEnabled(false);
@@ -133,6 +167,125 @@ describe("LudusaviStateStore", () => {
       snap = store.getSnapshot();
       expect(snap.notificationSettings.refresh_status).toBe(true);
       expect(snap.settings?.notifications.refresh_status).toBe(true);
+    });
+
+    it("normalizes malformed disabled games and patches sorted unique membership", () => {
+      const store = createLudusaviStateStore();
+      store.applySettings({
+        auto_sync_enabled: true,
+        sync_disabled_games: ["Hades", 1, "", "Celeste", "Hades"] as any,
+        selected_game: "",
+        notifications: {
+          enabled: true,
+          auto_sync_progress: true,
+          auto_sync_results: true,
+          manual_operations: true,
+          refresh_status: true,
+          failures_errors: true,
+        },
+        update_channel: "stable",
+        automatic_update_checks: true,
+        debug_logging: true,
+      });
+
+      expect(store.getSnapshot().settings?.sync_disabled_games).toEqual([
+        "Hades",
+        "Celeste",
+        "Hades",
+      ]);
+
+      store.setGameSyncEnabled("Portal", false);
+      store.setGameSyncEnabled("Celeste", false);
+      expect(store.getSnapshot().settings?.sync_disabled_games).toEqual([
+        "Celeste",
+        "Hades",
+        "Portal",
+      ]);
+
+      store.setGameSyncEnabled("Hades", true);
+      expect(store.getSnapshot().settings?.sync_disabled_games).toEqual([
+        "Celeste",
+        "Portal",
+      ]);
+    });
+  });
+
+  describe("canonical game resolution", () => {
+    function hydrateGames() {
+      const store = createLudusaviStateStore();
+      store.applySettings({
+        auto_sync_enabled: true,
+        sync_disabled_games: ["Hades", "Portal 2", "Doom"],
+        selected_game: "",
+        notifications: {
+          enabled: true,
+          auto_sync_progress: true,
+          auto_sync_results: true,
+          manual_operations: true,
+          refresh_status: true,
+          failures_errors: true,
+        },
+        update_channel: "stable",
+        automatic_update_checks: true,
+        debug_logging: true,
+      });
+      store.applyRefreshResult({
+        games: [
+          { name: "Hades", steam_id: 1145360, configured: true, has_backup: true },
+          { name: "Hades II", steam_id: "1145350", configured: true, has_backup: true },
+          { name: "Portal 2", configured: true, has_backup: true },
+          { name: "Portal Stories: Mel", configured: true, has_backup: true },
+          { name: "Doom", configured: true, has_backup: true },
+        ] as any,
+        history: {},
+        aliases: { "Supergiant Hades": "Hades" },
+        dependency_error: null,
+      });
+      return store;
+    }
+
+    it("resolves numeric app IDs before launch names", () => {
+      const store = hydrateGames();
+
+      expect(store.resolveCanonicalGameName("Different Launch Name", "1145360")).toBe("Hades");
+      expect(store.isGameSyncDisabled("Different Launch Name", "1145360")).toBe(true);
+    });
+
+    it("resolves aliases and exact normalized names", () => {
+      const store = hydrateGames();
+
+      expect(store.resolveCanonicalGameName("Supergiant Hades", "")).toBe("Hades");
+      expect(store.resolveCanonicalGameName("PORTAL 2", "")).toBe("Portal 2");
+    });
+
+    it("uses canonical app ID resolution to avoid Hades and Hades II false positives", () => {
+      const store = hydrateGames();
+
+      expect(store.resolveCanonicalGameName("Hades II", "1145350")).toBe("Hades II");
+      expect(store.isGameSyncDisabled("Hades II", "1145350")).toBe(false);
+    });
+
+    it("rejects ambiguous substrings and unresolved empty registries", () => {
+      const store = hydrateGames();
+
+      expect(store.resolveCanonicalGameName("Portal", "")).toBeNull();
+
+      const empty = createLudusaviStateStore();
+      empty.applyRefreshResult({
+        games: [],
+        history: {},
+        aliases: {},
+        dependency_error: null,
+      });
+      expect(empty.resolveCanonicalGameName("Hades", "1145360")).toBeNull();
+      expect(empty.isGameSyncDisabled("Hades", "1145360")).toBe(false);
+    });
+
+    it("applies backend short-name fuzzy eligibility rules", () => {
+      const store = hydrateGames();
+
+      expect(store.resolveCanonicalGameName("Doom Eternal", "")).toBe("Doom");
+      expect(store.resolveCanonicalGameName("Doomer", "")).toBeNull();
     });
   });
 });

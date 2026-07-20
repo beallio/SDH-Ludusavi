@@ -49,7 +49,7 @@ import { LudusaviLauncherSection } from "./LudusaviLauncherSection";
 import { NotificationSettingsSection } from "./NotificationSettingsSection";
 import { QamStyles } from "./QamStyles";
 import { LogsSection, VersionsSection } from "./VersionAndLogsSection";
-import { resolveRefreshedSelection } from "./refreshSelection";
+import { resolveAppliedSelection } from "./refreshSelection";
 import { resolveQamOpenSelection } from "./qamOpenSelection";
 import { runOperationFinalize } from "./manualOperationFinalize";
 import { useSteamContext, selectCurrentSteamGameIfAvailable } from "./useSteamContext";
@@ -157,7 +157,7 @@ export function LudusaviContent({
     settingsLoaded: ludusaviState.settings !== null,
     operationInProgress: operationInProgress.current,
     qamContentRef,
-    setSelectedGame: (gameName) => ludusaviStore.setSelectedGame(gameName),
+    setDisplayedGame: (gameName) => ludusaviStore.setDisplayedGame(gameName),
     resolveQamOpenSelection,
   });
 
@@ -178,6 +178,7 @@ export function LudusaviContent({
     isGameCacheCurrentCall,
     refreshGamesCall,
     applySettings: (settings) => runtime.settings.applySettings(ludusaviStore, settings),
+    hydrateDisplayedGame: (gameName) => ludusaviStore.hydrateDisplayedGame(gameName),
     setGameHistory: (history) => ludusaviStore.setGameHistory(history),
     setVersions: (versions) => ludusaviStore.setVersions(versions),
     setLudusaviCommand: (command) => ludusaviStore.setLudusaviCommand(command),
@@ -189,6 +190,7 @@ export function LudusaviContent({
     setBusyLabel,
     isRpcStatus,
     logRpcStatus,
+    logError: (message) => log("error", message),
   });
 
   const { refreshGames } = useGameRefresh({
@@ -247,16 +249,17 @@ export function LudusaviContent({
 
     const cachedAliases = ludusaviState.gameAliases;
 
-    if (allowSteamContextSelection && selectCurrentSteamGameIfAvailable(cachedGames, cachedAliases, (gameName) => ludusaviStore.setSelectedGame(gameName))) {
+    if (allowSteamContextSelection && selectCurrentSteamGameIfAvailable(cachedGames, cachedAliases, (gameName) => ludusaviStore.setDisplayedGame(gameName))) {
       return true;
     }
 
-    const outcome = resolveRefreshedSelection({
+    const currentSelectedGame = ludusaviStore.getSnapshot().selectedGame;
+    const outcome = resolveAppliedSelection({
       games: cachedGames,
       preferredGame,
-      currentSelectedGame: selectedGame,
+      liveSelection: currentSelectedGame,
     });
-    ludusaviStore.setSelectedGame(outcome.game);
+    ludusaviStore.setDisplayedGame(outcome.game);
 
     return true;
   };
@@ -292,20 +295,21 @@ export function LudusaviContent({
 
     if (
       allowSteamContextSelection &&
-      selectCurrentSteamGameIfAvailable(result.games, result.aliases || {}, (gameName) => ludusaviStore.setSelectedGame(gameName))
+      selectCurrentSteamGameIfAvailable(result.games, result.aliases || {}, (gameName) => ludusaviStore.setDisplayedGame(gameName))
     ) {
       return true;
     }
 
-    const outcome = resolveRefreshedSelection({
+    const currentSelectedGame = ludusaviStore.getSnapshot().selectedGame;
+    const outcome = resolveAppliedSelection({
       games: result.games,
       preferredGame,
-      currentSelectedGame: selectedGame,
+      liveSelection: currentSelectedGame,
     });
     if (outcome.source === "first") {
       log("debug", `Defaulting selected game to ${outcome.game}`);
     }
-    ludusaviStore.setSelectedGame(outcome.game);
+    ludusaviStore.setDisplayedGame(outcome.game);
 
     return true;
   };
@@ -365,6 +369,7 @@ export function LudusaviContent({
   const {
     onGameChange,
     toggleAutoSync,
+    toggleGameSync,
     toggleAutomaticUpdateChecks,
     toggleNotificationSetting,
     toggleUpdateChannel,
@@ -555,7 +560,9 @@ export function LudusaviContent({
         selectedGame={selectedGame}
         selectedStatus={selectedStatus}
         selectedHistory={selectedHistory}
+        gameSyncEnabled={!(settings.sync_disabled_games ?? []).includes(selectedGame)}
         onGameChange={onGameChange}
+        onToggleGameSync={(enabled) => void toggleGameSync(selectedGame, enabled)}
         onForceBackup={() => void runForceOperation("Backup", forceBackupCall)}
         onBrowseBackups={() => {
           if (!selectedGame) return;

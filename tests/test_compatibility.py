@@ -56,6 +56,7 @@ EXPECTED_METHODS: dict[str, list[str]] = {
     "get_settings": [],
     "get_game_history": [],
     "set_auto_sync_enabled": ["enabled"],
+    "set_game_sync_enabled": ["game_name", "enabled"],
     "set_selected_game": ["game_name"],
     "set_notification_settings": ["settings"],
     "set_debug_logging": ["enabled"],

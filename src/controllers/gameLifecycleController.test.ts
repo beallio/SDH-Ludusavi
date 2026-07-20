@@ -30,6 +30,7 @@ describe("GameLifecycleController", () => {
 
     mockStore = {
       isTracked: vi.fn().mockReturnValue(true),
+      isGameSyncDisabled: vi.fn().mockReturnValue(false),
       shouldPublishAutoSyncStatusBeforeRpc: vi.fn().mockReturnValue(true),
       getSnapshot: vi.fn().mockReturnValue({
         settings: {
@@ -793,6 +794,73 @@ describe("GameLifecycleController", () => {
 
     resolveFlow("keep_local");
     await vi.runAllTimersAsync();
+  });
+
+  it("disabled game never pauses or starts any pre-game or post-game watch", async () => {
+    mockStore.isGameSyncDisabled.mockReturnValue(true);
+    mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
+    mockResolveConflict.mockResolvedValue("keep_local");
+    mockRpc.resolveGameStartConflict.mockResolvedValue({ status: "backed_up" });
+    mockRpc.checkGameExit.mockResolvedValue({
+      status: "skipped",
+      reason: "game_sync_disabled",
+    });
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.runAllTimersAsync();
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockRpc.pauseGameProcess).not.toHaveBeenCalled();
+    expect(mockRpc.startSyncthingActivityWatch).not.toHaveBeenCalled();
+    expect(mockStore.isGameSyncDisabled).toHaveBeenCalledWith("Hades", "1145300");
+    expect(mockStatusSurface.publish).not.toHaveBeenCalledWith(
+      "checking",
+      expect.objectContaining({ source: "lifecycle_exit" }),
+    );
+  });
+
+  it("enabled game still pauses and starts initial, restarted, and post-game watches", async () => {
+    mockStore.isGameSyncDisabled.mockReturnValue(false);
+    mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
+    mockResolveConflict.mockResolvedValue("keep_local");
+    mockRpc.resolveGameStartConflict.mockResolvedValue({ status: "backed_up" });
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.runAllTimersAsync();
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockRpc.pauseGameProcess).toHaveBeenCalledWith(2);
+    expect(mockRpc.startSyncthingActivityWatch.mock.calls).toEqual(
+      expect.arrayContaining([
+        ["pre_game", "Hades", "1145300"],
+        ["post_game", "Hades", "1145300"],
+      ]),
+    );
+    expect(
+      mockRpc.startSyncthingActivityWatch.mock.calls.filter(
+        ([phase]: [string]) => phase === "pre_game",
+      ),
+    ).toHaveLength(2);
   });
 
   it("conflict resolved with keep_local publishes the backing-up animation", async () => {

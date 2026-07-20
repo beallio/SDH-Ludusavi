@@ -30,6 +30,7 @@ export const defaultNotificationSettings: NotificationSettings = {
 
 export const defaultSettings = (): Settings => ({
   auto_sync_enabled: false,
+  sync_disabled_games: [],
   selected_game: "",
   notifications: { ...defaultNotificationSettings },
   update_channel: "stable",
@@ -53,6 +54,11 @@ export function normalizeNotificationSettings(
 export function normalizeSettings(settings: Settings): Settings {
   return {
     ...settings,
+    sync_disabled_games: Array.isArray(settings.sync_disabled_games)
+      ? settings.sync_disabled_games.filter(
+          (name): name is string => typeof name === "string" && name.length > 0
+        )
+      : [],
     notifications: normalizeNotificationSettings(settings.notifications),
     update_channel: settings.update_channel === "development" ? "development" : "stable",
     automatic_update_checks: typeof settings.automatic_update_checks === "boolean" ? settings.automatic_update_checks : true,
@@ -131,7 +137,6 @@ export class LudusaviStateStore {
     const normalized = normalizeSettings(settings);
     this.commit({
       settings: normalized,
-      selectedGame: normalized.selected_game,
       autoSyncNotificationsEnabled: normalized.auto_sync_enabled,
       notificationSettings: normalized.notifications
     });
@@ -143,12 +148,32 @@ export class LudusaviStateStore {
     this.applySettings(next);
   }
 
-  setSelectedGame(selectedGame: string) {
-    this.patchSettings({ selected_game: selectedGame });
+  setDisplayedGame(selectedGame: string) {
+    this.commit({ selectedGame });
+  }
+
+  hydrateDisplayedGame(selectedGame: string) {
+    if (this.snapshot.selectedGame === "") {
+      this.commit({ selectedGame });
+    }
   }
 
   setAutoSyncEnabled(enabled: boolean) {
     this.patchSettings({ auto_sync_enabled: enabled });
+  }
+
+  setGameSyncEnabled(gameName: string, enabled: boolean) {
+    const disabledGames = new Set(
+      this.snapshot.settings?.sync_disabled_games ?? []
+    );
+    if (enabled) {
+      disabledGames.delete(gameName);
+    } else {
+      disabledGames.add(gameName);
+    }
+    this.patchSettings({
+      sync_disabled_games: [...disabledGames].sort()
+    });
   }
 
   setDebugLogging(enabled: boolean) {
@@ -239,6 +264,53 @@ export class LudusaviStateStore {
     return false;
   }
 
+  resolveCanonicalGameName(name: string, appID: string): string | null {
+    const games = this.snapshot.games ?? [];
+
+    const appIDMatch = games.find(
+      (game) => game.steam_id !== null
+        && game.steam_id !== undefined
+        && String(game.steam_id) === appID
+    );
+    if (appIDMatch) {
+      return appIDMatch.name;
+    }
+
+    const aliasTarget = this.snapshot.gameAliases[name];
+    if (aliasTarget !== undefined) {
+      const aliasMatch = games.find((game) => game.name === aliasTarget);
+      if (aliasMatch) {
+        return aliasMatch.name;
+      }
+    }
+
+    const normalizedInput = normalize(name);
+    const exactMatch = games.find(
+      (game) => normalize(game.name) === normalizedInput
+    );
+    if (exactMatch) {
+      return exactMatch.name;
+    }
+
+    const candidates = games.filter((game) => {
+      const normalizedTarget = normalize(game.name);
+      const isSubstring = normalizedInput.includes(normalizedTarget)
+        || normalizedTarget.includes(normalizedInput);
+      return isSubstring
+        && fuzzyMatchAllowed(normalizedInput, normalizedTarget, game.configured);
+    });
+
+    return candidates.length === 1 ? candidates[0].name : null;
+  }
+
+  isGameSyncDisabled(name: string, appID: string): boolean {
+    const canonicalName = this.resolveCanonicalGameName(name, appID);
+    if (canonicalName === null) {
+      return false;
+    }
+    return (this.snapshot.settings?.sync_disabled_games ?? []).includes(canonicalName);
+  }
+
   shouldPublishAutoSyncStatusBeforeRpc(tracked: boolean): boolean {
     const trackingCacheEmpty =
       this.snapshot.trackedAppIDs.size === 0 && this.snapshot.trackedNames.size === 0;
@@ -252,6 +324,26 @@ export class LudusaviStateStore {
     this.snapshot = { ...this.snapshot, ...patch };
     this.listeners.forEach((listener) => listener());
   }
+}
+
+function fuzzyMatchAllowed(
+  normalizedInput: string,
+  normalizedTarget: string,
+  configured: boolean
+): boolean {
+  if (normalizedInput.length > 4 && normalizedTarget.length > 4) {
+    return true;
+  }
+  if (!configured || normalizedTarget.length !== 4) {
+    return false;
+  }
+  if (!normalizedInput.startsWith(normalizedTarget)) {
+    return false;
+  }
+  if (normalizedInput.length === normalizedTarget.length) {
+    return true;
+  }
+  return [" ", ".", "-"].includes(normalizedInput[normalizedTarget.length]);
 }
 
 export function createLudusaviStateStore() {

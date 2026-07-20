@@ -1,8 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { evaluateStartCheck, evaluateStartConflictResolution, evaluatePreGameQuiescence, evaluateExitCheck, evaluateExitBackup, evaluateExitHandoff, getStartCleanup, getExitCleanup } from "./gameLifecycleDecision";
+import { evaluateStartCheck, evaluateStartConflictResolution, evaluatePreGameQuiescence, evaluateExitCheck, evaluateExitBackup, evaluateExitHandoff, getStartCleanup, getExitCleanup, SILENT_SKIPPED_REASONS } from "./gameLifecycleDecision";
 import type { StartState, ExitState } from "./gameLifecycleDecision";
 
 describe("gameLifecycleDecision", () => {
+  it("keeps game_sync_disabled out of silent skip reasons", () => {
+    expect(SILENT_SKIPPED_REASONS).not.toContain("game_sync_disabled");
+  });
+
   describe("Start", () => {
     const baseState: StartState = {
       name: "Test Game",
