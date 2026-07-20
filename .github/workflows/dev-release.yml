@@ -100,6 +100,18 @@ jobs:
           ./run.sh uv run python scripts/validate_plugin_zip.py "out/SDH-Ludusavi-v${{ env.DEV_VERSION }}.zip" --expected-version "${{ env.DEV_VERSION }}" --expected-name SDH-Ludusavi
           (cd out && sha256sum -c "SDH-Ludusavi-v${{ env.DEV_VERSION }}.zip.sha256")
 
+      - name: Upload Dev Build Artifacts
+        # Retained independently of publishing so a Releases API outage cannot
+        # discard a package that already passed every gate. Recovering a failed
+        # publish otherwise requires deleting the pushed tag and rebuilding.
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dev-release-v${{ env.DEV_VERSION }}
+          path: out/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Create and Push Dev Release Git Tag
         shell: bash
         run: |
