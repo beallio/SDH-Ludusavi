@@ -429,3 +429,33 @@ def test_post_release_sync_script_merge_conflict(tmp_path: Path) -> None:
 
     assert res.returncode != 0
     assert "conflict" in res.stderr.lower()
+
+
+def test_dev_release_retains_build_artifacts_when_publishing_fails() -> None:
+    # A GitHub Releases outage once failed the publish step after the build had
+    # already passed every gate, and the validated ZIP was discarded with it.
+    # Recovering meant deleting the pushed tag and rebuilding from scratch, so
+    # the workflow must retain the packaged artifacts independently of whether
+    # publishing succeeds.
+    content = Path(".github/workflows/dev-release.yml").read_text(encoding="utf-8")
+
+    assert "uses: actions/upload-artifact@v7" in content, (
+        "dev-release.yml must upload the packaged build so a failed publish "
+        "does not discard a validated package"
+    )
+
+    assert content.index("uses: actions/upload-artifact@v7") < content.index(
+        "uses: softprops/action-gh-release@v3"
+    ), (
+        "artifacts must be uploaded before the publish step, so a publish failure cannot discard them"
+    )
+
+    # Split into step blocks so assertions cover the whole step, including keys
+    # such as `if:` that precede `uses:`.
+    steps = content.split("      - name: ")
+    upload_steps = [s for s in steps if "uses: actions/upload-artifact@v7" in s]
+    assert len(upload_steps) == 1, "expected exactly one artifact upload step"
+    upload_step = upload_steps[0]
+
+    assert "if: always()" in upload_step, "the upload step must run even when a prior step failed"
+    assert "path: out/" in upload_step, "the upload step must retain the packaged output directory"
