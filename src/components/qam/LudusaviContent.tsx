@@ -85,6 +85,7 @@ export function LudusaviContent({
   const qamContentRef = useRef<HTMLDivElement | null>(null);
   const isMounted = useRef(true);
   const operationInProgress = useRef(false);
+  const explicitSelectionRef = useRef(false);
   const styleElement = useMemo(
     () => <QamStyles cssText={dropdownCssText} />,
     [dropdownCssText]
@@ -159,6 +160,10 @@ export function LudusaviContent({
     qamContentRef,
     setDisplayedGame: (gameName) => ludusaviStore.setDisplayedGame(gameName),
     resolveQamOpenSelection,
+    explicitSelectionPending: explicitSelectionRef.current,
+    onExplicitSelectionConsumed: () => {
+      explicitSelectionRef.current = false;
+    },
   });
 
   useInitialContent({
@@ -376,6 +381,11 @@ export function LudusaviContent({
     toggleDebugLogging
   } = settingsController;
 
+  const handleGameChange = (data: Parameters<typeof onGameChange>[0]) => {
+    explicitSelectionRef.current = true;
+    onGameChange(data);
+  };
+
   const runForceOperation = async (
     label: "Backup" | "Restore",
     operationCall: (gameName: string) => Promise<RpcResult<OperationResult>>
@@ -561,7 +571,7 @@ export function LudusaviContent({
         selectedStatus={selectedStatus}
         selectedHistory={selectedHistory}
         gameSyncEnabled={!(settings.sync_disabled_games ?? []).includes(selectedGame)}
-        onGameChange={onGameChange}
+        onGameChange={handleGameChange}
         onToggleGameSync={(enabled) => void toggleGameSync(selectedGame, enabled)}
         onForceBackup={() => void runForceOperation("Backup", forceBackupCall)}
         onBrowseBackups={() => {

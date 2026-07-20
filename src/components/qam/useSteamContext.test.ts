@@ -1,5 +1,6 @@
 import { vi, describe, it, expect } from "vitest";
 import { useSteamContext, selectCurrentSteamGameIfAvailable } from "./useSteamContext";
+import { resolveQamOpenSelection } from "./qamOpenSelection";
 import * as steamUtils from "../../utils/steam";
 
 vi.mock("react", () => ({
@@ -59,9 +60,38 @@ describe("useSteamContext", () => {
       qamContentRef: { current: null },
       setDisplayedGame,
       resolveQamOpenSelection,
+      explicitSelectionPending: false,
+      onExplicitSelectionConsumed: vi.fn(),
     });
 
     expect(setDisplayedGame).not.toHaveBeenCalled();
+  });
+
+  it("consumes an explicit selection once without selecting the running game", () => {
+    vi.stubGlobal("window", { setTimeout: vi.fn() });
+    const setDisplayedGame = vi.fn();
+    const onExplicitSelectionConsumed = vi.fn();
+
+    try {
+      useSteamContext({
+        isQuickAccessVisible: true,
+        games: [{ name: "Test" } as any],
+        gameAliases: {},
+        selectedGame: "Test",
+        settingsLoaded: true,
+        operationInProgress: false,
+        qamContentRef: { current: null },
+        setDisplayedGame,
+        resolveQamOpenSelection,
+        explicitSelectionPending: true,
+        onExplicitSelectionConsumed,
+      });
+
+      expect(setDisplayedGame).not.toHaveBeenCalled();
+      expect(onExplicitSelectionConsumed).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
