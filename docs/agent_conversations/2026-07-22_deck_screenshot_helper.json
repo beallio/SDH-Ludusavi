@@ -1,0 +1,29 @@
+{
+  "date": "2026-07-22",
+  "task_objective": "Capture the Steam Deck's current screen, then package the working method as a reusable helper script.",
+  "files_modified": [
+    "docs/plans/deck_screenshot_helper.md (new)",
+    "tests/test_deck_screenshot.py (new)",
+    "scripts/deck_screenshot.sh (new)",
+    "DEVELOPMENT.md (Deck Screenshots section)"
+  ],
+  "tests_added": [
+    "test_script_is_executable_and_strict",
+    "test_captures_and_copies_screenshot",
+    "test_capture_waits_for_file_before_copying",
+    "test_screenshot_runs_with_graphical_runtime_dir",
+    "test_removes_remote_temp_file",
+    "test_unreachable_deck_fails_without_copying",
+    "test_timeout_when_capture_never_appears",
+    "test_honours_deck_host_override",
+    "test_defaults_output_path_under_out"
+  ],
+  "design_decisions": [
+    "The Deck runs a gamescope session: grim is not installed and spectacle cannot attach to the compositor, so gamescopectl screenshot is the only working capture path.",
+    "SSH lands in a tty session, so the capture command must set XDG_RUNTIME_DIR=/run/user/1000 to reach the graphical session.",
+    "gamescopectl returns exit 0 before the PNG exists; the script polls stat until the size is non-zero and stable across two samples, so a partially written file is never copied.",
+    "Bash rather than Python, invoked directly instead of through ./run.sh, so the helper works without the project virtualenv.",
+    "Tests inject stub ssh/scp binaries on PATH with a mapped remote root, so the suite needs no Deck and passes on CI."
+  ],
+  "results": "Verified live against the Deck (1280x800 RGBA PNG returned). ruff check, ruff format, and ty check pass; full suite 848 passed at 88.69% coverage."
+}
