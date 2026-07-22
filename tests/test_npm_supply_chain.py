@@ -76,8 +76,9 @@ def test_pnpm_workspace_contains_supply_chain_policy() -> None:
         "sideEffectsCache: false",
         "picomatch@^4.0.0: 4.0.4",
         "picomatch@^2.0.0: 2.3.2",
-        "brace-expansion@^1.1.7: 1.1.13",
-        "brace-expansion@^2.0.0: 2.0.3",
+        # GHSA-3jxr-9vmj-r5cp (ReDoS): patched in 1.1.16 / 2.1.2.
+        "brace-expansion@^1.1.7: 1.1.16",
+        "brace-expansion@^2.0.0: 2.1.2",
         "minimatch@^3.0.0: 3.1.5",
         "minimatch@^9.0.0: 9.0.9",
     ]:
