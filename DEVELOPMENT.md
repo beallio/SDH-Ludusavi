@@ -298,6 +298,19 @@ The JSON format output can be inspected for automated processing. The analyzer c
 - `diagnostics.error_or_traceback`
 - `diagnostics.oversized_or_raw_payload`
 
+**Deck Screenshots:**
+To capture what the Deck is showing right now (useful for UI verification alongside the logs):
+```bash
+./scripts/deck_screenshot.sh                 # writes out/deck-screenshot-<UTC stamp>.png
+./scripts/deck_screenshot.sh /tmp/shot.png   # or an explicit path
+```
+The Deck runs a gamescope session, so `grim`/`spectacle` do not work; the script drives
+`gamescopectl screenshot` over SSH. Because `gamescopectl` returns before the PNG is written,
+the script polls for a stable file size before copying it back and then removes the remote temp
+file. Override `DECK_HOST` (default `steamdeck`), `DECK_UID` (default `1000`), or
+`DECK_SCREENSHOT_TIMEOUT` (default `15` seconds) as needed. The script runs directly, not through
+`./run.sh`: it needs no project virtualenv.
+
 The primary operation labels are:
 
 - `ui`: plugin, QAM, initialization, and cache-selection events.
