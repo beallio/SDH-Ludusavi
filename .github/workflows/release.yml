@@ -89,10 +89,18 @@ jobs:
           ./run.sh uv run python scripts/validate_plugin_zip.py "out/SDH-Ludusavi-${{ env.TAG_NAME }}.zip" --expected-version "${{ env.VERSION_FROM_TAG }}" --expected-name SDH-Ludusavi
           (cd out && sha256sum -c "SDH-Ludusavi-${{ env.TAG_NAME }}.zip.sha256")
 
+      - name: Resolve Release Notes
+        id: notes
+        run: |
+          python3 scripts/release_notes.py resolve "${{ env.TAG_NAME }}" --out-dir out
+
       - name: Publish Stable Release to GitHub
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG_NAME }}
+          name: ${{ steps.notes.outputs.title }}
+          body_path: ${{ steps.notes.outputs.body_path }}
+          generate_release_notes: ${{ steps.notes.outputs.generate }}
           prerelease: false
           make_latest: true
           fail_on_unmatched_files: true
