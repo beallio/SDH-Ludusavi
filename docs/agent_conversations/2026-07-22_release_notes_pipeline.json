@@ -1,0 +1,30 @@
+{
+  "date": "2026-07-22",
+  "task_objective": "Stop stable releases publishing with an empty body and a bare tag title; author notes in-repo with a generated-notes fallback, and backfill v0.4.0 and v0.4.1.",
+  "files_modified": [
+    "docs/plans/release_notes_pipeline.md (new)",
+    "scripts/release_notes.py (new)",
+    "tests/test_release_notes.py (new)",
+    "tests/test_release_workflows.py (release-notes wiring assertions)",
+    ".github/workflows/release.yml (Resolve Release Notes step; name/body_path/generate_release_notes)",
+    "docs/releases/v0.4.0.md, v0.4.1.md, v0.4.2.md (new)",
+    "DEVELOPMENT.md (stable release process steps renumbered, notes step added)"
+  ],
+  "tests_added": [
+    "test_authored_notes_supply_title_and_body",
+    "test_missing_notes_fall_back_to_generated",
+    "test_notes_without_heading_keep_full_body",
+    "test_outputs_are_written_to_github_output",
+    "test_malformed_tags_are_rejected (6 parametrized cases)",
+    "test_release_notes_exist_for_every_stable_tag",
+    "test_release_workflow_publishes_authored_notes_with_generated_fallback"
+  ],
+  "design_decisions": [
+    "release.yml passed neither name nor body to softprops/action-gh-release@v3, so GitHub defaulted to the tag name and an empty body for every stable release to date.",
+    "Notes are authored at docs/releases/vX.Y.Z.md with the H1 as the release title and the remainder as the body, so notes are reviewed with the change that motivates them.",
+    "A single publish step covers both paths: the action treats empty name and body_path as unset, so the resolver emits empty strings plus generate=true when no file exists. Missing notes degrade to generated notes rather than blocking the release.",
+    "Resolution lives in a stdlib-only Python helper rather than inline YAML shell so it is unit-testable without running the workflow, matching version_guard.py and set_release_version.py.",
+    "Tag shape is validated against ^v\\d+\\.\\d+\\.\\d+$ before being used to build a path, so a crafted tag cannot escape docs/releases/."
+  ],
+  "results": "ruff check, ruff format, ty check pass; full suite 860 passed (up from 848) at 88.69% coverage. Backfilled notes published to the existing v0.4.0 and v0.4.1 GitHub releases with gh release edit; tags and assets untouched."
+}
