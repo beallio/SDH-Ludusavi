@@ -87,7 +87,11 @@ To create a stable release:
    ```bash
    ./run.sh uv run python scripts/set_release_version.py X.Y.Z
    ```
-2. Run quality checks locally:
+2. Write the release notes at `docs/releases/vX.Y.Z.md`. The first line must be an H1
+   (`# vX.Y.Z — Short summary`), which becomes the GitHub release title; everything below
+   it becomes the release body. Also increment the demo `cacheBuster` in `README.md` so the
+   image refreshes for the new tag.
+3. Run quality checks locally:
    ```bash
    ./run.sh uv run ruff check . --fix
    ./run.sh uv run ruff format .
@@ -95,15 +99,18 @@ To create a stable release:
    ./run.sh uv run pytest
    ./run.sh pnpm run verify
    ```
-3. Commit the changes and tag it:
+4. Commit the changes and tag it:
    ```bash
-   git add package.json plugin.json assets/icon.png
+   git add package.json plugin.json assets/icon.png docs/releases/vX.Y.Z.md
    git commit -m "chore(release): prepare vX.Y.Z"
    git tag vX.Y.Z
    git push origin main vX.Y.Z
    ```
-4. The GitHub Actions release workflow will trigger on tag push to validate, build, and publish the release.
-5. Immediately run the post-release sync script to bump `dev` to the next patch version and sync it with `main`:
+5. The GitHub Actions release workflow will trigger on tag push to validate, build, and publish the release.
+   The publish step resolves `docs/releases/vX.Y.Z.md` via `scripts/release_notes.py`. If that file is
+   absent the release still publishes, falling back to GitHub's auto-generated notes and the bare tag
+   name as the title — so missing notes degrade, they do not block.
+6. Immediately run the post-release sync script to bump `dev` to the next patch version and sync it with `main`:
    ```bash
    ./scripts/post_release_sync.sh
    ```
