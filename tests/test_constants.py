@@ -9,5 +9,6 @@ from sdh_ludusavi.constants import (
 
 def test_constants_defined() -> None:
     assert DEFAULT_NOTIFICATION_SETTINGS["enabled"] is True
+    assert DEFAULT_NOTIFICATION_SETTINGS["update_available"] is True
     assert "auto_sync_enabled" in SETTINGS_KEYS
     assert MAX_INSTALLED_APP_IDS_BYTES == 16384
