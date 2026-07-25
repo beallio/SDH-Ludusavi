@@ -189,6 +189,7 @@ DEFAULT_NOTIFICATIONS = {
     "manual_operations": True,
     "refresh_status": True,
     "failures_errors": True,
+    "update_available": True,
 }
 
 
@@ -283,6 +284,24 @@ def test_notification_settings_load_malformed_settings_safely(tmp_path: Path) ->
         selected_game="Hades",
         notifications=expected_notifications,
     )
+
+
+def test_notification_settings_add_new_defaults_to_persisted_settings(tmp_path: Path) -> None:
+    settings_path = tmp_path / "settings.json"
+    legacy_notifications = {
+        key: value for key, value in DEFAULT_NOTIFICATIONS.items() if key != "update_available"
+    }
+    settings_path.write_text(
+        json.dumps({"notifications": legacy_notifications}),
+        encoding="utf-8",
+    )
+
+    service = service_with_state(tmp_path)
+
+    assert service.get_settings()["notifications"] == {
+        **DEFAULT_NOTIFICATIONS,
+        "update_available": True,
+    }
 
 
 def test_refresh_reports_ludusavi_adapter_initialization_failure(tmp_path: Path) -> None:

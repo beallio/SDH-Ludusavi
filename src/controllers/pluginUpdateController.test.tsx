@@ -170,6 +170,73 @@ describe("PluginUpdateController", () => {
     expect(updatedController.errorMessage).toBe(null);
   });
 
+  it("does not force an automatic check after pending-install hydration settles", async () => {
+    vi.mocked(ludusaviRpc.getUpdateCheckContextCall).mockResolvedValue({
+      update_channel: "stable",
+      automatic_update_checks: true,
+      installed_version: "0.2.0",
+      effective_installed_version: "0.2.0",
+      last_checked_at: null,
+      last_checked_channel: null,
+      last_available_tag: null,
+      last_notified_tag: null,
+      installed_release_tag: null,
+      installed_release_published_at: null,
+      pending_update_install: {
+        version: "0.2.0",
+        tag: "v0.2.0",
+        channel: "stable",
+        published_at: "2026-07-24T00:00:00Z",
+        requested_at: "2026-07-24T00:00:00Z",
+      },
+      rate_limited_until: null,
+    });
+
+    usePluginUpdateController({
+      currentVersion: "0.2.0",
+      updateChannel: "stable",
+      automaticUpdateChecks: true,
+    });
+
+    activeEffects[2].cb();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    stateIdx = 0;
+    activeEffects.length = 0;
+    usePluginUpdateController({
+      currentVersion: "0.2.0",
+      updateChannel: "stable",
+      automaticUpdateChecks: true,
+    });
+    activeEffects[0].cb();
+    activeEffects[3].cb();
+    const automaticDepsBefore = activeEffects[3].deps;
+
+    stateIdx = 0;
+    activeEffects.length = 0;
+    usePluginUpdateController({
+      currentVersion: "0.2.0",
+      updateChannel: "stable",
+      automaticUpdateChecks: true,
+    });
+    const automaticEffect = activeEffects[3];
+    const automaticDepsChanged = automaticEffect.deps.some(
+      (dependency: unknown, index: number) =>
+        dependency !== automaticDepsBefore[index],
+    );
+    if (automaticDepsChanged) {
+      automaticEffect.cb();
+    }
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(ludusaviRpc.checkForPluginUpdateCall).not.toHaveBeenCalledWith(
+      "0.2.0",
+      true,
+    );
+  });
+
   it("dependency arrays for re-check effects do not change on check result", () => {
     stateIdx = 0;
     activeEffects.length = 0;

@@ -71,6 +71,7 @@ def test_pnpm_workspace_contains_supply_chain_policy() -> None:
 
     for required_text in [
         "minimumReleaseAge: 20160",
+        "postcss@8.5.18",
         "storeDir: /tmp/sdh_ludusavi/.pnpm-store",
         "virtualStoreDir: /tmp/sdh_ludusavi/pnpm-virtual-store",
         "sideEffectsCache: false",
@@ -79,10 +80,27 @@ def test_pnpm_workspace_contains_supply_chain_policy() -> None:
         # GHSA-3jxr-9vmj-r5cp (ReDoS): patched in 1.1.16 / 2.1.2.
         "brace-expansion@^1.1.7: 1.1.16",
         "brace-expansion@^2.0.0: 2.1.2",
+        # GHSA-r28c-9q8g-f849 (path traversal): patched in 8.5.18.
+        "postcss@<=8.5.17: 8.5.18",
+        # GHSA-mh99-v99m-4gvg: the vulnerable brace-expansion builds were only
+        # reachable through these two legacy build tools, so forcing both to
+        # current majors removes the advisory instead of suppressing it.
+        '"@rollup/plugin-commonjs@^26.0.0": 29.0.3',
+        "rollup-plugin-delete@^2.0.0: 3.0.2",
         "minimatch@^3.0.0: 3.1.5",
         "minimatch@^9.0.0: 9.0.9",
     ]:
         assert required_text in workspace
+
+
+def test_no_audit_advisories_are_suppressed() -> None:
+    """The audit gate must fail on new advisories, never silently ignore them."""
+    package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+    audit_config = package["pnpm"]["auditConfig"]
+
+    assert audit_config["ignoreGhsas"] == []
+    assert audit_config["ignoreCves"] == []
+    assert "auditConfig" not in (ROOT / "pnpm-workspace.yaml").read_text(encoding="utf-8")
 
 
 def test_pnpm_install_script_checker_rejects_unapproved_build_scripts(

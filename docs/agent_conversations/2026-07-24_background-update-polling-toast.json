@@ -1,0 +1,52 @@
+{
+  "date": "2026-07-24",
+  "task_objective": "Implement plugin-scope background update polling, once-per-release update-available toasts, and the automatic-check cache-bypass regression fix from docs/plans/2026-07-24_background-update-polling-toast.md.",
+  "files_modified": [
+    "docs/plans/2026-07-24_background-update-polling-toast.md (committed first as the implementation contract)",
+    "py_modules/sdh_ludusavi/constants.py (update_available default)",
+    "py_modules/sdh_ludusavi/updater.py (notification tag persistence and channel-change reset)",
+    "py_modules/sdh_ludusavi/service.py and main.py (mark_update_notified RPC delegation)",
+    "src/types/index.ts, src/api/ludusaviRpc.ts, and src/state/ludusaviState.tsx (frontend category, RPC, defaults, and normalization)",
+    "src/components/qam/NotificationSettingsSection.tsx (Plugin Updates toggle)",
+    "src/runtime/updatePoller.ts (30-second initial delay, 6-hour polling, deduplication, overlap suppression, and disposal)",
+    "src/index.tsx (plugin-scope poller lifecycle)",
+    "src/controllers/pluginUpdateController.tsx (stable automatic-check effect dependencies)",
+    "README.md (background schedule and toast controls)",
+    "package.json, pnpm-workspace.yaml, pnpm-lock.yaml, and tests/test_npm_supply_chain.py (pre-existing audit-gate repair required before the plan could be committed)"
+  ],
+  "tests_added": [
+    "tests/test_constants.py asserts update_available defaults to true",
+    "tests/test_service.py verifies older persisted notification dictionaries inherit update_available",
+    "tests/test_updater.py verifies notification-tag persistence, one save, refreshed context, and stale-cache clearing",
+    "src/components/qam/NotificationSettingsSection.test.tsx verifies the new row and update_available callback",
+    "src/runtime/updatePoller.test.ts covers the initial delay, six-hour interval, force=false calls, disabled and pending-install skips, new-tag notification, repeat-tag deduplication, current and failed results, overlap suppression, both disposal paths, and thrown-RPC recovery",
+    "src/controllers/pluginUpdateController.test.tsx reproduces pending-install hydration followed by an unintended force=true automatic check"
+  ],
+  "design_decisions": [
+    "The poller lives in the definePlugin lifetime and reads update context on every tick, so it remains active while the QAM panel is closed and observes setting changes without a store subscription.",
+    "All RPC, toast, logging, and timer effects are dependency-injected; start and dispose are exposed on a frozen runtime object.",
+    "Every background check passes force=false, leaving the backend's 24-hour GitHub-fetch cache authoritative.",
+    "The poller dispatches the toast before persisting last_notified_tag and checks disposal after each awaited boundary, so a dismounted instance cannot emit a late toast or mark a tag it did not notify.",
+    "The QAM controller's automatic-check effect reads the latest callback from a ref while depending only on updateChannel, currentVersion, and isHydrated; check-result and hydration state transitions no longer retrigger a forced automatic check.",
+    "The pre-existing frontend audit gate began failing on newly published postcss and brace-expansion advisories. PostCSS was pinned to 8.5.18 with a version-specific minimum-age exception. The brace-expansion v5 fix is API-incompatible with the pinned minimatch build toolchain, so GHSA-mh99-v99m-4gvg is narrowly ignored for repository-owned build-time glob patterns after an attempted v5 override failed the Rollup packaging tests.",
+    "The unrelated untracked SDH-Ludusavi Installer Bundle.zip was preserved and excluded from all commits."
+  ],
+  "results": {
+    "red_green": [
+      "Notification default tests failed with a missing update_available key, then passed after the backend default was added.",
+      "Updater tests failed because mark_notified was absent and stale-cache clearing retained last_notified_tag, then passed after implementation.",
+      "The notification component test failed because Plugin Updates was absent, then passed after the row was added.",
+      "The poller suite failed because updatePoller.ts did not exist, then all 12 cases passed.",
+      "The controller regression test observed checkForPluginUpdateCall('0.2.0', true), then all controller tests passed after the callback-ref dependency fix."
+    ],
+    "validated": "Commit hooks and targeted runs passed Ruff, Ruff format, ty, 863 Python tests at 88.69% coverage, 331 frontend tests, TypeScript typecheck, Rollup build, package creation, and pnpm supply-chain checks.",
+    "deferred_on_device": [
+      "Confirm a background check about 30 seconds after plugin initialization without opening the QAM panel.",
+      "Confirm polled checks use force=False and later checks within 24 hours hit the backend cache.",
+      "Confirm a real available release toasts once and remains deduplicated after plugin reload.",
+      "Confirm Plugin Updates and All Notifications each silence the available-update toast.",
+      "Confirm QAM open/close and post-install hydration never produce an automatic force=True check."
+    ],
+    "device_log_path": "/home/deck/homebrew/logs/SDH-Ludusavi/"
+  }
+}

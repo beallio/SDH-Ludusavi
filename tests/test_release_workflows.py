@@ -262,6 +262,30 @@ def test_workflows_trigger_and_overwrite_and_checksum_verification() -> None:
     )
 
 
+def test_release_workflow_publishes_authored_notes_with_generated_fallback() -> None:
+    # Releases published with an empty body and a bare tag name because the
+    # publish step passed neither `name` nor `body`. Notes are now authored in
+    # docs/releases/vX.Y.Z.md and resolved at publish time, falling back to
+    # GitHub's generated notes when a release ships without them.
+    content = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert "python3 scripts/release_notes.py resolve" in content, (
+        "release.yml must resolve authored release notes before publishing"
+    )
+    assert content.index("scripts/release_notes.py") < content.index(
+        "uses: softprops/action-gh-release@v3"
+    ), "notes must be resolved before the publish step consumes them"
+
+    steps = content.split("      - name: ")
+    publish_steps = [s for s in steps if "uses: softprops/action-gh-release@v3" in s]
+    assert len(publish_steps) == 1, "expected exactly one publish step"
+    publish = publish_steps[0]
+
+    assert "name: ${{ steps.notes.outputs.title }}" in publish
+    assert "body_path: ${{ steps.notes.outputs.body_path }}" in publish
+    assert "generate_release_notes: ${{ steps.notes.outputs.generate }}" in publish
+
+
 def test_workflows_use_node24_action_runtime_and_current_action_majors() -> None:
     workflows = {
         ".github/workflows/ci.yml": Path(".github/workflows/ci.yml").read_text(encoding="utf-8"),

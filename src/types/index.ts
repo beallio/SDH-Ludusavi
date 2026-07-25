@@ -5,6 +5,7 @@ export type NotificationSettings = {
   manual_operations: boolean;
   refresh_status: boolean;
   failures_errors: boolean;
+  update_available: boolean;
 };
 
 export type NotificationCategory = keyof Omit<NotificationSettings, "enabled">;
