@@ -749,3 +749,81 @@ def test_prohibition_on_logging_full_sha256() -> None:
     log_str2 = format_candidate_log(cand_obj)
     assert "aaaaaaaa" in log_str2
     assert full_sha not in log_str2
+
+
+def test_mark_notified_persists_tag_and_returns_updated_context() -> None:
+    import datetime
+    import threading
+    import time
+
+    from sdh_ludusavi.updater import PluginUpdater
+    from sdh_ludusavi.updater_models import JsonResponse
+
+    class MockClient:
+        def list_releases(self):
+            return JsonResponse(status=200, headers={}, body=[])
+
+        def get_release(self, tag):
+            return JsonResponse(status=200, headers={}, body={})
+
+        def get_manifest(self, url):
+            return JsonResponse(status=200, headers={}, body={})
+
+    save_calls = 0
+
+    def save() -> None:
+        nonlocal save_calls
+        save_calls += 1
+
+    updater = PluginUpdater(
+        state_lock=threading.RLock(),
+        save_callback=save,
+        log_callback=lambda _level, _message: None,
+        release_client=MockClient(),
+        version_resolver=lambda: "1.2.2",
+        now=lambda: datetime.datetime.now(datetime.timezone.utc),
+        monotonic=time.monotonic,
+    )
+
+    context = updater.mark_notified("v1.2.3")
+
+    assert context["last_notified_tag"] == "v1.2.3"
+    assert updater.get_context()["last_notified_tag"] == "v1.2.3"
+    assert save_calls == 1
+
+
+def test_clear_stale_cache_drops_last_notified_tag() -> None:
+    import datetime
+    import threading
+    import time
+
+    from sdh_ludusavi.updater import PluginUpdater
+    from sdh_ludusavi.updater_models import JsonResponse
+
+    class MockClient:
+        def list_releases(self):
+            return JsonResponse(status=200, headers={}, body=[])
+
+        def get_release(self, tag):
+            return JsonResponse(status=200, headers={}, body={})
+
+        def get_manifest(self, url):
+            return JsonResponse(status=200, headers={}, body={})
+
+    updater = PluginUpdater(
+        state_lock=threading.RLock(),
+        save_callback=lambda: None,
+        log_callback=lambda _level, _message: None,
+        release_client=MockClient(),
+        version_resolver=lambda: "1.2.2",
+        now=lambda: datetime.datetime.now(datetime.timezone.utc),
+        monotonic=time.monotonic,
+    )
+    updater.load_state(
+        {},
+        {"update_check_cache": {"last_notified_tag": "v1.2.3"}},
+    )
+
+    updater._clear_stale_cache()
+
+    assert updater.get_context()["last_notified_tag"] is None

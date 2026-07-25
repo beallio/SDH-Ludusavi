@@ -71,6 +71,7 @@ def test_pnpm_workspace_contains_supply_chain_policy() -> None:
 
     for required_text in [
         "minimumReleaseAge: 20160",
+        "postcss@8.5.18",
         "storeDir: /tmp/sdh_ludusavi/.pnpm-store",
         "virtualStoreDir: /tmp/sdh_ludusavi/pnpm-virtual-store",
         "sideEffectsCache: false",
@@ -79,6 +80,10 @@ def test_pnpm_workspace_contains_supply_chain_policy() -> None:
         # GHSA-3jxr-9vmj-r5cp (ReDoS): patched in 1.1.16 / 2.1.2.
         "brace-expansion@^1.1.7: 1.1.16",
         "brace-expansion@^2.0.0: 2.1.2",
+        # GHSA-r28c-9q8g-f849 (path traversal): patched in 8.5.18.
+        "postcss@<=8.5.17: 8.5.18",
+        # GHSA-mh99-v99m-4gvg cannot be patched without replacing minimatch APIs.
+        "GHSA-mh99-v99m-4gvg",
         "minimatch@^3.0.0: 3.1.5",
         "minimatch@^9.0.0: 9.0.9",
     ]:
