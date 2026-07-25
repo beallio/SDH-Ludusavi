@@ -49,10 +49,20 @@ export function NotificationSettingsSection({
         <ToggleField
           label="Failures and Errors"
           description="Shows warning toasts when sync or Ludusavi operations fail."
-          bottomSeparator="none"
+          bottomSeparator="standard"
           checked={settings.notifications.failures_errors}
           disabled={!settings.notifications.enabled || isBusy}
           onChange={(enabled: boolean) => onToggleNotificationSetting("failures_errors", enabled)}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ToggleField
+          label="Plugin Updates"
+          description="Shows a toast when a new plugin version is available."
+          bottomSeparator="none"
+          checked={settings.notifications.update_available}
+          disabled={!settings.notifications.enabled || isBusy}
+          onChange={(enabled: boolean) => onToggleNotificationSetting("update_available", enabled)}
         />
       </PanelSectionRow>
     </PanelSection>

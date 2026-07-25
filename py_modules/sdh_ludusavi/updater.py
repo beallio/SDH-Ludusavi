@@ -153,7 +153,15 @@ class PluginUpdater:
     def _clear_stale_cache(self) -> None:
         self._cache.pop("last_result", None)
         self._cache.pop("last_available_tag", None)
+        self._cache.pop("last_notified_tag", None)
         self._cache.pop("last_checked_version", None)
+
+    def mark_notified(self, tag: str) -> dict[str, object]:
+        with self._state_lock:
+            self._cache["last_notified_tag"] = tag
+            self._save_callback()
+            self._log("info", f"Update notification recorded: tag={tag}")
+            return self.get_context()
 
     def check_for_update(
         self,

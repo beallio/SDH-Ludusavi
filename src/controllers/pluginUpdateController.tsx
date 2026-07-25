@@ -197,6 +197,8 @@ export function usePluginUpdateController({
     },
     [updateChannel, state.installedOverride, state.pendingInstallVersion, effectiveCurrentVersion, clearCheckTimeout, finishCheck]
   );
+  const checkForUpdatesRef = useRef(checkForUpdates);
+  checkForUpdatesRef.current = checkForUpdates;
 
   const checkNow = useCallback(async () => {
     await checkForUpdates({ force: true, notify: true, source: "manual" });
@@ -327,12 +329,20 @@ export function usePluginUpdateController({
         return;
       }
       if (automaticUpdateChecks) {
-        void checkForUpdates({ force: false, notify: false, source: "automatic" });
+        void checkForUpdatesRef.current({
+          force: false,
+          notify: false,
+          source: "automatic",
+        });
       }
     } else {
-      void checkForUpdates({ force: true, notify: false, source: "automatic" });
+      void checkForUpdatesRef.current({
+        force: true,
+        notify: false,
+        source: "automatic",
+      });
     }
-  }, [updateChannel, currentVersion, isHydrated, checkForUpdates]);
+  }, [updateChannel, currentVersion, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) {

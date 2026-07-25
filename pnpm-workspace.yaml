@@ -1,4 +1,6 @@
 minimumReleaseAge: 20160
+minimumReleaseAgeExclude:
+  - postcss@8.5.18
 storeDir: /tmp/sdh_ludusavi/.pnpm-store
 virtualStoreDir: /tmp/sdh_ludusavi/pnpm-virtual-store
 sideEffectsCache: false
@@ -13,3 +15,11 @@ overrides:
   minimatch@^9.0.0: 9.0.9
   picomatch@^2.0.0: 2.3.2
   picomatch@^4.0.0: 4.0.4
+  postcss@<=8.5.17: 8.5.18
+
+# GHSA-mh99-v99m-4gvg affects brace expansion of untrusted patterns. These
+# transitive build tools only expand repository-owned glob patterns, and the
+# patched v5 API is incompatible with their pinned minimatch versions.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-mh99-v99m-4gvg
