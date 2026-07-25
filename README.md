@@ -17,19 +17,40 @@ SDH-Ludusavi keeps your game saves protected without pulling you out of Game Mod
 
 ## Installation (Early Access)
 
-As the plugin is currently in development and not yet available in the Decky Store, follow these steps to install it manually.
-
-Download the latest release archive from the [GitHub Releases](https://github.com/beallio/SDH-Ludusavi/releases) page. Always download the versioned ZIP file (e.g., `SDH-Ludusavi-vX.Y.Z.zip`).
+As the plugin is currently in development and not yet available in the Decky Store, install it using one of the two methods below.
 
 > [!WARNING]
 > Prereleases (versioned with `-dev.gSHORTSHA`) are intended for development, testing, and early access. They may contain bugs and should be used with caution.
 
-### 1. Enable Decky Loader Developer Mode
+### Method 1: Guided Desktop Installer (Recommended)
+
+Download **[SDH-Ludusavi Installer Bundle.zip](https://github.com/beallio/SDH-Ludusavi/raw/main/SDH-Ludusavi%20Installer%20Bundle.zip)** from this repository.
+
+Use this for **both a first-time install and for updating** an existing install. The installer finds the newest release on GitHub, verifies its SHA-256 checksum before installing, and replaces any existing copy in place — rolling back automatically if anything fails. Decky Loader Developer Mode is **not** required.
+
+1. Switch the Steam Deck to **Desktop Mode**.
+2. Extract the archive onto the Desktop, so that the `DeckyPluginInstaller` folder and `Install SDH-Ludusavi Decky Plugin` sit directly on the Desktop.
+3. Double-click **Install SDH-Ludusavi Decky Plugin**.
+4. Approve the installation and administrator-authentication prompts.
+5. Return to Gaming Mode. If the plugin does not appear immediately, restart Steam.
+
+No Konsole window is needed. The installer writes a log to `/home/deck/Desktop/Decky Plugin Installer.log`.
+
+To update later, run the same installer again — it always fetches the latest release. You can also update from inside the plugin itself; see [In-Plugin Updates](#in-plugin-updates).
+
+> [!NOTE]
+> If the launcher does nothing when double-clicked, KDE may not trust it yet. Right-click it, choose **Properties → Permissions**, and ensure it is executable — or right-click and select **Run**.
+
+### Method 2: Manual install via Decky Loader
+
+Download the latest release archive from the [GitHub Releases](https://github.com/beallio/SDH-Ludusavi/releases) page. Always download the versioned ZIP file (e.g., `SDH-Ludusavi-vX.Y.Z.zip`).
+
+#### 1. Enable Decky Loader Developer Mode
 1. Open the Decky Loader menu in the Steam Deck Quick Access Menu (QAM).
 2. Go to **Settings** (the gear icon).
 3. Under **General**, scroll down to find **Developer Mode** and toggle it **On**.
 
-### 2. Install the Plugin
+#### 2. Install the Plugin
 You have two options for manual installation through the Decky Loader's Developer menu:
 
 - **Option A: Install from URL**
@@ -51,7 +72,7 @@ Once installed, the plugin can handle updates directly from the UI:
 - **Automatic & Manual Checks**: When automatic checks are enabled, the plugin checks in the background 30 seconds after loading and every 6 hours afterward, even while the QAM panel is closed. You can also trigger a manual check at any time.
 - **Update Notifications**: A newly available release raises one toast per release tag. The **Plugin Updates** notification toggle controls these toasts, and the master **All Notifications** toggle silences them with every other plugin notification.
 - **Security Validation**: Pre-validates release checksums and metadata before initiating Decky's native installation prompts.
-- **Manual Fallback & Recovery**: If one-click installation fails (e.g., due to a temporary network issue or Decky API drift), you can view release notes on GitHub and perform a manual reinstall using Option A or B.
+- **Manual Fallback & Recovery**: If one-click installation fails (e.g., due to a temporary network issue or Decky API drift), you can view release notes on GitHub and reinstall using the [guided desktop installer](#method-1-guided-desktop-installer-recommended) or either manual option.
 
 ## Prerequisites
 
