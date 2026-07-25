@@ -25,7 +25,8 @@ export const defaultNotificationSettings: NotificationSettings = {
   auto_sync_results: true,
   manual_operations: true,
   refresh_status: true,
-  failures_errors: true
+  failures_errors: true,
+  update_available: true
 };
 
 export const defaultSettings = (): Settings => ({
@@ -47,7 +48,8 @@ export function normalizeNotificationSettings(
     auto_sync_results: typeof settings?.auto_sync_results === "boolean" ? settings.auto_sync_results : true,
     manual_operations: typeof settings?.manual_operations === "boolean" ? settings.manual_operations : true,
     refresh_status: typeof settings?.refresh_status === "boolean" ? settings.refresh_status : true,
-    failures_errors: typeof settings?.failures_errors === "boolean" ? settings.failures_errors : true
+    failures_errors: typeof settings?.failures_errors === "boolean" ? settings.failures_errors : true,
+    update_available: typeof settings?.update_available === "boolean" ? settings.update_available : true
   };
 }
 

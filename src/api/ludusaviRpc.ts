@@ -102,5 +102,6 @@ export const checkForPluginUpdateCall = callable<[currentVersion: string, force:
 export const revalidatePluginUpdateCall = callable<[candidate: PluginUpdateCandidate], RevalidateResult>("revalidate_plugin_update");
 export const recordUpdateInstallRequestedCall = callable<[candidate: any], RpcResult<UpdateCheckContext>>("record_update_install_requested");
 export const confirmUpdateInstallHandoffCall = callable<[version: string], RpcResult<UpdateCheckContext>>("confirm_update_install_handoff");
+export const markUpdateNotifiedCall = callable<[tag: string], RpcResult<UpdateCheckContext>>("mark_update_notified");
 export const clearPendingUpdateInstallCall = callable<[version: string], RpcResult<UpdateCheckContext>>("clear_pending_update_install");
 export const getUpdateCheckContextCall = callable<[], RpcResult<UpdateCheckContext>>("get_update_check_context");
