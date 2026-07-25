@@ -48,7 +48,8 @@ You have two options for manual installation through the Decky Loader's Develope
 Once installed, the plugin can handle updates directly from the UI:
 
 - **Update Channels**: Choose between **Stable releases only** (default) or **Development releases** (includes prereleases for testing).
-- **Automatic & Manual Checks**: Optionally check for updates in the background or trigger a manual check at any time.
+- **Automatic & Manual Checks**: When automatic checks are enabled, the plugin checks in the background 30 seconds after loading and every 6 hours afterward, even while the QAM panel is closed. You can also trigger a manual check at any time.
+- **Update Notifications**: A newly available release raises one toast per release tag. The **Plugin Updates** notification toggle controls these toasts, and the master **All Notifications** toggle silences them with every other plugin notification.
 - **Security Validation**: Pre-validates release checksums and metadata before initiating Decky's native installation prompts.
 - **Manual Fallback & Recovery**: If one-click installation fails (e.g., due to a temporary network issue or Decky API drift), you can view release notes on GitHub and perform a manual reinstall using Option A or B.
 
