@@ -6,8 +6,11 @@ import {
   backupGameOnExitCall,
   checkGameExitCall,
   checkGameStartCall,
+  checkForPluginUpdateCall,
   getGameHistoryCall,
   getSettings,
+  getUpdateCheckContextCall,
+  markUpdateNotifiedCall,
   pauseGameProcessCall,
   resolveGameStartConflictCall,
   restoreGameOnStartCall,
@@ -41,6 +44,7 @@ import {
 
 import { createPluginRuntime } from "./runtime/pluginRuntime";
 import { createStartupHydration } from "./runtime/startupHydration";
+import { createUpdatePoller } from "./runtime/updatePoller";
 
 
 async function syncGlobalHistory(store: LudusaviStateStore) {
@@ -250,7 +254,20 @@ export default definePlugin(() => {
     syncGlobalHistory: () => syncGlobalHistory(ludusaviStore),
     ensureStateReady: () => lifecycleStateReady
   });
+  const updatePoller = createUpdatePoller({
+    getUpdateCheckContext: getUpdateCheckContextCall,
+    checkForUpdate: checkForPluginUpdateCall,
+    markUpdateNotified: markUpdateNotifiedCall,
+    notify: (title, body) => notify(
+      ludusaviStore,
+      "update_available",
+      title,
+      body
+    ),
+    log,
+  });
   lifecycleController.start();
+  updatePoller.start();
 
   return {
     name: "SDH-Ludusavi",
@@ -272,6 +289,7 @@ export default definePlugin(() => {
       logUiEvent("plugin_dismounting", {}, "info");
       startupHydration.dispose();
       void lifecycleController.dispose();
+      updatePoller.dispose();
 
       if (dropdownStyleEl.parentNode) {
         dropdownStyleEl.parentNode.removeChild(dropdownStyleEl);
