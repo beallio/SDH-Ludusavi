@@ -16,10 +16,8 @@ overrides:
   picomatch@^2.0.0: 2.3.2
   picomatch@^4.0.0: 4.0.4
   postcss@<=8.5.17: 8.5.18
-
-# GHSA-mh99-v99m-4gvg affects brace expansion of untrusted patterns. These
-# transitive build tools only expand repository-owned glob patterns, and the
-# patched v5 API is incompatible with their pinned minimatch versions.
-auditConfig:
-  ignoreGhsas:
-    - GHSA-mh99-v99m-4gvg
+  # GHSA-mh99-v99m-4gvg reaches brace-expansion only through these two build
+  # tools. Forcing both to current majors drops the legacy glob/minimatch
+  # chains that pin the vulnerable brace-expansion builds.
+  "@rollup/plugin-commonjs@^26.0.0": 29.0.3
+  rollup-plugin-delete@^2.0.0: 3.0.2
