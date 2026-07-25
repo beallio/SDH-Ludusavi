@@ -31,6 +31,7 @@ const SETTINGS = {
     manual_operations: true,
     refresh_status: true,
     failures_errors: true,
+    update_available: true,
   },
   update_channel: "stable",
   automatic_update_checks: true,

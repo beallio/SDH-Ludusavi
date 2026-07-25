@@ -14,6 +14,7 @@ const SETTINGS: Settings = {
     manual_operations: false,
     refresh_status: false,
     failures_errors: true,
+    update_available: true,
   },
   update_channel: "stable",
   automatic_update_checks: true,
