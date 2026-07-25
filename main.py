@@ -127,6 +127,12 @@ class Plugin:
             lambda: self._service().confirm_update_install_handoff(version),
         )
 
+    async def mark_update_notified(self, tag: str) -> dict[str, Any]:
+        return await self._call(
+            "mark_update_notified",
+            lambda: self._service().mark_update_notified(tag),
+        )
+
     async def start_syncthing_activity_watch(
         self, phase: str, game_name: str | None = None, app_id: str | None = None
     ) -> dict[str, Any]:

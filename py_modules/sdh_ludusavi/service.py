@@ -479,6 +479,9 @@ class SDHLudusaviService:
     def confirm_update_install_handoff(self, version: str) -> dict[str, Any]:
         return self._updater.confirm_install_handoff(version)
 
+    def mark_update_notified(self, tag: str) -> dict[str, Any]:
+        return self._updater.mark_notified(tag)
+
     def clear_pending_update_install(self, version: str | None = None) -> dict[str, Any]:
         return self._updater.clear_pending_install(version)
 
