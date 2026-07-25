@@ -7,6 +7,7 @@ DEFAULT_NOTIFICATION_SETTINGS: dict[str, bool] = {
     "manual_operations": True,
     "refresh_status": True,
     "failures_errors": True,
+    "update_available": True,
 }
 
 SETTINGS_KEYS = (
