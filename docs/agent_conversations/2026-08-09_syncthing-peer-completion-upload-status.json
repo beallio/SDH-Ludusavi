@@ -1,13 +1,18 @@
 {
   "date": "2026-08-09",
-  "task_objective": "Complete authorized Task 3 from docs/plans/2026-08-09_syncthing-peer-completion-upload-status.md and resolve Review 02 finding 1 without beginning Task 4.",
+  "task_objective": "Complete authorized Tasks 1-4 of docs/plans/2026-08-09_syncthing-peer-completion-upload-status.md: model, track, preserve, and document post-game Syncthing peer-completion upload status.",
   "files_modified": [
+    "py_modules/sdh_ludusavi/syncthing/__init__.py (FolderCompletion event subscription)",
+    "py_modules/sdh_ludusavi/syncthing/_types.py (backend-only PeerCompletion and outbound observation timestamps)",
+    "py_modules/sdh_ludusavi/syncthing/activity.py (completion parsing, freshness classification, and event reducer)",
+    "py_modules/sdh_ludusavi/syncthing/watcher.py (post-game peer baselines, connected-peer gating, and count-only diagnostics)",
+    "tests/test__types.py, tests/test_activity.py, tests/test_syncthing.py, and tests/test_watcher.py (Task 1-2 regression coverage)",
     "src/controllers/syncthingMonitorMachine.ts (post-game settled-sample handoff guard)",
     "src/controllers/syncthingMonitorMachine.test.ts (pre-handoff buffering, fresh post-handoff quorum, and fast-sync mutation coverage)",
     "src/controllers/syncthingMonitor.activity.test.ts (fake-timer handoff lifecycle coverage)",
     "src/controllers/gameLifecycleDecision.test.ts (buffered upload handoff publication coverage)",
-    "tests/test_watcher.py (Review 02 watched-folder-mutation plus unrelated FolderCompletion regression)",
-    "docs/agent_conversations/2026-08-09_syncthing-peer-completion-upload-status.json (required Review 02 test-input rationale)"
+    "README.md, DEVELOPMENT.md, docs/specs/sdh_ludusavi_sync.md, and docs/specs/custom_status_bar_ui.md (Task 4 user and developer contract)",
+    "docs/agent_conversations/2026-08-09_syncthing-peer-completion-upload-status.json (Task 1-4 audit record)"
   ],
   "tests_added": [
     "The pure post-game state machine retains uploading and does not consume settled samples before handoff_confirmed, then completes only after three distinct new settled samples.",
@@ -17,24 +22,41 @@
     "A watched-folder sequence advance produces uploading even when the same relevant peer emits only a FolderCompletion event for another folder; that unscoped completion is absent from peer_completions."
   ],
   "design_decisions": [
+    "Peer completion is post-game-only. A FolderCompletion is accepted only when its folder and configured remote device both match the resolved backup folder; the backend begins with a REST baseline for each currently connected relevant peer.",
+    "A watched-folder local-index mutation requires fresh peer observations made after that mutation. Event ordering and monotonic observation time establish freshness; FolderCompletion.sequence is remote-device state and is never compared to the Deck's local sequence.",
+    "Incomplete peer evidence and watched-folder mutation hold uploading for 2.5 seconds so an index update and terminal completion in one event batch remain visible to the 500 ms frontend poller. RemoteDownloadProgress remains supplemental evidence, not the acknowledgement source.",
+    "Post-game COMPLETE requires local settlement plus no outstanding need from every peer that remains connected and relevant. Disconnected/offline configured peers are intentionally outside this confirmation, while pre-game settlement remains local/incoming and never queries peer completion.",
+    "Diagnostics aggregate only peer counts and needed bytes/items/deletes. Device IDs, peer percentages, and raw responses remain backend-only and never enter logs or RPC payloads.",
     "The reducer gates only post-game settled-sample counting on handoffActivated. Pre-game settlement and all existing transfer classification remain unchanged.",
     "Pre-handoff samples reset the post-game settle counter instead of carrying it into the handoff, so the existing three-sample stability check is a visible post-handoff dwell rather than already-consumed history.",
     "Task 2 changed test_watch_ignores_other_folder_traffic_shared_with_relevant_peer from watched-folder status sequences 6, 7 to 5, 5, and Review 02 required this rationale. The original sequences now correctly arm post-game outbound evidence because they advance the watched folder's local index; keeping them flat preserves that test's actual assertion that unrelated-folder traffic alone remains idle. The companion regression restores the missing combination and proves uploading comes from the watched-folder mutation, not the peer's unrelated FolderCompletion."
   ],
   "results": {
-    "red_green": [
-      "RED: the Task 3 focused frontend suite failed three new tests before the reducer edit: a buffered upload reached latestStatus=complete before handoff, the fake-timer monitor exposed completionObserved=true before handoff, and a mutation-only fast sync also completed early.",
-      "GREEN: after the handoffActivated guard, the focused frontend suite passed 85 tests. The final fake-timer assertion confirms COMPLETE publication, stopWatch, and terminal-context cleanup after the third post-handoff sample."
+    "red_proofs": [
+      "Task 1 RED: focused model/activity tests failed against the pre-task sources because FolderCompletion was not subscribed or parsed, and no peer-completion, freshness, need-counter, or deterministic observation-hold classification existed.",
+      "Task 2 RED: watcher lifecycle tests failed before the integration because post-game watches neither established /rest/db/completion baselines nor tracked fresh connected-peer completion events, so they could not gate settlement or emit sanitized aggregate diagnostics.",
+      "Task 3 RED: the focused frontend suite failed three new tests before the reducer edit: a buffered upload reached latestStatus=complete before handoff, the fake-timer monitor exposed completionObserved=true before handoff, and a mutation-only fast sync also completed early.",
+      "Task 4 is documentation-only, so no behavior RED test was required. Its focused documentation/static suite is recorded in validation."
     ],
+    "task_commits": {
+      "task_1": "5bc0c6f feat(syncthing): model peer completion activity",
+      "task_2": "fbd4caa feat(syncthing): track connected peer completion",
+      "task_3": "a3e717f fix(autosync): preserve uploading through backup handoff",
+      "task_4_subject": "docs(syncthing): define peer completion status"
+    },
     "validation": [
-      "Baseline before edits: pnpm test passed 331 tests and TypeScript typecheck; pytest passed 906 tests with the configured coverage gate.",
-      "Focused Task 3 command: ./run.sh pnpm exec vitest run src/controllers/syncthingMonitorMachine.test.ts src/controllers/syncthingMonitor.activity.test.ts src/controllers/gameLifecycleDecision.test.ts passed 85 tests.",
-      "Review follow-up: the exact watcher node passed with --no-cov. The unmodified one-test pytest command ran its assertion successfully but exited only because repository-wide coverage fell to 8.31%, so the full coverage-enforced suite remains the authoritative validation."
+      "Task 1 full quality gates: pnpm test passed 331 tests; pnpm run build, ruff check/format, and ty check passed; pytest passed 892 tests with 89.06% coverage (83% gate).",
+      "Task 2 full quality gates: pnpm test passed 331 tests; pnpm run build, ruff check/format, and ty check passed; pytest passed 906 tests with coverage above the 83% gate.",
+      "Task 3 focused command: ./run.sh pnpm exec vitest run src/controllers/syncthingMonitorMachine.test.ts src/controllers/syncthingMonitor.activity.test.ts src/controllers/gameLifecycleDecision.test.ts passed 85 tests. Its review quality gates: pnpm test passed 334 tests; pnpm run build, ruff check/format, and ty check passed; pytest passed 907 tests.",
+      "Task 4 focused documentation/static command: ./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py ran all 25 assertions successfully, then exited only because this documentation-only selection produced 0% repository coverage against the enforced 83% threshold. The captured diagnostic is /tmp/sdh_ludusavi/syncthing-peer-completion-upload-status-doc-tests-error.log. The same command with --no-cov passed all 25 assertions in 0.18s; the coverage-enforced full suite remains authoritative.",
+      "Task 4 full quality gates: scripts/orchestration/run-quality-gates passed: pnpm test ran 33 files / 334 tests, TypeScript typecheck passed, pnpm build passed, ruff check and format passed, ty check passed, and the coverage-enforced pytest suite passed all 907 tests with 89.28% coverage (83% gate)."
     ],
     "review_notes": [
       "docs/review/syncthing-peer-completion-upload-status-review-01.md",
-      "docs/review/syncthing-peer-completion-upload-status-review-02.md"
+      "docs/review/syncthing-peer-completion-upload-status-review-02.md",
+      "docs/review/syncthing-peer-completion-upload-status-review-03.md"
     ],
-    "deferred": "Task 4 will expand this record with the final Task 1-3 commit hashes, its documentation validation, the planning-time Steam Deck viability evidence, and the explicitly deferred prerelease device acceptance."
+    "live_viability_evidence": "The planning-time Steam Deck Syncthing 2.1.2 event history showed two connected folder peers at 93.56119493792454% with 8,942,011 needed bytes, 32 needed items, and 19 needed deletes, then separate 100% reports. The same window contained zero RemoteDownloadProgress events. Replaying those FolderCompletion events sustained upload state for about 41 seconds, establishing peer completion as the durable outbound signal.",
+    "deferred_post_release_steam_deck_verification": "After finalization creates the development prerelease, verify on the Steam Deck that BACKING UP LOCAL SAVE -> GAME SAVE UP TO DATE -> SYNCTHING PREPARING -> SYNCTHING UPLOADING -> SYNCTHING COMPLETE appears for both sustained and very small changes; pull fresh logs into /tmp/sdh_ludusavi/steamdeck/logs, confirm count-only diagnostics align with transitions, and repeat with all relevant peers disconnected to confirm LOCAL BACKUP SAVED - NO SYNCTHING PEERS ONLINE. This hardware acceptance is intentionally deferred and was not attempted before release availability."
   }
 }

@@ -116,15 +116,15 @@ Backups and restores are limited to 15 minutes (status checks to 5 minutes); if 
 - **Skipped — recency is ambiguous**: The plugin couldn't determine which save is newer and will prompt you to choose. This also occurs when your local save and the backup have both changed (for example, after playing in Desktop Mode); the plugin only restores automatically when the backup is clearly newer, and otherwise pauses the launch so you can choose.
 - **Sync Skipped — Conflict Unresolved**: You dismissed the conflict prompt without choosing a save, so the plugin deliberately made no save changes and resumed the game.
 - **Syncthing Downloading**: Syncthing is downloading/applying backup folder data.
-- **Syncthing Uploading**: Syncthing is uploading/serving backup folder data to a remote peer.
-- **Syncthing Complete**: Syncthing synchronization has settled locally. This confirms there is no longer active transfer or scanning on the Steam Deck, but it does NOT guarantee that remote devices have finished downloading the save.
+- **Syncthing Uploading**: After a backup, a currently connected device that shares the watched backup folder is still catching up, or has not yet reported that it caught up after the Deck changed the folder's index.
+- **Syncthing Complete**: After a backup, the watched folder has settled on the Steam Deck and every currently connected device that shares it has reported no outstanding need after the local index change. This does **not** guarantee the save has reached a configured device that is disconnected or offline.
 - **Local Backup Saved - Syncthing Unavailable**: The backup succeeded, but configured Syncthing API access failed.
 - **Local Backup Saved - Path Not Shared**: The backup succeeded, but its directory is not in a Syncthing shared folder, or the shared folder has no configured remote devices.
 - **Local Backup Saved - No Syncthing Peers Online**: The backup succeeded, but none of the devices that share the backup folder are currently connected, so remote propagation was not observed. Syncthing will sync later once a peer reconnects.
 
 When Syncthing is not configured, the plugin silently reports the normal local-backup result without a Syncthing warning. Peer connectivity, not internet connectivity, controls these warnings: Syncthing monitoring runs whenever at least one device sharing the backup folder is connected (including over LAN without internet), and is skipped when none are.
 
-Syncthing activity statuses reflect only the Syncthing folder that contains Ludusavi's configured backup path. Traffic in other Syncthing folders is excluded, even when those folders are shared with the same remote peer.
+Syncthing activity statuses reflect only the Syncthing folder that contains Ludusavi's configured backup path. Traffic in other Syncthing folders is excluded, even when those folders are shared with the same remote peer. At game launch, settlement retains its existing local/incoming meaning: remote devices catching up to the Deck do not delay the launch gate.
 
 If incoming activity is already visible during a launch check, the game remains paused
 until that folder settles. The plugin then verifies the save again and uses only the
