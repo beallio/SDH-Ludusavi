@@ -13,10 +13,12 @@ from ._types import (
     FolderSelection,
     FolderRuntime,
     RemoteProgress,
+    PeerCompletion,
     LocalActivity,
     ConnectionSnapshot,
     DEFAULT_EVENT_TIMEOUT_SECONDS,
     DEFAULT_ACTIVE_WINDOW_SECONDS,
+    OUTBOUND_OBSERVATION_HOLD_SECONDS,
 )
 from .activity import (
     get_initial_folder_state_and_runtime,
@@ -24,6 +26,7 @@ from .activity import (
     get_events,
     get_connection_snapshot,
     get_my_device_id,
+    get_peer_completion,
     get_folder_status,
     prune_remote_progress,
     prune_local_activity,
@@ -86,10 +89,16 @@ class SyncthingWatch:
         self.folder_state = "unknown"
         self.runtime = FolderRuntime()
         self.remote_progress: dict[str, RemoteProgress] = {}
+        self.peer_completions: dict[str, PeerCompletion] = {}
         self.local_activity = LocalActivity(active_items={})
         self.connected_devices: frozenset[str] = (
             initial_snapshot.connected_devices if initial_snapshot else frozenset()
         )
+        self._last_peer_completion_diagnostics: tuple[int, int, int, int, int, int] | None = None
+
+    @property
+    def _peer_completion_tracking(self) -> bool:
+        return self.phase == "post_game"
 
     def start(self) -> None:
         self.thread = threading.Thread(
@@ -104,10 +113,7 @@ class SyncthingWatch:
 
     def _run(self) -> None:
         try:
-            self.folder_state, self.runtime = get_initial_folder_state_and_runtime(
-                self.api, self.folder.folder_id, strict=True
-            )
-            self.cursor = get_event_cursor(self.api)
+            self._initialize()
         except Exception as exc:
             logger.warning("Failed to initialize watch thread: %s", exc)
             self.latest_sample = {
@@ -139,6 +145,35 @@ class SyncthingWatch:
                 break
 
             self._tick(time.monotonic())
+
+    def _initialize(self) -> None:
+        """Establish the ordered watch baseline before any sample is published."""
+        self.folder_state, self.runtime = get_initial_folder_state_and_runtime(
+            self.api, self.folder.folder_id, strict=True
+        )
+        self.cursor = get_event_cursor(self.api)
+
+        if self._peer_completion_tracking:
+            self._capture_peer_completion_baselines(time.monotonic())
+            # A second local sequence observation closes the baseline race: its
+            # mutation must wait for completion reports captured after it.
+            self._tick_folder_status(time.monotonic())
+
+    def _capture_peer_completion_baselines(self, now: float) -> None:
+        for device_id in self._connected_relevant_device_ids():
+            try:
+                self.peer_completions[device_id] = get_peer_completion(
+                    self.api, self.folder, device_id, now
+                )
+            # Completion responses and API failures can contain device IDs or raw JSON.
+            except Exception as exc:
+                logger.warning(
+                    "Syncthing peer completion initialization failed: %s", type(exc).__name__
+                )
+                raise RuntimeError("Syncthing peer completion initialization failed.") from exc
+
+    def _connected_relevant_device_ids(self) -> frozenset[str]:
+        return frozenset(set(self.folder.device_ids) & self.connected_devices)
 
     def _tick(self, now: float) -> None:
         # 1. Capture a monotonic timestamp for folder polling.
@@ -205,6 +240,12 @@ class SyncthingWatch:
                 self.local_activity.sequence_change_from = self.runtime.sequence
                 self.local_activity.sequence_change_to = new_runtime.sequence
                 self.local_activity.last_local_index_monotonic = now
+            if self._peer_completion_tracking and new_runtime.sequence > self.runtime.sequence:
+                self.local_activity.outbound_index_observed_monotonic = now
+                self.local_activity.outbound_observation_hold_deadline_monotonic = max(
+                    self.local_activity.outbound_observation_hold_deadline_monotonic,
+                    now + OUTBOUND_OBSERVATION_HOLD_SECONDS,
+                )
             self.folder_state = new_state
             self.runtime = new_runtime
         # Intentionally broad
@@ -220,8 +261,12 @@ class SyncthingWatch:
                 runtime=self.runtime,
                 active_window_seconds=DEFAULT_ACTIVE_WINDOW_SECONDS,
                 now=now,
+                peer_completions=self.peer_completions,
+                connected_relevant_device_ids=self._connected_relevant_device_ids(),
+                peer_completion_tracking=self._peer_completion_tracking,
             )
             self.latest_sample = _serialize_sample(self.watch_id, status)
+            self._log_peer_completion_transition()
         # Intentionally broad
         except Exception as exc:
             self.latest_sample = {
@@ -229,6 +274,61 @@ class SyncthingWatch:
                 "reason": "computation_failed",
                 "message": str(exc),
             }
+
+    def _log_peer_completion_transition(self) -> None:
+        if not self._peer_completion_tracking:
+            return
+
+        connected_relevant_device_ids = self._connected_relevant_device_ids()
+        incomplete_peers = 0
+        awaiting_fresh_completion = 0
+        needed_bytes = 0
+        needed_items = 0
+        needed_deletes = 0
+        mutation_observed_at = self.local_activity.outbound_index_observed_monotonic
+
+        for device_id in connected_relevant_device_ids:
+            completion = self.peer_completions.get(device_id)
+            if completion is not None and (
+                completion.completion < 100
+                or completion.need_bytes > 0
+                or completion.need_items > 0
+                or completion.need_deletes > 0
+            ):
+                incomplete_peers += 1
+                needed_bytes += completion.need_bytes
+                needed_items += completion.need_items
+                needed_deletes += completion.need_deletes
+            if mutation_observed_at > 0 and (
+                completion is None or completion.observed_monotonic < mutation_observed_at
+            ):
+                awaiting_fresh_completion += 1
+
+        diagnostics = (
+            len(connected_relevant_device_ids),
+            incomplete_peers,
+            awaiting_fresh_completion,
+            needed_bytes,
+            needed_items,
+            needed_deletes,
+        )
+        if diagnostics == self._last_peer_completion_diagnostics:
+            return
+        if self._last_peer_completion_diagnostics is None:
+            transition = "started"
+        elif incomplete_peers or awaiting_fresh_completion:
+            transition = "incomplete"
+        else:
+            transition = "acknowledged"
+        self._last_peer_completion_diagnostics = diagnostics
+        logger.info(
+            "Syncthing peer completion %s: phase=%s connected_relevant_peers=%d "
+            "incomplete_peers=%d awaiting_fresh_completion=%d needed_bytes=%d "
+            "needed_items=%d needed_deletes=%d",
+            transition,
+            self.phase,
+            *diagnostics,
+        )
 
     def _tick_events(self) -> None:
         try:
@@ -251,6 +351,8 @@ class SyncthingWatch:
                         remote_progress=self.remote_progress,
                         local_activity=self.local_activity,
                         now=time.monotonic(),
+                        peer_completions=self.peer_completions,
+                        peer_completion_tracking=self._peer_completion_tracking,
                     )
                     config_changed = config_changed or event_config_changed
                 if config_changed:
