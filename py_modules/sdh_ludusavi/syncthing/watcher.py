@@ -334,6 +334,12 @@ class SyncthingWatch:
         try:
             events = get_events(self.api, self.cursor, DEFAULT_EVENT_TIMEOUT_SECONDS)
             if events:
+                event_ids = [int(event.get("id", self.cursor)) for event in events]
+                if any(event_id < self.cursor for event_id in event_ids):
+                    self.cursor = max(event_ids)
+                    logger.info(
+                        "Syncthing event subscription reset detected; re-seeding event cursor."
+                    )
                 config_changed = False
                 for event in events:
                     self.cursor = max(self.cursor, int(event.get("id", self.cursor)))

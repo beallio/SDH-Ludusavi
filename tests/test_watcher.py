@@ -559,6 +559,95 @@ def _stopped_watch_for_tick(device_ids: tuple[str, ...]) -> SyncthingWatch:
     return watch
 
 
+def _unchanged_event_state(**kwargs):
+    return (
+        kwargs["folder_state"],
+        kwargs["runtime"],
+        kwargs["remote_progress"],
+        kwargs["local_activity"],
+        False,
+    )
+
+
+def test_event_subscription_reset_reseeds_cursor_and_processes_returned_events() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    reset_events = [
+        {"id": 1, "type": "StateChanged", "data": {"folder": "test-folder"}},
+        {"id": 2, "type": "StateChanged", "data": {"folder": "test-folder"}},
+    ]
+
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.get_events", return_value=reset_events),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.process_event",
+            side_effect=_unchanged_event_state,
+        ) as mock_process_event,
+    ):
+        watch._tick_events()
+
+    assert mock_process_event.call_count == 2
+    assert [call.kwargs["event"] for call in mock_process_event.call_args_list] == reset_events
+    assert watch.cursor == 2
+
+
+def test_event_cursor_keeps_moving_forward_for_normal_event_batches() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    forward_events = [
+        {"id": 101, "type": "StateChanged", "data": {"folder": "test-folder"}},
+        {"id": 103, "type": "StateChanged", "data": {"folder": "test-folder"}},
+    ]
+
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.get_events", return_value=forward_events),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.process_event",
+            side_effect=_unchanged_event_state,
+        ) as mock_process_event,
+    ):
+        watch._tick_events()
+
+    assert mock_process_event.call_count == 2
+    assert watch.cursor == 103
+
+
+def test_event_subscription_reset_logs_once_without_sensitive_event_details(caplog) -> None:
+    watch = _stopped_watch_for_tick(("SECRET-REMOTE-ID",))
+    reset_events = [
+        {
+            "id": 1,
+            "type": "StateChanged",
+            "data": {
+                "folder": "SECRET-FOLDER",
+                "device": "SECRET-REMOTE-ID",
+                "payload": "RAW-EVENT-PAYLOAD",
+            },
+        },
+        {
+            "id": 2,
+            "type": "StateChanged",
+            "data": {"folder": "SECRET-FOLDER", "device": "SECRET-REMOTE-ID"},
+        },
+    ]
+
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.get_events", return_value=reset_events),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.process_event",
+            side_effect=_unchanged_event_state,
+        ),
+        caplog.at_level("INFO", logger="sdh_ludusavi.syncthing.watcher"),
+    ):
+        watch._tick_events()
+
+    reset_records = [
+        record for record in caplog.records if "event subscription reset" in record.message
+    ]
+    assert len(reset_records) == 1
+    assert "SECRET-REMOTE-ID" not in caplog.text
+    assert "SECRET-FOLDER" not in caplog.text
+    assert "RAW-EVENT-PAYLOAD" not in caplog.text
+
+
 def test_post_game_initialization_captures_peer_baselines_before_second_status_poll() -> None:
     watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"))
     watch.connected_devices = frozenset({"DEV-A", "DEV-B"})
