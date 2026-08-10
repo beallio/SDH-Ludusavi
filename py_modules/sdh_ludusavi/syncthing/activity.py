@@ -108,6 +108,40 @@ def get_my_device_id(api: SyncthingAPI) -> str:
     return my_id
 
 
+def get_peer_completion(
+    api: SyncthingAPI,
+    folder: FolderSelection,
+    device_id: str,
+    now: float,
+) -> PeerCompletion:
+    """Read and validate one remote peer's completion for *folder*.
+
+    Syncthing's response does not repeat the requested folder or device, so those
+    backend-only values are supplied to the existing scoped parser rather than
+    trusting a response field. Errors from the REST client can contain raw bodies
+    and device IDs, so this boundary intentionally emits only generic errors.
+    """
+    try:
+        data = api.get_json(
+            "/rest/db/completion",
+            params={"folder": folder.folder_id, "device": device_id},
+            timeout=10,
+        )
+    # The API error can include response data and the backend-only device ID.
+    except Exception as exc:
+        raise RuntimeError("Syncthing peer completion query failed.") from exc
+
+    if not isinstance(data, dict):
+        raise RuntimeError("Unexpected peer completion response.")
+
+    completion = _parse_peer_completion(
+        {**data, "folder": folder.folder_id, "device": device_id}, folder, now
+    )
+    if completion is None:
+        raise RuntimeError("Invalid peer completion response.")
+    return completion
+
+
 def prune_remote_progress(
     remote_progress: dict[str, RemoteProgress], active_window: float, now: float
 ) -> dict[str, RemoteProgress]:
