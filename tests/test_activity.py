@@ -6,6 +6,7 @@ from sdh_ludusavi.syncthing.activity import (
     get_event_cursor,
     get_initial_folder_state_and_runtime,
     get_my_device_id,
+    get_peer_completion,
     process_event,
     _serialize_sample,
 )
@@ -134,6 +135,81 @@ def test_connection_bytes_cannot_create_transfer_direction_from_folder_mutation(
     assert status.downloading is False
     assert status.uploading is False
     assert status.status != "ACTIVE_TRANSFER"
+
+
+def test_get_peer_completion_validates_one_configured_peer_response() -> None:
+    api = Mock()
+    api.get_json.return_value = {
+        "completion": 93.56119493792454,
+        "needBytes": 8_942_011,
+        "needItems": 32,
+        "needDeletes": 19,
+    }
+    folder = FolderSelection(
+        folder_id="folder-a",
+        label="Folder A",
+        path="/sync/a",
+        device_ids=("REMOTE-A",),
+    )
+
+    completion = get_peer_completion(api, folder, "REMOTE-A", now=42.0)
+
+    assert completion == PeerCompletion(
+        device_id="REMOTE-A",
+        completion=93.56119493792454,
+        need_bytes=8_942_011,
+        need_items=32,
+        need_deletes=19,
+        observed_monotonic=42.0,
+    )
+    api.get_json.assert_called_once_with(
+        "/rest/db/completion",
+        params={"folder": "folder-a", "device": "REMOTE-A"},
+        timeout=10,
+    )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        [],
+        {"completion": float("nan"), "needBytes": 0, "needItems": 0, "needDeletes": 0},
+        {"completion": 100, "needBytes": -1, "needItems": 0, "needDeletes": 0},
+        {"completion": 100, "needBytes": 0, "needItems": 0, "needDeletes": True},
+    ],
+)
+def test_get_peer_completion_rejects_malformed_responses_without_device_leaks(response) -> None:
+    api = Mock()
+    api.get_json.return_value = response
+    folder = FolderSelection(
+        folder_id="folder-a",
+        label="Folder A",
+        path="/sync/a",
+        device_ids=("SECRET-REMOTE-ID",),
+    )
+
+    with pytest.raises(RuntimeError, match="peer completion") as excinfo:
+        get_peer_completion(api, folder, "SECRET-REMOTE-ID", now=42.0)
+
+    assert "SECRET-REMOTE-ID" not in str(excinfo.value)
+
+
+def test_get_peer_completion_sanitizes_api_errors() -> None:
+    api = Mock()
+    api.get_json.side_effect = RuntimeError("raw body for SECRET-REMOTE-ID")
+    folder = FolderSelection(
+        folder_id="folder-a",
+        label="Folder A",
+        path="/sync/a",
+        device_ids=("SECRET-REMOTE-ID",),
+    )
+
+    with pytest.raises(RuntimeError, match="peer completion") as excinfo:
+        get_peer_completion(api, folder, "SECRET-REMOTE-ID", now=42.0)
+
+    assert "SECRET-REMOTE-ID" not in str(excinfo.value)
+    assert "raw body" not in str(excinfo.value)
 
 
 @pytest.mark.parametrize(
