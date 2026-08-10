@@ -968,6 +968,45 @@ def test_watch_ignores_other_folder_traffic_shared_with_relevant_peer() -> None:
     assert sample["status"] != "ACTIVE_TRANSFER"
 
 
+def test_watched_folder_mutation_beats_unscoped_peer_completion() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    now = time.monotonic()
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+            return_value=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_folder_status",
+            return_value={"state": "idle", "sequence": 6},
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_events",
+            return_value=[
+                {
+                    "id": 101,
+                    "type": "FolderCompletion",
+                    "data": {
+                        "folder": "other-folder",
+                        "device": "DEV-A",
+                        "completion": 93.56119493792454,
+                        "needBytes": 8_942_011,
+                        "needItems": 32,
+                        "needDeletes": 19,
+                    },
+                }
+            ],
+        ),
+    ):
+        watch._tick(now)
+
+    sample = watch.latest_sample["sample"]
+    assert sample["uploading"] is True
+    assert sample["status"] == "ACTIVE_TRANSFER"
+    assert watch.peer_completions == {}
+
+
 def test_watch_preserves_watched_folder_download_and_upload_progress() -> None:
     watch = _stopped_watch_for_tick(("DEV-A",))
 
