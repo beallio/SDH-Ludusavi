@@ -4,6 +4,7 @@ from sdh_ludusavi.syncthing.activity import (
     compute_activity_status,
     get_connection_snapshot,
     get_event_cursor,
+    get_events,
     get_initial_folder_state_and_runtime,
     get_my_device_id,
     get_peer_completion,
@@ -26,6 +27,35 @@ def test_get_event_cursor_rejects_non_list() -> None:
 
     with pytest.raises(RuntimeError, match="Unexpected events response"):
         get_event_cursor(MockAPI())
+
+
+def test_get_event_cursor_uses_same_subscription_filter_as_event_reads() -> None:
+    class MockAPI:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def get_json(self, path, params=None, timeout=None):
+            self.calls.append({"path": path, "params": params, "timeout": timeout})
+            return [{"id": 248, "globalID": 1598}]
+
+    api = MockAPI()
+
+    cursor = get_event_cursor(api)
+    get_events(api, since=cursor, event_timeout_seconds=1.0)
+
+    cursor_params = api.calls[0]["params"]
+    event_params = api.calls[1]["params"]
+    assert cursor_params["events"] == event_params["events"]
+
+
+def test_get_event_cursor_uses_subscription_scoped_id_not_global_id() -> None:
+    api = Mock()
+    api.get_json.return_value = [
+        {"id": 247, "globalID": 1597},
+        {"id": 248, "globalID": 1598},
+    ]
+
+    assert get_event_cursor(api) == 248
 
 
 def test_get_initial_folder_state_and_runtime_strict_failure() -> None:
