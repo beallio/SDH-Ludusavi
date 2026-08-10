@@ -199,6 +199,7 @@ export type AutoSyncStatusKind =
   | "syncthing_downloading"
   | "syncthing_uploading"
   | "syncthing_complete"
+  | "syncthing_upload_incomplete"
   | "syncthing_unavailable"
   | "syncthing_folder_not_found"
   | "syncthing_no_peers";
