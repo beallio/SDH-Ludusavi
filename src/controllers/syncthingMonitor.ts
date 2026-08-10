@@ -99,7 +99,8 @@ class WatchContext {
     return this.state.step === "cancelled";
   }
 }
-const EMPTY_SAMPLE_RETRY_MS = 250, ACTIVE_POLL_INTERVAL_MS = 500;
+const EMPTY_SAMPLE_RETRY_MS = 250;
+const ACTIVE_POLL_INTERVAL_MS = 500;
 export const PRE_GAME_QUIESCENCE_TIMEOUT_MS = 120_000;
 // The 15-minute backend ceiling handles measurable peer need; this shorter frontend cap
 // bounds silent awaiting-fresh-completion watches, which provide no need to measure.
@@ -541,7 +542,6 @@ export class SyncthingMonitor {
 
     const wID = context.watchID;
     const effects = this.dispatch(context, { type: "poll_failed", reason }, { releaseWatchID: true });
-    
     if (effects.stopWatch && wID !== null) {
       void this.stopWatchSafe(wID);
     }
