@@ -20,6 +20,8 @@ from ._types import (
     LocalActivity,
     ActivityStatus,
     OUTBOUND_OBSERVATION_HOLD_SECONDS,
+    peer_completion_is_incomplete,
+    summarize_peer_completions,
     int_field,
     parse_folder_runtime,
 )
@@ -293,20 +295,13 @@ def compute_activity_status(
     awaiting_fresh_peer_completion = False
     outbound_observation_hold_active = False
     if peer_completion_tracking:
-        for device_id in connected_relevant_device_ids:
-            completion = peer_completions.get(device_id)
-            if completion is not None and (
-                completion.completion < 100
-                or completion.need_bytes > 0
-                or completion.need_items > 0
-                or completion.need_deletes > 0
-            ):
-                incomplete_peer = True
-            if local_activity.outbound_index_observed_monotonic > 0 and (
-                completion is None
-                or completion.observed_monotonic < local_activity.outbound_index_observed_monotonic
-            ):
-                awaiting_fresh_peer_completion = True
+        completion_diagnostics = summarize_peer_completions(
+            peer_completions,
+            connected_relevant_device_ids,
+            local_activity.outbound_index_observed_monotonic,
+        )
+        incomplete_peer = completion_diagnostics.incomplete_peers > 0
+        awaiting_fresh_peer_completion = completion_diagnostics.awaiting_fresh_completion > 0
         outbound_observation_hold_active = (
             now < local_activity.outbound_observation_hold_deadline_monotonic
         )
@@ -441,12 +436,7 @@ def process_event(
         completion = _parse_peer_completion(data, folder, now)
         if completion is not None:
             peer_completions[completion.device_id] = completion
-            if (
-                completion.completion < 100
-                or completion.need_bytes > 0
-                or completion.need_items > 0
-                or completion.need_deletes > 0
-            ):
+            if peer_completion_is_incomplete(completion):
                 local_activity.outbound_observation_hold_deadline_monotonic = max(
                     local_activity.outbound_observation_hold_deadline_monotonic,
                     now + OUTBOUND_OBSERVATION_HOLD_SECONDS,
