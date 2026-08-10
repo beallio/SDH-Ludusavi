@@ -108,10 +108,12 @@ Using Syncthing allows for near-instant local backups that sync in the backgroun
 
 ## Understanding Status Messages
 
-Backups and restores are limited to 15 minutes. Syncthing monitoring is advisory and
-never blocks launch or exit: when its post-game observation boundary is reached, the
-plugin reports the resulting upload state rather than presenting an ordinary slow sync as
-an API failure.
+Backups and restores are limited to 15 minutes (status checks to 5 minutes); if Ludusavi
+exceeds this — for example, a stalled cloud sync — the operation is reported as failed
+instead of hanging, and any paused game is resumed automatically. Syncthing monitoring is
+advisory and never blocks launch or exit: when its post-game observation boundary is
+reached, the plugin reports the resulting upload state rather than presenting an ordinary
+slow sync as an API failure.
 
 - **Backup ready**: Ludusavi has a valid backup for this game.
 - **Needs first backup**: Ludusavi recognizes the game, but no backup has been created yet.

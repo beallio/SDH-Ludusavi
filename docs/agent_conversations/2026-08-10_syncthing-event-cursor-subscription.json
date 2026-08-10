@@ -64,6 +64,8 @@
   "task_5_verification": {
     "focused_static_suite": "./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py -q --no-cov: 25 passed in 0.18s.",
     "module_size_recovery": "The first full-gate run caught the required two-line declaration restoration taking src/controllers/syncthingMonitor.ts to 566 lines against its 565-line budget. Removing one whitespace-only separator kept the requested declarations separate; ./run.sh uv run pytest tests/test_module_size_budgets.py -q --no-cov then passed: 1 passed in 0.02s.",
+    "review_05_readme_restore": "Task 5 accidentally replaced the Ludusavi operation-timeout sentence with the new Syncthing advisory sentence, dropping the 5-minute status-check limit, failed-not-hanging behavior, and automatic paused-game resume. Review 05 required the round-trip restoration; the exact three clauses now appear alongside the retained Syncthing sentence.",
+    "review_05_quality_gates": "After restoring the README clauses, scripts/orchestration/run-quality-gates passed: pnpm test 33 files and 335 tests; TypeScript typecheck; Rollup build; ruff check and format; ty check; and pytest 917 passed in 24.58s at 89.51% coverage. scripts/orchestration/check-review-notes-not-deleted also passed.",
     "full_quality_gates": "scripts/orchestration/run-quality-gates completed after the budget recovery. Exact final summaries: pnpm test reported 33 test files and 335 tests passed, followed by tsc --noEmit; pnpm run build created dist successfully; ruff check --fix and ty check passed; ruff format reported 141 files left unchanged; ./run.sh uv run pytest -q reported 917 passed in 25.08s at 89.51% coverage.",
     "live_event_probe": {
       "status": "blocked",
