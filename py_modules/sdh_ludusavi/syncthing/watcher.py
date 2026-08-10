@@ -19,6 +19,10 @@ from ._types import (
     DEFAULT_EVENT_TIMEOUT_SECONDS,
     DEFAULT_ACTIVE_WINDOW_SECONDS,
     OUTBOUND_OBSERVATION_HOLD_SECONDS,
+    OUTBOUND_STALL_WINDOW_SECONDS,
+    POST_GAME_WATCH_HARD_CEILING_SECONDS,
+    PeerCompletionDiagnostics,
+    summarize_peer_completions,
 )
 from .activity import (
     get_initial_folder_state_and_runtime,
@@ -80,7 +84,13 @@ class SyncthingWatch:
         self.folder = folder
         self.api = api
         self.started_at = time.time()
-        self.deadline_monotonic = time.monotonic() + WATCH_TTL_SECONDS
+        self.watch_started_monotonic = time.monotonic()
+        ttl_seconds = (
+            POST_GAME_WATCH_HARD_CEILING_SECONDS + 60.0
+            if self._peer_completion_tracking
+            else WATCH_TTL_SECONDS
+        )
+        self.deadline_monotonic = self.watch_started_monotonic + ttl_seconds
         self._on_expired = on_expired
         self.stop_event = threading.Event()
         self.latest_sample: dict[str, Any] = {}
@@ -94,7 +104,9 @@ class SyncthingWatch:
         self.connected_devices: frozenset[str] = (
             initial_snapshot.connected_devices if initial_snapshot else frozenset()
         )
-        self._last_peer_completion_diagnostics: tuple[int, int, int, int, int, int] | None = None
+        self._last_peer_completion_diagnostics: PeerCompletionDiagnostics | None = None
+        self._last_outbound_need: int | None = None
+        self._last_outbound_need_decrease_monotonic: float | None = None
 
     @property
     def _peer_completion_tracking(self) -> bool:
@@ -216,6 +228,8 @@ class SyncthingWatch:
         prune_local_activity(self.local_activity, DEFAULT_ACTIVE_WINDOW_SECONDS, now_post)
 
         # 7. Compute and atomically assign the latest sample using the post-event state.
+        if self._stop_if_post_game_upload_incomplete(now_post):
+            return
         self._tick_sample(now_post)
 
     def _tick_connectivity(self) -> None:
@@ -279,44 +293,16 @@ class SyncthingWatch:
         if not self._peer_completion_tracking:
             return
 
-        connected_relevant_device_ids = self._connected_relevant_device_ids()
-        incomplete_peers = 0
-        awaiting_fresh_completion = 0
-        needed_bytes = 0
-        needed_items = 0
-        needed_deletes = 0
-        mutation_observed_at = self.local_activity.outbound_index_observed_monotonic
-
-        for device_id in connected_relevant_device_ids:
-            completion = self.peer_completions.get(device_id)
-            if completion is not None and (
-                completion.completion < 100
-                or completion.need_bytes > 0
-                or completion.need_items > 0
-                or completion.need_deletes > 0
-            ):
-                incomplete_peers += 1
-                needed_bytes += completion.need_bytes
-                needed_items += completion.need_items
-                needed_deletes += completion.need_deletes
-            if mutation_observed_at > 0 and (
-                completion is None or completion.observed_monotonic < mutation_observed_at
-            ):
-                awaiting_fresh_completion += 1
-
-        diagnostics = (
-            len(connected_relevant_device_ids),
-            incomplete_peers,
-            awaiting_fresh_completion,
-            needed_bytes,
-            needed_items,
-            needed_deletes,
+        diagnostics = summarize_peer_completions(
+            self.peer_completions,
+            self._connected_relevant_device_ids(),
+            self.local_activity.outbound_index_observed_monotonic,
         )
         if diagnostics == self._last_peer_completion_diagnostics:
             return
         if self._last_peer_completion_diagnostics is None:
             transition = "started"
-        elif incomplete_peers or awaiting_fresh_completion:
+        elif diagnostics.incomplete_peers or diagnostics.awaiting_fresh_completion:
             transition = "incomplete"
         else:
             transition = "acknowledged"
@@ -327,8 +313,53 @@ class SyncthingWatch:
             "needed_items=%d needed_deletes=%d",
             transition,
             self.phase,
-            *diagnostics,
+            diagnostics.connected_relevant_peers,
+            diagnostics.incomplete_peers,
+            diagnostics.awaiting_fresh_completion,
+            diagnostics.needed_bytes,
+            diagnostics.needed_items,
+            diagnostics.needed_deletes,
         )
+
+    def _stop_if_post_game_upload_incomplete(self, now: float) -> bool:
+        if not self._peer_completion_tracking:
+            return False
+
+        diagnostics = summarize_peer_completions(
+            self.peer_completions,
+            self._connected_relevant_device_ids(),
+            self.local_activity.outbound_index_observed_monotonic,
+        )
+        if diagnostics.incomplete_peers == 0:
+            self._last_outbound_need = None
+            self._last_outbound_need_decrease_monotonic = None
+            return False
+
+        outstanding_need = diagnostics.aggregate_outstanding_need
+        if self._last_outbound_need is None:
+            self._last_outbound_need_decrease_monotonic = now
+        elif outstanding_need < self._last_outbound_need:
+            self._last_outbound_need_decrease_monotonic = now
+        self._last_outbound_need = outstanding_need
+
+        stalled = (
+            self._last_outbound_need_decrease_monotonic is not None
+            and now - self._last_outbound_need_decrease_monotonic >= OUTBOUND_STALL_WINDOW_SECONDS
+        )
+        reached_hard_ceiling = (
+            now - self.watch_started_monotonic >= POST_GAME_WATCH_HARD_CEILING_SECONDS
+        )
+        if not stalled and not reached_hard_ceiling:
+            return False
+
+        logger.info("Syncthing post-game watch stopped with incomplete upload.")
+        self.latest_sample = {
+            "status": "failed",
+            "reason": "post_game_upload_incomplete",
+            "message": "Syncthing upload did not complete before monitoring ended.",
+        }
+        self.stop_event.set()
+        return True
 
     def _tick_events(self) -> None:
         try:
