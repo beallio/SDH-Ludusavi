@@ -1,0 +1,25 @@
+{
+  "date": "2026-08-10",
+  "task_objective": "Implement Task 4 of the Syncthing event cursor subscription plan: split watch caps and surface a truthful terminal upload status.",
+  "review_note": "docs/review/syncthing-event-cursor-subscription-review-03.md",
+  "files_modified": [
+    "src/types/index.ts",
+    "src/controllers/syncthingMonitor.ts",
+    "src/controllers/syncthingMonitorMachine.ts",
+    "src/surfaces/autoSyncStatusRenderer.tsx",
+    "src/controllers/syncthingMonitor.failures.test.ts",
+    "src/controllers/syncthingMonitorMachine.test.ts"
+  ],
+  "tests_added": [
+    "Backend post-game incomplete-upload terminal reason publishes the distinct status.",
+    "Post-game polling survives the previous 120-second cap and stops at its own ceiling with the distinct status.",
+    "post_game_upload_incomplete maps to syncthing_upload_incomplete while genuine API unavailability remains mapped separately."
+  ],
+  "red_proof": "The focused suite first failed with 3 failures: the new backend reason published syncthing_unavailable, the post-game watch stopped at the old cap, and the reason mapper returned null.",
+  "design_decisions": [
+    "Pre-game keeps its 120-second quiescence cap unchanged.",
+    "Post-game uses a 300-second frontend ceiling, below the backend 900-second absolute ceiling. The frontend ceiling bounds the no-evidence awaiting_fresh_completion state, where no outstanding-need value exists for the backend stall detector to evaluate.",
+    "syncthing_upload_incomplete is an auto-hiding amber outcome rather than an error: the local backup succeeded, and waiting or restoring peer connectivity is not an actionable plugin configuration repair. It is therefore intentionally excluded from ACTIONABLE_UNAVAILABLE_REASONS."
+  ],
+  "results": "Focused Task 4 Vitest command passed: 2 files, 75 tests. Full gates passed: 335 Vitest tests, TypeScript typecheck, Rollup build, Ruff check/format, ty check, module-size budget, and 917 pytest tests at 89.53% coverage."
+}
