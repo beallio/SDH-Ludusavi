@@ -52,6 +52,7 @@ const ACTIONABLE_UNAVAILABLE_REASONS = new Set([
 export function mapSyncthingFailureReason(reason: string | undefined): AutoSyncStatusKind | null {
   if (reason === "no_connected_peers") return "syncthing_no_peers";
   if (reason === "folder_not_found" || reason === "folder_not_shared") return "syncthing_folder_not_found";
+  if (reason === "post_game_upload_incomplete") return "syncthing_upload_incomplete";
   if (reason === "api_unavailable") return "syncthing_unavailable";
   return null;
 }

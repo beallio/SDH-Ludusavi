@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,12 @@ DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_EVENT_TIMEOUT_SECONDS = 1.0
 DEFAULT_STATUS_POLL_INTERVAL_SECONDS = 1.0
 OUTBOUND_OBSERVATION_HOLD_SECONDS = 2.5
+# The observed straggler held needDeletes unchanged for about 60 seconds while
+# still making progress, so a 90-second window avoids treating that as stalled.
+OUTBOUND_STALL_WINDOW_SECONDS = 90.0
+# This is a post-game backstop, not the usual completion path: fifteen minutes
+# leaves room for a slow peer while still bounding a watch that never settles.
+POST_GAME_WATCH_HARD_CEILING_SECONDS = 900.0
 
 COMMON_SYNCTHING_FLATPAK_IDS = [
     "me.kozec.syncthingtk",
@@ -123,6 +130,64 @@ class PeerCompletion:
     need_items: int
     need_deletes: int
     observed_monotonic: float
+
+
+@dataclass(frozen=True)
+class PeerCompletionDiagnostics:
+    """Aggregate backend-only completion state for connected relevant peers."""
+
+    connected_relevant_peers: int
+    incomplete_peers: int
+    awaiting_fresh_completion: int
+    needed_bytes: int
+    needed_items: int
+    needed_deletes: int
+
+    @property
+    def aggregate_outstanding_need(self) -> int:
+        return self.needed_bytes + self.needed_items + self.needed_deletes
+
+
+def peer_completion_is_incomplete(completion: PeerCompletion | None) -> bool:
+    return completion is not None and (
+        completion.completion < 100
+        or completion.need_bytes > 0
+        or completion.need_items > 0
+        or completion.need_deletes > 0
+    )
+
+
+def summarize_peer_completions(
+    peer_completions: Mapping[str, PeerCompletion],
+    connected_relevant_device_ids: frozenset[str],
+    mutation_observed_at: float,
+) -> PeerCompletionDiagnostics:
+    incomplete_peers = 0
+    awaiting_fresh_completion = 0
+    needed_bytes = 0
+    needed_items = 0
+    needed_deletes = 0
+
+    for device_id in connected_relevant_device_ids:
+        completion = peer_completions.get(device_id)
+        if completion is not None and peer_completion_is_incomplete(completion):
+            incomplete_peers += 1
+            needed_bytes += completion.need_bytes
+            needed_items += completion.need_items
+            needed_deletes += completion.need_deletes
+        if mutation_observed_at > 0 and (
+            completion is None or completion.observed_monotonic < mutation_observed_at
+        ):
+            awaiting_fresh_completion += 1
+
+    return PeerCompletionDiagnostics(
+        connected_relevant_peers=len(connected_relevant_device_ids),
+        incomplete_peers=incomplete_peers,
+        awaiting_fresh_completion=awaiting_fresh_completion,
+        needed_bytes=needed_bytes,
+        needed_items=needed_items,
+        needed_deletes=needed_deletes,
+    )
 
 
 @dataclass(frozen=True)

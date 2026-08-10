@@ -1,0 +1,83 @@
+{
+  "date": "2026-08-10",
+  "task_objective": "Complete the five-task Syncthing event cursor subscription plan: keep all event cursor reads in one subscription, recover subscription resets, report stalled uploads truthfully, surface that outcome, and document the verified contract.",
+  "review_note": "docs/review/syncthing-event-cursor-subscription-review-03.md",
+  "files_modified": [
+    "src/types/index.ts",
+    "src/controllers/syncthingMonitor.ts",
+    "src/controllers/syncthingMonitorMachine.ts",
+    "src/surfaces/autoSyncStatusRenderer.tsx",
+    "src/controllers/syncthingMonitor.failures.test.ts",
+    "src/controllers/syncthingMonitorMachine.test.ts"
+  ],
+  "tests_added": [
+    "Backend post-game incomplete-upload terminal reason publishes the distinct status.",
+    "Post-game polling survives the previous 120-second cap and stops at its own ceiling with the distinct status.",
+    "post_game_upload_incomplete maps to syncthing_upload_incomplete while genuine API unavailability remains mapped separately."
+  ],
+  "red_proof": "The focused suite first failed with 3 failures: the new backend reason published syncthing_unavailable, the post-game watch stopped at the old cap, and the reason mapper returned null.",
+  "design_decisions": [
+    "Pre-game keeps its 120-second quiescence cap unchanged.",
+    "Post-game uses a 300-second frontend ceiling, below the backend 900-second absolute ceiling. The frontend ceiling bounds the no-evidence awaiting_fresh_completion state, where no outstanding-need value exists for the backend stall detector to evaluate.",
+    "syncthing_upload_incomplete is an auto-hiding amber outcome rather than an error: the local backup succeeded, and waiting or restoring peer connectivity is not an actionable plugin configuration repair. It is therefore intentionally excluded from ACTIONABLE_UNAVAILABLE_REASONS.",
+    "Syncthing event ids are subscription-scoped by the events filter, so cursor seeding and event reads share EVENT_TYPES; globalID remains process-wide and is not a since cursor.",
+    "Peer completion remains the authoritative outbound acknowledgement because its need counters persist across block-request gaps and represent needDeletes even when needBytes is zero. RemoteDownloadProgress remains supplemental."
+  ],
+  "task_commits": {
+    "task_1": {
+      "hash": "52eaf87",
+      "subject": "fix(syncthing): seed event cursor from the filtered subscription"
+    },
+    "task_2": {
+      "hash": "86ac8f8",
+      "subject": "fix(syncthing): re-seed the cursor when a subscription resets"
+    },
+    "task_3": {
+      "hash": "3a6e4c8",
+      "subject": "feat(syncthing): stop a stalled post-game watch with a truthful reason"
+    },
+    "task_4": {
+      "hash": "4920826",
+      "subject": "feat(autosync): split watch caps and surface incomplete upload status"
+    },
+    "task_5_subject": "docs(syncthing): correct event subscription and upload status contract"
+  },
+  "task_5_files_modified": [
+    "README.md",
+    "docs/specs/sdh_ludusavi_sync.md",
+    "docs/specs/custom_status_bar_ui.md",
+    "docs/agent_conversations/2026-08-10_syncthing-event-cursor-subscription.json",
+    "src/controllers/syncthingMonitor.ts"
+  ],
+  "review_notes": [
+    "docs/review/syncthing-event-cursor-subscription-review-01.md",
+    "docs/review/syncthing-event-cursor-subscription-review-02.md",
+    "docs/review/syncthing-event-cursor-subscription-review-03.md",
+    "docs/review/syncthing-event-cursor-subscription-review-04.md"
+  ],
+  "task_red_proofs": {
+    "task_1": "Mutation proof from review 01: removing the cursor events filter made tests/test_activity.py::test_get_event_cursor_uses_same_subscription_filter_as_event_reads fail with KeyError: 'events' (1 failed, 56 passed); restored green at 57 passed.",
+    "task_2": "Mutation proof from review 02: removing the reset branch made test_event_subscription_reset_reseeds_cursor_and_processes_returned_events and test_event_subscription_reset_logs_once_without_sensitive_event_details fail (2 failed, 44 passed).",
+    "task_3": "Mutation proof from review 03: preventing the stop branch made test_post_game_unchanged_outbound_need_stops_with_sanitized_truthful_reason and test_post_game_watch_stops_at_hard_ceiling_despite_outbound_progress fail (2 failed, 49 passed).",
+    "task_4": "Initial focused RED proof: 3 failures before implementation — the new backend reason published syncthing_unavailable, the post-game watch stopped at the old cap, and the mapper returned null. Review 04 also proved the cap branch by restoring handlePollFailure: 1 failed, 17 passed."
+  },
+  "task_5_verification": {
+    "focused_static_suite": "./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py -q --no-cov: 25 passed in 0.18s.",
+    "module_size_recovery": "The first full-gate run caught the required two-line declaration restoration taking src/controllers/syncthingMonitor.ts to 566 lines against its 565-line budget. Removing one whitespace-only separator kept the requested declarations separate; ./run.sh uv run pytest tests/test_module_size_budgets.py -q --no-cov then passed: 1 passed in 0.02s.",
+    "review_05_readme_restore": "Task 5 accidentally replaced the Ludusavi operation-timeout sentence with the new Syncthing advisory sentence, dropping the 5-minute status-check limit, failed-not-hanging behavior, and automatic paused-game resume. Review 05 required the round-trip restoration; the exact three clauses now appear alongside the retained Syncthing sentence.",
+    "review_05_quality_gates": "After restoring the README clauses, scripts/orchestration/run-quality-gates passed: pnpm test 33 files and 335 tests; TypeScript typecheck; Rollup build; ruff check and format; ty check; and pytest 917 passed in 24.58s at 89.51% coverage. scripts/orchestration/check-review-notes-not-deleted also passed.",
+    "full_quality_gates": "scripts/orchestration/run-quality-gates completed after the budget recovery. Exact final summaries: pnpm test reported 33 test files and 335 tests passed, followed by tsc --noEmit; pnpm run build created dist successfully; ruff check --fix and ty check passed; ruff format reported 141 files left unchanged; ./run.sh uv run pytest -q reported 917 passed in 25.08s at 89.51% coverage.",
+    "live_event_probe": {
+      "status": "blocked",
+      "precondition": "2026-08-10 host-side ssh -q -o BatchMode=yes -o ConnectTimeout=5 steamdeck-legos true exited 255; non-quiet diagnostic: ssh: connect to host 10.168.168.219 port 22: No route to host.",
+      "result": "No branch package, device install, event probe, or cleanup check was attempted. The live event-flow verification is not passed and must be retried once the device is reachable."
+    }
+  },
+  "deferred_device_verification": [
+    "A real post-game game-exit run remains deferred until a development prerelease. It must show BACKING UP LOCAL SAVE, GAME SAVE UP TO DATE, SYNCTHING UPLOADING with moving count-only diagnostics, then SYNCTHING COMPLETE.",
+    "The 90-second stall window and 900-second backend ceiling are calibrated from one 2026-08-09 observation: needDeletes stayed unchanged for about 60 seconds while still progressing. The 300-second frontend ceiling deliberately bounds only silent awaiting-fresh-completion watches.",
+    "The new incomplete-upload terminal status has unit coverage but has not been observed on device; reproducing it needs a peer to stall mid-sync.",
+    "RemoteDownloadProgress behavior remains unmeasured. The documentation rationale changed, but whether that event alone would suffice is still unknown because it has never been received."
+  ],
+  "results": "Focused Task 4 Vitest command passed: 2 files, 75 tests. Full Task 4 gates passed: 335 Vitest tests, TypeScript typecheck, Rollup build, Ruff check/format, ty check, module-size budget, and 917 pytest tests at 89.53% coverage. Task 5 static, full-gate, and blocked-device-verification results are recorded in task_5_verification."
+}

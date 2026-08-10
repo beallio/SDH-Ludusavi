@@ -85,6 +85,12 @@ only events for that watched folder and one of its configured remote devices. It
 completion plus `needBytes`, `needItems`, and `needDeletes` internally; these device-level
 values never enter the RPC payload.
 
+Syncthing scopes an event `id` to the `/rest/events` subscription selected by its
+`events=` filter; `since` matches that scoped value, while `globalID` is
+process-wide. Cursor seeding and event polling therefore use the same `EVENT_TYPES`
+filter. A new event call site must use that filter too, or its cursor would refer to a
+different subscription.
+
 After a watched-folder local-index mutation, an older peer completion cannot acknowledge
 the mutation. The backend uses event ordering and monotonic observation times, not the
 remote device's `FolderCompletion.sequence`, to establish freshness. An incomplete or
@@ -92,18 +98,29 @@ not-yet-fresh connected relevant peer holds post-game upload activity, as does a
 2.5-second observation hold following a mutation or incomplete report. This gives the
 500 ms monitor poller several chances to observe a fast transfer even when the final 100%
 completion arrives in the same REST event batch. `RemoteDownloadProgress` remains
-supplemental upload evidence; it is not the authoritative acknowledgement signal because
-remote puller requests may be absent during a transfer. Bounded transition diagnostics
-contain only peer counts and aggregate need totals, never device IDs or raw completion
-payloads. Pre-game watches do not query peer completion or use it to extend launch
-settlement; their local/incoming behavior is unchanged. Events and traffic from another
-Syncthing folder are excluded even when both folders share the same remote device.
+supplemental upload evidence; peer completion is authoritative because its need counters
+persist across gaps between transient block requests and capture `needDeletes` even
+when bytes are zero. The 2026-08-09 capture contained that zero-byte,
+positive-delete state, which block-request activity cannot express. A post-game watcher
+stops after 90 seconds without a decrease in aggregate peer need, or at the backend's
+900-second hard ceiling. The frontend additionally stops a silent
+awaiting-fresh-completion watch after 300 seconds because it has no need value to measure.
+Either incomplete-upload boundary publishes the amber
+`LOCAL BACKUP SAVED - SYNCTHING UPLOAD INCOMPLETE` outcome, not an API-failure status.
+Bounded transition diagnostics contain only peer counts and aggregate need totals, never
+device IDs or raw completion payloads. Pre-game watches do not query peer completion or
+use it to extend launch settlement; their local/incoming behavior is unchanged. Events and
+traffic from another Syncthing folder are excluded even when both folders share the same
+remote device.
 
 ## Core Data Structures
 
 - `AutoSyncStatusKind`: `checking`, `backing_up`, `restoring`, `conflict`,
   `conflict_unresolved`, `has_backup`, `unknown`, `error`,
-  `syncthing_downloading`, `syncthing_uploading`, or `syncthing_complete`.
+  `syncthing_pending_upload`, `syncthing_downloading`,
+  `syncthing_uploading`, `syncthing_complete`,
+  `syncthing_upload_incomplete`, `syncthing_unavailable`,
+  `syncthing_folder_not_found`, or `syncthing_no_peers`.
 - `AutoSyncStatusSource`: lifecycle, RPC result, timeout, or hide provenance.
 - `AutoSyncStatusState`: current strip status, visibility, and provenance.
 - `AutoSyncStatusBrowserViewOwner`: wrapper shape used to normalize the BrowserView
@@ -120,8 +137,9 @@ maps to a 38px strip at `y=741` and a 21px bottom menu bar at `y=779-799`. The i
 plus text are centered horizontally as one group, with a stable text-group width so
 status changes do not visibly shift the strip. Checking, upload/download, and success
 states use Steam Blue (`#66c0f4`), while `unknown`, `conflict`, and
-`conflict_unresolved` use the amber warning color (`#f59e0b`), and `error` remains red
-(`#ef4444`).
+`conflict_unresolved` and the non-error Syncthing terminal outcomes (including
+`syncthing_upload_incomplete`) use the amber warning color (`#f59e0b`), and `error`
+remains red (`#ef4444`).
 
 ## Public Interfaces
 
@@ -160,6 +178,10 @@ Autosync status strip behavior:
   the Deck's watched folder settles and every currently connected relevant peer reports no
   outstanding need after that mutation. It does not validate a disconnected or offline
   configured peer.
+- Incomplete post-game upload: show `LOCAL BACKUP SAVED - SYNCTHING UPLOAD INCOMPLETE`
+  in amber when monitoring ends while a connected peer remains behind or has not freshly
+  confirmed the local-index mutation. The local backup succeeded; this is not an API
+  error and it auto-hides with the other result outcomes.
 - Unknown/non-actionable save state: show `UNKNOWN` for 2 seconds.
 - Failed or unsafe-to-sync state: show `UNABLE TO SYNC` and emit one Decky failure
   toast.
