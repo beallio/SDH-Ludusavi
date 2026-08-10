@@ -115,7 +115,12 @@ def test_mark_finished_writes_head_sha(repo: Path) -> None:
     assert result.returncode == 0, result.stderr
     marker = repo / ".orch_tmp" / f"{SLUG}_finished"
     assert marker.exists()
-    assert marker.read_text(encoding="utf-8").strip() == _git(repo, "rev-parse", "HEAD")
+    # The marker carries repo provenance: line 1 is HEAD, line 2 pins the
+    # canonical repository root so a marker from a sibling checkout cannot be
+    # mistaken for this one.
+    lines = marker.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == _git(repo, "rev-parse", "HEAD")
+    assert lines[1] == f"repo={repo.resolve()}"
 
 
 def test_wait_for_finished_since_blocks_on_stale_marker(repo: Path) -> None:
