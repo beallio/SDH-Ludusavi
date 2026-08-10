@@ -78,9 +78,26 @@ Syncthing BrowserView activity is scoped in the backend to the deepest configure
 Syncthing folder containing Ludusavi's backup path. `/rest/system/connections` is a
 relevant-peer availability source only: its global and per-device byte counters never
 determine activity or transfer direction. Watched-folder state from `/rest/db/status`
-and folder-tagged `DownloadProgress`, `RemoteDownloadProgress`, state, scan, item, and
-index events are the only activity sources. Events and traffic from another Syncthing
-folder are excluded even when both folders share the same remote device.
+and folder-tagged `DownloadProgress`, state, scan, item, and index events remain the
+folder-local activity sources. For post-game watches, `/rest/db/completion` supplies one
+baseline per currently connected relevant peer, and a `FolderCompletion` reducer accepts
+only events for that watched folder and one of its configured remote devices. It records
+completion plus `needBytes`, `needItems`, and `needDeletes` internally; these device-level
+values never enter the RPC payload.
+
+After a watched-folder local-index mutation, an older peer completion cannot acknowledge
+the mutation. The backend uses event ordering and monotonic observation times, not the
+remote device's `FolderCompletion.sequence`, to establish freshness. An incomplete or
+not-yet-fresh connected relevant peer holds post-game upload activity, as does a
+2.5-second observation hold following a mutation or incomplete report. This gives the
+500 ms monitor poller several chances to observe a fast transfer even when the final 100%
+completion arrives in the same REST event batch. `RemoteDownloadProgress` remains
+supplemental upload evidence; it is not the authoritative acknowledgement signal because
+remote puller requests may be absent during a transfer. Bounded transition diagnostics
+contain only peer counts and aggregate need totals, never device IDs or raw completion
+payloads. Pre-game watches do not query peer completion or use it to extend launch
+settlement; their local/incoming behavior is unchanged. Events and traffic from another
+Syncthing folder are excluded even when both folders share the same remote device.
 
 ## Core Data Structures
 
@@ -136,8 +153,13 @@ Autosync status strip behavior:
 - Successful autosync result or current save state: show `GAME SAVE UP TO DATE` for
   2 seconds.
 - Syncthing downloading activity: show `SYNCTHING DOWNLOADING` with cloud-down icon.
-- Syncthing uploading activity: show `SYNCTHING UPLOADING` with cloud-up icon.
-- Syncthing completion: show `SYNCTHING COMPLETE` with cloud-checkmark icon. This reflects locally observed activity settling, not full remote sync validation.
+- Syncthing uploading activity: show `SYNCTHING UPLOADING` with cloud-up icon. After a
+  backup, it means a currently connected relevant peer is incomplete or has not yet
+  freshly acknowledged the watched-folder local-index mutation.
+- Syncthing completion: show `SYNCTHING COMPLETE` with cloud-checkmark icon only after
+  the Deck's watched folder settles and every currently connected relevant peer reports no
+  outstanding need after that mutation. It does not validate a disconnected or offline
+  configured peer.
 - Unknown/non-actionable save state: show `UNKNOWN` for 2 seconds.
 - Failed or unsafe-to-sync state: show `UNABLE TO SYNC` and emit one Decky failure
   toast.
@@ -147,7 +169,10 @@ precedence over a stale `local_current` result. After observed incoming activity
 the launch flow is observe, settle, recheck, decide, then resume. The 900 ms
 `GAME SAVE UP TO DATE` dwell applies only to a successful post-game `backed_up` result
 before the pending/uploading Syncthing handoff; it does not delay pre-game current or
-restored results.
+restored results. Settled samples received before the post-game handoff cannot consume the
+completion quorum. Once the handoff is confirmed, three new distinct settled samples are
+required before the monitor publishes COMPLETE and stops, making UPLOADING visible even
+for a very fast peer transfer.
 
 Checking and running states stay visible while their operation runs and are replaced
 when the operation's result is published. A stuck-bar safety ceiling force-hides them
