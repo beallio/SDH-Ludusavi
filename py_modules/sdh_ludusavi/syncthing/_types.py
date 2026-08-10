@@ -16,6 +16,7 @@ EVENT_TYPES = ",".join(
         "FolderScanProgress",
         "DownloadProgress",
         "RemoteDownloadProgress",
+        "FolderCompletion",
         "ItemStarted",
         "ItemFinished",
         "LocalChangeDetected",
@@ -31,6 +32,7 @@ DEFAULT_ACTIVE_WINDOW_SECONDS = 15.0
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_EVENT_TIMEOUT_SECONDS = 1.0
 DEFAULT_STATUS_POLL_INTERVAL_SECONDS = 1.0
+OUTBOUND_OBSERVATION_HOLD_SECONDS = 2.5
 
 COMMON_SYNCTHING_FLATPAK_IDS = [
     "me.kozec.syncthingtk",
@@ -112,6 +114,18 @@ class RemoteProgress:
 
 
 @dataclass(frozen=True)
+class PeerCompletion:
+    """Backend-only completion state for one remote folder peer."""
+
+    device_id: str
+    completion: float
+    need_bytes: int
+    need_items: int
+    need_deletes: int
+    observed_monotonic: float
+
+
+@dataclass(frozen=True)
 class ConnectionSnapshot:
     # Device IDs whose Syncthing "connected" field is true. Backend-only:
     # never log these or return them through RPC.
@@ -133,6 +147,10 @@ class LocalActivity:
     scan_current_bytes: int = 0
     scan_total_bytes: int = 0
     last_item_finished_monotonic: float = 0.0
+    # Monotonic timestamps for outbound peer acknowledgement. These stay in
+    # process memory and must never be exposed through the activity RPC.
+    outbound_index_observed_monotonic: float = 0.0
+    outbound_observation_hold_deadline_monotonic: float = 0.0
 
 
 @dataclass(frozen=True)

@@ -252,10 +252,29 @@ traffic for multiple folders.
 
 BrowserView activity and transfer direction instead come from folder-scoped sources:
 `/rest/db/status?folder=<folder-id>` and events whose `folder` matches the resolved
-folder. Watched-folder syncing/download/item evidence indicates downloading, and
-non-empty watched-folder `RemoteDownloadProgress` indicates uploading. Scan, index,
-sequence, and need signals may keep an update in progress without inventing a transfer
-direction.
+folder. Watched-folder syncing/download/item evidence indicates downloading. For a
+post-game watch, the backend also obtains a `/rest/db/completion` baseline for each
+currently connected relevant peer and reduces `FolderCompletion` only when both its
+folder and its remote device belong to the resolved folder. A peer is behind when its
+completion is below 100% or any of `needBytes`, `needItems`, or `needDeletes` is positive.
+
+A watched-folder local-index advance marks an outbound mutation. Each connected relevant
+peer must provide a completion observation made after that mutation before it can
+acknowledge the change; the implementation compares event ordering and monotonic
+observation times, never the remote `FolderCompletion.sequence` with the Deck's local
+sequence. Newly observed mutation or incomplete-peer evidence has a 2.5-second
+observation hold, so an index update and a final completion in one REST event batch remain
+visible to the frontend's 500 ms poller. Post-game COMPLETE therefore requires local
+settlement plus fresh, no-need reports from every peer that is still connected and relevant.
+Disconnected or offline configured peers are deliberately outside that confirmation.
+
+Non-empty watched-folder `RemoteDownloadProgress` remains supplemental upload evidence,
+but is not authoritative: a remote puller's transient block requests can be absent while
+the peer is still catching up. Pre-game watches never query peer completion and retain
+their local/incoming launch-gate classification unchanged. Scan, index, sequence, and need
+signals may keep an update in progress without inventing a transfer direction. Transition
+diagnostics report only phase, peer counts, and aggregate need totals; they never log or
+return device IDs, completion payloads, or connection byte counters.
 
 ### Frontend: Steam Runtime and View Ownership
 The frontend strictly isolates untyped runtime access and splits massive components by responsibility:

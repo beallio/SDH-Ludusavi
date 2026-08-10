@@ -283,6 +283,7 @@ describe("SyncthingMonitorMachine", () => {
           initialized: true, 
           activityObserved: true, 
           mutationObserved: true,
+          handoffActivated: true,
           settledCount: 2, 
           lastProcessedTimestamp: 10 
         };
@@ -325,13 +326,162 @@ describe("SyncthingMonitorMachine", () => {
         expect(res.state.settledCount).toBe(0);
       });
       
-      it("completes on settledCount >= 3", () => {
-        let state = { ...createInitialWatchState("post_game"), step: "watching" as const, initialized: true, activityObserved: true, mutationObserved: true, settledCount: 2 };
+      it("completes on settledCount >= 3 after the post-game handoff", () => {
+        let state = { ...createInitialWatchState("post_game"), step: "watching" as const, initialized: true, activityObserved: true, mutationObserved: true, handoffActivated: true, settledCount: 2 };
         const res = transition(state, { type: "sample", sample: { timestamp_unix: 2, uploading: false, downloading: false, update_in_progress: false, status: "idle", settled: true } as any });
         expect(res.state.settledCount).toBe(3);
         expect(res.state.step).toBe("complete");
         expect(res.state.completionObserved).toBe(true);
         expect(res.effects.stopWatch).toBe(true);
+      });
+
+      it("retains a buffered upload until three fresh settled samples follow the handoff", () => {
+        let state: WatchMachineState = {
+          ...createInitialWatchState("post_game"),
+          step: "watching",
+          initialized: true,
+        };
+        state = transition(state, {
+          type: "sample",
+          sample: {
+            timestamp_unix: 1,
+            folder_state: "syncing",
+            uploading: true,
+            downloading: false,
+            update_in_progress: false,
+            status: "ACTIVE_TRANSFER",
+            settled: false,
+          },
+        }).state;
+
+        for (const timestamp_unix of [2, 3, 4]) {
+          state = transition(state, {
+            type: "sample",
+            sample: {
+              timestamp_unix,
+              folder_state: "idle",
+              uploading: false,
+              downloading: false,
+              update_in_progress: false,
+              status: "IDLE",
+              settled: true,
+            },
+          }).state;
+        }
+
+        expect(state.latestStatus).toBe("uploading");
+        expect(state.settledCount).toBe(0);
+        expect(state.completionObserved).toBe(false);
+        expect(state.step).toBe("watching");
+        expect(handoffOutcome(state)).toBe("uploading");
+
+        state = transition(state, { type: "handoff_confirmed" }).state;
+        for (const timestamp_unix of [5, 6]) {
+          const result = transition(state, {
+            type: "sample",
+            sample: {
+              timestamp_unix,
+              folder_state: "idle",
+              uploading: false,
+              downloading: false,
+              update_in_progress: false,
+              status: "IDLE",
+              settled: true,
+            },
+          });
+          state = result.state;
+          expect(state.latestStatus).toBe("uploading");
+          expect(state.completionObserved).toBe(false);
+          expect(result.effects.stopWatch).toBe(false);
+        }
+
+        const completed = transition(state, {
+          type: "sample",
+          sample: {
+            timestamp_unix: 7,
+            folder_state: "idle",
+            uploading: false,
+            downloading: false,
+            update_in_progress: false,
+            status: "IDLE",
+            settled: true,
+          },
+        });
+        expect(completed.state.latestStatus).toBe("complete");
+        expect(completed.state.completionObserved).toBe(true);
+        expect(completed.effects.publish).toEqual({ status: "syncthing_complete", source: "context" });
+        expect(completed.effects.stopWatch).toBe(true);
+      });
+
+      it("keeps a mutation without caught outbound evidence pending until the handoff", () => {
+        let state: WatchMachineState = {
+          ...createInitialWatchState("post_game"),
+          step: "watching",
+          initialized: true,
+        };
+        state = transition(state, {
+          type: "sample",
+          sample: {
+            timestamp_unix: 1,
+            folder_state: "scanning",
+            uploading: false,
+            downloading: false,
+            update_in_progress: false,
+            status: "SCANNING",
+            settled: false,
+          },
+        }).state;
+
+        for (const timestamp_unix of [2, 3, 4]) {
+          state = transition(state, {
+            type: "sample",
+            sample: {
+              timestamp_unix,
+              folder_state: "idle",
+              uploading: false,
+              downloading: false,
+              update_in_progress: false,
+              status: "IDLE",
+              settled: true,
+            },
+          }).state;
+        }
+
+        expect(state.mutationObserved).toBe(true);
+        expect(state.completionObserved).toBe(false);
+        expect(handoffOutcome(state)).toBe("pending");
+
+        state = transition(state, { type: "handoff_confirmed" }).state;
+        for (const timestamp_unix of [5, 6]) {
+          state = transition(state, {
+            type: "sample",
+            sample: {
+              timestamp_unix,
+              folder_state: "idle",
+              uploading: false,
+              downloading: false,
+              update_in_progress: false,
+              status: "IDLE",
+              settled: true,
+            },
+          }).state;
+          expect(state.completionObserved).toBe(false);
+        }
+
+        const completed = transition(state, {
+          type: "sample",
+          sample: {
+            timestamp_unix: 7,
+            folder_state: "idle",
+            uploading: false,
+            downloading: false,
+            update_in_progress: false,
+            status: "IDLE",
+            settled: true,
+          },
+        });
+        expect(completed.state.completionObserved).toBe(true);
+        expect(completed.effects.stopWatch).toBe(true);
       });
 
       it("completes post-game via mutation without uploading", () => {

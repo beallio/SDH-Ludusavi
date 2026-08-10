@@ -206,7 +206,11 @@ export function transition(
       } else if (sample.update_in_progress && state.phase !== "post_game") {
         newStatus = "downloading";
         nextState.settledCount = 0;
-      } else if (nextState.mutationObserved && sample.settled) {
+      } else if (
+        nextState.mutationObserved &&
+        sample.settled &&
+        (state.phase !== "post_game" || state.handoffActivated)
+      ) {
         nextState.settledCount++;
         if (nextState.settledCount >= 3) {
           newStatus = "complete";

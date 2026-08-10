@@ -16,6 +16,7 @@ from sdh_ludusavi.syncthing import (
     FolderRuntime,
     RemoteProgress,
     LocalActivity,
+    PeerCompletion,
 )
 
 
@@ -223,3 +224,25 @@ def test_compute_activity_status() -> None:
     )
     assert status.update_in_progress is False
     assert status.settled is True
+
+
+def test_pre_game_classifier_ignores_incomplete_peer_completion_by_default() -> None:
+    now = time.monotonic()
+    status = compute_activity_status(
+        folder_state="idle",
+        remote_progress={},
+        local_activity=LocalActivity(),
+        runtime=FolderRuntime(sequence=12),
+        active_window_seconds=15.0,
+        now=now,
+        peer_completions={
+            "REMOTE-DEVICE": PeerCompletion(
+                "REMOTE-DEVICE", 93.56119493792454, 8_942_011, 32, 19, now
+            )
+        },
+        connected_relevant_device_ids=frozenset({"REMOTE-DEVICE"}),
+    )
+
+    assert status.status == "IDLE"
+    assert status.settled is True
+    assert status.uploading is False

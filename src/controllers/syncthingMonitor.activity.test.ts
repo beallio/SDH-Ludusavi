@@ -124,10 +124,10 @@ describe("SyncthingMonitor", () => {
     expect(mockOnStatus).not.toHaveBeenCalled();
   });
 
-  it("buffered completion returns complete", async () => {
+  it("preserves buffered uploading until three settled samples arrive after handoff", async () => {
     mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
-    
-    // Return uploading sample first, then 3 distinct settled samples
+
+    // Return uploading first, three settled samples before handoff, then three more.
     let pollCount = 0;
     mockRpc.pollWatch.mockImplementation(() => {
       pollCount++;
@@ -147,12 +147,38 @@ describe("SyncthingMonitor", () => {
     });
 
     const handle = monitor.start("post_game", "Hades", "1145300");
-    // Run enough polls to complete the watch (1 upload + 3 settled)
+    // The three pre-handoff settled samples must not complete or stop the watch.
     await vi.advanceTimersByTimeAsync(2000);
+    expect(monitor.getSnapshotForTest()).toMatchObject({
+      completionObserved: false,
+      latestStatus: "uploading",
+    });
+    expect(mockRpc.stopWatch).not.toHaveBeenCalled();
 
     const handoffResult = await handle.activatePostGameHandoff(750);
-    expect(handoffResult.status).toBe("complete");
+    expect(handoffResult.status).toBe("uploading");
     expect(mockOnStatus).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(monitor.getSnapshotForTest()).toMatchObject({
+      completionObserved: false,
+      latestStatus: "uploading",
+    });
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(monitor.getSnapshotForTest()).toMatchObject({
+      completionObserved: false,
+      latestStatus: "uploading",
+    });
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(mockOnStatus).toHaveBeenCalledWith("syncthing_complete", {
+      source: "lifecycle_exit",
+      gameName: "Hades",
+      appID: "1145300",
+    });
+    expect(mockRpc.stopWatch).toHaveBeenCalledWith("w1");
+    expect(monitor.getSnapshotForTest().generation).toBeNull();
   });
 
   it("activated upload publishes subsequent status callbacks", async () => {

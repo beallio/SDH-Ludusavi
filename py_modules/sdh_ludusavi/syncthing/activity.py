@@ -15,14 +15,17 @@ from ._types import (
     FolderSelection,
     FolderRuntime,
     RemoteProgress,
+    PeerCompletion,
     ConnectionSnapshot,
     LocalActivity,
     ActivityStatus,
+    OUTBOUND_OBSERVATION_HOLD_SECONDS,
     int_field,
     parse_folder_runtime,
 )
 
 logger = logging.getLogger(__name__)
+_MAX_COMPLETION_COUNTER = (2**63) - 1
 
 
 def get_folder_status(api: SyncthingAPI, folder_id: str) -> dict[str, Any]:
@@ -105,6 +108,40 @@ def get_my_device_id(api: SyncthingAPI) -> str:
     return my_id
 
 
+def get_peer_completion(
+    api: SyncthingAPI,
+    folder: FolderSelection,
+    device_id: str,
+    now: float,
+) -> PeerCompletion:
+    """Read and validate one remote peer's completion for *folder*.
+
+    Syncthing's response does not repeat the requested folder or device, so those
+    backend-only values are supplied to the existing scoped parser rather than
+    trusting a response field. Errors from the REST client can contain raw bodies
+    and device IDs, so this boundary intentionally emits only generic errors.
+    """
+    try:
+        data = api.get_json(
+            "/rest/db/completion",
+            params={"folder": folder.folder_id, "device": device_id},
+            timeout=10,
+        )
+    # The API error can include response data and the backend-only device ID.
+    except Exception as exc:
+        raise RuntimeError("Syncthing peer completion query failed.") from exc
+
+    if not isinstance(data, dict):
+        raise RuntimeError("Unexpected peer completion response.")
+
+    completion = _parse_peer_completion(
+        {**data, "folder": folder.folder_id, "device": device_id}, folder, now
+    )
+    if completion is None:
+        raise RuntimeError("Invalid peer completion response.")
+    return completion
+
+
 def prune_remote_progress(
     remote_progress: dict[str, RemoteProgress], active_window: float, now: float
 ) -> dict[str, RemoteProgress]:
@@ -134,6 +171,51 @@ def prune_local_activity(activity: LocalActivity, active_window: float, now: flo
         activity.active_download_files = 0
 
 
+def _bounded_number(data: dict[str, Any], key: str, minimum: float, maximum: float) -> float | None:
+    value = data.get(key)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    number = float(value)
+    if not math.isfinite(number) or not minimum <= number <= maximum:
+        return None
+    return number
+
+
+def _nonnegative_completion_counter(data: dict[str, Any], key: str) -> int | None:
+    value = _bounded_number(data, key, 0, _MAX_COMPLETION_COUNTER)
+    if value is None or not value.is_integer():
+        return None
+    return int(value)
+
+
+def _parse_peer_completion(
+    data: dict[str, Any], folder: FolderSelection, now: float
+) -> PeerCompletion | None:
+    if data.get("folder") != folder.folder_id:
+        return None
+    device_id = data.get("device")
+    if not isinstance(device_id, str) or not device_id or device_id not in folder.device_ids:
+        return None
+
+    completion = _bounded_number(data, "completion", 0, 100)
+    need_bytes = _nonnegative_completion_counter(data, "needBytes")
+    need_items = _nonnegative_completion_counter(data, "needItems")
+    need_deletes = _nonnegative_completion_counter(data, "needDeletes")
+    if completion is None:
+        return None
+    if need_bytes is None or need_items is None or need_deletes is None:
+        return None
+
+    return PeerCompletion(
+        device_id=device_id,
+        completion=completion,
+        need_bytes=need_bytes,
+        need_items=need_items,
+        need_deletes=need_deletes,
+        observed_monotonic=now,
+    )
+
+
 def _serialize_sample(
     watch_id: str,
     status: ActivityStatus,
@@ -160,6 +242,9 @@ def compute_activity_status(
     runtime: FolderRuntime,
     active_window_seconds: float,
     now: float,
+    peer_completions: dict[str, PeerCompletion] | None = None,
+    connected_relevant_device_ids: frozenset[str] = frozenset(),
+    peer_completion_tracking: bool = False,
 ) -> ActivityStatus:
     normalized_state = folder_state or "unknown"
     active_items = local_activity.active_items
@@ -198,7 +283,35 @@ def compute_activity_status(
         or bool(active_items)
     )
 
-    uploading = bool(remote_progress)
+    peer_completions = peer_completions or {}
+    incomplete_peer = False
+    awaiting_fresh_peer_completion = False
+    outbound_observation_hold_active = False
+    if peer_completion_tracking:
+        for device_id in connected_relevant_device_ids:
+            completion = peer_completions.get(device_id)
+            if completion is not None and (
+                completion.completion < 100
+                or completion.need_bytes > 0
+                or completion.need_items > 0
+                or completion.need_deletes > 0
+            ):
+                incomplete_peer = True
+            if local_activity.outbound_index_observed_monotonic > 0 and (
+                completion is None
+                or completion.observed_monotonic < local_activity.outbound_index_observed_monotonic
+            ):
+                awaiting_fresh_peer_completion = True
+        outbound_observation_hold_active = (
+            now < local_activity.outbound_observation_hold_deadline_monotonic
+        )
+
+    uploading = (
+        bool(remote_progress)
+        or incomplete_peer
+        or awaiting_fresh_peer_completion
+        or outbound_observation_hold_active
+    )
 
     active_transfer = downloading or uploading
     update_in_progress = (
@@ -267,6 +380,8 @@ def process_event(
     remote_progress: dict[str, RemoteProgress],
     local_activity: LocalActivity,
     now: float,
+    peer_completions: dict[str, PeerCompletion] | None = None,
+    peer_completion_tracking: bool = False,
 ) -> tuple[str, FolderRuntime, dict[str, RemoteProgress], LocalActivity, bool]:
     event_type = event.get("type")
     data = event.get("data") or {}
@@ -313,6 +428,24 @@ def process_event(
             )
         else:
             remote_progress.pop(device_id, None)
+    elif (
+        event_type == "FolderCompletion"
+        and peer_completion_tracking
+        and peer_completions is not None
+    ):
+        completion = _parse_peer_completion(data, folder, now)
+        if completion is not None:
+            peer_completions[completion.device_id] = completion
+            if (
+                completion.completion < 100
+                or completion.need_bytes > 0
+                or completion.need_items > 0
+                or completion.need_deletes > 0
+            ):
+                local_activity.outbound_observation_hold_deadline_monotonic = max(
+                    local_activity.outbound_observation_hold_deadline_monotonic,
+                    now + OUTBOUND_OBSERVATION_HOLD_SECONDS,
+                )
     elif event_type == "ItemStarted" and _folder_match():
         item = str(data.get("item") or "unknown")
         local_activity.active_items[item] = now
@@ -330,6 +463,12 @@ def process_event(
             local_activity.last_sequence_change_monotonic = now
             local_activity.sequence_change_from = previous_sequence
             local_activity.sequence_change_to = sequence
+        if sequence > previous_sequence:
+            local_activity.outbound_index_observed_monotonic = now
+            local_activity.outbound_observation_hold_deadline_monotonic = max(
+                local_activity.outbound_observation_hold_deadline_monotonic,
+                now + OUTBOUND_OBSERVATION_HOLD_SECONDS,
+            )
         runtime = FolderRuntime(
             sequence=sequence or runtime.sequence,
             need_bytes=runtime.need_bytes,

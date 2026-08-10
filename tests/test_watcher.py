@@ -12,6 +12,7 @@ from sdh_ludusavi.syncthing import (
     FolderRuntime,
     LocalActivity,
     ConnectionSnapshot,
+    PeerCompletion,
 )
 
 
@@ -558,6 +559,314 @@ def _stopped_watch_for_tick(device_ids: tuple[str, ...]) -> SyncthingWatch:
     return watch
 
 
+def test_post_game_initialization_captures_peer_baselines_before_second_status_poll() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"))
+    watch.connected_devices = frozenset({"DEV-A", "DEV-B"})
+    calls: list[str] = []
+
+    def initial_folder_state(api, folder_id, strict=False):
+        calls.append("initial-folder")
+        return "idle", FolderRuntime(sequence=5)
+
+    def event_cursor(api):
+        calls.append("event-cursor")
+        return 100
+
+    def completion(api, folder, device_id, now):
+        calls.append(f"completion-{device_id}")
+        return PeerCompletion(device_id, 100.0, 0, 0, 0, now)
+
+    def folder_status(api, folder_id):
+        calls.append("second-folder")
+        return {"state": "idle", "sequence": 6}
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime",
+            side_effect=initial_folder_state,
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.get_event_cursor", side_effect=event_cursor),
+        patch("sdh_ludusavi.syncthing.watcher.get_peer_completion", side_effect=completion),
+        patch("sdh_ludusavi.syncthing.watcher.get_folder_status", side_effect=folder_status),
+    ):
+        watch._initialize()
+
+    assert calls[:2] == ["initial-folder", "event-cursor"]
+    assert set(calls[2:4]) == {"completion-DEV-A", "completion-DEV-B"}
+    assert calls[4] == "second-folder"
+    assert set(watch.peer_completions) == {"DEV-A", "DEV-B"}
+    # A baseline captured before the second sequence observation cannot acknowledge it.
+    assert watch.local_activity.outbound_index_observed_monotonic > 0
+
+
+def test_pre_game_initialization_never_requests_peer_completion() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch.phase = "pre_game"
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime",
+            return_value=("idle", FolderRuntime(sequence=5)),
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.get_event_cursor", return_value=100),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_peer_completion",
+            side_effect=AssertionError("pre-game must not query completion"),
+        ) as completion,
+    ):
+        watch._initialize()
+
+    completion.assert_not_called()
+    assert watch.peer_completions == {}
+
+
+def test_post_game_completion_initialization_failure_is_sanitized(caplog) -> None:
+    watch = _stopped_watch_for_tick(("SECRET-REMOTE-ID",))
+    watch.connected_devices = frozenset({"SECRET-REMOTE-ID"})
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_initial_folder_state_and_runtime",
+            return_value=("idle", FolderRuntime(sequence=5)),
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.get_event_cursor", return_value=100),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_peer_completion",
+            side_effect=RuntimeError("raw completion body for SECRET-REMOTE-ID"),
+        ),
+        caplog.at_level("DEBUG", logger="sdh_ludusavi.syncthing.watcher"),
+    ):
+        watch._run()
+
+    assert watch.latest_sample == {
+        "status": "failed",
+        "reason": "watch_initialization_failed",
+        "message": "Syncthing peer completion initialization failed.",
+    }
+    assert "SECRET-REMOTE-ID" not in caplog.text
+    assert "raw completion body" not in caplog.text
+
+
+def test_post_game_peer_completion_events_gate_settlement_and_ignore_unscoped_traffic() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"))
+    watch.connected_devices = frozenset({"DEV-A", "DEV-B"})
+    watch.local_activity = LocalActivity(active_items={})
+
+    event_batches = [
+        [
+            {
+                "id": 101,
+                "type": "LocalIndexUpdated",
+                "data": {"folder": "test-folder", "sequence": 6},
+            },
+            {
+                "id": 102,
+                "type": "FolderCompletion",
+                "data": {
+                    "folder": "test-folder",
+                    "device": "DEV-A",
+                    "completion": 93.56119493792454,
+                    "needBytes": 8_942_011,
+                    "needItems": 32,
+                    "needDeletes": 19,
+                },
+            },
+            {
+                "id": 103,
+                "type": "FolderCompletion",
+                "data": {
+                    "folder": "test-folder",
+                    "device": "DEV-B",
+                    "completion": 93.56119493792454,
+                    "needBytes": 8_942_011,
+                    "needItems": 32,
+                    "needDeletes": 19,
+                },
+            },
+        ],
+        [
+            {
+                "id": 104,
+                "type": "FolderCompletion",
+                "data": {
+                    "folder": "test-folder",
+                    "device": "DEV-A",
+                    "completion": 100,
+                    "needBytes": 0,
+                    "needItems": 0,
+                    "needDeletes": 0,
+                },
+            },
+            {
+                "id": 105,
+                "type": "FolderCompletion",
+                "data": {
+                    "folder": "other-folder",
+                    "device": "DEV-B",
+                    "completion": 1,
+                    "needBytes": 1,
+                    "needItems": 1,
+                    "needDeletes": 1,
+                },
+            },
+            {
+                "id": 106,
+                "type": "FolderCompletion",
+                "data": {
+                    "folder": "test-folder",
+                    "device": "UNCONFIGURED-DEVICE",
+                    "completion": 1,
+                    "needBytes": 1,
+                    "needItems": 1,
+                    "needDeletes": 1,
+                },
+            },
+        ],
+        [
+            {
+                "id": 107,
+                "type": "FolderCompletion",
+                "data": {
+                    "folder": "test-folder",
+                    "device": "DEV-B",
+                    "completion": 100,
+                    "needBytes": 0,
+                    "needItems": 0,
+                    "needDeletes": 0,
+                },
+            }
+        ],
+    ]
+
+    with patch("sdh_ludusavi.syncthing.watcher.get_events", side_effect=event_batches):
+        watch._tick_events()
+        watch._tick_sample(time.monotonic())
+        assert watch.latest_sample["sample"]["uploading"] is True
+        assert watch.latest_sample["sample"]["settled"] is False
+
+        watch._tick_events()
+        watch.local_activity.outbound_observation_hold_deadline_monotonic = 0
+        watch._tick_sample(time.monotonic())
+        assert watch.latest_sample["sample"]["uploading"] is True
+        assert watch.latest_sample["sample"]["settled"] is False
+
+        watch._tick_events()
+        watch.local_activity.last_local_index_monotonic = 0
+        watch.local_activity.last_sequence_change_monotonic = 0
+        watch._tick_sample(time.monotonic())
+
+    sample = watch.latest_sample["sample"]
+    assert sample["uploading"] is False
+    assert sample["settled"] is True
+    assert set(watch.peer_completions) == {"DEV-A", "DEV-B"}
+
+
+def test_newly_connected_peer_waits_for_a_fresh_completion_and_disconnects_stop_gating() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"))
+    now = time.monotonic()
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=now)
+    watch.peer_completions = {
+        "DEV-A": PeerCompletion("DEV-A", 100.0, 0, 0, 0, now + 1.0),
+    }
+
+    watch.connected_devices = frozenset({"DEV-A", "DEV-B"})
+    watch._tick_sample(now + 1.0)
+    assert watch.latest_sample["sample"]["uploading"] is True
+
+    watch.connected_devices = frozenset({"DEV-A"})
+    watch._tick_sample(now + 1.0)
+    assert watch.latest_sample["sample"]["uploading"] is False
+    assert watch.latest_sample["sample"]["settled"] is True
+
+
+def test_peer_completion_diagnostics_are_transition_only_and_privacy_safe(caplog) -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    now = time.monotonic()
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=now)
+    watch.peer_completions = {
+        "DEV-A": PeerCompletion("DEV-A", 93.56119493792454, 8_942_011, 32, 19, now + 1)
+    }
+
+    with caplog.at_level("INFO", logger="sdh_ludusavi.syncthing.watcher"):
+        watch._tick_sample(now + 1)
+        watch._tick_sample(now + 1.5)
+        watch.peer_completions["DEV-A"] = PeerCompletion("DEV-A", 100.0, 0, 0, 0, now + 2)
+        watch._tick_sample(now + 2)
+
+    transition_records = [
+        record
+        for record in caplog.records
+        if record.name == "sdh_ludusavi.syncthing.watcher" and "peer completion" in record.message
+    ]
+    assert len(transition_records) == 2
+    assert "phase=post_game" in caplog.text
+    assert "connected_relevant_peers=1" in caplog.text
+    assert "incomplete_peers=1" in caplog.text
+    assert "awaiting_fresh_completion=0" in caplog.text
+    assert "needed_bytes=8942011" in caplog.text
+    assert "needed_items=32" in caplog.text
+    assert "needed_deletes=19" in caplog.text
+    assert "DEV-A" not in caplog.text
+    assert "test-folder" not in caplog.text
+
+
+def test_malformed_completion_event_keeps_last_good_state_and_never_leaks_payload(caplog) -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    now = time.monotonic()
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=now)
+    watch.peer_completions = {
+        "DEV-A": PeerCompletion("DEV-A", 93.56119493792454, 8_942_011, 32, 19, now + 1)
+    }
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_events",
+            side_effect=[
+                [
+                    {
+                        "id": 101,
+                        "type": "FolderCompletion",
+                        "data": {
+                            "folder": "test-folder",
+                            "device": "DEV-A",
+                            "completion": "RAW-COMPLETION-PAYLOAD",
+                            "needBytes": 0,
+                            "needItems": 0,
+                            "needDeletes": 0,
+                        },
+                    }
+                ],
+                [
+                    {
+                        "id": 102,
+                        "type": "FolderCompletion",
+                        "data": {
+                            "folder": "test-folder",
+                            "device": "DEV-A",
+                            "completion": 100,
+                            "needBytes": 0,
+                            "needItems": 0,
+                            "needDeletes": 0,
+                        },
+                    }
+                ],
+            ],
+        ),
+        caplog.at_level("DEBUG", logger="sdh_ludusavi.syncthing.watcher"),
+    ):
+        watch._tick_events()
+        watch._tick_sample(now + 1)
+        assert watch.latest_sample["sample"]["uploading"] is True
+
+        watch._tick_events()
+        watch._tick_sample(now + 2)
+
+    assert watch.latest_sample["sample"]["uploading"] is False
+    assert watch.latest_sample["sample"]["settled"] is True
+    assert "DEV-A" not in caplog.text
+    assert "RAW-COMPLETION-PAYLOAD" not in caplog.text
+
+
 def test_watch_stops_when_final_relevant_peer_disconnects() -> None:
     watch = _stopped_watch_for_tick(("DEV-A",))
 
@@ -631,8 +940,8 @@ def test_watch_ignores_other_folder_traffic_shared_with_relevant_peer() -> None:
         patch(
             "sdh_ludusavi.syncthing.watcher.get_folder_status",
             side_effect=[
-                {"state": "sync-waiting", "sequence": 6},
-                {"state": "sync-waiting", "sequence": 7},
+                {"state": "sync-waiting", "sequence": 5},
+                {"state": "sync-waiting", "sequence": 5},
             ],
         ),
         patch(
@@ -657,6 +966,45 @@ def test_watch_ignores_other_folder_traffic_shared_with_relevant_peer() -> None:
     assert sample["downloading"] is False
     assert sample["uploading"] is False
     assert sample["status"] != "ACTIVE_TRANSFER"
+
+
+def test_watched_folder_mutation_beats_unscoped_peer_completion() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    now = time.monotonic()
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+            return_value=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_folder_status",
+            return_value={"state": "idle", "sequence": 6},
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_events",
+            return_value=[
+                {
+                    "id": 101,
+                    "type": "FolderCompletion",
+                    "data": {
+                        "folder": "other-folder",
+                        "device": "DEV-A",
+                        "completion": 93.56119493792454,
+                        "needBytes": 8_942_011,
+                        "needItems": 32,
+                        "needDeletes": 19,
+                    },
+                }
+            ],
+        ),
+    ):
+        watch._tick(now)
+
+    sample = watch.latest_sample["sample"]
+    assert sample["uploading"] is True
+    assert sample["status"] == "ACTIVE_TRANSFER"
+    assert watch.peer_completions == {}
 
 
 def test_watch_preserves_watched_folder_download_and_upload_progress() -> None:
@@ -780,6 +1128,10 @@ def test_watch_self_terminates_after_ttl() -> None:
             return_value=("idle", FolderRuntime(sequence=5)),
         ),
         patch("sdh_ludusavi.syncthing.watcher.get_event_cursor", return_value=100),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_peer_completion",
+            return_value=PeerCompletion("DEV-A", 100.0, 0, 0, 0, time.monotonic()),
+        ),
     ):
         watch.deadline_monotonic = time.monotonic() - 1.0  # force past
         watch._run()  # Should return immediately and set status
