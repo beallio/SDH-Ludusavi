@@ -559,6 +559,95 @@ def _stopped_watch_for_tick(device_ids: tuple[str, ...]) -> SyncthingWatch:
     return watch
 
 
+def _unchanged_event_state(**kwargs):
+    return (
+        kwargs["folder_state"],
+        kwargs["runtime"],
+        kwargs["remote_progress"],
+        kwargs["local_activity"],
+        False,
+    )
+
+
+def test_event_subscription_reset_reseeds_cursor_and_processes_returned_events() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    reset_events = [
+        {"id": 1, "type": "StateChanged", "data": {"folder": "test-folder"}},
+        {"id": 2, "type": "StateChanged", "data": {"folder": "test-folder"}},
+    ]
+
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.get_events", return_value=reset_events),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.process_event",
+            side_effect=_unchanged_event_state,
+        ) as mock_process_event,
+    ):
+        watch._tick_events()
+
+    assert mock_process_event.call_count == 2
+    assert [call.kwargs["event"] for call in mock_process_event.call_args_list] == reset_events
+    assert watch.cursor == 2
+
+
+def test_event_cursor_keeps_moving_forward_for_normal_event_batches() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    forward_events = [
+        {"id": 101, "type": "StateChanged", "data": {"folder": "test-folder"}},
+        {"id": 103, "type": "StateChanged", "data": {"folder": "test-folder"}},
+    ]
+
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.get_events", return_value=forward_events),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.process_event",
+            side_effect=_unchanged_event_state,
+        ) as mock_process_event,
+    ):
+        watch._tick_events()
+
+    assert mock_process_event.call_count == 2
+    assert watch.cursor == 103
+
+
+def test_event_subscription_reset_logs_once_without_sensitive_event_details(caplog) -> None:
+    watch = _stopped_watch_for_tick(("SECRET-REMOTE-ID",))
+    reset_events = [
+        {
+            "id": 1,
+            "type": "StateChanged",
+            "data": {
+                "folder": "SECRET-FOLDER",
+                "device": "SECRET-REMOTE-ID",
+                "payload": "RAW-EVENT-PAYLOAD",
+            },
+        },
+        {
+            "id": 2,
+            "type": "StateChanged",
+            "data": {"folder": "SECRET-FOLDER", "device": "SECRET-REMOTE-ID"},
+        },
+    ]
+
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.get_events", return_value=reset_events),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.process_event",
+            side_effect=_unchanged_event_state,
+        ),
+        caplog.at_level("INFO", logger="sdh_ludusavi.syncthing.watcher"),
+    ):
+        watch._tick_events()
+
+    reset_records = [
+        record for record in caplog.records if "event subscription reset" in record.message
+    ]
+    assert len(reset_records) == 1
+    assert "SECRET-REMOTE-ID" not in caplog.text
+    assert "SECRET-FOLDER" not in caplog.text
+    assert "RAW-EVENT-PAYLOAD" not in caplog.text
+
+
 def test_post_game_initialization_captures_peer_baselines_before_second_status_poll() -> None:
     watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"))
     watch.connected_devices = frozenset({"DEV-A", "DEV-B"})
@@ -865,6 +954,129 @@ def test_malformed_completion_event_keeps_last_good_state_and_never_leaks_payloa
     assert watch.latest_sample["sample"]["settled"] is True
     assert "DEV-A" not in caplog.text
     assert "RAW-COMPLETION-PAYLOAD" not in caplog.text
+
+
+def _tick_with_peer_completion(
+    watch: SyncthingWatch,
+    now: float,
+    *,
+    completion: float,
+    need_bytes: int,
+    need_items: int = 0,
+    need_deletes: int = 0,
+) -> None:
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+            return_value=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_folder_status",
+            return_value={"state": "idle", "sequence": 5},
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_events",
+            return_value=[
+                {
+                    "id": watch.cursor + 1,
+                    "type": "FolderCompletion",
+                    "data": {
+                        "folder": "test-folder",
+                        "device": "DEV-A",
+                        "completion": completion,
+                        "needBytes": need_bytes,
+                        "needItems": need_items,
+                        "needDeletes": need_deletes,
+                    },
+                }
+            ],
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.time.monotonic", return_value=now),
+    ):
+        watch._tick(now)
+
+
+def test_post_game_outbound_need_progress_keeps_watch_alive_past_stall_window() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=1.0)
+
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.OUTBOUND_STALL_WINDOW_SECONDS", 10.0),
+        patch("sdh_ludusavi.syncthing.watcher.POST_GAME_WATCH_HARD_CEILING_SECONDS", 1000.0),
+    ):
+        _tick_with_peer_completion(watch, 1.0, completion=95.0, need_bytes=100)
+        _tick_with_peer_completion(watch, 12.0, completion=96.0, need_bytes=90)
+        _tick_with_peer_completion(watch, 23.0, completion=97.0, need_bytes=80)
+
+    assert watch.latest_sample["status"] == "activity"
+    assert not watch.stop_event.is_set()
+
+
+def test_post_game_unchanged_outbound_need_stops_with_sanitized_truthful_reason() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=1.0)
+
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.OUTBOUND_STALL_WINDOW_SECONDS", 10.0),
+        patch("sdh_ludusavi.syncthing.watcher.POST_GAME_WATCH_HARD_CEILING_SECONDS", 1000.0),
+    ):
+        _tick_with_peer_completion(watch, 1.0, completion=95.0, need_bytes=123_456, need_deletes=7)
+        _tick_with_peer_completion(watch, 12.0, completion=95.0, need_bytes=123_456, need_deletes=7)
+
+    assert watch.latest_sample["status"] == "failed"
+    assert watch.latest_sample["reason"] == "post_game_upload_incomplete"
+    assert watch.stop_event.is_set()
+    assert "DEV-A" not in watch.latest_sample["message"]
+    assert "test-folder" not in watch.latest_sample["message"]
+    assert "123456" not in watch.latest_sample["message"]
+    assert "7" not in watch.latest_sample["message"]
+
+
+def test_post_game_all_complete_fresh_peers_settle_without_terminal_reason() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=1.0)
+    watch.peer_completions = {
+        "DEV-A": PeerCompletion("DEV-A", 95.0, 123_456, 0, 7, 1.0),
+    }
+
+    _tick_with_peer_completion(watch, 2.0, completion=100.0, need_bytes=0)
+
+    assert watch.latest_sample["status"] == "activity"
+    assert watch.latest_sample["sample"]["settled"] is True
+    assert "reason" not in watch.latest_sample
+    assert not watch.stop_event.is_set()
+
+
+def test_pre_game_watch_never_stops_for_outbound_need_stall() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch.phase = "pre_game"
+
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.OUTBOUND_STALL_WINDOW_SECONDS", 10.0),
+        patch("sdh_ludusavi.syncthing.watcher.POST_GAME_WATCH_HARD_CEILING_SECONDS", 20.0),
+    ):
+        _tick_with_peer_completion(watch, 1.0, completion=95.0, need_bytes=100)
+        _tick_with_peer_completion(watch, 21.0, completion=95.0, need_bytes=100)
+
+    assert watch.latest_sample["status"] == "activity"
+    assert not watch.stop_event.is_set()
+
+
+def test_post_game_watch_stops_at_hard_ceiling_despite_outbound_progress() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=1.0)
+    watch.watch_started_monotonic = 0.0
+
+    with (
+        patch("sdh_ludusavi.syncthing.watcher.OUTBOUND_STALL_WINDOW_SECONDS", 1000.0),
+        patch("sdh_ludusavi.syncthing.watcher.POST_GAME_WATCH_HARD_CEILING_SECONDS", 20.0),
+    ):
+        _tick_with_peer_completion(watch, 1.0, completion=95.0, need_bytes=100)
+        _tick_with_peer_completion(watch, 20.0, completion=96.0, need_bytes=90)
+
+    assert watch.latest_sample["status"] == "failed"
+    assert watch.latest_sample["reason"] == "post_game_upload_incomplete"
+    assert watch.stop_event.is_set()
 
 
 def test_watch_stops_when_final_relevant_peer_disconnects() -> None:

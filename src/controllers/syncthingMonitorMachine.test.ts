@@ -632,6 +632,9 @@ describe("SyncthingMonitorMachine", () => {
       expect(mapSyncthingFailureReason("folder_not_found")).toBe("syncthing_folder_not_found");
       expect(mapSyncthingFailureReason("folder_not_shared")).toBe("syncthing_folder_not_found");
       expect(mapSyncthingFailureReason("api_unavailable")).toBe("syncthing_unavailable");
+      expect(mapSyncthingFailureReason("post_game_upload_incomplete")).toBe(
+        "syncthing_upload_incomplete",
+      );
       expect(mapSyncthingFailureReason("unknown")).toBeNull();
       expect(mapSyncthingFailureReason(undefined)).toBeNull();
     });

@@ -108,7 +108,12 @@ Using Syncthing allows for near-instant local backups that sync in the backgroun
 
 ## Understanding Status Messages
 
-Backups and restores are limited to 15 minutes (status checks to 5 minutes); if Ludusavi exceeds this — for example, a stalled cloud sync — the operation is reported as failed instead of hanging, and any paused game is resumed automatically.
+Backups and restores are limited to 15 minutes (status checks to 5 minutes); if Ludusavi
+exceeds this — for example, a stalled cloud sync — the operation is reported as failed
+instead of hanging, and any paused game is resumed automatically. Syncthing monitoring is
+advisory and never blocks launch or exit: when its post-game observation boundary is
+reached, the plugin reports the resulting upload state rather than presenting an ordinary
+slow sync as an API failure.
 
 - **Backup ready**: Ludusavi has a valid backup for this game.
 - **Needs first backup**: Ludusavi recognizes the game, but no backup has been created yet.
@@ -118,6 +123,10 @@ Backups and restores are limited to 15 minutes (status checks to 5 minutes); if 
 - **Syncthing Downloading**: Syncthing is downloading/applying backup folder data.
 - **Syncthing Uploading**: After a backup, a currently connected device that shares the watched backup folder is still catching up, or has not yet reported that it caught up after the Deck changed the folder's index.
 - **Syncthing Complete**: After a backup, the watched folder has settled on the Steam Deck and every currently connected device that shares it has reported no outstanding need after the local index change. This does **not** guarantee the save has reached a configured device that is disconnected or offline.
+- **Local Backup Saved - Syncthing Upload Incomplete**: The local backup succeeded, but
+  monitoring ended before a connected peer finished catching up or freshly confirmed that
+  it had done so. This is an upload outcome, not a Syncthing API failure; Syncthing can
+  continue propagating the backup after monitoring stops.
 - **Local Backup Saved - Syncthing Unavailable**: The backup succeeded, but configured Syncthing API access failed.
 - **Local Backup Saved - Path Not Shared**: The backup succeeded, but its directory is not in a Syncthing shared folder, or the shared folder has no configured remote devices.
 - **Local Backup Saved - No Syncthing Peers Online**: The backup succeeded, but none of the devices that share the backup folder are currently connected, so remote propagation was not observed. Syncthing will sync later once a peer reconnects.
