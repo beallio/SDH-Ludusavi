@@ -52,8 +52,13 @@ def get_initial_folder_state_and_runtime(
 
 
 def get_event_cursor(api: SyncthingAPI) -> int:
+    # Syncthing scopes id to the subscription selected by events= and matches
+    # since against that scoped id, while globalID is process-wide. Keep this
+    # filter aligned with get_events() so the seeded cursor is usable there.
     events = api.get_json(
-        "/rest/events", params={"since": 0, "limit": 1000, "timeout": 1}, timeout=5
+        "/rest/events",
+        params={"since": 0, "limit": 1000, "timeout": 1, "events": EVENT_TYPES},
+        timeout=5,
     )
     if not isinstance(events, list):
         raise RuntimeError(f"Unexpected events response: {events}")
