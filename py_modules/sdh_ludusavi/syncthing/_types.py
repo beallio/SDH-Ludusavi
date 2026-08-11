@@ -138,6 +138,7 @@ class PeerCompletionDiagnostics:
 
     connected_relevant_peers: int
     incomplete_peers: int
+    peers_pending_deletes: int
     awaiting_fresh_completion: int
     needed_bytes: int
     needed_items: int
@@ -160,6 +161,7 @@ def summarize_peer_completions(
     mutation_observed_at: float,
 ) -> PeerCompletionDiagnostics:
     incomplete_peers = 0
+    peers_pending_deletes = 0
     awaiting_fresh_completion = 0
     needed_bytes = 0
     needed_items = 0
@@ -167,11 +169,14 @@ def summarize_peer_completions(
 
     for device_id in connected_relevant_device_ids:
         completion = peer_completions.get(device_id)
-        if completion is not None and peer_completion_is_incomplete(completion):
-            incomplete_peers += 1
-            needed_bytes += completion.need_bytes
-            needed_items += completion.need_items
+        if completion is not None:
             needed_deletes += completion.need_deletes
+            if completion.need_deletes > 0:
+                peers_pending_deletes += 1
+            if peer_completion_is_incomplete(completion):
+                incomplete_peers += 1
+                needed_bytes += completion.need_bytes
+                needed_items += completion.need_items
         if mutation_observed_at > 0 and (
             completion is None or completion.observed_monotonic < mutation_observed_at
         ):
@@ -180,6 +185,7 @@ def summarize_peer_completions(
     return PeerCompletionDiagnostics(
         connected_relevant_peers=len(connected_relevant_device_ids),
         incomplete_peers=incomplete_peers,
+        peers_pending_deletes=peers_pending_deletes,
         awaiting_fresh_completion=awaiting_fresh_completion,
         needed_bytes=needed_bytes,
         needed_items=needed_items,
