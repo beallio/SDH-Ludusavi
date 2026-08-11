@@ -93,19 +93,25 @@ different subscription.
 
 After a watched-folder local-index mutation, an older peer completion cannot acknowledge
 the mutation. The backend uses event ordering and monotonic observation times, not the
-remote device's `FolderCompletion.sequence`, to establish freshness. An incomplete or
-not-yet-fresh connected relevant peer holds post-game upload activity, as does a
-2.5-second observation hold following a mutation or incomplete report. This gives the
-500 ms monitor poller several chances to observe a fast transfer even when the final 100%
-completion arrives in the same REST event batch. `RemoteDownloadProgress` remains
-supplemental upload evidence; peer completion is authoritative because its need counters
-persist across gaps between transient block requests and capture `needDeletes` even
-when bytes are zero. The 2026-08-09 capture contained that zero-byte,
-positive-delete state, which block-request activity cannot express. A post-game watcher
-stops after 90 seconds without a decrease in aggregate peer need, or at the backend's
-900-second hard ceiling. The frontend additionally stops a silent
-awaiting-fresh-completion watch after 300 seconds because it has no need value to measure.
-Either incomplete-upload boundary publishes the amber
+remote device's `FolderCompletion.sequence`, to establish freshness. A connected relevant
+peer holds post-game upload activity only while it has missing content (`needBytes > 0` or
+`needItems > 0`) or has not yet freshly acknowledged the mutation. The completion
+percentage and `needDeletes` stay in count-only transition diagnostics, but never gate
+completion: Syncthing reduces its percentage for pending deletes, as the 2026-08-09
+`completion=95`, `needBytes=0`, `needItems=0`, `needDeletes=12` capture demonstrates.
+A 2.5-second observation hold following a mutation or content-incomplete report gives the
+500 ms monitor poller several chances to observe a fast transfer even when the first
+content-complete peer report arrives in the same REST event batch.
+`RemoteDownloadProgress` remains supplemental upload evidence; peer completion is
+authoritative because its need counters
+persist across gaps between transient block requests. A post-game watcher stops after 90
+seconds without a decrease in aggregate content need, or at the backend's 900-second hard
+ceiling. The frontend additionally stops a silent awaiting-fresh-completion watch after
+300 seconds because it has no content need to measure. The stall window and both ceilings
+remain unchanged: once delete pruning stopped gating in the 2026-08-10 captured run,
+content settled in roughly 24 seconds and approached none of them. Their content-only
+workload suitability is deferred until a run reaches a boundary. Either incomplete-upload
+boundary publishes the amber
 `LOCAL BACKUP SAVED - SYNCTHING UPLOAD INCOMPLETE` outcome, not an API-failure status.
 Bounded transition diagnostics contain only peer counts and aggregate need totals, never
 device IDs or raw completion payloads. Pre-game watches do not query peer completion or
@@ -172,12 +178,13 @@ Autosync status strip behavior:
   2 seconds.
 - Syncthing downloading activity: show `SYNCTHING DOWNLOADING` with cloud-down icon.
 - Syncthing uploading activity: show `SYNCTHING UPLOADING` with cloud-up icon. After a
-  backup, it means a currently connected relevant peer is incomplete or has not yet
-  freshly acknowledged the watched-folder local-index mutation.
+  backup, it means a currently connected relevant peer is missing backup content or has
+  not yet freshly acknowledged the watched-folder local-index mutation.
 - Syncthing completion: show `SYNCTHING COMPLETE` with cloud-checkmark icon only after
-  the Deck's watched folder settles and every currently connected relevant peer reports no
-  outstanding need after that mutation. It does not validate a disconnected or offline
-  configured peer.
+  the Deck's watched folder settles and every currently connected relevant peer has
+  received the backup after that mutation. Pending deletion of older snapshots and the
+  completion percentage do not delay this state. It does not validate a disconnected or
+  offline configured peer.
 - Incomplete post-game upload: show `LOCAL BACKUP SAVED - SYNCTHING UPLOAD INCOMPLETE`
   in amber when monitoring ends while a connected peer remains behind or has not freshly
   confirmed the local-index mutation. The local backup succeeded; this is not an API
