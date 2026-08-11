@@ -546,10 +546,12 @@ def test_unrelated_folder_and_unconfigured_device_cannot_activate_the_watched_fo
 @pytest.mark.parametrize(
     ("completion", "need_bytes", "need_items", "need_deletes", "expected_uploading"),
     [
-        (93.56119493792454, 0, 0, 0, True),
+        (93.56119493792454, 0, 0, 0, False),
         (100.0, 8_942_011, 0, 0, True),
         (100.0, 0, 32, 0, True),
-        (100.0, 0, 0, 19, True),
+        (100.0, 0, 0, 19, False),
+        (95.0, 0, 0, 12, False),
+        (100.0, 1, 0, 99, True),
         (100.0, 0, 0, 0, False),
     ],
 )

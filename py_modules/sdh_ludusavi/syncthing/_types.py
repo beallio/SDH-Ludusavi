@@ -149,12 +149,9 @@ class PeerCompletionDiagnostics:
 
 
 def peer_completion_is_incomplete(completion: PeerCompletion | None) -> bool:
-    return completion is not None and (
-        completion.completion < 100
-        or completion.need_bytes > 0
-        or completion.need_items > 0
-        or completion.need_deletes > 0
-    )
+    # Syncthing's completion percentage is reduced by pending deletes, so retaining
+    # it would re-introduce delete gating through the back door.
+    return completion is not None and (completion.need_bytes > 0 or completion.need_items > 0)
 
 
 def summarize_peer_completions(
