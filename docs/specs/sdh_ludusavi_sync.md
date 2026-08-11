@@ -93,10 +93,12 @@ To track synchronization of backup data to other devices, the plugin monitors Sy
   without a decrease in aggregate content need as stalled. Its 900-second hard ceiling
   remains a backstop, and the frontend also has a 300-second post-game no-evidence
   ceiling for a watch awaiting fresh peer confirmation, where no content need exists to
-  measure. The stall window and both ceilings remain unchanged: in the 2026-08-10
-  captured run, content reached every peer in roughly 24 seconds once delete pruning
-  stopped gating, so that run approaches none of these values. Their suitability for the
-  content-only workload remains deferred for a run that actually approaches a boundary.
+  measure. The stall window and both ceilings remain unchanged, and the content-only
+  gate was confirmed on device on 2026-08-11 (`v0.4.4-dev.g856f4cc`, three peers):
+  `SYNCTHING COMPLETE` published 39.4 seconds after handoff, on an acknowledged
+  transition that still reported `needed_deletes=40` and `peers_pending_deletes=2`.
+  That run approached none of these boundaries, so their suitability for the
+  content-only workload remains deferred for a run that actually reaches one.
   If monitoring ends with upload work incomplete, it publishes
   `syncthing_upload_incomplete` as the amber
   `LOCAL BACKUP SAVED - SYNCTHING UPLOAD INCOMPLETE` outcome, not
