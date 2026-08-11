@@ -1,0 +1,51 @@
+{
+  "date": "2026-08-10",
+  "task_objective": "Complete the three review-gated tasks in docs/plans/2026-08-10_syncthing-content-only-completion.md: gate post-game Syncthing completion on received content only, retain pruning diagnostics, and document the resulting contract.",
+  "files_modified": [
+    "py_modules/sdh_ludusavi/syncthing/_types.py (content-only completeness predicate, diagnostics, and content-only stall aggregate)",
+    "py_modules/sdh_ludusavi/syncthing/watcher.py (pending-delete count-only transition diagnostics)",
+    "tests/test_activity.py (content-only peer-completion classification table)",
+    "tests/test_watcher.py (delete diagnostics, captured content-boundary replay, and delete-masking stall regression coverage)",
+    "README.md (user-facing Syncthing Complete definition)",
+    "docs/specs/sdh_ludusavi_sync.md and docs/specs/custom_status_bar_ui.md (content-only completion and unchanged-boundary contract)",
+    "docs/agent_conversations/2026-08-10_syncthing-content-only-completion.json (this audit record)"
+  ],
+  "tests_added": [
+    "The peer-completion classification table proves that a sub-100 percentage or pending deletes alone is complete, while missing bytes or items still hold upload activity.",
+    "Peer-completion diagnostics keep delete-only peers out of incomplete_peers while retaining their needed_deletes total and peers_pending_deletes count.",
+    "The captured 2026-08-10 sequence settles at the missing-content boundary while deletes continue to drain, proving pruning cannot hold the post-game watch open.",
+    "A content-stalled peer still reaches the stall boundary while another peer drains deletes, proving diagnostic delete progress cannot mask stalled content propagation."
+  ],
+  "design_decisions": [
+    "A connected relevant peer is content-incomplete only when needBytes or needItems is positive. completion < 100 and needDeletes > 0 are intentionally excluded because Syncthing reduces its percentage for pending deletes; the 2026-08-09 capture was completion=95 with needBytes=0, needItems=0, and needDeletes=12.",
+    "needed_deletes and peers_pending_deletes remain count-only diagnostics across all connected relevant peers. They preserve visibility into stale-snapshot pruning without delaying SYNCTHING COMPLETE or entering RPC payloads.",
+    "Review 02 exposed a plan defect, not an implementation error: Task 2 broadened needed_deletes to all peers while its step 4 incorrectly said to leave aggregate_outstanding_need unchanged. Commit 196cc73 corrected the aggregate to bytes plus items only, so peer B pruning cannot mask peer A's stalled content upload.",
+    "OUTBOUND_STALL_WINDOW_SECONDS stays 90 seconds; the backend 900-second hard ceiling and frontend 300-second no-evidence ceiling also stay unchanged. After delete pruning stopped gating, the captured 2026-08-10 run reached the content boundary in roughly 24 seconds and approached none of those values, so retuning is deferred to a run that reaches a boundary.",
+    "The Task 1 classification-table expected-value changes were authorized by the plan: (93.56119493792454, 0, 0, 0) changed True to False because percentage is not a content gate, and (100.0, 0, 0, 19) changed True to False because deletes are pruning. The required content rows remain true: (100.0, 8_942_011, 0, 0) and (100.0, 0, 32, 0)."
+  ],
+  "results": {
+    "red_proofs": [
+      "Task 1 RED: the focused activity classification test was made red by the authorized table changes before the predicate edit. The durable Review 01 mutation evidence independently restores needDeletes and reports two failures, classifies_outbound_need[100.0-0-0-19-False] and classifies_outbound_need[95.0-0-0-12-False], with 2 failed and 57 passed; restoring completion < 100 instead fails classifies_outbound_need[93.56119493792454-0-0-0-False] and classifies_outbound_need[95.0-0-0-12-False], again 2 failed and 57 passed.",
+      "Task 2 RED: the new watcher diagnostics and captured-sequence tests were written before the Task 2 implementation. The durable Review 03 mutation evidence restores the old three-term aggregate and makes test_post_game_content_stall_is_not_masked_by_other_peer_deletes fail, with 1 failed and 53 passed; this proves the review-requested Task 2 correction is not masked by delete progress.",
+      "Task 3 is documentation and audit-record work only, so strict TDD does not require a behavior RED test. Its focused documentation/static suite is recorded in validation."
+    ],
+    "task_commits": {
+      "task_1": "874a62a fix(syncthing): gate peer completeness on missing content only",
+      "task_2": "83045bc feat(syncthing): report pending deletes without gating completion",
+      "task_2_review_correction": "196cc73 fix(syncthing): track content progress for upload stalls",
+      "task_3_subject": "docs(syncthing): define completion as content received"
+    },
+    "validation": [
+      "Task 1 review quality gates: pnpm test passed 335 tests; pnpm run build, ruff check/format, and ty check passed; pytest passed 919 tests with 89.53% coverage.",
+      "Task 2 review quality gates: pnpm test passed 335 tests; pnpm run build, ruff check/format, and ty check passed; pytest passed 922 tests with 89.54% coverage after the review correction.",
+      "Task 3 focused documentation/static suite: ./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py -q --no-cov passed 25 tests in 0.18 seconds before the documentation edits and again in 0.18 seconds after them.",
+      "Task 3 full quality gates: scripts/orchestration/run-quality-gates passed; pnpm test ran 33 files / 335 tests, pnpm run typecheck and pnpm run build passed, ruff check and format passed, ty check passed, and the coverage-enforced pytest suite passed 922 tests with 89.52% coverage (83% gate)."
+    ],
+    "review_notes": [
+      "docs/review/syncthing-content-only-completion-review-01.md (Task 1 accepted; Task 2 authorized)",
+      "docs/review/syncthing-content-only-completion-review-02.md (Task 2 correction requested; plan defect identified)",
+      "docs/review/syncthing-content-only-completion-review-03.md (Task 2 accepted after correction; Task 3 authorized)"
+    ],
+    "deferred_post_release_steam_deck_verification": "A real post-game device run remains deferred until a prerelease is available. Confirm SYNCTHING UPLOADING while needed_bytes or needed_items is positive, then SYNCTHING COMPLETE when both reach zero even while needed_deletes remains non-zero, with no LOCAL BACKUP SAVED - SYNCTHING UPLOAD INCOMPLETE. The captured content boundary was 24.1 seconds after handoff. The unchanged stall window and ceilings remain unexercised by this plan."
+  }
+}
