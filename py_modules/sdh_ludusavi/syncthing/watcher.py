@@ -310,7 +310,7 @@ class SyncthingWatch:
         logger.info(
             "Syncthing peer completion %s: phase=%s connected_relevant_peers=%d "
             "incomplete_peers=%d awaiting_fresh_completion=%d needed_bytes=%d "
-            "needed_items=%d needed_deletes=%d",
+            "needed_items=%d needed_deletes=%d peers_pending_deletes=%d",
             transition,
             self.phase,
             diagnostics.connected_relevant_peers,
@@ -319,6 +319,7 @@ class SyncthingWatch:
             diagnostics.needed_bytes,
             diagnostics.needed_items,
             diagnostics.needed_deletes,
+            diagnostics.peers_pending_deletes,
         )
 
     def _stop_if_post_game_upload_incomplete(self, now: float) -> bool:

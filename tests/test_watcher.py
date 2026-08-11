@@ -14,6 +14,7 @@ from sdh_ludusavi.syncthing import (
     ConnectionSnapshot,
     PeerCompletion,
 )
+from sdh_ludusavi.syncthing._types import summarize_peer_completions
 
 
 def test_watch_tick_owns_runtime_state() -> None:
@@ -868,6 +869,26 @@ def test_newly_connected_peer_waits_for_a_fresh_completion_and_disconnects_stop_
     assert watch.latest_sample["sample"]["settled"] is True
 
 
+def test_peer_completion_diagnostics_keep_deletes_visible_without_gating_completion() -> None:
+    diagnostics = summarize_peer_completions(
+        {
+            "DEV-A": PeerCompletion("DEV-A", 100.0, 12, 3, 4, 11.0),
+            "DEV-B": PeerCompletion("DEV-B", 95.0, 0, 0, 12, 11.0),
+            "DEV-C": PeerCompletion("DEV-C", 100.0, 0, 0, 0, 11.0),
+        },
+        frozenset({"DEV-A", "DEV-B", "DEV-C"}),
+        mutation_observed_at=10.0,
+    )
+
+    assert diagnostics.connected_relevant_peers == 3
+    assert diagnostics.incomplete_peers == 1
+    assert diagnostics.awaiting_fresh_completion == 0
+    assert diagnostics.needed_bytes == 12
+    assert diagnostics.needed_items == 3
+    assert diagnostics.needed_deletes == 16
+    assert diagnostics.peers_pending_deletes == 2
+
+
 def test_peer_completion_diagnostics_are_transition_only_and_privacy_safe(caplog) -> None:
     watch = _stopped_watch_for_tick(("DEV-A",))
     now = time.monotonic()
@@ -895,8 +916,43 @@ def test_peer_completion_diagnostics_are_transition_only_and_privacy_safe(caplog
     assert "needed_bytes=8942011" in caplog.text
     assert "needed_items=32" in caplog.text
     assert "needed_deletes=19" in caplog.text
+    assert "peers_pending_deletes=1" in caplog.text
     assert "DEV-A" not in caplog.text
     assert "test-folder" not in caplog.text
+
+
+def test_post_game_completion_settles_at_content_boundary_not_pruning_boundary() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A", "DEV-B", "DEV-C"))
+    now = time.monotonic()
+    watch.connected_devices = frozenset({"DEV-A", "DEV-B", "DEV-C"})
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=now)
+    watch.peer_completions = {
+        "DEV-A": PeerCompletion("DEV-A", 93.0, 1_406_700, 100, 39, now + 1),
+        "DEV-B": PeerCompletion("DEV-B", 93.0, 20, 7, 40, now + 1),
+        "DEV-C": PeerCompletion("DEV-C", 93.0, 19, 4, 38, now + 1),
+    }
+
+    watch._tick_sample(now + 1)
+    assert watch.latest_sample["sample"]["uploading"] is True
+    assert watch.latest_sample["sample"]["settled"] is False
+
+    watch.peer_completions = {
+        "DEV-A": PeerCompletion("DEV-A", 95.0, 0, 0, 16, now + 2),
+        "DEV-B": PeerCompletion("DEV-B", 95.0, 0, 0, 15, now + 2),
+        "DEV-C": PeerCompletion("DEV-C", 95.0, 0, 0, 15, now + 2),
+    }
+    watch._tick_sample(now + 2)
+    assert watch.latest_sample["sample"]["uploading"] is False
+    assert watch.latest_sample["sample"]["settled"] is True
+
+    watch.peer_completions = {
+        "DEV-A": PeerCompletion("DEV-A", 95.0, 0, 0, 1, now + 3),
+        "DEV-B": PeerCompletion("DEV-B", 95.0, 0, 0, 1, now + 3),
+        "DEV-C": PeerCompletion("DEV-C", 95.0, 0, 0, 2, now + 3),
+    }
+    watch._tick_sample(now + 3)
+    assert watch.latest_sample["sample"]["uploading"] is False
+    assert watch.latest_sample["sample"]["settled"] is True
 
 
 def test_malformed_completion_event_keeps_last_good_state_and_never_leaks_payload(caplog) -> None:
@@ -1030,6 +1086,28 @@ def test_post_game_unchanged_outbound_need_stops_with_sanitized_truthful_reason(
     assert "test-folder" not in watch.latest_sample["message"]
     assert "123456" not in watch.latest_sample["message"]
     assert "7" not in watch.latest_sample["message"]
+
+
+def test_post_game_content_stall_is_not_masked_by_other_peer_deletes() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"))
+    watch.connected_devices = frozenset({"DEV-A", "DEV-B"})
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=1.0)
+
+    with patch("sdh_ludusavi.syncthing.watcher.OUTBOUND_STALL_WINDOW_SECONDS", 10.0):
+        watch.peer_completions = {
+            "DEV-A": PeerCompletion("DEV-A", 95.0, 1_000, 0, 0, 2.0),
+            "DEV-B": PeerCompletion("DEV-B", 95.0, 0, 0, 50, 2.0),
+        }
+        assert not watch._stop_if_post_game_upload_incomplete(1.0)
+
+        watch.peer_completions = {
+            "DEV-A": PeerCompletion("DEV-A", 95.0, 1_000, 0, 0, 13.0),
+            "DEV-B": PeerCompletion("DEV-B", 95.0, 0, 0, 49, 13.0),
+        }
+        assert watch._stop_if_post_game_upload_incomplete(12.0)
+
+    assert watch.latest_sample["status"] == "failed"
+    assert watch.latest_sample["reason"] == "post_game_upload_incomplete"
 
 
 def test_post_game_all_complete_fresh_peers_settle_without_terminal_reason() -> None:
