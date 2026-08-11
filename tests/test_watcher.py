@@ -1088,6 +1088,28 @@ def test_post_game_unchanged_outbound_need_stops_with_sanitized_truthful_reason(
     assert "7" not in watch.latest_sample["message"]
 
 
+def test_post_game_content_stall_is_not_masked_by_other_peer_deletes() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"))
+    watch.connected_devices = frozenset({"DEV-A", "DEV-B"})
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=1.0)
+
+    with patch("sdh_ludusavi.syncthing.watcher.OUTBOUND_STALL_WINDOW_SECONDS", 10.0):
+        watch.peer_completions = {
+            "DEV-A": PeerCompletion("DEV-A", 95.0, 1_000, 0, 0, 2.0),
+            "DEV-B": PeerCompletion("DEV-B", 95.0, 0, 0, 50, 2.0),
+        }
+        assert not watch._stop_if_post_game_upload_incomplete(1.0)
+
+        watch.peer_completions = {
+            "DEV-A": PeerCompletion("DEV-A", 95.0, 1_000, 0, 0, 13.0),
+            "DEV-B": PeerCompletion("DEV-B", 95.0, 0, 0, 49, 13.0),
+        }
+        assert watch._stop_if_post_game_upload_incomplete(12.0)
+
+    assert watch.latest_sample["status"] == "failed"
+    assert watch.latest_sample["reason"] == "post_game_upload_incomplete"
+
+
 def test_post_game_all_complete_fresh_peers_settle_without_terminal_reason() -> None:
     watch = _stopped_watch_for_tick(("DEV-A",))
     watch.local_activity = LocalActivity(outbound_index_observed_monotonic=1.0)
