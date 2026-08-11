@@ -146,7 +146,9 @@ class PeerCompletionDiagnostics:
 
     @property
     def aggregate_outstanding_need(self) -> int:
-        return self.needed_bytes + self.needed_items + self.needed_deletes
+        # Stall progress must track the content that gates completion. Deletes are
+        # diagnostic-only, so their progress cannot mask a stalled upload.
+        return self.needed_bytes + self.needed_items
 
 
 def peer_completion_is_incomplete(completion: PeerCompletion | None) -> bool:
