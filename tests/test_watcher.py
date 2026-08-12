@@ -926,6 +926,60 @@ def test_post_game_debug_completion_keeps_observing_until_all_peers_finish(caplo
     )
 
 
+def test_manager_leaves_debug_extended_watch_observing_after_completion(caplog) -> None:
+    watch = _first_peer_completion_watch()
+    manager = SyncthingWatchManager()
+    manager.watches[watch.watch_id] = watch
+
+    with caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"):
+        _confirm_first_peer(watch)
+
+    stop_result = manager.stop_watch(watch.watch_id)
+
+    assert stop_result == {"status": "observing", "watch_id": watch.watch_id}
+    assert not watch.stop_event.is_set()
+    assert watch.watch_id not in manager.watches
+
+
+def test_manager_stops_normal_completed_watch(caplog) -> None:
+    watch = _first_peer_completion_watch()
+    manager = SyncthingWatchManager()
+    manager.watches[watch.watch_id] = watch
+
+    with caplog.at_level(logging.INFO, logger="sdh_ludusavi.syncthing.watcher"):
+        _confirm_first_peer(watch)
+
+    with patch.object(watch, "stop", wraps=watch.stop) as mock_stop:
+        stop_result = manager.stop_watch(watch.watch_id)
+
+    assert stop_result == {"status": "stopped", "watch_id": watch.watch_id}
+    mock_stop.assert_called_once_with()
+    assert watch.stop_event.is_set()
+    assert watch.watch_id not in manager.watches
+
+
+def test_manager_stop_all_stops_debug_extended_and_normal_watches(caplog) -> None:
+    debug_watch = _first_peer_completion_watch()
+    debug_watch.watch_id = "debug-watch"
+    normal_watch = _first_peer_completion_watch()
+    normal_watch.watch_id = "normal-watch"
+    manager = SyncthingWatchManager()
+    manager.watches = {
+        debug_watch.watch_id: debug_watch,
+        normal_watch.watch_id: normal_watch,
+    }
+
+    with caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"):
+        _confirm_first_peer(debug_watch)
+
+    assert not debug_watch.stop_event.is_set()
+    manager.stop_all()
+
+    assert debug_watch.stop_event.is_set()
+    assert normal_watch.stop_event.is_set()
+    assert manager.watches == {}
+
+
 def test_post_game_debug_extended_observation_stops_at_existing_stall_boundary(caplog) -> None:
     watch = _first_peer_completion_watch()
 

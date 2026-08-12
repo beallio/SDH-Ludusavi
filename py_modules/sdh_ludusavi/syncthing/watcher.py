@@ -117,6 +117,11 @@ class SyncthingWatch:
     def _peer_completion_tracking(self) -> bool:
         return self.phase == "post_game"
 
+    @property
+    def is_debug_extending_peer_completion(self) -> bool:
+        """Whether a debug watch continues after its first confirmed peer completes."""
+        return self._debug_outbound_completion_observation and not self.stop_event.is_set()
+
     def start(self) -> None:
         self.thread = threading.Thread(
             target=self._run, name=f"syncthing-watch-{self.watch_id}", daemon=True
@@ -612,6 +617,8 @@ class SyncthingWatchManager:
     def stop_watch(self, watch_id: str) -> dict[str, Any]:
         with self.lock:
             watch = self.watches.pop(watch_id, None)
+        if watch and watch.is_debug_extending_peer_completion:
+            return {"status": "observing", "watch_id": watch_id}
         if watch:
             watch.stop()
         return {"status": "stopped", "watch_id": watch_id}
