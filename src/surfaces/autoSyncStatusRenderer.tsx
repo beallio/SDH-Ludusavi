@@ -14,6 +14,7 @@ export const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
   syncthing_downloading: "SYNCTHING DOWNLOADING",
   syncthing_uploading: "SYNCTHING UPLOADING",
   syncthing_complete: "SYNCTHING COMPLETE",
+  syncthing_upload_incomplete: "LOCAL BACKUP SAVED - SYNCTHING UPLOAD INCOMPLETE",
   syncthing_unavailable: "LOCAL BACKUP SAVED - SYNCTHING UNAVAILABLE",
   syncthing_folder_not_found: "LOCAL BACKUP SAVED - PATH NOT SHARED",
   syncthing_no_peers: "LOCAL BACKUP SAVED - NO SYNCTHING PEERS ONLINE"
@@ -35,15 +36,13 @@ export function isSyncthingStatus(status: AutoSyncStatusKind): boolean {
     status === "syncthing_pending_upload" ||
     status === "syncthing_uploading" ||
     status === "syncthing_downloading" ||
-    status === "syncthing_complete"
+    status === "syncthing_complete" || status === "syncthing_upload_incomplete"
   );
 }
 
 export function shouldAutoHideStatus(status: AutoSyncStatusKind): boolean {
   return status !== "conflict" && !isSyncthingActiveStatus(status);
 }
-
-
 
 export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
   if (status === "game_sync_disabled") {
@@ -87,7 +86,8 @@ export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
   if (
     status === "syncthing_unavailable" ||
     status === "syncthing_folder_not_found" ||
-    status === "syncthing_no_peers"
+    status === "syncthing_no_peers" ||
+    status === "syncthing_upload_incomplete"
   ) {
     return '<svg viewBox="0 0 512 512" width="18" height="18" aria-hidden="true"><path d="M403.002 217.001C388.998 148.002 328.998 96 256 96c-57.998 0-107.998 32.998-132.998 81.001C63.002 183.002 16 233.998 16 296c0 65.996 53.999 120 120 120h260c55 0 100-45 100-100 0-52.998-40.996-96.001-92.998-98.999z" fill="currentColor"/><path d="M196 232 316 352M316 232 196 352" fill="none" stroke="#0b151f" stroke-width="40" stroke-linecap="round"/></svg>';
   }
@@ -131,7 +131,7 @@ body {
   box-sizing: border-box;
 }
 .text { display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; min-width: 245px; }
-.icon { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" || state.status === "conflict" || state.status === "conflict_unresolved" || state.status === "game_sync_disabled" || state.status === "syncthing_unavailable" || state.status === "syncthing_folder_not_found" || state.status === "syncthing_no_peers" ? "#f59e0b" : "#1a9fff"}; }
+.icon { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" || state.status === "conflict" || state.status === "conflict_unresolved" || state.status === "game_sync_disabled" || state.status === "syncthing_unavailable" || state.status === "syncthing_folder_not_found" || state.status === "syncthing_no_peers" || state.status === "syncthing_upload_incomplete" ? "#f59e0b" : "#1a9fff"}; }
 .icon svg { width: 100%; height: 100%; display: block; }
 @keyframes spin {
   0% { transform: rotate(0deg); }

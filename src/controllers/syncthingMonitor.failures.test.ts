@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { SyncthingMonitor, type SyncthingRpc } from "./syncthingMonitor";
+import {
+  POST_GAME_WATCH_HARD_CEILING_MS,
+  PRE_GAME_QUIESCENCE_TIMEOUT_MS,
+  SyncthingMonitor,
+  type SyncthingRpc,
+} from "./syncthingMonitor";
 
 vi.mock("@decky/api", () => ({
   callable: () => () => Promise.resolve(),
@@ -135,6 +140,32 @@ describe("SyncthingMonitor", () => {
     await vi.advanceTimersByTimeAsync(500);
 
     expect(mockOnStatus).toHaveBeenCalledWith("syncthing_no_peers", {
+      source: "rpc_result",
+      gameName: "Hades",
+      appID: "1145300",
+    });
+    expect(mockOnStatus).not.toHaveBeenCalledWith("syncthing_unavailable", expect.any(Object));
+  });
+
+  it("backend post-game incomplete upload publishes the truthful terminal status", async () => {
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path" });
+    mockRpc.pollWatch
+      .mockResolvedValueOnce({
+        status: "activity",
+        watch_id: "w1",
+        sample: { status: "idle", timestamp_unix: 1000 }
+      })
+      .mockResolvedValueOnce({
+        status: "failed",
+        reason: "post_game_upload_incomplete",
+        message: "post-game upload remains incomplete"
+      });
+
+    const handle = monitor.start("post_game", "Hades", "1145300");
+    await handle.activatePostGameHandoff(750);
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(mockOnStatus).toHaveBeenCalledWith("syncthing_upload_incomplete", {
       source: "rpc_result",
       gameName: "Hades",
       appID: "1145300",
@@ -352,13 +383,14 @@ describe("SyncthingMonitor", () => {
     mockRpc.pollWatch.mockResolvedValue({ status: "activity", watch_id: "w1", sample: { status: "idle", timestamp_unix: 1000 } });
 
     monitor.start("pre_game", "Hades", "1145300");
-    await vi.advanceTimersByTimeAsync(121_000);
+    expect(PRE_GAME_QUIESCENCE_TIMEOUT_MS).toBe(120_000);
+    await vi.advanceTimersByTimeAsync(PRE_GAME_QUIESCENCE_TIMEOUT_MS + 1_000);
 
     expect(log).not.toHaveBeenCalledWith("error", expect.any(String));
     expect(mockRpc.stopWatch).toHaveBeenCalledWith("w1");
   });
 
-  it("post_game timeout still errors", async () => {
+  it("post_game polling survives the old cap and publishes incomplete upload at its own ceiling", async () => {
     mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path", detection_grace_ms: 30000 });
     mockRpc.pollWatch
       .mockResolvedValueOnce({ status: "activity", watch_id: "w1", sample: { status: "syncing", uploading: true, timestamp_unix: 1000 } })
@@ -366,9 +398,24 @@ describe("SyncthingMonitor", () => {
 
     const handle = monitor.start("post_game", "Hades", "1145300");
     await handle.activatePostGameHandoff(750);
-    await vi.advanceTimersByTimeAsync(121_000);
+    await vi.advanceTimersByTimeAsync(PRE_GAME_QUIESCENCE_TIMEOUT_MS + 1);
+    const pollCallsAtOldCap = mockRpc.pollWatch.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(1_000);
 
-    expect(log).toHaveBeenCalledWith("error", expect.stringContaining("watch_duration_timeout"));
+    expect(mockRpc.pollWatch.mock.calls.length).toBeGreaterThan(pollCallsAtOldCap);
+    expect(mockRpc.stopWatch).not.toHaveBeenCalled();
+    expect(mockOnStatus).not.toHaveBeenCalledWith("syncthing_upload_incomplete", expect.any(Object));
+
+    await vi.advanceTimersByTimeAsync(
+      POST_GAME_WATCH_HARD_CEILING_MS - PRE_GAME_QUIESCENCE_TIMEOUT_MS + 1_000,
+    );
+
+    expect(mockOnStatus).toHaveBeenCalledWith("syncthing_upload_incomplete", {
+      source: "rpc_result",
+      gameName: "Hades",
+      appID: "1145300",
+    });
+    expect(mockOnStatus).not.toHaveBeenCalledWith("syncthing_unavailable", expect.any(Object));
     expect(mockRpc.stopWatch).toHaveBeenCalledWith("w1");
   });
 });

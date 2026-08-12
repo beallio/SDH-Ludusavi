@@ -101,8 +101,10 @@ class WatchContext {
 }
 const EMPTY_SAMPLE_RETRY_MS = 250;
 const ACTIVE_POLL_INTERVAL_MS = 500;
-const MAX_WATCH_DURATION_MS = 120_000;
-export const PRE_GAME_QUIESCENCE_TIMEOUT_MS = MAX_WATCH_DURATION_MS;
+export const PRE_GAME_QUIESCENCE_TIMEOUT_MS = 120_000;
+// The 15-minute backend ceiling handles measurable peer need; this shorter frontend cap
+// bounds silent awaiting-fresh-completion watches, which provide no need to measure.
+export const POST_GAME_WATCH_HARD_CEILING_MS = 300_000;
 export class SyncthingMonitor {
   private rpc: SyncthingRpc;
   private onStatus: StatusCallback;
@@ -480,18 +482,17 @@ export class SyncthingMonitor {
       return;
     }
 
-    const timeoutStartedAt =
-      context.phase === "pre_game" ? context.startedAt : context.handoffActivatedAt;
-    if (
-      timeoutStartedAt !== null &&
-      Date.now() - timeoutStartedAt > MAX_WATCH_DURATION_MS
-    ) {
+    const timeoutStartedAt = context.phase === "pre_game" ? context.startedAt : context.handoffActivatedAt;
+    const timeoutMs = context.phase === "pre_game"
+      ? PRE_GAME_QUIESCENCE_TIMEOUT_MS
+      : POST_GAME_WATCH_HARD_CEILING_MS;
+    if (timeoutStartedAt !== null && Date.now() - timeoutStartedAt > timeoutMs) {
       if (context.phase === "pre_game") {
         log("info", `Syncthing pre-game watch reached max duration with no incoming sync; stopping: generation=${context.generation}`);
         this.stopWatchTerminally(context, "watch_duration_timeout");
       } else {
-        log("info", `Syncthing watch ${context.watchID} hit the active 120s timeout, stopping.`);
-        this.handlePollFailure(context, "watch_duration_timeout");
+        log("info", `Syncthing post-game watch reached the frontend no-evidence ceiling; stopping: generation=${context.generation}`);
+        this.stopWatchTerminally(context, "post_game_upload_incomplete");
       }
       return;
     }
@@ -541,7 +542,6 @@ export class SyncthingMonitor {
 
     const wID = context.watchID;
     const effects = this.dispatch(context, { type: "poll_failed", reason }, { releaseWatchID: true });
-    
     if (effects.stopWatch && wID !== null) {
       void this.stopWatchSafe(wID);
     }

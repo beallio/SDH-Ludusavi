@@ -52,6 +52,7 @@ const ACTIONABLE_UNAVAILABLE_REASONS = new Set([
 export function mapSyncthingFailureReason(reason: string | undefined): AutoSyncStatusKind | null {
   if (reason === "no_connected_peers") return "syncthing_no_peers";
   if (reason === "folder_not_found" || reason === "folder_not_shared") return "syncthing_folder_not_found";
+  if (reason === "post_game_upload_incomplete") return "syncthing_upload_incomplete";
   if (reason === "api_unavailable") return "syncthing_unavailable";
   return null;
 }
@@ -206,7 +207,11 @@ export function transition(
       } else if (sample.update_in_progress && state.phase !== "post_game") {
         newStatus = "downloading";
         nextState.settledCount = 0;
-      } else if (nextState.mutationObserved && sample.settled) {
+      } else if (
+        nextState.mutationObserved &&
+        sample.settled &&
+        (state.phase !== "post_game" || state.handoffActivated)
+      ) {
         nextState.settledCount++;
         if (nextState.settledCount >= 3) {
           newStatus = "complete";

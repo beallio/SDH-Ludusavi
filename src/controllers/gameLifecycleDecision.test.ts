@@ -94,6 +94,22 @@ describe("gameLifecycleDecision", () => {
       expect(decision.nextRpc).toBe("handoff");
     });
 
+    it("publishes uploading when the post-game handoff reports buffered peer activity", () => {
+      const backupResult = { status: "backed_up" as const, game: "Test Game" };
+
+      const decision = evaluateExitHandoff(
+        baseState,
+        { status: "uploading" },
+        backupResult,
+        null,
+      );
+
+      expect(decision).toEqual({
+        commands: [{ type: "publishStatus", status: "syncthing_uploading" }],
+        stateUpdates: { handoffTransferred: true },
+      });
+    });
+
     it.each([
       { status: "unavailable" as const, reason: "initialization_failed" },
       { status: "stale" as const },
