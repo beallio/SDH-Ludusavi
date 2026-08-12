@@ -81,7 +81,49 @@ To track synchronization of backup data to other devices, the plugin monitors Sy
 - **Path Resolution**: The watched folder is resolved dynamically by matching Syncthing configured folders against Ludusavi's backup path.
 - **Conflict Handling**: The monitor is stopped when a conflict is detected and is restarted only after a resolution operation is chosen, preventing the conflict screen from being overridden by temporary Syncthing statuses.
 - **Peer Connectivity Gate**: Peer connectivity, not internet connectivity, controls monitoring. Before a watch starts, the backend intersects the matched folder's configured remote devices with the currently connected devices from `/rest/system/connections`. A folder with no configured remote devices is classified `folder_not_shared` (rendered as `LOCAL BACKUP SAVED - PATH NOT SHARED`); configured devices with none connected is classified `no_connected_peers`. Connected devices that do not share the matched folder do not count.
-- **No Peers Online**: After a successful backup with no relevant peers connected, the frontend immediately publishes the terminal `LOCAL BACKUP SAVED - NO SYNCTHING PEERS ONLINE` warning (amber, auto-hidden by the result-status timeout) instead of waiting through the detection grace period. The local backup remains successful and no failure toast is emitted. Pre-game monitoring is skipped silently. If every relevant peer disconnects while a watch is active, the watcher stops with the same terminal `no_connected_peers` result. Device membership is used only for connectivity; it never claims remote acknowledgement or completion, and device IDs are never logged or returned through RPC.
+- **No Peers Online**: After a successful backup with no relevant peers connected, the frontend immediately publishes the terminal `LOCAL BACKUP SAVED - NO SYNCTHING PEERS ONLINE` warning (amber, auto-hidden by the result-status timeout) instead of waiting through the detection grace period. The local backup remains successful and no failure toast is emitted. Pre-game monitoring is skipped silently. If every relevant peer disconnects while a watch is active, the watcher stops with the same terminal `no_connected_peers` result. Device IDs are never logged or returned through RPC.
+- **Event Cursor Subscription**: Syncthing scopes an event `id` to the subscription
+  selected by the `events=` filter, and `since` is matched against that scoped
+  `id`. `globalID` is process-wide and must not be used as the cursor. Every
+  `/rest/events` call in the watcher, including cursor seeding, uses the same
+  `EVENT_TYPES` filter so its cursor and event reads address one subscription.
+- **Post-game Peer Completion**: For a post-game watch only, the backend reads `/rest/db/completion` once for each currently connected relevant peer, then accepts `FolderCompletion` events only when both the watched folder and a configured remote device match. A peer is content-incomplete only when it reports positive `needBytes` or `needItems`. `needDeletes` and the completion percentage remain transition diagnostics, but never gate completion: Syncthing reduces its percentage for pending deletes, as shown by the 2026-08-09 capture at `completion=95`, `needBytes=0`, `needItems=0`, and `needDeletes=12`. After a watched-folder local-index mutation, a content-complete peer is fresh only when its observation follows that mutation; freshness is based on event ordering and monotonic observation time, not `FolderCompletion.sequence`, which describes the remote device database and is not comparable to the Deck's local sequence. The post-game watch confirms completion when at least one connected relevant peer is fresh and content-complete for three consecutive backend observations (roughly a four-to-six second settling window). Other connected peers may remain content-incomplete; their counts and aggregate need remain diagnostics rather than completion gates.
+- **Post-game Quiet Window**: Only the post-game `settled` decision uses `POST_GAME_SETTLE_QUIET_WINDOW_SECONDS = 3.0`. Seven captured post-backup local-activity bursts spread 0.051 to 0.111 seconds, so three seconds leaves roughly 30x margin; values below about 6.5 seconds are equivalent in this workload because first-peer confirmation binds first. Pre-game settlement deliberately keeps its fifteen-second launch-safety window. The reported `local_change_recent`, `local_index_recent`, `sequence_change_recent`, and `scan_progress_recent` fields, along with local and remote activity pruning, also retain their fifteen-second `DEFAULT_ACTIVE_WINDOW_SECONDS` semantics.
+- **Outbound Status and Privacy**: A post-game watch keeps `SYNCTHING UPLOADING` active until its first fresh content-complete peer reaches the three-observation confirmation window. A 2.5-second observation hold prevents a local-index mutation and final completion in the same event batch from vanishing between frontend polls. `RemoteDownloadProgress` remains supplemental rather than authoritative: peer completion is need-based, survives gaps between transient block requests, and records `needDeletes` even when no content is pending. COMPLETE therefore requires local settlement plus one confirmed connected peer; it does not assert that every connected peer has finished, and it does not cover disconnected or offline configured peers. Transition diagnostics continue to include counts and aggregate content need totals, plus pending-delete counts and totals, so they record the lagging peers at completion. Diagnostic observation after completion is selected from the persisted `debug_logging` setting captured when the watch starts, not logger levels: service logging pins `sdh_ludusavi` loggers to `DEBUG` while the user toggle changes only the `decky.logger` sink filter. When selected and released by the frontend, the watcher keeps publishing the identical completion sample while any connected relevant peer has pending deletes, then terminates cleanly when those deletes drain or the `POST_GAME_WATCH_HARD_CEILING_SECONDS` boundary is reached. `incomplete_peers` cannot be that exit test: it is zero by construction after the release that content completion caused, so testing it alone would stop the diagnostic branch on its first evaluation. Extended observation never changes the published status. `/rest/system/connections` remains an availability boundary only: its global and per-device byte counters never determine activity or direction.
+- **Post-game Completion Stop Ownership**: Peer completion only latches the backend's
+  settled state; it never stops an owned post-game watch. The backend keeps publishing
+  settled samples with advancing `timestamp_unix` values so the frontend can observe
+  three settled samples with distinct timestamps, publish `SYNCTHING COMPLETE`, and then
+  call `stopWatch`. That manager release normally stops the watch. If debug logging was
+  latched at first-peer confirmation, the backend may continue diagnostic observation
+  only after that release, while connected relevant peers still have pending deletes;
+  it self-terminates cleanly when those deletes drain or at the post-game hard ceiling.
+  `incomplete_peers` is already zero at this released diagnostic boundary and therefore
+  cannot safely decide the exit. A stopped watcher freezes `latest_sample`; while it is
+  still registered, `poll_watch()` returns that frozen sample and therefore repeats its
+  timestamp. A backend-side stop before the frontend's quorum would silently prevent
+  completion and incorrectly let the frontend's no-evidence ceiling publish the
+  incomplete outcome.
+- **Post-game Boundaries and Terminal Outcome**: The backend treats 90 seconds
+  without a decrease in aggregate content need as stalled. Its 900-second hard ceiling
+  remains a backstop, and the frontend also has a 300-second post-game no-evidence
+  ceiling for a watch awaiting fresh peer confirmation, where no content need exists to
+  measure. The stall window and both ceilings remain unchanged, and the content-only
+  gate was confirmed on device on 2026-08-11 (`v0.4.4-dev.g856f4cc`, three peers):
+  its three peers reported content-complete at +15.3 seconds, +19.5 seconds, and
+  +36.3 seconds; the previous all-peers result published at +39.4 seconds. First-peer
+  confirmation therefore moves the expected boundary to roughly +15.3 seconds plus the
+  four-to-six second settling window, while the third peer may still be behind. The old
+  strip was visible for about 44 seconds (from `backing_up` through the terminal
+  two-second hide); the expected first-peer strip is roughly 25 seconds. That capture
+  approached none of these boundaries, so their suitability for the content-only
+  workload remains deferred for a run that actually reaches one.
+  If monitoring ends with upload work incomplete, it publishes
+  `syncthing_upload_incomplete` as the amber
+  `LOCAL BACKUP SAVED - SYNCTHING UPLOAD INCOMPLETE` outcome, not
+  `syncthing_unavailable`; the latter remains reserved for API and initialization
+  failures.
+- **Pre-game Boundary**: Pre-game watches do not call the completion endpoint and do not use remote peer lag to extend the launch gate. Their existing folder-local incoming, scan, need, index, and `RemoteDownloadProgress` evidence remains the sole settlement input.
 
 ## Manual Sync
 

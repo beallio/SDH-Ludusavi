@@ -1,0 +1,56 @@
+{
+  "date": "2026-08-12",
+  "task_objective": "Complete the review-gated Syncthing debug-observation exit plan: keep released debug observation alive while pending deletes drain, bound it at the existing hard ceiling, and record the exact exit contract without changing published status.",
+  "files_modified": {
+    "task_1": [
+      "py_modules/sdh_ludusavi/syncthing/watcher.py",
+      "tests/test_watcher.py"
+    ],
+    "task_2": [
+      "docs/specs/sdh_ludusavi_sync.md",
+      "docs/agent_conversations/2026-08-12_syncthing-debug-observation-exit.json"
+    ]
+  },
+  "red_proof": {
+    "task_1": {
+      "command": "./run.sh uv run pytest tests/test_watcher.py -q --no-cov",
+      "durable_proof": "Review 01 independently mutated the accepted implementation. Removing the pending-deletes term failed test_released_debug_observation_continues_until_pending_deletes_drain and test_released_debug_observation_stops_at_hard_ceiling_before_thread_ttl (2 failed, 75 passed). Removing the ceiling check failed test_released_debug_observation_stops_at_hard_ceiling_before_thread_ttl (1 failed, 76 passed). Removing the released guard failed test_unreleased_debug_watch_keeps_publishing_after_all_peers_finish (1 failed, 76 passed). Each mutation was reverted and the focused watcher suite passed 77 tests.",
+      "task_1_commit": "a46c7a96c6d687b2394df40073fe26776a0f06a0"
+    },
+    "task_2": {
+      "command": "./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py -q --no-cov",
+      "durable_proof": "Task 2 is documentation and audit-record work only, so strict TDD does not require a runtime RED test. The static documentation suite passed 25 tests in 0.18 seconds before these edits."
+    }
+  },
+  "design_decisions": [
+    "The released debug branch stops only after incomplete_peers, awaiting_fresh_completion, and peers_pending_deletes are all zero. The load-bearing new term is peers_pending_deletes: after the frontend releases a content-complete watch, incomplete_peers is zero by construction, so it cannot serve as the diagnostic exit condition alone.",
+    "A never-draining delete backlog exits at POST_GAME_WATCH_HARD_CEILING_SECONDS through the extended-observation branch, before the thread TTL warning path. Both clean stop paths deregister the watcher from the manager's observing registry.",
+    "Published samples and user-visible status are identical with and without extended observation. The diagnostic is opt-in under the persisted Debug Logging setting, so no README.md change is needed or made.",
+    "The 2026-08-12 diagnosis explains the 2026-08-11 23:25 result previously recorded as unexplained: extended observation was selected but its old exit predicate was guaranteed true on its first post-release evaluation. The separate debug-gate fix was still real; it made selection follow the persisted setting, but it did not repair this immediate exit."
+  ],
+  "commits": {
+    "task_1": {
+      "hash": "a46c7a96c6d687b2394df40073fe26776a0f06a0",
+      "subject": "fix(syncthing): observe until pending deletes drain"
+    },
+    "task_2_subject": "docs(syncthing): define the debug observation exit contract"
+  },
+  "review_notes_available_through_task_1": [
+    "docs/review/syncthing-debug-observation-exit-review-01.md"
+  ],
+  "review_history": [
+    "Review 01 accepted Task 1 after verifying the release-sequence test shape, the independent pending-deletes, hard-ceiling, and released-guard mutations, and the unchanged published completion sample. It authorized Task 2 only."
+  ],
+  "validation": {
+    "task_1_review": "Review 01: pnpm test 335 passed; pnpm run build passed; ruff check and format clean; ty check passed; pytest 946 passed at 89.69% coverage; worktree clean; no review notes deleted.",
+    "task_2_static_before_edits": "./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py -q --no-cov: 25 passed in 0.18s.",
+    "task_2_static_after_edits": "./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py -q --no-cov: 25 passed in 0.18s.",
+    "task_2_quality_gates": "scripts/orchestration/run-quality-gates: pnpm test 335 passed; TypeScript typecheck passed; Rollup build passed; ruff check and format passed; ty check passed. The immediately following full pytest confirmation passed 946 tests in 24.67s at 89.66% coverage (83% required); no review notes deleted."
+  },
+  "deferred_verification": [
+    "A Debug Logging Steam Deck run is optional and deferred. Its expected signature is transition samples continuing after SYNCTHING COMPLETE while needed_deletes remains nonzero, then stopping cleanly as those deletes drain. The 2026-08-12 11:26 Deadpool run instead stopped immediately after COMPLETE with 27 deletes outstanding.",
+    "The extended hard-ceiling path becomes reachable for the first time with this change. Unit coverage proves its terminal behaviour, but no on-device run has reached that ceiling.",
+    "A released debug watch can now live until the 900-second post-game hard ceiling when deletes never drain. That longer lifetime is intentional for an opt-in diagnostic and does not alter published status.",
+    "The unchanged 90-second content-stall window remains unexercised for released watches; this plan deliberately does not restructure it."
+  ]
+}
