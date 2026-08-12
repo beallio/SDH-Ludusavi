@@ -894,6 +894,27 @@ def _confirm_first_peer(watch: SyncthingWatch) -> None:
         _tick_first_peer_completion(watch, now)
 
 
+def _poll_first_peer_completion_sequence(
+    manager: SyncthingWatchManager, watch: SyncthingWatch, *, poll_count: int
+) -> tuple[list[float], list[bool]]:
+    """Drive post-game ticks and observe each published sample through the manager."""
+    manager.watches[watch.watch_id] = watch
+    timestamps = []
+    settled_flags = []
+
+    for now in range(2, 2 + poll_count):
+        if not watch.stop_event.is_set():
+            _tick_first_peer_completion(watch, float(now))
+
+        response = manager.poll_watch(watch.watch_id)
+        assert response["status"] == "activity"
+        sample = response["sample"]
+        timestamps.append(sample["timestamp_unix"])
+        settled_flags.append(sample["settled"])
+
+    return timestamps, settled_flags
+
+
 @pytest.mark.parametrize(
     ("log_level",),
     [
@@ -916,6 +937,41 @@ def test_post_game_first_peer_confirmation_keeps_publishing_settled_samples_in_b
     assert settled_timestamps == [4.0, 5.0, 6.0]
     assert watch.peer_completions["DEV-B"].need_bytes == 123_456
     assert not watch.stop_event.is_set()
+
+
+def test_manager_poll_sequence_keeps_three_distinct_settled_samples_after_first_peer_completion(
+    caplog,
+) -> None:
+    watch = _first_peer_completion_watch()
+    manager = SyncthingWatchManager()
+
+    with caplog.at_level(logging.INFO, logger="sdh_ludusavi.syncthing.watcher"):
+        timestamps, settled_flags = _poll_first_peer_completion_sequence(
+            manager, watch, poll_count=5
+        )
+
+    settled_timestamps = [
+        timestamp for timestamp, settled in zip(timestamps, settled_flags, strict=True) if settled
+    ]
+    assert settled_timestamps == [4.0, 5.0, 6.0]
+    assert len(set(settled_timestamps)) >= 3
+    assert not watch.stop_event.is_set()
+
+
+def test_manager_poll_sequence_exposes_frozen_sample_for_stopped_registered_watch(caplog) -> None:
+    watch = _first_peer_completion_watch()
+    manager = SyncthingWatchManager()
+
+    with caplog.at_level(logging.INFO, logger="sdh_ludusavi.syncthing.watcher"):
+        _confirm_first_peer(watch)
+    watch.stop_event.set()
+
+    timestamps, settled_flags = _poll_first_peer_completion_sequence(manager, watch, poll_count=4)
+
+    # poll_watch returns the registered watch's last sample verbatim. Pin that stopped-watch
+    # behavior so a future manager change makes the contract change explicit.
+    assert timestamps == [4.0, 4.0, 4.0, 4.0]
+    assert settled_flags == [True, True, True, True]
 
 
 def test_unreleased_debug_watch_keeps_publishing_after_all_peers_finish(caplog) -> None:
