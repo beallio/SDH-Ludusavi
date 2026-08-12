@@ -94,6 +94,7 @@ class SyncthingWatch:
         )
         self.deadline_monotonic = self.watch_started_monotonic + ttl_seconds
         self._on_expired = on_expired
+        self._on_observation_finished: Callable[[str], None] | None = None
         self.stop_event = threading.Event()
         self.latest_sample: dict[str, Any] = {}
         self.thread: threading.Thread | None = None
@@ -132,6 +133,13 @@ class SyncthingWatch:
         self.stop_event.set()
         if self.thread and self.thread.ident is not None:
             self.thread.join(timeout=1.0)
+
+    def _deregister_finished_debug_observation(self) -> None:
+        if self._debug_outbound_completion_observation and self._on_observation_finished:
+            self._on_observation_finished(self.watch_id)
+
+    def set_debug_observation_finished_callback(self, callback: Callable[[str], None]) -> None:
+        self._on_observation_finished = callback
 
     def _run(self) -> None:
         try:
@@ -218,6 +226,7 @@ class SyncthingWatch:
                 "message": "All Syncthing devices configured for the backup folder are disconnected.",
             }
             self.stop_event.set()
+            self._deregister_finished_debug_observation()
             return
 
         # 3. Poll current folder status and detect sequence changes.
@@ -353,6 +362,7 @@ class SyncthingWatch:
         )
         if diagnostics.incomplete_peers == 0 and diagnostics.awaiting_fresh_completion == 0:
             self.stop_event.set()
+            self._deregister_finished_debug_observation()
 
     def _log_peer_completion_transition(self) -> None:
         if not self._peer_completion_tracking:
@@ -425,6 +435,7 @@ class SyncthingWatch:
             "message": "Syncthing upload did not complete before monitoring ended.",
         }
         self.stop_event.set()
+        self._deregister_finished_debug_observation()
         return True
 
     def _tick_events(self) -> None:
@@ -471,6 +482,7 @@ class SyncthingWatchManager:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.watches: dict[str, SyncthingWatch] = {}
+        self._observing_watches: dict[str, SyncthingWatch] = {}
 
     def start_watch(
         self,
@@ -601,6 +613,11 @@ class SyncthingWatchManager:
         # out, stop_watch releases the lock, and pop is a harmless no-op.
         with self.lock:
             self.watches.pop(watch_id, None)
+            self._observing_watches.pop(watch_id, None)
+
+    def _deregister_finished_observation(self, watch_id: str) -> None:
+        with self.lock:
+            self._observing_watches.pop(watch_id, None)
 
     def poll_watch(self, watch_id: str) -> dict[str, Any]:
         import copy
@@ -617,15 +634,21 @@ class SyncthingWatchManager:
     def stop_watch(self, watch_id: str) -> dict[str, Any]:
         with self.lock:
             watch = self.watches.pop(watch_id, None)
-        if watch and watch.is_debug_extending_peer_completion:
-            return {"status": "observing", "watch_id": watch_id}
+            if watch and watch.is_debug_extending_peer_completion:
+                watch.set_debug_observation_finished_callback(self._deregister_finished_observation)
+                self._observing_watches[watch_id] = watch
+                return {"status": "observing", "watch_id": watch_id}
         if watch:
             watch.stop()
         return {"status": "stopped", "watch_id": watch_id}
 
     def stop_all(self) -> None:
         with self.lock:
-            watches_to_stop = list(self.watches.values())
+            watches_to_stop = {
+                **self.watches,
+                **self._observing_watches,
+            }.values()
             self.watches.clear()
+            self._observing_watches.clear()
         for watch in watches_to_stop:
             watch.stop()

@@ -941,6 +941,42 @@ def test_manager_leaves_debug_extended_watch_observing_after_completion(caplog) 
     assert watch.watch_id not in manager.watches
 
 
+def test_manager_stop_watch_then_stop_all_stops_debug_extended_watch(caplog) -> None:
+    watch = _first_peer_completion_watch()
+    manager = SyncthingWatchManager()
+    manager.watches[watch.watch_id] = watch
+
+    with caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"):
+        _confirm_first_peer(watch)
+
+    assert manager.stop_watch(watch.watch_id) == {
+        "status": "observing",
+        "watch_id": watch.watch_id,
+    }
+    assert manager.watches == {}
+
+    manager.stop_all()
+
+    assert watch.stop_event.is_set()
+    assert manager.watches == {}
+
+
+def test_manager_removes_self_terminated_debug_watch_from_observation_registry(caplog) -> None:
+    watch = _first_peer_completion_watch()
+    manager = SyncthingWatchManager()
+    manager.watches[watch.watch_id] = watch
+
+    with caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"):
+        _confirm_first_peer(watch)
+        manager.stop_watch(watch.watch_id)
+
+        watch.peer_completions["DEV-B"] = PeerCompletion("DEV-B", 100.0, 0, 0, 0, 5.0)
+        _tick_first_peer_completion(watch, 5.0)
+
+    assert watch.stop_event.is_set()
+    assert manager._observing_watches == {}
+
+
 def test_manager_stops_normal_completed_watch(caplog) -> None:
     watch = _first_peer_completion_watch()
     manager = SyncthingWatchManager()
