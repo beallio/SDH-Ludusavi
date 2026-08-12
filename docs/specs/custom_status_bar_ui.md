@@ -102,6 +102,13 @@ completion: Syncthing reduces its percentage for pending deletes, as the 2026-08
 A 2.5-second observation hold following a mutation or content-incomplete report gives the
 500 ms monitor poller several chances to observe a fast transfer even when the first
 content-complete peer report arrives in the same REST event batch.
+Only post-game `settled` uses the three-second `POST_GAME_SETTLE_QUIET_WINDOW_SECONDS`.
+Seven captured post-backup bursts spread 0.051 to 0.111 seconds, so this leaves roughly
+30x margin; values below about 6.5 seconds are equivalent because first-peer confirmation
+binds first. Pre-game retains the fifteen-second launch-safety window. The reported local
+recency flags and both local and remote pruning retain their fifteen-second
+`DEFAULT_ACTIVE_WINDOW_SECONDS` behavior, so the short window does not shrink the
+diagnostic surface or incoming-transfer reporting.
 `RemoteDownloadProgress` remains supplemental upload evidence; peer completion is
 authoritative because its need counters persist across gaps between transient block
 requests. Peer completion never stops an owned post-game watch: the backend keeps
@@ -193,9 +200,11 @@ Autosync status strip behavior:
   three consecutive fresh, content-complete observations after that mutation. Other
   connected peers may still be catching up; their content and pending-delete counts remain
   diagnostics, and pending deletion of older snapshots and the completion percentage do
-  not delay this state. Debug logging may extend backend observation for those diagnostics,
-  but it does not change the sample or visible status. Completion does not validate a
-  disconnected or offline configured peer.
+  not delay this state. Debug observation for those diagnostics is selected only from the
+  persisted `debug_logging` value captured at watch start, not the logger level:
+  `setup_logging()` pins `sdh_ludusavi` loggers to `DEBUG` while the user toggle adjusts
+  only the `decky.logger` sink filter. It does not change the sample or visible status.
+  Completion does not validate a disconnected or offline configured peer.
 - Incomplete post-game upload: show `LOCAL BACKUP SAVED - SYNCTHING UPLOAD INCOMPLETE`
   in amber when monitoring ends while a connected peer remains behind or has not freshly
   confirmed the local-index mutation. The local backup succeeded; this is not an API
