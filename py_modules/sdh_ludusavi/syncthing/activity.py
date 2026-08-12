@@ -248,6 +248,7 @@ def compute_activity_status(
     runtime: FolderRuntime,
     active_window_seconds: float,
     now: float,
+    settle_quiet_window_seconds: float | None = None,
     peer_completions: dict[str, PeerCompletion] | None = None,
     connected_relevant_device_ids: frozenset[str] = frozenset(),
     peer_completion_tracking: bool = False,
@@ -255,6 +256,11 @@ def compute_activity_status(
 ) -> ActivityStatus:
     normalized_state = folder_state or "unknown"
     active_items = local_activity.active_items
+    settle_quiet_window = (
+        active_window_seconds
+        if settle_quiet_window_seconds is None
+        else settle_quiet_window_seconds
+    )
 
     local_change_recent = (
         local_activity.last_local_change_monotonic > 0
@@ -271,6 +277,22 @@ def compute_activity_status(
     scan_progress_recent = (
         local_activity.last_scan_progress_monotonic > 0
         and now - local_activity.last_scan_progress_monotonic <= active_window_seconds
+    )
+    settle_local_change_recent = (
+        local_activity.last_local_change_monotonic > 0
+        and now - local_activity.last_local_change_monotonic <= settle_quiet_window
+    )
+    settle_local_index_recent = (
+        local_activity.last_local_index_monotonic > 0
+        and now - local_activity.last_local_index_monotonic <= settle_quiet_window
+    )
+    settle_sequence_change_recent = (
+        local_activity.last_sequence_change_monotonic > 0
+        and now - local_activity.last_sequence_change_monotonic <= settle_quiet_window
+    )
+    settle_scan_progress_recent = (
+        local_activity.last_scan_progress_monotonic > 0
+        and now - local_activity.last_scan_progress_monotonic <= settle_quiet_window
     )
 
     receive_needed = (
@@ -316,9 +338,21 @@ def compute_activity_status(
         or bool(active_items)
         or item_finished_recent
     )
+    settle_update_in_progress = (
+        active_transfer
+        or receive_needed
+        or preparing
+        or normalized_state in SCANNING_STATES
+        or settle_scan_progress_recent
+        or settle_local_change_recent
+        or settle_local_index_recent
+        or settle_sequence_change_recent
+        or bool(active_items)
+        or item_finished_recent
+    )
     settled = (
         normalized_state == "idle"
-        and not update_in_progress
+        and not settle_update_in_progress
         and not local_activity.active_download_files
         and not remote_progress
         and runtime.pull_errors == 0
