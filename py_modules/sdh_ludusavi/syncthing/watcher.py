@@ -95,6 +95,7 @@ class SyncthingWatch:
         self.deadline_monotonic = self.watch_started_monotonic + ttl_seconds
         self._on_expired = on_expired
         self._on_observation_finished: Callable[[str], None] | None = None
+        self._released_for_observation = False
         self.stop_event = threading.Event()
         self.latest_sample: dict[str, Any] = {}
         self.thread: threading.Thread | None = None
@@ -135,11 +136,16 @@ class SyncthingWatch:
             self.thread.join(timeout=1.0)
 
     def _deregister_finished_debug_observation(self) -> None:
-        if self._debug_outbound_completion_observation and self._on_observation_finished:
+        if (
+            self._released_for_observation
+            and self._debug_outbound_completion_observation
+            and self._on_observation_finished
+        ):
             self._on_observation_finished(self.watch_id)
 
-    def set_debug_observation_finished_callback(self, callback: Callable[[str], None]) -> None:
+    def begin_released_observation(self, callback: Callable[[str], None]) -> None:
         self._on_observation_finished = callback
+        self._released_for_observation = True
 
     def _run(self) -> None:
         try:
@@ -250,7 +256,7 @@ class SyncthingWatch:
         if self._stop_if_post_game_upload_incomplete(now_post):
             return
         self._tick_sample(now_post)
-        self._stop_after_post_game_peer_completion()
+        self._latch_post_game_peer_completion()
 
     def _tick_connectivity(self) -> None:
         try:
@@ -334,7 +340,7 @@ class SyncthingWatch:
             self._outbound_peer_confirmation_streak = 0
         return self._outbound_peer_confirmation_streak < OUTBOUND_CONFIRMATION_OBSERVATIONS
 
-    def _stop_after_post_game_peer_completion(self) -> None:
+    def _latch_post_game_peer_completion(self) -> None:
         if (
             not self._peer_completion_tracking
             or self._outbound_peer_confirmation_streak < OUTBOUND_CONFIRMATION_OBSERVATIONS
@@ -348,11 +354,9 @@ class SyncthingWatch:
         if not self._outbound_first_peer_completion_reached:
             self._outbound_first_peer_completion_reached = True
             self._debug_outbound_completion_observation = logger.isEnabledFor(logging.DEBUG)
-            if not self._debug_outbound_completion_observation:
-                self.stop_event.set()
-                return
+            return
 
-        if not self._debug_outbound_completion_observation:
+        if not (self._debug_outbound_completion_observation and self._released_for_observation):
             return
 
         diagnostics = summarize_peer_completions(
@@ -635,7 +639,7 @@ class SyncthingWatchManager:
         with self.lock:
             watch = self.watches.pop(watch_id, None)
             if watch and watch.is_debug_extending_peer_completion:
-                watch.set_debug_observation_finished_callback(self._deregister_finished_observation)
+                watch.begin_released_observation(self._deregister_finished_observation)
                 self._observing_watches[watch_id] = watch
                 return {"status": "observing", "watch_id": watch_id}
         if watch:
