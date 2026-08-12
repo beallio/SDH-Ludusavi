@@ -737,118 +737,123 @@ def test_post_game_completion_initialization_failure_is_sanitized(caplog) -> Non
     assert "raw completion body" not in caplog.text
 
 
-def test_post_game_peer_completion_events_gate_settlement_and_ignore_unscoped_traffic() -> None:
+def test_post_game_first_fresh_peer_requires_three_observations_before_settling() -> None:
     watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"))
     watch.connected_devices = frozenset({"DEV-A", "DEV-B"})
-    watch.local_activity = LocalActivity(active_items={})
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=10.0)
+    watch.peer_completions = {
+        "DEV-A": PeerCompletion("DEV-A", 100.0, 0, 0, 0, 11.0),
+        "DEV-B": PeerCompletion("DEV-B", 93.56119493792454, 8_942_011, 32, 19, 11.0),
+    }
 
-    event_batches = [
-        [
-            {
-                "id": 101,
-                "type": "LocalIndexUpdated",
-                "data": {"folder": "test-folder", "sequence": 6},
-            },
-            {
-                "id": 102,
-                "type": "FolderCompletion",
-                "data": {
-                    "folder": "test-folder",
-                    "device": "DEV-A",
-                    "completion": 93.56119493792454,
-                    "needBytes": 8_942_011,
-                    "needItems": 32,
-                    "needDeletes": 19,
-                },
-            },
-            {
-                "id": 103,
-                "type": "FolderCompletion",
-                "data": {
-                    "folder": "test-folder",
-                    "device": "DEV-B",
-                    "completion": 93.56119493792454,
-                    "needBytes": 8_942_011,
-                    "needItems": 32,
-                    "needDeletes": 19,
-                },
-            },
-        ],
-        [
-            {
-                "id": 104,
-                "type": "FolderCompletion",
-                "data": {
-                    "folder": "test-folder",
-                    "device": "DEV-A",
-                    "completion": 100,
-                    "needBytes": 0,
-                    "needItems": 0,
-                    "needDeletes": 0,
-                },
-            },
-            {
-                "id": 105,
-                "type": "FolderCompletion",
-                "data": {
-                    "folder": "other-folder",
-                    "device": "DEV-B",
-                    "completion": 1,
-                    "needBytes": 1,
-                    "needItems": 1,
-                    "needDeletes": 1,
-                },
-            },
-            {
-                "id": 106,
-                "type": "FolderCompletion",
-                "data": {
-                    "folder": "test-folder",
-                    "device": "UNCONFIGURED-DEVICE",
-                    "completion": 1,
-                    "needBytes": 1,
-                    "needItems": 1,
-                    "needDeletes": 1,
-                },
-            },
-        ],
-        [
-            {
-                "id": 107,
-                "type": "FolderCompletion",
-                "data": {
-                    "folder": "test-folder",
-                    "device": "DEV-B",
-                    "completion": 100,
-                    "needBytes": 0,
-                    "needItems": 0,
-                    "needDeletes": 0,
-                },
-            }
-        ],
-    ]
-
-    with patch("sdh_ludusavi.syncthing.watcher.get_events", side_effect=event_batches):
-        watch._tick_events()
-        watch._tick_sample(time.monotonic())
+    for observation in (11.0, 13.0):
+        watch._tick_sample(observation)
         assert watch.latest_sample["sample"]["uploading"] is True
         assert watch.latest_sample["sample"]["settled"] is False
 
-        watch._tick_events()
-        watch.local_activity.outbound_observation_hold_deadline_monotonic = 0
-        watch._tick_sample(time.monotonic())
-        assert watch.latest_sample["sample"]["uploading"] is True
-        assert watch.latest_sample["sample"]["settled"] is False
-
-        watch._tick_events()
-        watch.local_activity.last_local_index_monotonic = 0
-        watch.local_activity.last_sequence_change_monotonic = 0
-        watch._tick_sample(time.monotonic())
-
+    watch._tick_sample(15.0)
     sample = watch.latest_sample["sample"]
     assert sample["uploading"] is False
     assert sample["settled"] is True
-    assert set(watch.peer_completions) == {"DEV-A", "DEV-B"}
+    assert watch.peer_completions["DEV-B"].need_bytes == 8_942_011
+    assert watch.peer_completions["DEV-B"].need_items == 32
+    assert not watch.stop_event.is_set()
+
+
+def test_post_game_without_a_fresh_content_complete_peer_keeps_uploading() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"))
+    watch.connected_devices = frozenset({"DEV-A", "DEV-B"})
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=10.0)
+    watch.peer_completions = {
+        "DEV-A": PeerCompletion("DEV-A", 100.0, 0, 0, 0, 9.0),
+        "DEV-B": PeerCompletion("DEV-B", 93.56119493792454, 8_942_011, 32, 19, 11.0),
+    }
+
+    watch._tick_sample(11.0)
+
+    assert watch._outbound_peer_confirmation_streak == 0
+    assert watch.latest_sample["sample"]["uploading"] is True
+    assert watch.latest_sample["sample"]["settled"] is False
+
+
+def test_post_game_peer_completion_regression_resets_the_confirmation_streak() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"))
+    watch.connected_devices = frozenset({"DEV-A", "DEV-B"})
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=10.0)
+    watch.peer_completions = {
+        # Model the Y4IAP3B blip: a zero report followed by non-zero content need.
+        "DEV-A": PeerCompletion("DEV-A", 100.0, 0, 0, 0, 11.0),
+        "DEV-B": PeerCompletion("DEV-B", 93.56119493792454, 8_942_011, 32, 19, 11.0),
+    }
+
+    watch._tick_sample(11.0)
+    assert watch.latest_sample["sample"]["uploading"] is True
+    watch._tick_sample(13.0)
+    assert watch._outbound_peer_confirmation_streak == 2
+
+    watch.peer_completions["DEV-A"] = PeerCompletion(
+        "DEV-A", 93.56119493792454, 8_942_011, 32, 19, 17.0
+    )
+    watch._tick_sample(17.0)
+    assert watch._outbound_peer_confirmation_streak == 0
+    assert watch.latest_sample["sample"]["uploading"] is True
+
+    watch.peer_completions["DEV-A"] = PeerCompletion("DEV-A", 100.0, 0, 0, 0, 19.0)
+    watch._tick_sample(19.0)
+    watch._tick_sample(21.0)
+    assert watch._outbound_peer_confirmation_streak == 2
+    assert watch.latest_sample["sample"]["uploading"] is True
+    assert not watch.stop_event.is_set()
+
+
+def test_post_game_without_an_armed_mutation_does_not_wait_for_peer_confirmation() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch.peer_completions = {
+        "DEV-A": PeerCompletion("DEV-A", 93.56119493792454, 8_942_011, 32, 19, 11.0),
+    }
+
+    watch._tick_sample(11.0)
+
+    assert watch.latest_sample["sample"]["uploading"] is False
+    assert watch.latest_sample["sample"]["settled"] is True
+    assert not watch.stop_event.is_set()
+
+
+def test_pre_game_watch_does_not_apply_outbound_peer_confirmation() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch.phase = "pre_game"
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=10.0)
+    watch.peer_completions = {
+        "DEV-A": PeerCompletion("DEV-A", 93.56119493792454, 8_942_011, 32, 19, 11.0),
+    }
+
+    watch._tick_sample(11.0)
+
+    assert watch.latest_sample["sample"]["uploading"] is False
+    assert watch.latest_sample["sample"]["settled"] is True
+    assert not watch.stop_event.is_set()
+
+
+def test_captured_peer_sequence_completes_before_the_straggler() -> None:
+    watch = _stopped_watch_for_tick(("Y4IAP3B", "5CE2WLE"))
+    watch.connected_devices = frozenset({"Y4IAP3B", "5CE2WLE"})
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=1.0)
+    watch.peer_completions = {
+        "Y4IAP3B": PeerCompletion("Y4IAP3B", 100.0, 0, 0, 0, 15.3),
+        "5CE2WLE": PeerCompletion("5CE2WLE", 93.0, 8_942_011, 32, 19, 15.3),
+    }
+
+    watch._tick_sample(15.3)
+    assert watch.latest_sample["sample"]["uploading"] is True
+
+    # The unchanged middle observation represents Syncthing's roughly two-second cadence.
+    watch._tick_sample(17.4)
+    assert watch.latest_sample["sample"]["uploading"] is True
+
+    watch._tick_sample(19.5)
+    assert watch.latest_sample["sample"]["settled"] is True
+    assert watch.peer_completions["5CE2WLE"].need_bytes == 8_942_011
+    assert not watch.stop_event.is_set()
 
 
 def test_newly_connected_peer_waits_for_a_fresh_completion_and_disconnects_stop_gating() -> None:
@@ -865,6 +870,10 @@ def test_newly_connected_peer_waits_for_a_fresh_completion_and_disconnects_stop_
 
     watch.connected_devices = frozenset({"DEV-A"})
     watch._tick_sample(now + 1.0)
+    assert watch.latest_sample["sample"]["uploading"] is True
+    assert watch.latest_sample["sample"]["settled"] is False
+
+    watch._tick_sample(now + 2.0)
     assert watch.latest_sample["sample"]["uploading"] is False
     assert watch.latest_sample["sample"]["settled"] is True
 
@@ -942,6 +951,14 @@ def test_post_game_completion_settles_at_content_boundary_not_pruning_boundary()
         "DEV-C": PeerCompletion("DEV-C", 95.0, 0, 0, 15, now + 2),
     }
     watch._tick_sample(now + 2)
+    assert watch.latest_sample["sample"]["uploading"] is True
+    assert watch.latest_sample["sample"]["settled"] is False
+
+    watch._tick_sample(now + 3)
+    assert watch.latest_sample["sample"]["uploading"] is True
+    assert watch.latest_sample["sample"]["settled"] is False
+
+    watch._tick_sample(now + 4)
     assert watch.latest_sample["sample"]["uploading"] is False
     assert watch.latest_sample["sample"]["settled"] is True
 
@@ -950,7 +967,7 @@ def test_post_game_completion_settles_at_content_boundary_not_pruning_boundary()
         "DEV-B": PeerCompletion("DEV-B", 95.0, 0, 0, 1, now + 3),
         "DEV-C": PeerCompletion("DEV-C", 95.0, 0, 0, 2, now + 3),
     }
-    watch._tick_sample(now + 3)
+    watch._tick_sample(now + 5)
     assert watch.latest_sample["sample"]["uploading"] is False
     assert watch.latest_sample["sample"]["settled"] is True
 
@@ -1005,6 +1022,11 @@ def test_malformed_completion_event_keeps_last_good_state_and_never_leaks_payloa
 
         watch._tick_events()
         watch._tick_sample(now + 2)
+
+        watch._tick_sample(now + 3)
+        assert watch.latest_sample["sample"]["uploading"] is True
+
+        watch._tick_sample(now + 4)
 
     assert watch.latest_sample["sample"]["uploading"] is False
     assert watch.latest_sample["sample"]["settled"] is True
@@ -1118,6 +1140,8 @@ def test_post_game_all_complete_fresh_peers_settle_without_terminal_reason() -> 
     }
 
     _tick_with_peer_completion(watch, 2.0, completion=100.0, need_bytes=0)
+    _tick_with_peer_completion(watch, 3.0, completion=100.0, need_bytes=0)
+    _tick_with_peer_completion(watch, 4.0, completion=100.0, need_bytes=0)
 
     assert watch.latest_sample["status"] == "activity"
     assert watch.latest_sample["sample"]["settled"] is True
