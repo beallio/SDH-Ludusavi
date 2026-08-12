@@ -17,6 +17,7 @@ from sdh_ludusavi.syncthing._types import (
     FolderSelection,
     LocalActivity,
     PeerCompletion,
+    RemoteProgress,
 )
 
 
@@ -480,6 +481,108 @@ def _post_game_status(
         peer_completion_tracking=True,
         outbound_peer_confirmation_pending=outbound_peer_confirmation_pending,
     )
+
+
+def test_settle_window_is_shorter_than_reported_activity_window() -> None:
+    now = 100.0
+    local_activity = LocalActivity(
+        last_local_change_monotonic=96.0,
+        last_local_index_monotonic=96.0,
+        last_sequence_change_monotonic=96.0,
+        last_scan_progress_monotonic=96.0,
+    )
+
+    status = compute_activity_status(
+        folder_state="idle",
+        remote_progress={},
+        local_activity=local_activity,
+        runtime=FolderRuntime(),
+        active_window_seconds=15.0,
+        settle_quiet_window_seconds=3.0,
+        now=now,
+    )
+
+    assert status.settled is True
+    assert status.update_in_progress is True
+    assert status.local_change_recent is True
+    assert status.local_index_recent is True
+    assert status.sequence_change_recent is True
+    assert status.scan_progress_recent is True
+
+
+def test_settle_window_requires_three_seconds_of_quiet() -> None:
+    now = 100.0
+    local_activity = LocalActivity(
+        last_local_change_monotonic=98.0,
+        last_local_index_monotonic=98.0,
+        last_sequence_change_monotonic=98.0,
+        last_scan_progress_monotonic=98.0,
+    )
+
+    status = compute_activity_status(
+        folder_state="idle",
+        remote_progress={},
+        local_activity=local_activity,
+        runtime=FolderRuntime(),
+        active_window_seconds=15.0,
+        settle_quiet_window_seconds=3.0,
+        now=now,
+    )
+
+    assert status.settled is False
+
+
+@pytest.mark.parametrize(
+    "blocking_condition",
+    [
+        "active_transfer",
+        "active_download_files",
+        "remote_progress",
+        "pull_error",
+        "watch_error",
+    ],
+)
+def test_settle_window_keeps_every_other_settled_term_blocking(
+    blocking_condition: str,
+) -> None:
+    now = 100.0
+    local_activity = LocalActivity(last_local_index_monotonic=96.0)
+    remote_progress: dict[str, RemoteProgress] = {}
+    runtime = FolderRuntime()
+    peer_completion_tracking = False
+    outbound_peer_confirmation_pending = False
+
+    if blocking_condition == "active_transfer":
+        peer_completion_tracking = True
+        outbound_peer_confirmation_pending = True
+    elif blocking_condition == "active_download_files":
+        local_activity.active_download_files = 1
+    elif blocking_condition == "remote_progress":
+        remote_progress = {
+            "REMOTE-A": RemoteProgress(
+                device_id="REMOTE-A",
+                file_count=1,
+                last_seen_monotonic=now,
+            )
+        }
+    elif blocking_condition == "pull_error":
+        runtime = FolderRuntime(pull_errors=1)
+    elif blocking_condition == "watch_error":
+        runtime = FolderRuntime(watch_error="status poll failed")
+
+    status = compute_activity_status(
+        folder_state="idle",
+        remote_progress=remote_progress,
+        local_activity=local_activity,
+        runtime=runtime,
+        active_window_seconds=15.0,
+        settle_quiet_window_seconds=3.0,
+        now=now,
+        peer_completion_tracking=peer_completion_tracking,
+        outbound_peer_confirmation_pending=outbound_peer_confirmation_pending,
+    )
+
+    assert status.settled is False
 
 
 @pytest.mark.parametrize(
