@@ -79,6 +79,7 @@ class SyncthingWatch:
         api: SyncthingAPI,
         initial_snapshot: ConnectionSnapshot | None = None,
         on_expired: Callable[[str], None] | None = None,
+        debug_logging: bool = False,
     ) -> None:
         self.watch_id = watch_id
         self.phase = phase
@@ -114,6 +115,7 @@ class SyncthingWatch:
         self._last_outbound_need_decrease_monotonic: float | None = None
         self._outbound_peer_confirmation_streak = 0
         self._outbound_first_peer_completion_reached = False
+        self._debug_logging = debug_logging
         self._debug_outbound_completion_observation = False
 
     @property
@@ -358,7 +360,14 @@ class SyncthingWatch:
 
         if not self._outbound_first_peer_completion_reached:
             self._outbound_first_peer_completion_reached = True
-            self._debug_outbound_completion_observation = logger.isEnabledFor(logging.DEBUG)
+            self._debug_outbound_completion_observation = self._debug_logging
+            logger.info(
+                "Syncthing post-game peer-completion latch: phase=%s "
+                "debug_observation_selected=%s connected_relevant_peers=%d",
+                self.phase,
+                self._debug_outbound_completion_observation,
+                len(self._connected_relevant_device_ids()),
+            )
             return
 
         if not (self._debug_outbound_completion_observation and self._released_for_observation):
@@ -499,6 +508,7 @@ class SyncthingWatchManager:
         game_name: str | None,
         app_id: str | None,
         backup_path: str | None,
+        debug_logging: bool = False,
     ) -> dict[str, Any]:
         if not backup_path or backup_path == "unknown":
             return {
@@ -586,6 +596,7 @@ class SyncthingWatchManager:
             api,
             initial_snapshot=snapshot,
             on_expired=self._deregister_expired_watch,
+            debug_logging=debug_logging,
         )
 
         watches_to_stop = []
