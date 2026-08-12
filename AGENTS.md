@@ -405,6 +405,27 @@ dependency requirements
 When creating a new release tag for a GitHub project, increment the `cacheBuster`
 parameter in README image URLs so images refresh immediately.
 
+## Release Notes Voice
+
+Release notes in `docs/releases/` are read by plugin users, not by contributors. Write them
+for someone who plays games on a Steam Deck and has never seen the source.
+
+- Lead with what changed for the person using the plugin, not with the mechanism.
+- Describe symptoms and outcomes in plain language: what they saw before, what they see now,
+  how long it takes.
+- Keep identifiers out of the prose. No function names, event type names, field names,
+  constants, commit hashes, or advisory IDs. If a cause genuinely needs explaining, explain
+  it in words a non-programmer follows.
+- Numbers are welcome when they are user-visible — seconds waited, versions, counts of
+  devices. Internal measurements are not.
+- State weakened guarantees and unproven areas plainly rather than omitting them. Honesty
+  about limits is part of the voice, not an exception to it.
+- Technical detail belongs in `docs/specs/`, `docs/review/`, and the commit history, all of
+  which are already thorough. Do not duplicate it here.
+
+The published GitHub release body is generated from this file, so a rewrite after publishing
+must also update the release on GitHub or the two will disagree.
+
 ---
 
 # 14. Release & Packaging Protocol
