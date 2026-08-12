@@ -1,0 +1,84 @@
+{
+  "date": "2026-08-11",
+  "task_objective": "Publish SYNCTHING COMPLETE after one fresh content-complete connected peer has settled across three observations, retain optional debug-only diagnostic observation, and document the deliberately weaker guarantee.",
+  "files_modified": {
+    "task_1": [
+      "py_modules/sdh_ludusavi/syncthing/_types.py",
+      "py_modules/sdh_ludusavi/syncthing/activity.py",
+      "py_modules/sdh_ludusavi/syncthing/watcher.py",
+      "tests/test_activity.py",
+      "tests/test_watcher.py"
+    ],
+    "task_2": [
+      "py_modules/sdh_ludusavi/syncthing/watcher.py",
+      "tests/test_watcher.py"
+    ],
+    "task_3": [
+      "README.md",
+      "docs/specs/sdh_ludusavi_sync.md",
+      "docs/specs/custom_status_bar_ui.md",
+      "docs/agent_conversations/2026-08-11_syncthing-first-peer-completion.json"
+    ]
+  },
+  "red_proof": {
+    "task_1": {
+      "command": "./run.sh uv run pytest tests/test_activity.py tests/test_watcher.py -q --no-cov",
+      "durable_proof": "Review 01 mutation evidence proves the settling tests reject OUTBOUND_CONFIRMATION_OBSERVATIONS=1: test_post_game_first_fresh_peer_requires_three_observations_before_settling, test_post_game_peer_completion_regression_resets_the_confirmation_streak, and test_captured_peer_sequence_completes_before_the_straggler failed among six failures. Reinstating the all-peers predicate made test_captured_peer_sequence_completes_before_the_straggler fail among three failures."
+    },
+    "task_2": {
+      "command": "./run.sh uv run pytest tests/test_watcher.py -q --no-cov",
+      "durable_proof": "Review 03 forced the completion debug gate in both directions: forcing False failed the two extended-observation boundary tests, while forcing True failed first_peer_completion_stops_watch_when_debug_is_disabled and debug_completion_keeps_observing_until_all_peers_finish."
+    },
+    "task_3": {
+      "command": "./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py -q --no-cov",
+      "durable_proof": "Documentation is a non-runtime change; the static suite validates the stated interface and architecture contract."
+    }
+  },
+  "design_decisions": [
+    "Three observations at Syncthing's roughly two-second cadence provide a four-to-six second settling window for a multi-write save. Freshness continues to exclude reports from before the observed local mutation.",
+    "Completion deliberately means the local folder has settled and at least one connected relevant peer has confirmed the content. It does not mean every connected peer has completed, and it never covers disconnected or offline configured peers.",
+    "Peer counts, aggregate content need, pending-delete counts, and pending-delete totals remain diagnostics so a completion sample still records lagging peers rather than hiding them.",
+    "Debug logging evaluates logger.isEnabledFor(logging.DEBUG) at first-peer completion. It can extend backend observation through all-peer completion, the stall boundary, or the hard ceiling, but the published sample and user-visible status remain identical.",
+    "The 2026-08-11 Wobbly Life capture is the baseline: peers completed at +15.3s, +19.5s, and +36.3s; the earlier all-peers result published at +39.4s. First-peer confirmation targets about +15.3s plus four-to-six seconds of settling, reducing the approximately 44-second visible strip to roughly 25 seconds including its terminal hide."
+  ],
+  "commits": {
+    "task_1": {
+      "hash": "7a19f6b8bd48f6f8f64fbaf61b84b0f715d779fe",
+      "subject": "feat(syncthing): complete on the first confirmed peer"
+    },
+    "task_2": {
+      "hash": "b0f64b1097c98d31ce62565b907cdd4453fb1fab",
+      "subject": "feat(syncthing): keep observing peers under debug logging",
+      "follow_up_fixes": [
+        "133a2e0b65fc7937d317dba413fa9d6270440e4f fix(syncthing): preserve debug peer observation",
+        "0eee3b3b20259ec3a910f3d2f8f72396e83ecc44 fix(syncthing): stop debug observation on teardown"
+      ]
+    },
+    "task_3_subject": "docs(syncthing): define completion as first confirmed peer"
+  },
+  "review_notes_available_through_task_2": [
+    "docs/review/syncthing-first-peer-completion-review-01.md",
+    "docs/review/syncthing-first-peer-completion-review-02.md",
+    "docs/review/syncthing-first-peer-completion-review-03.md",
+    "docs/review/syncthing-first-peer-completion-review-04.md",
+    "docs/review/syncthing-first-peer-completion-review-05.md"
+  ],
+  "review_history": [
+    "Review 02 corrected a plan defect: Task 2's original halt-and-report instruction gave an agent with no reporting channel no distinguishable way to signal a blocker. Two rounds wrote a valid marker with no code, and neither orchestration status nor recover detected it; the orchestrator found it by comparing the branch diff with the marker.",
+    "Review 03 found that frontend stopWatch made debug-extended observation unreachable even though watch-level tests passed. The manager now leaves a debug-extended watch observing while removing it from the replacement-blocking registry.",
+    "Review 04 found that a watch removed for replacement escaped stop_all teardown. The manager now tracks debug-observing watches separately, drains that collection during stop_all, and deregisters self-terminated watches.",
+    "Review 05 accepts a narrow race: a watch can self-terminate between the extending-state check and manager registration, leaving only a stopped dictionary entry until stop_all. It does not retain a thread or polling loop and is cleared at teardown."
+  ],
+  "validation": {
+    "baseline_before_task_3": "2026-08-11: ./run.sh uv run pytest -> 930 passed, 89.59% coverage.",
+    "task_1_review": "Review 01 independently reran gates: pnpm test 335 passed; pnpm run build ok; ruff clean; ty ok; pytest 921 passed at 89.56% coverage; worktree clean; no review notes deleted.",
+    "task_2_final_review": "Review 05 independently reran gates: pnpm test 335 passed; pnpm run build ok; ruff clean; ty ok; pytest 930 passed at 89.61% coverage; worktree clean; no review notes deleted.",
+    "task_3": "Static documentation suite: 25 passed in 0.18s. Full quality gates: pnpm test 335 passed; TypeScript typecheck passed; Rollup build passed; ruff check and format passed; ty check passed; pytest 930 passed at 89.59% coverage in 23.97s."
+  },
+  "deferred_verification": [
+    "A post-game device run remains deferred to a prerelease. Its required signature is SYNCTHING COMPLETE while a transition diagnostic still reports incomplete_peers greater than zero, with handoff-to-complete compared to the +39.4-second baseline.",
+    "Debug-extended observation is unit-tested but has not run against a live slow peer.",
+    "The unchanged 90-second stall window, 900-second backend hard ceiling, and 300-second frontend no-evidence ceiling remain unexercised on device. Completing on the first peer makes those boundaries less likely to be reached, not verified.",
+    "The acceptability of the weaker at-least-one-connected-peer guarantee is a product judgement, not a testable fact."
+  ]
+}

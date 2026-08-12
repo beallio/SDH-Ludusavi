@@ -122,7 +122,7 @@ slow sync as an API failure.
 - **Sync Skipped — Conflict Unresolved**: You dismissed the conflict prompt without choosing a save, so the plugin deliberately made no save changes and resumed the game.
 - **Syncthing Downloading**: Syncthing is downloading/applying backup folder data.
 - **Syncthing Uploading**: After a backup, a currently connected device that shares the watched backup folder is still catching up, or has not yet reported that it caught up after the Deck changed the folder's index.
-- **Syncthing Complete**: After a backup, the watched folder has settled on the Steam Deck and every currently connected device that shares it has received the backup after the local index change. The plugin does **not** wait for those devices to finish deleting older snapshots. This does **not** guarantee the save has reached a configured device that is disconnected or offline.
+- **Syncthing Complete**: After a backup, the watched folder has settled on the Steam Deck and at least one currently connected device that shares it has reported the backup as received in three consecutive checks. Other connected devices may still be catching up when this status appears; the plugin does **not** wait for them to finish deleting older snapshots. This also does **not** guarantee the save has reached a configured device that is disconnected or offline.
 - **Local Backup Saved - Syncthing Upload Incomplete**: The local backup succeeded, but
   monitoring ended before a connected peer finished catching up or freshly confirmed that
   it had done so. This is an upload outcome, not a Syncthing API failure; Syncthing can
