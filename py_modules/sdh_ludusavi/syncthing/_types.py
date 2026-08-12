@@ -34,6 +34,10 @@ DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_EVENT_TIMEOUT_SECONDS = 1.0
 DEFAULT_STATUS_POLL_INTERVAL_SECONDS = 1.0
 OUTBOUND_OBSERVATION_HOLD_SECONDS = 2.5
+# At Syncthing's roughly two-second cadence, three observations provide a
+# four-to-six second settling window for multi-write saves; freshness already
+# excludes completion reports that predate the observed mutation.
+OUTBOUND_CONFIRMATION_OBSERVATIONS = 3
 # The observed straggler held needDeletes unchanged for about 60 seconds while
 # still making progress, so a 90-second window avoids treating that as stalled.
 OUTBOUND_STALL_WINDOW_SECONDS = 90.0
