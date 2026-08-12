@@ -18,6 +18,7 @@ from ._types import (
     ConnectionSnapshot,
     DEFAULT_EVENT_TIMEOUT_SECONDS,
     DEFAULT_ACTIVE_WINDOW_SECONDS,
+    POST_GAME_SETTLE_QUIET_WINDOW_SECONDS,
     OUTBOUND_CONFIRMATION_OBSERVATIONS,
     OUTBOUND_OBSERVATION_HOLD_SECONDS,
     OUTBOUND_STALL_WINDOW_SECONDS,
@@ -295,6 +296,9 @@ class SyncthingWatch:
     def _tick_sample(self, now: float) -> None:
         try:
             connected_relevant_device_ids = self._connected_relevant_device_ids()
+            settle_quiet_window_seconds = (
+                POST_GAME_SETTLE_QUIET_WINDOW_SECONDS if self.phase == "post_game" else None
+            )
             status = compute_activity_status(
                 folder_state=self.folder_state,
                 remote_progress=self.remote_progress,
@@ -302,6 +306,7 @@ class SyncthingWatch:
                 runtime=self.runtime,
                 active_window_seconds=DEFAULT_ACTIVE_WINDOW_SECONDS,
                 now=now,
+                settle_quiet_window_seconds=settle_quiet_window_seconds,
                 peer_completions=self.peer_completions,
                 connected_relevant_device_ids=connected_relevant_device_ids,
                 peer_completion_tracking=self._peer_completion_tracking,

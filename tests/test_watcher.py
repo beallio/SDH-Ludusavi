@@ -10,6 +10,10 @@ import pytest
 
 from sdh_ludusavi.syncthing.watcher import SyncthingWatch, SyncthingWatchManager
 from sdh_ludusavi.syncthing.config import SyncthingNotConfiguredError
+from sdh_ludusavi.syncthing.activity import (
+    prune_local_activity as real_prune_local_activity,
+    prune_remote_progress as real_prune_remote_progress,
+)
 from sdh_ludusavi.syncthing import (
     FolderSelection,
     FolderRuntime,
@@ -561,6 +565,69 @@ def _stopped_watch_for_tick(device_ids: tuple[str, ...]) -> SyncthingWatch:
     watch.folder_state = "idle"
     watch.runtime = FolderRuntime(sequence=5)
     return watch
+
+
+@pytest.mark.parametrize(
+    ("phase", "quiet_seconds", "settled"),
+    [
+        pytest.param("post_game", 4.0, True, id="post-game-settles-after-four-seconds"),
+        pytest.param("post_game", 2.0, False, id="post-game-remains-active-after-two-seconds"),
+        pytest.param("pre_game", 4.0, False, id="pre-game-keeps-fifteen-second-launch-gate"),
+    ],
+)
+def test_watch_uses_short_settle_window_only_for_post_game(
+    phase: str, quiet_seconds: float, settled: bool
+) -> None:
+    now = 100.0
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch.phase = phase
+    watch.local_activity = LocalActivity(
+        last_local_change_monotonic=now - quiet_seconds,
+        last_local_index_monotonic=now - quiet_seconds,
+        last_sequence_change_monotonic=now - quiet_seconds,
+        last_scan_progress_monotonic=now - quiet_seconds,
+        outbound_index_observed_monotonic=now - quiet_seconds,
+    )
+
+    if phase == "post_game":
+        watch.peer_completions = {
+            "DEV-A": PeerCompletion("DEV-A", 100.0, 0, 0, 0, now),
+        }
+        watch._outbound_peer_confirmation_streak = 2
+
+    watch._tick_sample(now)
+
+    assert watch.latest_sample["sample"]["settled"] is settled
+
+
+def test_watcher_keeps_activity_pruning_on_the_fifteen_second_window() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    now = 100.0
+
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+            return_value=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_folder_status",
+            return_value={"state": "idle", "sequence": 5},
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.get_events", return_value=[]),
+        patch("sdh_ludusavi.syncthing.watcher.time.monotonic", return_value=now),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.prune_remote_progress",
+            wraps=real_prune_remote_progress,
+        ) as mocked_prune_remote_progress,
+        patch(
+            "sdh_ludusavi.syncthing.watcher.prune_local_activity",
+            wraps=real_prune_local_activity,
+        ) as mocked_prune_local_activity,
+    ):
+        watch._tick(now)
+
+    assert mocked_prune_remote_progress.call_args.args[1] == 15.0
+    assert mocked_prune_local_activity.call_args.args[1] == 15.0
 
 
 def _unchanged_event_state(**kwargs):
