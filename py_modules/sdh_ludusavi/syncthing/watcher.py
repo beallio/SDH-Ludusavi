@@ -378,7 +378,18 @@ class SyncthingWatch:
             self._connected_relevant_device_ids(),
             self.local_activity.outbound_index_observed_monotonic,
         )
-        if diagnostics.incomplete_peers == 0 and diagnostics.awaiting_fresh_completion == 0:
+        # Content completion caused the frontend to release this watch, so incomplete_peers is
+        # zero by construction here. Pending deletes must keep debug observation alive.
+        if (
+            diagnostics.incomplete_peers == 0
+            and diagnostics.awaiting_fresh_completion == 0
+            and diagnostics.peers_pending_deletes == 0
+        ):
+            self.stop_event.set()
+            self._deregister_finished_debug_observation()
+            return
+
+        if time.monotonic() - self.watch_started_monotonic >= POST_GAME_WATCH_HARD_CEILING_SECONDS:
             self.stop_event.set()
             self._deregister_finished_debug_observation()
 
