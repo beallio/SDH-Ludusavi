@@ -103,12 +103,20 @@ A 2.5-second observation hold following a mutation or content-incomplete report 
 500 ms monitor poller several chances to observe a fast transfer even when the first
 content-complete peer report arrives in the same REST event batch.
 `RemoteDownloadProgress` remains supplemental upload evidence; peer completion is
-authoritative because its need counters
-persist across gaps between transient block requests. A post-game watcher stops after 90
-seconds without a decrease in aggregate content need, or at the backend's 900-second hard
-ceiling. The frontend additionally stops a silent awaiting-fresh-completion watch after
-300 seconds because it has no content need to measure. The stall window and both ceilings
-remain unchanged: once delete pruning stopped gating in the 2026-08-10 captured run,
+authoritative because its need counters persist across gaps between transient block
+requests. Peer completion never stops an owned post-game watch: the backend keeps
+publishing settled samples with advancing `timestamp_unix` values, and the frontend
+publishes `SYNCTHING COMPLETE` only after observing three settled samples with distinct
+timestamps, then calls `stopWatch`. That call releases the watch; only a released watch
+with debug logging latched may continue backend diagnostic observation, until every peer
+finishes or an existing terminal boundary is reached. A watcher stopped before that
+frontend-owned release freezes `latest_sample`, so a still-registered `poll_watch()` call
+would return duplicate timestamps forever and the frontend could never satisfy its
+completion quorum. An owned post-game watcher can still stop after 90 seconds without a
+decrease in aggregate content need, or at the backend's 900-second hard ceiling. The
+frontend additionally stops a silent awaiting-fresh-completion watch after 300 seconds
+because it has no content need to measure. The stall window and both ceilings remain
+unchanged: once delete pruning stopped gating in the 2026-08-10 captured run,
 content settled in roughly 24 seconds and approached none of them. Their content-only
 workload suitability is deferred until a run reaches a boundary. Either incomplete-upload
 boundary publishes the amber
@@ -203,8 +211,8 @@ the launch flow is observe, settle, recheck, decide, then resume. The 900 ms
 before the pending/uploading Syncthing handoff; it does not delay pre-game current or
 restored results. Settled samples received before the post-game handoff cannot consume the
 completion quorum. Once the handoff is confirmed, three new distinct settled samples are
-required before the monitor publishes COMPLETE and stops, making UPLOADING visible even
-for a very fast peer transfer.
+required before the frontend publishes COMPLETE and calls `stopWatch`, making UPLOADING
+visible even for a very fast peer transfer.
 
 Checking and running states stay visible while their operation runs and are replaced
 when the operation's result is published. A stuck-bar safety ceiling force-hides them

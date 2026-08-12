@@ -1,0 +1,71 @@
+{
+  "date": "2026-08-11",
+  "task_objective": "Complete the three review-gated tasks in docs/plans/2026-08-11_syncthing-completion-stop-race.md: keep post-game watches publishing until the frontend owns completion release, add a manager-poll regression harness, and document that ownership contract.",
+  "files_modified": {
+    "task_1": [
+      "py_modules/sdh_ludusavi/syncthing/watcher.py",
+      "tests/test_watcher.py"
+    ],
+    "task_2": [
+      "tests/test_watcher.py"
+    ],
+    "task_3": [
+      "docs/specs/sdh_ludusavi_sync.md",
+      "docs/specs/custom_status_bar_ui.md",
+      "docs/agent_conversations/2026-08-11_syncthing-completion-stop-race.json"
+    ]
+  },
+  "red_proof": {
+    "task_1": {
+      "command": "./run.sh uv run pytest tests/test_watcher.py -q --no-cov",
+      "durable_proof": "Restoring self.stop_event.set() at first-peer confirmation failed test_post_game_first_peer_confirmation_keeps_publishing_settled_samples_in_both_modes[normal], test_post_game_first_peer_confirmation_keeps_publishing_settled_samples_in_both_modes[debug], and test_unreleased_debug_watch_keeps_publishing_after_all_peers_finish (11 failed, 58 passed). Removing the released-state guard separately failed test_unreleased_debug_watch_keeps_publishing_after_all_peers_finish (1 failed, 68 passed)."
+    },
+    "task_2": {
+      "command": "./run.sh uv run pytest tests/test_watcher.py -q --no-cov -k poll_sequence",
+      "durable_proof": "Restoring the first-peer stop made test_manager_poll_sequence_keeps_three_distinct_settled_samples_after_first_peer_completion fail with settled timestamps [4.0, 4.0, 4.0] instead of [4.0, 5.0, 6.0] (1 failed, 1 passed), proving the harness observes the frozen-sample production failure through SyncthingWatchManager.poll_watch()."
+    },
+    "task_3": {
+      "command": "./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py -q --no-cov",
+      "durable_proof": "Task 3 is documentation and audit-record work only, so strict TDD does not require a behavior RED test. The static documentation suite passed 25 tests in 0.21 seconds before the edits."
+    }
+  },
+  "design_decisions": [
+    "Peer completion latches the backend's settled state but never stops a post-game watch the frontend still owns. The backend must keep publishing advancing timestamps so the frontend can form its three-sample distinct-timestamp quorum.",
+    "The frontend publishes SYNCTHING COMPLETE and then calls stopWatch. In normal mode that release stops the watcher; debug extended observation is allowed only after manager release, and then ends when all peers finish or an existing terminal boundary is reached.",
+    "A stopped but registered watcher freezes latest_sample, and manager polling honestly returns that frozen sample. The bug was stopping too early, not poll_watch() returning the last known sample.",
+    "No README.md edit is needed: the user-facing definition of SYNCTHING COMPLETE remains that the local folder has settled and one connected peer has confirmed content receipt; only stop ownership changed."
+  ],
+  "commits": {
+    "task_1": {
+      "hash": "b349da3",
+      "subject": "fix(syncthing): let the frontend own the completion stop"
+    },
+    "task_2": {
+      "hash": "3ee4389",
+      "subject": "test(syncthing): cover the manager poll sequence after completion"
+    },
+    "task_3_subject": "docs(syncthing): define completion stop ownership"
+  },
+  "review_notes_available_through_task_2": [
+    "docs/review/syncthing-completion-stop-race-review-01.md",
+    "docs/review/syncthing-completion-stop-race-review-02.md"
+  ],
+  "review_history": [
+    "Four consecutive defects on the predecessor branch shared the wrong-test-shape pattern: watch-level tests exercised a sequence the running system never performs and could not see the frontend quorum. Task 2's manager-poll harness closes that gap by reproducing the observed polling sequence rather than reading watch.latest_sample directly.",
+    "Review 01 accepted Task 1 after verifying the explicit released-state guard, the separation of latching from stopping, and mutations that failed in both normal and debug modes.",
+    "Review 02 accepted Task 2 after verifying the harness polls through SyncthingWatchManager.poll_watch() and demonstrably catches the original frozen-timestamp regression."
+  ],
+  "validation": {
+    "task_1_review": "Review 01: pnpm test 335 passed; pnpm run build passed; ruff check and format clean; ty check passed; pytest 931 passed at 89.63% coverage; worktree clean; no review notes deleted.",
+    "task_2_review": "Review 02: pnpm test 335 passed; pnpm run build passed; ruff check and format clean; ty check passed; pytest 933 passed at 89.63% coverage; worktree clean; no review notes deleted.",
+    "task_3_static_before_edits": "./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py -q --no-cov: 25 passed in 0.21s.",
+    "task_3_static_after_edits": "./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py -q --no-cov: 25 passed in 0.19s.",
+    "task_3_quality_gates": "scripts/orchestration/run-quality-gates: pnpm test 335 passed; TypeScript typecheck passed; Rollup build passed; ruff check and format passed; ty check passed; pytest 933 passed in 24.56s at 89.61% coverage (83% required); no review notes deleted."
+  },
+  "deferred_verification": [
+    "A post-game Steam Deck run is required before this is considered fixed. The expected signature is SYNCTHING COMPLETE within roughly twenty seconds of handoff while a transition still reports non-zero needed_deletes, with no LOCAL BACKUP SAVED - SYNCTHING UPLOAD INCOMPLETE at the 300-second mark.",
+    "Debug extended observation has no device evidence after this fix and must be treated as a first hardware test, not a re-confirmation.",
+    "The unchanged 90-second stall window, 900-second backend hard ceiling, and 300-second frontend no-evidence ceiling remain unexercised. The captured 2026-08-11 failure proves only that the frontend ceiling fires as designed after a backend-side premature stop.",
+    "The accepted stop_watch() race from the predecessor branch is unchanged by this plan."
+  ]
+}
