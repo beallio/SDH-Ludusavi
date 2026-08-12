@@ -464,6 +464,7 @@ def _post_game_status(
     peer_completions: dict[str, PeerCompletion],
     local_activity: LocalActivity | None = None,
     connected_devices: frozenset[str] = frozenset({"REMOTE-A"}),
+    outbound_peer_confirmation_pending: bool = False,
     now: float = 100.0,
     active_window_seconds: float = 0.0,
 ):
@@ -477,6 +478,7 @@ def _post_game_status(
         peer_completions=peer_completions,
         connected_relevant_device_ids=connected_devices,
         peer_completion_tracking=True,
+        outbound_peer_confirmation_pending=outbound_peer_confirmation_pending,
     )
 
 
@@ -543,109 +545,25 @@ def test_unrelated_folder_and_unconfigured_device_cannot_activate_the_watched_fo
     assert status.uploading is False
 
 
-@pytest.mark.parametrize(
-    ("completion", "need_bytes", "need_items", "need_deletes", "expected_uploading"),
-    [
-        (93.56119493792454, 0, 0, 0, False),
-        (100.0, 8_942_011, 0, 0, True),
-        (100.0, 0, 32, 0, True),
-        (100.0, 0, 0, 19, False),
-        (95.0, 0, 0, 12, False),
-        (100.0, 1, 0, 99, True),
-        (100.0, 0, 0, 0, False),
-    ],
-)
-def test_connected_peer_completion_classifies_outbound_need(
-    completion: float,
-    need_bytes: int,
-    need_items: int,
-    need_deletes: int,
-    expected_uploading: bool,
+@pytest.mark.parametrize("outbound_peer_confirmation_pending", [True, False])
+def test_outbound_peer_confirmation_pending_classifies_activity(
+    outbound_peer_confirmation_pending: bool,
 ) -> None:
-    peer_completions: dict[str, PeerCompletion] = {}
-    process_event(
-        event=_folder_completion(
-            completion=completion,
-            need_bytes=need_bytes,
-            need_items=need_items,
-            need_deletes=need_deletes,
-        ),
-        folder=_watched_folder(),
-        folder_state="idle",
-        runtime=FolderRuntime(),
-        remote_progress={},
-        local_activity=LocalActivity(),
-        now=100.0,
-        peer_completions=peer_completions,
-        peer_completion_tracking=True,
+    status = _post_game_status(
+        peer_completions={
+            "REMOTE-A": PeerCompletion("REMOTE-A", 100.0, 0, 0, 0, 11.0),
+        },
+        local_activity=LocalActivity(outbound_index_observed_monotonic=10.0),
+        outbound_peer_confirmation_pending=outbound_peer_confirmation_pending,
     )
 
-    status = _post_game_status(peer_completions=peer_completions)
-
-    assert status.uploading is expected_uploading
-    assert status.update_in_progress is expected_uploading
-    assert status.settled is not expected_uploading
-    assert status.status == ("ACTIVE_TRANSFER" if expected_uploading else "IDLE")
+    assert status.uploading is outbound_peer_confirmation_pending
+    assert status.update_in_progress is outbound_peer_confirmation_pending
+    assert status.settled is not outbound_peer_confirmation_pending
+    assert status.status == ("ACTIVE_TRANSFER" if outbound_peer_confirmation_pending else "IDLE")
 
 
-def test_peer_completion_must_be_fresh_after_watched_index_mutation() -> None:
-    folder = _watched_folder()
-    peer_completions: dict[str, PeerCompletion] = {}
-    local_activity = LocalActivity()
-
-    process_event(
-        event=_folder_completion(),
-        folder=folder,
-        folder_state="idle",
-        runtime=FolderRuntime(sequence=10),
-        remote_progress={},
-        local_activity=local_activity,
-        now=10.0,
-        peer_completions=peer_completions,
-        peer_completion_tracking=True,
-    )
-    _, runtime, _, local_activity, _ = process_event(
-        event={"type": "LocalIndexUpdated", "data": {"folder": "folder-a", "sequence": 11}},
-        folder=folder,
-        folder_state="idle",
-        runtime=FolderRuntime(sequence=10),
-        remote_progress={},
-        local_activity=local_activity,
-        now=11.0,
-        peer_completions=peer_completions,
-        peer_completion_tracking=True,
-    )
-    assert runtime.sequence == 11
-
-    stale_status = _post_game_status(
-        peer_completions=peer_completions,
-        local_activity=local_activity,
-        now=20.0,
-    )
-    assert stale_status.uploading is True
-    assert stale_status.settled is False
-
-    process_event(
-        event=_folder_completion(),
-        folder=folder,
-        folder_state="idle",
-        runtime=runtime,
-        remote_progress={},
-        local_activity=local_activity,
-        now=21.0,
-        peer_completions=peer_completions,
-        peer_completion_tracking=True,
-    )
-    fresh_status = _post_game_status(
-        peer_completions=peer_completions,
-        local_activity=local_activity,
-        now=21.0,
-    )
-    assert fresh_status.uploading is False
-    assert fresh_status.settled is True
-
-
-def test_each_connected_relevant_peer_must_complete_the_mutation() -> None:
+def test_confirmed_first_peer_allows_settlement_while_another_peer_is_incomplete() -> None:
     local_activity = LocalActivity(outbound_index_observed_monotonic=10.0)
     peer_completions = {
         "REMOTE-A": PeerCompletion("REMOTE-A", 100.0, 0, 0, 0, 11.0),
@@ -656,20 +574,23 @@ def test_each_connected_relevant_peer_must_complete_the_mutation() -> None:
         peer_completions=peer_completions,
         local_activity=local_activity,
         connected_devices=frozenset({"REMOTE-A", "REMOTE-B"}),
+        outbound_peer_confirmation_pending=True,
         now=20.0,
     )
     assert incomplete.uploading is True
     assert incomplete.status == "ACTIVE_TRANSFER"
 
-    peer_completions["REMOTE-B"] = PeerCompletion("REMOTE-B", 100.0, 0, 0, 0, 21.0)
     complete = _post_game_status(
         peer_completions=peer_completions,
         local_activity=local_activity,
         connected_devices=frozenset({"REMOTE-A", "REMOTE-B"}),
+        outbound_peer_confirmation_pending=False,
         now=21.0,
     )
     assert complete.uploading is False
     assert complete.settled is True
+    assert peer_completions["REMOTE-B"].need_bytes == 8_942_011
+    assert peer_completions["REMOTE-B"].need_items == 32
 
 
 def test_disconnected_or_unrelated_peers_cannot_hold_folder_active() -> None:
@@ -713,6 +634,7 @@ def test_remote_download_progress_remains_independent_of_peer_completion_trackin
         peer_completions={},
         connected_relevant_device_ids=frozenset(),
         peer_completion_tracking=True,
+        outbound_peer_confirmation_pending=False,
     )
     assert status.uploading is True
 

@@ -18,10 +18,12 @@ from ._types import (
     ConnectionSnapshot,
     DEFAULT_EVENT_TIMEOUT_SECONDS,
     DEFAULT_ACTIVE_WINDOW_SECONDS,
+    OUTBOUND_CONFIRMATION_OBSERVATIONS,
     OUTBOUND_OBSERVATION_HOLD_SECONDS,
     OUTBOUND_STALL_WINDOW_SECONDS,
     POST_GAME_WATCH_HARD_CEILING_SECONDS,
     PeerCompletionDiagnostics,
+    peer_completion_is_incomplete,
     summarize_peer_completions,
 )
 from .activity import (
@@ -107,6 +109,7 @@ class SyncthingWatch:
         self._last_peer_completion_diagnostics: PeerCompletionDiagnostics | None = None
         self._last_outbound_need: int | None = None
         self._last_outbound_need_decrease_monotonic: float | None = None
+        self._outbound_peer_confirmation_streak = 0
 
     @property
     def _peer_completion_tracking(self) -> bool:
@@ -268,6 +271,7 @@ class SyncthingWatch:
 
     def _tick_sample(self, now: float) -> None:
         try:
+            connected_relevant_device_ids = self._connected_relevant_device_ids()
             status = compute_activity_status(
                 folder_state=self.folder_state,
                 remote_progress=self.remote_progress,
@@ -276,8 +280,11 @@ class SyncthingWatch:
                 active_window_seconds=DEFAULT_ACTIVE_WINDOW_SECONDS,
                 now=now,
                 peer_completions=self.peer_completions,
-                connected_relevant_device_ids=self._connected_relevant_device_ids(),
+                connected_relevant_device_ids=connected_relevant_device_ids,
                 peer_completion_tracking=self._peer_completion_tracking,
+                outbound_peer_confirmation_pending=self._outbound_peer_confirmation_pending(
+                    connected_relevant_device_ids
+                ),
             )
             self.latest_sample = _serialize_sample(self.watch_id, status)
             self._log_peer_completion_transition()
@@ -288,6 +295,27 @@ class SyncthingWatch:
                 "reason": "computation_failed",
                 "message": str(exc),
             }
+
+    def _outbound_peer_confirmation_pending(
+        self, connected_relevant_device_ids: frozenset[str]
+    ) -> bool:
+        mutation_observed_at = self.local_activity.outbound_index_observed_monotonic
+        if not self._peer_completion_tracking or mutation_observed_at == 0:
+            self._outbound_peer_confirmation_streak = 0
+            return False
+
+        has_fresh_content_complete_peer = any(
+            completion is not None
+            and not peer_completion_is_incomplete(completion)
+            and completion.observed_monotonic >= mutation_observed_at
+            for device_id in connected_relevant_device_ids
+            if (completion := self.peer_completions.get(device_id)) is not None
+        )
+        if has_fresh_content_complete_peer:
+            self._outbound_peer_confirmation_streak += 1
+        else:
+            self._outbound_peer_confirmation_streak = 0
+        return self._outbound_peer_confirmation_streak < OUTBOUND_CONFIRMATION_OBSERVATIONS
 
     def _log_peer_completion_transition(self) -> None:
         if not self._peer_completion_tracking:

@@ -21,7 +21,6 @@ from ._types import (
     ActivityStatus,
     OUTBOUND_OBSERVATION_HOLD_SECONDS,
     peer_completion_is_incomplete,
-    summarize_peer_completions,
     int_field,
     parse_folder_runtime,
 )
@@ -252,6 +251,7 @@ def compute_activity_status(
     peer_completions: dict[str, PeerCompletion] | None = None,
     connected_relevant_device_ids: frozenset[str] = frozenset(),
     peer_completion_tracking: bool = False,
+    outbound_peer_confirmation_pending: bool = True,
 ) -> ActivityStatus:
     normalized_state = folder_state or "unknown"
     active_items = local_activity.active_items
@@ -290,26 +290,17 @@ def compute_activity_status(
         or bool(active_items)
     )
 
-    peer_completions = peer_completions or {}
-    incomplete_peer = False
-    awaiting_fresh_peer_completion = False
-    outbound_observation_hold_active = False
-    if peer_completion_tracking:
-        completion_diagnostics = summarize_peer_completions(
-            peer_completions,
-            connected_relevant_device_ids,
-            local_activity.outbound_index_observed_monotonic,
-        )
-        incomplete_peer = completion_diagnostics.incomplete_peers > 0
-        awaiting_fresh_peer_completion = completion_diagnostics.awaiting_fresh_completion > 0
-        outbound_observation_hold_active = (
-            now < local_activity.outbound_observation_hold_deadline_monotonic
-        )
+    outbound_observation_hold_active = (
+        peer_completion_tracking
+        and now < local_activity.outbound_observation_hold_deadline_monotonic
+    )
+    outbound_peer_confirmation_active = (
+        peer_completion_tracking and outbound_peer_confirmation_pending
+    )
 
     uploading = (
         bool(remote_progress)
-        or incomplete_peer
-        or awaiting_fresh_peer_completion
+        or outbound_peer_confirmation_active
         or outbound_observation_hold_active
     )
 
