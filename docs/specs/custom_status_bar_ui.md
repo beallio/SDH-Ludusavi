@@ -178,13 +178,16 @@ Autosync status strip behavior:
   2 seconds.
 - Syncthing downloading activity: show `SYNCTHING DOWNLOADING` with cloud-down icon.
 - Syncthing uploading activity: show `SYNCTHING UPLOADING` with cloud-up icon. After a
-  backup, it means a currently connected relevant peer is missing backup content or has
-  not yet freshly acknowledged the watched-folder local-index mutation.
-- Syncthing completion: show `SYNCTHING COMPLETE` with cloud-checkmark icon only after
-  the Deck's watched folder settles and every currently connected relevant peer has
-  received the backup after that mutation. Pending deletion of older snapshots and the
-  completion percentage do not delay this state. It does not validate a disconnected or
-  offline configured peer.
+  backup, it means no connected relevant peer has yet produced three consecutive fresh,
+  content-complete observations after the watched-folder local-index mutation.
+- Syncthing completion: show `SYNCTHING COMPLETE` with cloud-checkmark icon after the
+  Deck's watched folder settles and at least one connected relevant peer has produced
+  three consecutive fresh, content-complete observations after that mutation. Other
+  connected peers may still be catching up; their content and pending-delete counts remain
+  diagnostics, and pending deletion of older snapshots and the completion percentage do
+  not delay this state. Debug logging may extend backend observation for those diagnostics,
+  but it does not change the sample or visible status. Completion does not validate a
+  disconnected or offline configured peer.
 - Incomplete post-game upload: show `LOCAL BACKUP SAVED - SYNCTHING UPLOAD INCOMPLETE`
   in amber when monitoring ends while a connected peer remains behind or has not freshly
   confirmed the local-index mutation. The local backup succeeded; this is not an API
