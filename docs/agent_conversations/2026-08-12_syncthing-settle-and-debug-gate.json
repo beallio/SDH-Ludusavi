@@ -1,0 +1,76 @@
+{
+  "date": "2026-08-12",
+  "task_objective": "Complete the review-gated Syncthing settle-window and debug-observation-setting plan: shorten only the post-game quiet gate, select extended diagnostic observation from the persisted Debug Logging setting, and record the resulting contract.",
+  "files_modified": {
+    "task_1": [
+      "py_modules/sdh_ludusavi/syncthing/_types.py",
+      "py_modules/sdh_ludusavi/syncthing/activity.py",
+      "py_modules/sdh_ludusavi/syncthing/watcher.py",
+      "tests/test_activity.py",
+      "tests/test_watcher.py"
+    ],
+    "task_2": [
+      "py_modules/sdh_ludusavi/service.py",
+      "py_modules/sdh_ludusavi/syncthing/watcher.py",
+      "tests/test_watcher.py",
+      "tests/test_service.py"
+    ],
+    "task_3": [
+      "docs/specs/sdh_ludusavi_sync.md",
+      "docs/specs/custom_status_bar_ui.md",
+      "docs/agent_conversations/2026-08-12_syncthing-settle-and-debug-gate.json"
+    ]
+  },
+  "red_proof": {
+    "task_1": {
+      "command": "./run.sh uv run pytest tests/test_activity.py tests/test_watcher.py -q --no-cov",
+      "durable_proof": "Review 01 mutation evidence showed that applying the short window to pre-game made test_watch_uses_short_settle_window_only_for_post_game[pre-game-keeps-fifteen-second-launch-gate] fail, and coupling a reported activity flag to the short window made test_settle_window_is_shorter_than_reported_activity_window fail. Both mutations were reverted; the focused suite then passed 135 tests."
+    },
+    "task_2": {
+      "command": "./run.sh uv run pytest tests/test_watcher.py tests/test_service.py -q --no-cov",
+      "durable_proof": "Review 02 restored logger.isEnabledFor(logging.DEBUG) and, with the sdh_ludusavi logger explicitly set to DEBUG, got two failures including test_debug_logging_false_stops_at_first_peer_even_when_plugin_logger_is_debug. Changing the fail-closed start_watch default to True separately failed two manager tests. Both mutations were reverted; the focused suite then passed 179 tests."
+    },
+    "task_3": {
+      "command": "./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py -q --no-cov",
+      "durable_proof": "Task 3 is documentation and audit-record work only, so strict TDD does not require a runtime RED test. The static documentation suite passed 25 tests in 0.17 seconds before these edits."
+    }
+  },
+  "design_decisions": [
+    "POST_GAME_SETTLE_QUIET_WINDOW_SECONDS is 3.0 seconds only for the post-game settled decision. Seven captured local-activity bursts spread 0.051 to 0.111 seconds, giving roughly 30x margin, and values below about 6.5 seconds are equivalent because first-peer confirmation binds first.",
+    "Pre-game settlement remains on the existing fifteen-second window because it gates launch and releasing it early could start a game before a newer incoming save lands. The reported local recency flags and local and remote pruning also retain their fifteen-second semantics.",
+    "Extended post-game observation is selected from the persisted debug_logging value captured at watch start. Logger levels are deliberately not a signal: setup_logging() pins sdh_ludusavi to DEBUG permanently while the UI setting adjusts only decky.logger filtering.",
+    "No README.md change is needed. SYNCTHING COMPLETE has the same user-facing meaning, and Debug Logging now behaves as its existing description claimed rather than introducing a new option."
+  ],
+  "commits": {
+    "task_1": {
+      "hash": "34a8c4b71a38c58a8e82a32051a7863d34fa4b4f",
+      "subject": "feat(syncthing): shorten the post-game settle gate"
+    },
+    "task_2": {
+      "hash": "b3a1d835065091aae03edc53ff68142cdd9a82b9",
+      "subject": "fix(syncthing): gate debug observation on the debug setting"
+    },
+    "task_3_subject": "docs(syncthing): define the settle window and debug gate signals"
+  },
+  "review_notes_available_through_task_2": [
+    "docs/review/syncthing-settle-and-debug-gate-review-01.md",
+    "docs/review/syncthing-settle-and-debug-gate-review-02.md"
+  ],
+  "review_history": [
+    "Review 01 accepted Task 1 after independently verifying that the short quiet window reaches only post-game settlement, preserves all reported long-window activity flags and pruning, and fails the pre-game launch-gate mutation.",
+    "Review 02 accepted Task 2 after independently verifying that the persisted setting, not a logger level, selects extended observation; it also verified the INFO latch diagnostic contains only phase, selection, and a connected-relevant-peer count."
+  ],
+  "validation": {
+    "task_1_review": "Review 01: pnpm test 335 passed; pnpm run build passed; ruff check and format clean; ty check passed; pytest 944 passed at 89.67% coverage; worktree clean; no review notes deleted.",
+    "task_2_review": "Review 02: pnpm test 335 passed; pnpm run build passed; ruff check and format clean; ty check passed; pytest 946 passed at 89.68% coverage; worktree clean; no review notes deleted.",
+    "task_3_static_before_edits": "./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py -q --no-cov: 25 passed in 0.17s.",
+    "task_3_static_after_edits": "./run.sh uv run pytest tests/test_protocol.py tests/test_architecture.py tests/test_status_flow_diagram.py -q --no-cov: 25 passed in 0.18s.",
+    "task_3_quality_gates": "scripts/orchestration/run-quality-gates: pnpm test 335 passed; TypeScript typecheck passed; Rollup build passed; ruff check and format passed; ty check passed. The immediately following full pytest confirmation passed 946 tests in 24.18s at 89.66% coverage (83% required)."
+  },
+  "deferred_verification": [
+    "A post-game Steam Deck run is required. The expected signature is SYNCTHING COMPLETE roughly 8 seconds after SYNCTHING UPLOADING rather than roughly 17 seconds, with handoff-to-complete near 19 seconds rather than the 27.4-second 2026-08-11 baseline.",
+    "The latch diagnostic must establish whether extended observation is selected on device. The 2026-08-11 case in which observation did not run despite an always-true logger-level gate remains unexplained; this branch supplies a correct gate and diagnostic, not a fix for that separate failure.",
+    "The three-second window is calibrated from one Wobbly Life save of roughly 1.4 MB across 111 files. A larger save could scan longer and may require a separate calibration.",
+    "The unchanged 90-second stall window, 900-second backend hard ceiling, and 300-second frontend no-evidence ceiling remain unexercised on device."
+  ]
+}
