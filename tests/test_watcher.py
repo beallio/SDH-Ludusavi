@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import time
 import threading
 from unittest.mock import Mock, patch
@@ -856,6 +857,104 @@ def test_captured_peer_sequence_completes_before_the_straggler() -> None:
     assert not watch.stop_event.is_set()
 
 
+def _first_peer_completion_watch() -> SyncthingWatch:
+    watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"))
+    watch.connected_devices = frozenset({"DEV-A", "DEV-B"})
+    watch.folder_state = "idle"
+    watch.runtime = FolderRuntime(sequence=1)
+    watch.local_activity = LocalActivity(outbound_index_observed_monotonic=1.0)
+    watch.peer_completions = {
+        "DEV-A": PeerCompletion("DEV-A", 100.0, 0, 0, 0, 1.0),
+        "DEV-B": PeerCompletion("DEV-B", 95.0, 123_456, 7, 0, 1.0),
+    }
+    return watch
+
+
+def _tick_first_peer_completion(watch: SyncthingWatch, now: float) -> None:
+    with (
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+            return_value=ConnectionSnapshot(connected_devices=frozenset({"DEV-A", "DEV-B"})),
+        ),
+        patch(
+            "sdh_ludusavi.syncthing.watcher.get_folder_status",
+            return_value={"state": "idle", "sequence": 1},
+        ),
+        patch("sdh_ludusavi.syncthing.watcher.get_events", return_value=[]),
+        patch("sdh_ludusavi.syncthing.watcher.time.monotonic", return_value=now),
+        patch("sdh_ludusavi.syncthing.activity.time.time", return_value=1_234.5),
+    ):
+        watch._tick(now)
+
+
+def _confirm_first_peer(watch: SyncthingWatch) -> None:
+    for now in (2.0, 3.0, 4.0):
+        _tick_first_peer_completion(watch, now)
+
+
+def test_post_game_first_peer_completion_stops_watch_when_debug_is_disabled(caplog) -> None:
+    watch = _first_peer_completion_watch()
+
+    with caplog.at_level(logging.INFO, logger="sdh_ludusavi.syncthing.watcher"):
+        _confirm_first_peer(watch)
+
+    assert watch.latest_sample["sample"]["settled"] is True
+    assert watch.peer_completions["DEV-B"].need_bytes == 123_456
+    assert watch.stop_event.is_set()
+
+
+def test_post_game_debug_completion_keeps_observing_until_all_peers_finish(caplog) -> None:
+    normal_watch = _first_peer_completion_watch()
+    debug_watch = _first_peer_completion_watch()
+
+    with caplog.at_level(logging.INFO, logger="sdh_ludusavi.syncthing.watcher"):
+        _confirm_first_peer(normal_watch)
+    with caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"):
+        _confirm_first_peer(debug_watch)
+        completed_sample = debug_watch.latest_sample.copy()
+
+        assert not debug_watch.stop_event.is_set()
+
+        debug_watch.peer_completions["DEV-B"] = PeerCompletion("DEV-B", 100.0, 0, 0, 0, 5.0)
+        _tick_first_peer_completion(debug_watch, 5.0)
+
+    assert normal_watch.stop_event.is_set()
+    assert completed_sample == normal_watch.latest_sample
+    assert debug_watch.stop_event.is_set()
+    assert any(
+        "Syncthing peer completion acknowledged" in record.getMessage() for record in caplog.records
+    )
+
+
+def test_post_game_debug_extended_observation_stops_at_existing_stall_boundary(caplog) -> None:
+    watch = _first_peer_completion_watch()
+
+    with caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"):
+        _confirm_first_peer(watch)
+        assert not watch.stop_event.is_set()
+        with patch("sdh_ludusavi.syncthing.watcher.OUTBOUND_STALL_WINDOW_SECONDS", 1.0):
+            _tick_first_peer_completion(watch, 6.0)
+
+    assert watch.latest_sample["reason"] == "post_game_upload_incomplete"
+    assert watch.stop_event.is_set()
+
+
+def test_post_game_debug_extended_observation_stops_at_existing_hard_ceiling(caplog) -> None:
+    watch = _first_peer_completion_watch()
+    watch.watch_started_monotonic = 0.0
+
+    with (
+        caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"),
+        patch("sdh_ludusavi.syncthing.watcher.POST_GAME_WATCH_HARD_CEILING_SECONDS", 5.0),
+    ):
+        _confirm_first_peer(watch)
+        assert not watch.stop_event.is_set()
+        _tick_first_peer_completion(watch, 5.0)
+
+    assert watch.latest_sample["reason"] == "post_game_upload_incomplete"
+    assert watch.stop_event.is_set()
+
+
 def test_newly_connected_peer_waits_for_a_fresh_completion_and_disconnects_stop_gating() -> None:
     watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"))
     now = time.monotonic()
@@ -1132,7 +1231,7 @@ def test_post_game_content_stall_is_not_masked_by_other_peer_deletes() -> None:
     assert watch.latest_sample["reason"] == "post_game_upload_incomplete"
 
 
-def test_post_game_all_complete_fresh_peers_settle_without_terminal_reason() -> None:
+def test_post_game_all_complete_fresh_peers_stop_after_settling() -> None:
     watch = _stopped_watch_for_tick(("DEV-A",))
     watch.local_activity = LocalActivity(outbound_index_observed_monotonic=1.0)
     watch.peer_completions = {
@@ -1146,7 +1245,7 @@ def test_post_game_all_complete_fresh_peers_settle_without_terminal_reason() -> 
     assert watch.latest_sample["status"] == "activity"
     assert watch.latest_sample["sample"]["settled"] is True
     assert "reason" not in watch.latest_sample
-    assert not watch.stop_event.is_set()
+    assert watch.stop_event.is_set()
 
 
 def test_pre_game_watch_never_stops_for_outbound_need_stall() -> None:

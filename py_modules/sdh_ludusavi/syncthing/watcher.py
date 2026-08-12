@@ -110,6 +110,8 @@ class SyncthingWatch:
         self._last_outbound_need: int | None = None
         self._last_outbound_need_decrease_monotonic: float | None = None
         self._outbound_peer_confirmation_streak = 0
+        self._outbound_first_peer_completion_reached = False
+        self._debug_outbound_completion_observation = False
 
     @property
     def _peer_completion_tracking(self) -> bool:
@@ -234,6 +236,7 @@ class SyncthingWatch:
         if self._stop_if_post_game_upload_incomplete(now_post):
             return
         self._tick_sample(now_post)
+        self._stop_after_post_game_peer_completion()
 
     def _tick_connectivity(self) -> None:
         try:
@@ -316,6 +319,35 @@ class SyncthingWatch:
         else:
             self._outbound_peer_confirmation_streak = 0
         return self._outbound_peer_confirmation_streak < OUTBOUND_CONFIRMATION_OBSERVATIONS
+
+    def _stop_after_post_game_peer_completion(self) -> None:
+        if (
+            not self._peer_completion_tracking
+            or self._outbound_peer_confirmation_streak < OUTBOUND_CONFIRMATION_OBSERVATIONS
+        ):
+            return
+
+        sample = self.latest_sample.get("sample")
+        if not isinstance(sample, dict) or not sample.get("settled"):
+            return
+
+        if not self._outbound_first_peer_completion_reached:
+            self._outbound_first_peer_completion_reached = True
+            self._debug_outbound_completion_observation = logger.isEnabledFor(logging.DEBUG)
+            if not self._debug_outbound_completion_observation:
+                self.stop_event.set()
+                return
+
+        if not self._debug_outbound_completion_observation:
+            return
+
+        diagnostics = summarize_peer_completions(
+            self.peer_completions,
+            self._connected_relevant_device_ids(),
+            self.local_activity.outbound_index_observed_monotonic,
+        )
+        if diagnostics.incomplete_peers == 0 and diagnostics.awaiting_fresh_completion == 0:
+            self.stop_event.set()
 
     def _log_peer_completion_transition(self) -> None:
         if not self._peer_completion_tracking:
