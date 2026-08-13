@@ -2,12 +2,13 @@ minimumReleaseAge: 20160
 minimumReleaseAgeExclude:
   # Pinned exclusions only: each entry names the exact version audited by hand,
   # so the 14-day quarantine still applies to every other release of these
-  # packages. nanoid 3.3.17 (published 2026-08-03) is the fix for
-  # GHSA-2v37-7h3g-55p8 and clears the quarantine on its own on 2026-08-17;
-  # until then this pin is what keeps the audit gate green without suppressing
-  # the advisory.
+  # packages. GHSA-2v37-7h3g-55p8 was first published as fixed in 3.3.17, then
+  # the advisory range was widened to <3.3.18; nanoid 3.3.18 (published
+  # 2026-08-07) is the real fix and clears the quarantine on its own on
+  # 2026-08-21. Until then this pin is what keeps the audit gate green without
+  # suppressing the advisory.
   - postcss@8.5.23
-  - nanoid@3.3.17
+  - nanoid@3.3.18
 storeDir: /tmp/sdh_ludusavi/.pnpm-store
 virtualStoreDir: /tmp/sdh_ludusavi/pnpm-virtual-store
 sideEffectsCache: false
@@ -26,8 +27,9 @@ overrides:
   # GHSA-fxqj-rqcc-2cmp (arbitrary .map read via sourceMappingURL) in 8.5.23.
   postcss@<=8.5.22: 8.5.23
   # GHSA-mwcw-c2x4-8c55 (negative size loops) patched in 3.3.16;
-  # GHSA-2v37-7h3g-55p8 (custom generators loop) in 3.3.17.
-  nanoid@<3.3.17: 3.3.17
+  # GHSA-2v37-7h3g-55p8 (custom generators loop) in 3.3.18 — the advisory
+  # originally named 3.3.17 and was later widened to <3.3.18.
+  nanoid@<3.3.18: 3.3.18
   # GHSA-mh99-v99m-4gvg reaches brace-expansion only through these two build
   # tools. Forcing both to current majors drops the legacy glob/minimatch
   # chains that pin the vulnerable brace-expansion builds.
