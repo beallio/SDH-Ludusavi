@@ -21,13 +21,17 @@
     ]
   },
   "mutation_proof": {
-    "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-1-mutation.log'",
-    "exit_code": 1,
-    "result": "2 failed, 60 passed in 0.08s",
-    "failures": [
-      "test_parse_folder_runtime_keeps_content_need_separate_from_deletes failed when need_content_items and the status counter parsing were removed",
-      "test_local_index_update_preserves_content_need_counts failed with need_files reset from 3 to 0 when the explicit FolderRuntime reconstruction replaced dataclasses.replace"
-    ],
+    "local_index_update": {
+      "mutation": "Replaced dataclasses.replace with the prior explicit FolderRuntime reconstruction.",
+      "result": "test_local_index_update_preserves_content_need_counts failed with need_files reset from 3 to 0."
+    },
+    "content_counter_parsing": {
+      "mutation": "Removed only the needFiles, needDirectories, and needSymlinks int_field calls from parse_folder_runtime while retaining need_content_items.",
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py::test_parse_folder_runtime_keeps_content_need_separate_from_deletes -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-review-01-parsing-mutation.log'",
+      "exit_code": 1,
+      "result": "1 failed in 0.05s",
+      "failure": "AssertionError: assert 0 == 2 at assert runtime.need_files == 2."
+    },
     "restored_green": "./run.sh uv run pytest tests/test_activity.py -q --no-cov: 62 passed in 0.06s."
   },
   "design_decisions": [
@@ -43,7 +47,15 @@
     "pytest": "948 passed in 24.09s; total coverage 89.68% with 83% required.",
     "review_note_integrity": "no deleted review notes"
   },
-  "results": "Task 1 implementation and its quality gates are complete; the task is ready for its atomic commit and round-complete marker.",
+  "review_follow_up": {
+    "round": "01",
+    "review_commit": "fba288ac603d673d4c5b00102e0dbee31da7bd30",
+    "changes": [
+      "Changed the parsing fixture to use distinct non-zero file, directory, and symlink counters and asserted each parsed value.",
+      "Proved the corrected test fails specifically when only the three counter parsing calls are removed."
+    ]
+  },
+  "results": "Task 1 implementation and the round-01 review follow-up are complete; the strengthened parsing test now proves the safety-critical counters are parsed rather than merely defaulted.",
   "deferred_verification": [
     "The plan's live-device verification remains outstanding; this task only exposes and preserves counters and does not change the launch gate."
   ]

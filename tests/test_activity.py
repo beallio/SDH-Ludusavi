@@ -307,16 +307,19 @@ def test_parse_folder_runtime_keeps_content_need_separate_from_deletes() -> None
     runtime = parse_folder_runtime(
         {
             "needBytes": 0,
-            "needFiles": 0,
-            "needDirectories": 0,
-            "needSymlinks": 0,
+            "needFiles": 2,
+            "needDirectories": 3,
+            "needSymlinks": 5,
             "needDeletes": 46,
-            "needTotalItems": 46,
+            "needTotalItems": 56,
         }
     )
 
-    assert runtime.need_content_items == 0
-    assert runtime.need_total_items == 46
+    assert runtime.need_files == 2
+    assert runtime.need_directories == 3
+    assert runtime.need_symlinks == 5
+    assert runtime.need_content_items == 10
+    assert runtime.need_total_items == 56
 
     empty_runtime = parse_folder_runtime({})
     assert empty_runtime.need_files == 0
