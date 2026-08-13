@@ -165,7 +165,8 @@
       "test_sync_preparing_content_item_remains_unsettled",
       "test_content_only_settlement_rejects_unsafe_folder_states",
       "test_sync_preparing_content_only_settlement_keeps_runtime_errors_blocking",
-      "test_sync_preparing_content_only_settlement_requires_no_content_activity"
+      "test_sync_preparing_content_only_settlement_requires_no_content_activity",
+      "test_post_game_delete_tail_settles_during_pruning_but_not_syncing"
     ],
     "red_proof": {
       "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py -q --no-cov -k \"sync_preparing_delete_tail_settles_without_content_activity or sync_preparing_content_item_remains_unsettled or content_only_settlement_rejects_unsafe_folder_states or sync_preparing_content_only_settlement_keeps_runtime_errors_blocking or sync_preparing_content_only_settlement_requires_no_content_activity\" 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-4-red.log'",
@@ -222,9 +223,36 @@
     "design_decisions": [
       "settled now separates content presence from diagnostic status. It accepts only idle or PREPARING_STATES and keeps status and update_in_progress unchanged, so delete-only sync-preparing tails can settle while still reporting PREPARING.",
       "LocalIndexUpdated and sequence-change quiet windows were removed only from settlement because their events contain no action. Fresh local changes, scan progress, and a recent content ItemFinished remain quiet-window blockers.",
-      "active_transfer remains a settled blocker to preserve the post-game peer-completion and outbound-observation safety contract even when there is no remote progress object."
+      "active_transfer remains a settled blocker to preserve the post-game peer-completion and outbound-observation safety contract even when there is no remote progress object.",
+      "settled is shared by pre-game and post-game. Therefore post-game can now settle during sync-preparing and cleaning when peer content is complete, whereas it previously required idle. This is safe and matches the v0.4.4 decision that local snapshot-pruning deletes must not gate completion: content is present, no download or remote-progress activity remains, and syncing still blocks."
     ],
     "results": "Task 4 is complete. A delete-only sync-preparing tail can settle as soon as content is complete, while content need, active content, unsafe states, runtime errors, and post-game confirmation holds remain blocking."
+  },
+  "review_round_05": {
+    "review_commit": "7c40c65d43b53d1f48bdde1ecdd5385147d78c14",
+    "requested_changes": [
+      "Record the intentional shared post-game settlement widening.",
+      "Add a regression that a content-complete peer with pending deletes settles in sync-preparing but not syncing."
+    ],
+    "production_changes": "None. The new regression passed against the reviewed predicate and no real problem was revealed.",
+    "test_added": "test_post_game_delete_tail_settles_during_pruning_but_not_syncing",
+    "mutation_proof": {
+      "mutation": "Temporarily re-narrowed content_state_allows_settlement from idle or preparing to idle only while retaining the new test.",
+      "command": "./run.sh uv run pytest tests/test_activity.py::test_post_game_delete_tail_settles_during_pruning_but_not_syncing -q --no-cov",
+      "exit_code": 1,
+      "result": "1 failed in 0.05s",
+      "failure": "AssertionError: assert False is True at assert preparing_status.settled is True.",
+      "restored_green": "The original predicate was restored unchanged; the targeted test passed in 0.04s."
+    },
+    "quality_gates": {
+      "command": "scripts/orchestration/run-quality-gates; scripts/orchestration/check-review-notes-not-deleted",
+      "exit_code": 0,
+      "frontend": "33 test files passed; 335 tests passed; TypeScript typecheck and Rollup build passed.",
+      "ruff": "All checks passed; 141 files left unchanged after formatting.",
+      "ty": "All checks passed.",
+      "pytest": "969 passed in 24.66s; total coverage 89.82% with 83% required.",
+      "review_note_integrity": "no deleted review notes"
+    }
   },
   "results": "Tasks 1 through 4 and their review follow-ups are complete; the next review round selects either Task 5 or changes requested for Task 4.",
   "deferred_verification": [

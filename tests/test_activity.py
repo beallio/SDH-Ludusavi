@@ -617,9 +617,10 @@ def _post_game_status(
     outbound_peer_confirmation_pending: bool = False,
     now: float = 100.0,
     active_window_seconds: float = 0.0,
+    folder_state: str = "idle",
 ):
     return compute_activity_status(
-        folder_state="idle",
+        folder_state=folder_state,
         remote_progress={},
         local_activity=local_activity or LocalActivity(),
         runtime=FolderRuntime(),
@@ -642,6 +643,24 @@ def test_post_game_content_complete_peer_with_deletes_stays_settled() -> None:
     assert status.receive_needed is False
     assert status.settled is True
     assert status.status == "IDLE"
+
+
+def test_post_game_delete_tail_settles_during_pruning_but_not_syncing() -> None:
+    peer_completions = {
+        "REMOTE-A": PeerCompletion("REMOTE-A", 100.0, 0, 0, 46, 11.0),
+    }
+
+    preparing_status = _post_game_status(
+        peer_completions=peer_completions,
+        folder_state="sync-preparing",
+    )
+    syncing_status = _post_game_status(
+        peer_completions=peer_completions,
+        folder_state="syncing",
+    )
+
+    assert preparing_status.settled is True
+    assert syncing_status.settled is False
 
 
 @pytest.mark.parametrize(
