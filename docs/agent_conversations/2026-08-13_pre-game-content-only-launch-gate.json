@@ -301,8 +301,90 @@
       "review_note_integrity": "no deleted review notes"
     }
   },
-  "results": "Tasks 1 through 5 and their review follow-ups are complete; the next review round selects Task 6 or changes requested for Task 5.",
+  "task_6": {
+    "objective": "Implement the final Task 6 round: transition-only pre-game quiescence diagnostics and an end-to-end delete-tail launch-gate replay.",
+    "files_modified": [
+      "docs/agent_conversations/2026-08-13_pre-game-content-only-launch-gate.json",
+      "py_modules/sdh_ludusavi/syncthing/watcher.py",
+      "tests/test_watcher.py"
+    ],
+    "tests_added": [
+      "test_pre_game_quiescence_diagnostics_are_transition_only",
+      "test_pre_game_quiescence_diagnostics_report_content_need_transitions",
+      "test_pre_game_quiescence_diagnostics_are_privacy_safe",
+      "test_pre_game_launch_gate_releases_during_delete_only_tail"
+    ],
+    "red_proof": {
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_watcher.py::test_pre_game_launch_gate_releases_during_delete_only_tail tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_transition_only tests/test_watcher.py::test_pre_game_quiescence_diagnostics_report_content_need_transitions tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_privacy_safe -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-6-red.log'",
+      "exit_code": 1,
+      "result": "3 failed, 1 passed in 0.18s",
+      "failures": [
+        "test_pre_game_quiescence_diagnostics_are_transition_only: no pre-game quiescence record was emitted.",
+        "test_pre_game_quiescence_diagnostics_report_content_need_transitions: zero transition records were emitted instead of two.",
+        "test_pre_game_quiescence_diagnostics_are_privacy_safe: the expected sanitized diagnostic line was absent."
+      ],
+      "already_green_control": "test_pre_game_launch_gate_releases_during_delete_only_tail passed because Tasks 1 through 5 were already implemented."
+    },
+    "green_after": {
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_watcher.py::test_pre_game_launch_gate_releases_during_delete_only_tail tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_transition_only tests/test_watcher.py::test_pre_game_quiescence_diagnostics_report_content_need_transitions tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_privacy_safe -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-6-green.log'",
+      "exit_code": 0,
+      "result": "4 passed in 0.04s"
+    },
+    "end_to_end_negative_control": {
+      "source": "git archive of dev at fb529868b0c7dc50e09c17f93514e6f89e63704e, with only the replay helper and test applied in a disposable /tmp snapshot.",
+      "command": "./run.sh uv run --no-sync pytest tests/test_watcher.py::test_pre_game_launch_gate_releases_during_delete_only_tail -q --no-cov",
+      "exit_code": 1,
+      "result": "1 failed in 0.14s",
+      "failure": "AssertionError: assert 0 == 3 at assert len(settled_timestamps) == 3.",
+      "meaning": "The dev implementation published no settled samples during the same sync-preparing delete tail, so the replay is a real control for all five mechanisms rather than an assumed scenario."
+    },
+    "mutation_proof": {
+      "mutation": "Removed only the _log_pre_game_quiescence_transition(status) call from _tick_sample, retaining the diagnostic implementation, all new tests, and the delete-tail replay.",
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_watcher.py::test_pre_game_launch_gate_releases_during_delete_only_tail tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_transition_only tests/test_watcher.py::test_pre_game_quiescence_diagnostics_report_content_need_transitions tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_privacy_safe -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-6-diagnostic-mutation.log'",
+      "exit_code": 1,
+      "result": "3 failed, 1 passed in 0.10s",
+      "failures": [
+        "test_pre_game_quiescence_diagnostics_are_transition_only",
+        "test_pre_game_quiescence_diagnostics_report_content_need_transitions",
+        "test_pre_game_quiescence_diagnostics_are_privacy_safe"
+      ],
+      "restored_green": "bash -o pipefail -c './run.sh uv run pytest tests/test_watcher.py::test_pre_game_launch_gate_releases_during_delete_only_tail tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_transition_only tests/test_watcher.py::test_pre_game_quiescence_diagnostics_report_content_need_transitions tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_privacy_safe -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-6-restored-green.log': 4 passed in 0.05s."
+    },
+    "quality_gates": {
+      "command": "scripts/orchestration/run-quality-gates; scripts/orchestration/check-review-notes-not-deleted",
+      "exit_code": 0,
+      "verbatim_tallies": [
+        "Test Files  33 passed (33)",
+        "Tests  335 passed (335)",
+        "created dist in 2.2s",
+        "All checks passed!",
+        "1 file reformatted, 140 files left unchanged",
+        "All checks passed!",
+        "collected 974 items",
+        "TOTAL                                             4489    456    90%",
+        "Required test coverage of 83% reached. Total coverage: 89.84%",
+        "============================= 974 passed in 25.21s =============================",
+        "no deleted review notes",
+        "quality gates passed"
+      ]
+    },
+    "design_decisions": [
+      "Pre-game diagnostics compare exactly the reported phase, folder state, need bytes, content-item count, pending deletes, active download-file count, active-item count, and settled value. They emit at INFO only when that tuple changes.",
+      "The diagnostic reads the computed ActivityStatus and FolderRuntime but does not add device IDs, folder identifiers or paths, item names, or raw API data to the line.",
+      "The replay drives SyncthingWatch._tick and SyncthingWatchManager.poll_watch rather than calling _tick_sample directly. Each of its three roughly two-second batches contains delete start and finish events followed by a sequence-advancing LocalIndexUpdated event."
+    ],
+    "unverified": [
+      "Real device behaviour remains unverified; this round used unit and replay coverage only, not a Steam Deck or live Syncthing folder.",
+      "Syncthing versions other than v2.1.2 remain unverified; a future version could route deletions through syncing instead of sync-preparing.",
+      "The needBytes-reaches-zero-before-commit in-flight temporary-file hazard has no live reproduction, although content-item counts continue to gate it.",
+      "Whether the 3.0-second pre-game settle window is the correct operational value remains unmeasured on a device.",
+      "The pre-game stall window and the frontend and backend ceilings remain untouched and unproven on hardware."
+    ],
+    "results": "Task 6 is complete. The pre-game watcher now logs safe quiescence transitions, delete-only tails publish three distinct settled samples in under ten seconds, and a persistent content item prevents every replayed settled sample."
+  },
+  "results": "Tasks 1 through 6 and their review follow-ups are complete; the implementation is ready for final review.",
   "deferred_verification": [
-    "The plan's live-device verification remains outstanding; no Task 5 command ran against a Steam Deck or a live Syncthing folder."
+    "The plan's live-device verification remains outstanding; no Task 6 command ran against a Steam Deck or a live Syncthing folder.",
+    "No verification in this plan exercised Syncthing versions other than v2.1.2, reproduced the in-flight temporary-file hazard, measured whether three seconds is correct, or exercised the unchanged stall window and frontend/backend ceilings on hardware."
   ]
 }
