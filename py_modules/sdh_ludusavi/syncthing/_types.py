@@ -30,6 +30,7 @@ EVENT_TYPES = ",".join(
 
 DEFAULT_API_URL = "http://127.0.0.1:8384"
 DEFAULT_ACTIVE_WINDOW_SECONDS = 15.0
+PRE_GAME_SETTLE_QUIET_WINDOW_SECONDS = 3.0
 # Seven post-backup captures spread local activity across 0.051s to 0.111s, so
 # three seconds is about 30x the worst burst. Below roughly 6.5s, first-peer
 # confirmation binds first, making shorter values equivalent in practice.
