@@ -342,6 +342,48 @@ def test_local_index_update_preserves_content_need_counts() -> None:
     assert runtime.need_content_items == 3
 
 
+def test_receive_needed_ignores_deleted_items_in_folder_status() -> None:
+    status = compute_activity_status(
+        folder_state="idle",
+        remote_progress={},
+        local_activity=LocalActivity(),
+        runtime=FolderRuntime(need_deletes=46, need_total_items=46),
+        active_window_seconds=15.0,
+        now=100.0,
+    )
+
+    assert status.receive_needed is False
+    assert status.status != "UPDATE_NEEDED"
+
+
+def test_receive_needed_blocks_content_items_even_without_bytes() -> None:
+    status = compute_activity_status(
+        folder_state="idle",
+        remote_progress={},
+        local_activity=LocalActivity(),
+        runtime=FolderRuntime(need_files=1),
+        active_window_seconds=15.0,
+        now=100.0,
+    )
+
+    assert status.receive_needed is True
+    assert status.status == "UPDATE_NEEDED"
+
+
+def test_receive_needed_blocks_bytes_without_content_items() -> None:
+    status = compute_activity_status(
+        folder_state="idle",
+        remote_progress={},
+        local_activity=LocalActivity(),
+        runtime=FolderRuntime(need_bytes=1),
+        active_window_seconds=15.0,
+        now=100.0,
+    )
+
+    assert status.receive_needed is True
+    assert status.status == "UPDATE_NEEDED"
+
+
 def test_download_progress_updates_only_the_watched_folder() -> None:
     folder = FolderSelection(folder_id="folder-a", label="Folder A", path="/sync/a")
     local_activity = LocalActivity(active_download_files=2, last_download_progress_monotonic=90.0)
@@ -521,6 +563,18 @@ def _post_game_status(
         peer_completion_tracking=True,
         outbound_peer_confirmation_pending=outbound_peer_confirmation_pending,
     )
+
+
+def test_post_game_content_complete_peer_with_deletes_stays_settled() -> None:
+    status = _post_game_status(
+        peer_completions={
+            "REMOTE-A": PeerCompletion("REMOTE-A", 100.0, 0, 0, 46, 11.0),
+        },
+    )
+
+    assert status.receive_needed is False
+    assert status.settled is True
+    assert status.status == "IDLE"
 
 
 def test_settle_window_is_shorter_than_reported_activity_window() -> None:

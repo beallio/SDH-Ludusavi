@@ -55,6 +55,55 @@
       "Proved the corrected test fails specifically when only the three counter parsing calls are removed."
     ]
   },
+  "task_2": {
+    "objective": "Implement Task 2 of the review-gated pre-game content-only launch gate plan: make receive_needed depend only on bytes and content items, never pending deletions.",
+    "files_modified": [
+      "docs/agent_conversations/2026-08-13_pre-game-content-only-launch-gate.json",
+      "py_modules/sdh_ludusavi/syncthing/activity.py",
+      "tests/test_activity.py"
+    ],
+    "tests_added": [
+      "test_receive_needed_ignores_deleted_items_in_folder_status",
+      "test_receive_needed_blocks_content_items_even_without_bytes",
+      "test_receive_needed_blocks_bytes_without_content_items",
+      "test_post_game_content_complete_peer_with_deletes_stays_settled"
+    ],
+    "red_proof": {
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py::test_receive_needed_ignores_deleted_items_in_folder_status tests/test_activity.py::test_receive_needed_blocks_content_items_even_without_bytes tests/test_activity.py::test_receive_needed_blocks_bytes_without_content_items tests/test_activity.py::test_post_game_content_complete_peer_with_deletes_stays_settled -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-2-red.log'",
+      "exit_code": 1,
+      "result": "2 failed, 2 passed in 0.07s",
+      "failures": [
+        "test_receive_needed_ignores_deleted_items_in_folder_status: AssertionError: assert True is False",
+        "test_receive_needed_blocks_content_items_even_without_bytes: AssertionError: assert False is True"
+      ],
+      "already_green_regressions": [
+        "test_receive_needed_blocks_bytes_without_content_items",
+        "test_post_game_content_complete_peer_with_deletes_stays_settled"
+      ]
+    },
+    "green_after": {
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py::test_receive_needed_ignores_deleted_items_in_folder_status tests/test_activity.py::test_receive_needed_blocks_content_items_even_without_bytes tests/test_activity.py::test_receive_needed_blocks_bytes_without_content_items tests/test_activity.py::test_post_game_content_complete_peer_with_deletes_stays_settled -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-2-green.log'",
+      "exit_code": 0,
+      "result": "4 passed in 0.04s"
+    },
+    "mutation_proof": {
+      "mutation": "Reverted only the receive_needed expression to need_bytes > 0 or need_total_items > 0 or need_deletes > 0, retaining the new tests and all other production code.",
+      "command": "bash -o pipefail -c 'scripts/orchestration/run-quality-gates 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-2-mutation.log'",
+      "exit_code": 1,
+      "result": "2 failed, 950 passed in 23.97s",
+      "failures": [
+        "test_receive_needed_ignores_deleted_items_in_folder_status: AssertionError: assert True is False",
+        "test_receive_needed_blocks_content_items_even_without_bytes: AssertionError: assert False is True"
+      ],
+      "restored_green": "scripts/orchestration/run-quality-gates exited 0: 33 frontend test files and 335 tests passed; TypeScript typecheck and Rollup build passed; Ruff reported All checks passed and formatting left 141 files unchanged; ty reported All checks passed; pytest reported 952 passed in 24.73s at 89.68% coverage; no review notes were deleted."
+    },
+    "design_decisions": [
+      "receive_needed now gates on need_bytes and need_content_items only. Syncthing Counts.TotalItems() includes Deleted, so need_total_items would reintroduce delete gating.",
+      "The bytes-only check remains because a non-zero byte count is still missing content; the content-item check keeps an unfinished temp file blocking after Syncthing reports its remaining bytes as zero.",
+      "Post-game peer completion remains content-only: a fresh peer with pending deletes still produces an idle, settled sample."
+    ],
+    "results": "Task 2 is complete and isolated to the receive-needed predicate. Delete-only folder-status tails no longer classify as missing content, while content items and bytes continue to block."
+  },
   "results": "Task 1 implementation and the round-01 review follow-up are complete; the strengthened parsing test now proves the safety-critical counters are parsed rather than merely defaulted.",
   "deferred_verification": [
     "The plan's live-device verification remains outstanding; this task only exposes and preserves counters and does not change the launch gate."

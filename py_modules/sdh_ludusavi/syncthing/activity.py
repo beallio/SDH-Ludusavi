@@ -296,9 +296,9 @@ def compute_activity_status(
         and now - local_activity.last_scan_progress_monotonic <= settle_quiet_window
     )
 
-    receive_needed = (
-        runtime.need_bytes > 0 or runtime.need_total_items > 0 or runtime.need_deletes > 0
-    )
+    # Syncthing's Counts.TotalItems() includes Deleted, so using need_total_items
+    # here would reintroduce delete gating.
+    receive_needed = runtime.need_bytes > 0 or runtime.need_content_items > 0
     preparing = normalized_state in PREPARING_STATES
     scanning = normalized_state in SCANNING_STATES or scan_progress_recent
 
