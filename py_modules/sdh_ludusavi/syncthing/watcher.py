@@ -18,6 +18,7 @@ from ._types import (
     ConnectionSnapshot,
     DEFAULT_EVENT_TIMEOUT_SECONDS,
     DEFAULT_ACTIVE_WINDOW_SECONDS,
+    PRE_GAME_SETTLE_QUIET_WINDOW_SECONDS,
     POST_GAME_SETTLE_QUIET_WINDOW_SECONDS,
     OUTBOUND_CONFIRMATION_OBSERVATIONS,
     OUTBOUND_OBSERVATION_HOLD_SECONDS,
@@ -111,6 +112,9 @@ class SyncthingWatch:
             initial_snapshot.connected_devices if initial_snapshot else frozenset()
         )
         self._last_peer_completion_diagnostics: PeerCompletionDiagnostics | None = None
+        self._last_pre_game_quiescence_diagnostics: (
+            tuple[str, str, int, int, int, int, int, bool] | None
+        ) = None
         self._last_outbound_need: int | None = None
         self._last_outbound_need_decrease_monotonic: float | None = None
         self._outbound_peer_confirmation_streak = 0
@@ -299,7 +303,9 @@ class SyncthingWatch:
         try:
             connected_relevant_device_ids = self._connected_relevant_device_ids()
             settle_quiet_window_seconds = (
-                POST_GAME_SETTLE_QUIET_WINDOW_SECONDS if self.phase == "post_game" else None
+                POST_GAME_SETTLE_QUIET_WINDOW_SECONDS
+                if self.phase == "post_game"
+                else PRE_GAME_SETTLE_QUIET_WINDOW_SECONDS
             )
             status = compute_activity_status(
                 folder_state=self.folder_state,
@@ -317,6 +323,7 @@ class SyncthingWatch:
                 ),
             )
             self.latest_sample = _serialize_sample(self.watch_id, status)
+            self._log_pre_game_quiescence_transition(status)
             self._log_peer_completion_transition()
         # Intentionally broad
         except Exception as exc:
@@ -424,6 +431,31 @@ class SyncthingWatch:
             diagnostics.needed_items,
             diagnostics.needed_deletes,
             diagnostics.peers_pending_deletes,
+        )
+
+    def _log_pre_game_quiescence_transition(self, status) -> None:
+        if self.phase != "pre_game":
+            return
+
+        diagnostics = (
+            self.phase,
+            status.folder_state,
+            status.runtime.need_bytes,
+            status.runtime.need_content_items,
+            status.runtime.need_deletes,
+            status.active_download_files,
+            status.active_items,
+            status.settled,
+        )
+        if diagnostics == self._last_pre_game_quiescence_diagnostics:
+            return
+
+        self._last_pre_game_quiescence_diagnostics = diagnostics
+        logger.info(
+            "Syncthing pre-game quiescence: phase=%s folder_state=%s need_bytes=%d "
+            "need_content_items=%d need_deletes=%d active_download_files=%d "
+            "active_items=%d settled=%s",
+            *diagnostics,
         )
 
     def _stop_if_post_game_upload_incomplete(self, now: float) -> bool:

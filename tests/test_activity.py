@@ -18,6 +18,7 @@ from sdh_ludusavi.syncthing._types import (
     LocalActivity,
     PeerCompletion,
     RemoteProgress,
+    parse_folder_runtime,
 )
 
 
@@ -302,6 +303,154 @@ def test_process_event_ignores_unrelated_folder_activity(event: dict) -> None:
     )
 
 
+def test_parse_folder_runtime_keeps_content_need_separate_from_deletes() -> None:
+    runtime = parse_folder_runtime(
+        {
+            "needBytes": 0,
+            "needFiles": 2,
+            "needDirectories": 3,
+            "needSymlinks": 5,
+            "needDeletes": 46,
+            "needTotalItems": 56,
+        }
+    )
+
+    assert runtime.need_files == 2
+    assert runtime.need_directories == 3
+    assert runtime.need_symlinks == 5
+    assert runtime.need_content_items == 10
+    assert runtime.need_total_items == 56
+
+    empty_runtime = parse_folder_runtime({})
+    assert empty_runtime.need_files == 0
+    assert empty_runtime.need_directories == 0
+    assert empty_runtime.need_symlinks == 0
+
+
+def test_local_index_update_preserves_content_need_counts() -> None:
+    _, runtime, _, _, _ = process_event(
+        event={"type": "LocalIndexUpdated", "data": {"folder": "folder-a", "sequence": 11}},
+        folder=FolderSelection(folder_id="folder-a", label="Folder A", path="/sync/a"),
+        folder_state="idle",
+        runtime=FolderRuntime(sequence=10, need_files=3),
+        remote_progress={},
+        local_activity=LocalActivity(),
+        now=100.0,
+    )
+
+    assert runtime.need_files == 3
+    assert runtime.need_content_items == 3
+
+
+@pytest.mark.parametrize(
+    ("action", "expected_finished_monotonic"),
+    [
+        ("delete", 0.0),
+        ("update", 101.0),
+        (None, 101.0),
+    ],
+    ids=["delete", "update", "missing-action"],
+)
+def test_item_events_distinguish_deletes_from_content(
+    action: str | None, expected_finished_monotonic: float
+) -> None:
+    folder = FolderSelection(folder_id="folder-a", label="Folder A", path="/sync/a")
+    local_activity = LocalActivity()
+    data = {"folder": "folder-a", "item": "save.dat"}
+    if action is not None:
+        data["action"] = action
+
+    process_event(
+        event={"type": "ItemStarted", "data": data},
+        folder=folder,
+        folder_state="idle",
+        runtime=FolderRuntime(),
+        remote_progress={},
+        local_activity=local_activity,
+        now=100.0,
+    )
+
+    if action == "delete":
+        assert local_activity.active_items == {}
+    else:
+        assert local_activity.active_items == {"save.dat": 100.0}
+
+    process_event(
+        event={"type": "ItemFinished", "data": data},
+        folder=folder,
+        folder_state="idle",
+        runtime=FolderRuntime(),
+        remote_progress={},
+        local_activity=local_activity,
+        now=101.0,
+    )
+
+    assert local_activity.active_items == {}
+    assert local_activity.last_item_finished_monotonic == expected_finished_monotonic
+
+
+def test_delete_item_finished_prunes_mismatched_active_item_without_rearming() -> None:
+    local_activity = LocalActivity(active_items={"snapshot": 99.0})
+
+    process_event(
+        event={
+            "type": "ItemFinished",
+            "data": {"folder": "folder-a", "item": "snapshot", "action": "delete"},
+        },
+        folder=FolderSelection(folder_id="folder-a", label="Folder A", path="/sync/a"),
+        folder_state="idle",
+        runtime=FolderRuntime(),
+        remote_progress={},
+        local_activity=local_activity,
+        now=100.0,
+    )
+
+    assert local_activity.active_items == {}
+    assert local_activity.last_item_finished_monotonic == 0.0
+
+
+def test_receive_needed_ignores_deleted_items_in_folder_status() -> None:
+    status = compute_activity_status(
+        folder_state="idle",
+        remote_progress={},
+        local_activity=LocalActivity(),
+        runtime=FolderRuntime(need_deletes=46, need_total_items=46),
+        active_window_seconds=15.0,
+        now=100.0,
+    )
+
+    assert status.receive_needed is False
+    assert status.status != "UPDATE_NEEDED"
+
+
+def test_receive_needed_blocks_content_items_even_without_bytes() -> None:
+    status = compute_activity_status(
+        folder_state="idle",
+        remote_progress={},
+        local_activity=LocalActivity(),
+        runtime=FolderRuntime(need_files=1),
+        active_window_seconds=15.0,
+        now=100.0,
+    )
+
+    assert status.receive_needed is True
+    assert status.status == "UPDATE_NEEDED"
+
+
+def test_receive_needed_blocks_bytes_without_content_items() -> None:
+    status = compute_activity_status(
+        folder_state="idle",
+        remote_progress={},
+        local_activity=LocalActivity(),
+        runtime=FolderRuntime(need_bytes=1),
+        active_window_seconds=15.0,
+        now=100.0,
+    )
+
+    assert status.receive_needed is True
+    assert status.status == "UPDATE_NEEDED"
+
+
 def test_download_progress_updates_only_the_watched_folder() -> None:
     folder = FolderSelection(folder_id="folder-a", label="Folder A", path="/sync/a")
     local_activity = LocalActivity(active_download_files=2, last_download_progress_monotonic=90.0)
@@ -468,9 +617,10 @@ def _post_game_status(
     outbound_peer_confirmation_pending: bool = False,
     now: float = 100.0,
     active_window_seconds: float = 0.0,
+    folder_state: str = "idle",
 ):
     return compute_activity_status(
-        folder_state="idle",
+        folder_state=folder_state,
         remote_progress={},
         local_activity=local_activity or LocalActivity(),
         runtime=FolderRuntime(),
@@ -481,6 +631,147 @@ def _post_game_status(
         peer_completion_tracking=True,
         outbound_peer_confirmation_pending=outbound_peer_confirmation_pending,
     )
+
+
+def test_post_game_content_complete_peer_with_deletes_stays_settled() -> None:
+    status = _post_game_status(
+        peer_completions={
+            "REMOTE-A": PeerCompletion("REMOTE-A", 100.0, 0, 0, 46, 11.0),
+        },
+    )
+
+    assert status.receive_needed is False
+    assert status.settled is True
+    assert status.status == "IDLE"
+
+
+def test_post_game_delete_tail_settles_during_pruning_but_not_syncing() -> None:
+    peer_completions = {
+        "REMOTE-A": PeerCompletion("REMOTE-A", 100.0, 0, 0, 46, 11.0),
+    }
+
+    preparing_status = _post_game_status(
+        peer_completions=peer_completions,
+        folder_state="sync-preparing",
+    )
+    syncing_status = _post_game_status(
+        peer_completions=peer_completions,
+        folder_state="syncing",
+    )
+
+    assert preparing_status.settled is True
+    assert syncing_status.settled is False
+
+
+@pytest.mark.parametrize(
+    "delete_churn_field",
+    ["last_local_index_monotonic", "last_sequence_change_monotonic"],
+)
+def test_sync_preparing_delete_tail_settles_without_content_activity(
+    delete_churn_field: str,
+) -> None:
+    now = 100.0
+    local_activity = LocalActivity()
+    setattr(local_activity, delete_churn_field, now)
+
+    status = compute_activity_status(
+        folder_state="sync-preparing",
+        remote_progress={},
+        local_activity=local_activity,
+        runtime=FolderRuntime(need_deletes=46, need_total_items=46),
+        active_window_seconds=15.0,
+        settle_quiet_window_seconds=3.0,
+        now=now,
+    )
+
+    assert status.settled is True
+    assert status.update_in_progress is True
+    assert status.status == "PREPARING"
+
+
+def test_sync_preparing_content_item_remains_unsettled() -> None:
+    status = compute_activity_status(
+        folder_state="sync-preparing",
+        remote_progress={},
+        local_activity=LocalActivity(),
+        runtime=FolderRuntime(need_files=1),
+        active_window_seconds=15.0,
+        settle_quiet_window_seconds=3.0,
+        now=100.0,
+    )
+
+    assert status.settled is False
+
+
+@pytest.mark.parametrize("folder_state", ["syncing", "scanning", "error", "paused"])
+def test_content_only_settlement_rejects_unsafe_folder_states(folder_state: str) -> None:
+    status = compute_activity_status(
+        folder_state=folder_state,
+        remote_progress={},
+        local_activity=LocalActivity(),
+        runtime=FolderRuntime(),
+        active_window_seconds=15.0,
+        settle_quiet_window_seconds=3.0,
+        now=100.0,
+    )
+
+    assert status.settled is False
+
+
+@pytest.mark.parametrize(
+    "runtime",
+    [FolderRuntime(pull_errors=1), FolderRuntime(watch_error="status poll failed")],
+    ids=["pull-errors", "watch-error"],
+)
+def test_sync_preparing_content_only_settlement_keeps_runtime_errors_blocking(
+    runtime: FolderRuntime,
+) -> None:
+    status = compute_activity_status(
+        folder_state="sync-preparing",
+        remote_progress={},
+        local_activity=LocalActivity(),
+        runtime=runtime,
+        active_window_seconds=15.0,
+        settle_quiet_window_seconds=3.0,
+        now=100.0,
+    )
+
+    assert status.settled is False
+
+
+@pytest.mark.parametrize(
+    ("local_activity", "remote_progress"),
+    [
+        (LocalActivity(active_download_files=1), {}),
+        (LocalActivity(active_items={"save.dat": 100.0}), {}),
+        (
+            LocalActivity(),
+            {
+                "REMOTE-A": RemoteProgress(
+                    device_id="REMOTE-A",
+                    file_count=1,
+                    last_seen_monotonic=100.0,
+                )
+            },
+        ),
+    ],
+    ids=["active-download", "active-content-item", "remote-progress"],
+)
+def test_sync_preparing_content_only_settlement_requires_no_content_activity(
+    local_activity: LocalActivity,
+    remote_progress: dict[str, RemoteProgress],
+) -> None:
+    status = compute_activity_status(
+        folder_state="sync-preparing",
+        remote_progress=remote_progress,
+        local_activity=local_activity,
+        runtime=FolderRuntime(),
+        active_window_seconds=15.0,
+        settle_quiet_window_seconds=3.0,
+        now=100.0,
+    )
+
+    assert status.settled is False
 
 
 def test_settle_window_is_shorter_than_reported_activity_window() -> None:
