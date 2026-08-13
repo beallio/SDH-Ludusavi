@@ -576,10 +576,11 @@ def _stopped_watch_for_tick(
     [
         pytest.param("post_game", 4.0, True, id="post-game-settles-after-four-seconds"),
         pytest.param("post_game", 2.0, False, id="post-game-remains-active-after-two-seconds"),
-        pytest.param("pre_game", 4.0, False, id="pre-game-keeps-fifteen-second-launch-gate"),
+        pytest.param("pre_game", 4.0, True, id="pre-game-settles-after-four-seconds"),
+        pytest.param("pre_game", 2.0, False, id="pre-game-remains-active-after-two-seconds"),
     ],
 )
-def test_watch_uses_short_settle_window_only_for_post_game(
+def test_watch_uses_short_settle_window_for_both_phases(
     phase: str, quiet_seconds: float, settled: bool
 ) -> None:
     now = 100.0

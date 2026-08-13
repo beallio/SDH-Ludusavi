@@ -228,6 +228,53 @@
     ],
     "results": "Task 4 is complete. A delete-only sync-preparing tail can settle as soon as content is complete, while content need, active content, unsafe states, runtime errors, and post-game confirmation holds remain blocking."
   },
+  "task_5": {
+    "objective": "Implement Task 5 of the review-gated pre-game content-only launch gate plan: give pre-game an explicit three-second settle window without changing activity pruning.",
+    "files_modified": [
+      "docs/agent_conversations/2026-08-13_pre-game-content-only-launch-gate.json",
+      "py_modules/sdh_ludusavi/syncthing/_types.py",
+      "py_modules/sdh_ludusavi/syncthing/watcher.py",
+      "tests/test_watcher.py"
+    ],
+    "tests_changed": [
+      "Renamed test_watch_uses_short_settle_window_only_for_post_game to test_watch_uses_short_settle_window_for_both_phases.",
+      "Changed the pre-game expectation from a fifteen-second hold to settlement after four seconds, and added a two-second negative control."
+    ],
+    "red_proof": {
+      "command": "./run.sh uv run pytest tests/test_watcher.py::test_watch_uses_short_settle_window_for_both_phases -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-5-red.log",
+      "exit_code": 1,
+      "result": "1 failed, 3 passed in 0.14s",
+      "failure": "test_watch_uses_short_settle_window_for_both_phases[pre-game-settles-after-four-seconds]: AssertionError: assert False is True"
+    },
+    "green_after": {
+      "command": "./run.sh uv run pytest tests/test_watcher.py::test_watch_uses_short_settle_window_for_both_phases tests/test_watcher.py::test_watcher_keeps_activity_pruning_on_the_fifteen_second_window -q --no-cov",
+      "exit_code": 0,
+      "result": "5 passed in 0.04s"
+    },
+    "mutation_proof": {
+      "mutation": "Reverted only _tick_sample's pre-game settle-window selection to None while retaining the new constant and all Task 5 test expectations.",
+      "command": "bash -o pipefail -c 'scripts/orchestration/run-quality-gates 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-5-mutation.log'",
+      "exit_code": 1,
+      "result": "1 failed, 969 passed in 24.32s",
+      "failure": "test_watch_uses_short_settle_window_for_both_phases[pre-game-settles-after-four-seconds]: AssertionError: assert False is True",
+      "failure_recovery": "The mutation gate's Ruff fix removed the temporarily unused pre-game import. Restoring that import before the final gate resolved F821 Undefined name PRE_GAME_SETTLE_QUIET_WINDOW_SECONDS."
+    },
+    "quality_gates": {
+      "command": "scripts/orchestration/run-quality-gates; scripts/orchestration/check-review-notes-not-deleted",
+      "exit_code": 0,
+      "frontend": "33 test files and 335 tests passed; TypeScript typecheck and Rollup build passed.",
+      "ruff": "All checks passed; 141 files left unchanged after formatting.",
+      "ty": "All checks passed.",
+      "pytest": "970 passed in 24.78s; total coverage 89.82% with 83% required.",
+      "review_note_integrity": "no deleted review notes"
+    },
+    "design_decisions": [
+      "PRE_GAME_SETTLE_QUIET_WINDOW_SECONDS is explicitly three seconds, matching the existing post-game settle window; compute_activity_status retains its None fallback for direct callers and tests.",
+      "_tick_sample now passes an explicit settle window in both phases. Pruning remains on DEFAULT_ACTIVE_WINDOW_SECONDS, as protected by the unchanged activity-pruning regression.",
+      "The renamed parameterized watcher test exercises both phases at four seconds and two seconds, so it fails if pre-game is accidentally returned to the fifteen-second default."
+    ],
+    "results": "Task 5 is complete. A content-complete pre-game watch can settle after three seconds of quiet, while a two-second quiet period remains blocking and activity pruning remains fifteen seconds."
+  },
   "review_round_05": {
     "review_commit": "7c40c65d43b53d1f48bdde1ecdd5385147d78c14",
     "requested_changes": [
@@ -254,8 +301,8 @@
       "review_note_integrity": "no deleted review notes"
     }
   },
-  "results": "Tasks 1 through 4 and their review follow-ups are complete; the next review round selects either Task 5 or changes requested for Task 4.",
+  "results": "Tasks 1 through 5 and their review follow-ups are complete; the next review round selects Task 6 or changes requested for Task 5.",
   "deferred_verification": [
-    "The plan's live-device verification remains outstanding; this task only exposes and preserves counters and does not change the launch gate."
+    "The plan's live-device verification remains outstanding; no Task 5 command ran against a Steam Deck or a live Syncthing folder."
   ]
 }
