@@ -18,6 +18,7 @@ from sdh_ludusavi.syncthing._types import (
     LocalActivity,
     PeerCompletion,
     RemoteProgress,
+    parse_folder_runtime,
 )
 
 
@@ -300,6 +301,42 @@ def test_process_event_ignores_unrelated_folder_activity(event: dict) -> None:
         LocalActivity(active_items={"existing.dat": 90.0}),
         False,
     )
+
+
+def test_parse_folder_runtime_keeps_content_need_separate_from_deletes() -> None:
+    runtime = parse_folder_runtime(
+        {
+            "needBytes": 0,
+            "needFiles": 0,
+            "needDirectories": 0,
+            "needSymlinks": 0,
+            "needDeletes": 46,
+            "needTotalItems": 46,
+        }
+    )
+
+    assert runtime.need_content_items == 0
+    assert runtime.need_total_items == 46
+
+    empty_runtime = parse_folder_runtime({})
+    assert empty_runtime.need_files == 0
+    assert empty_runtime.need_directories == 0
+    assert empty_runtime.need_symlinks == 0
+
+
+def test_local_index_update_preserves_content_need_counts() -> None:
+    _, runtime, _, _, _ = process_event(
+        event={"type": "LocalIndexUpdated", "data": {"folder": "folder-a", "sequence": 11}},
+        folder=FolderSelection(folder_id="folder-a", label="Folder A", path="/sync/a"),
+        folder_state="idle",
+        runtime=FolderRuntime(sequence=10, need_files=3),
+        remote_progress={},
+        local_activity=LocalActivity(),
+        now=100.0,
+    )
+
+    assert runtime.need_files == 3
+    assert runtime.need_content_items == 3
 
 
 def test_download_progress_updates_only_the_watched_folder() -> None:
