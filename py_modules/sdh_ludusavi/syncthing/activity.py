@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 import time
 import math
@@ -489,17 +490,7 @@ def process_event(
                 local_activity.outbound_observation_hold_deadline_monotonic,
                 now + OUTBOUND_OBSERVATION_HOLD_SECONDS,
             )
-        runtime = FolderRuntime(
-            sequence=sequence or runtime.sequence,
-            need_bytes=runtime.need_bytes,
-            need_total_items=runtime.need_total_items,
-            need_deletes=runtime.need_deletes,
-            global_bytes=runtime.global_bytes,
-            local_bytes=runtime.local_bytes,
-            in_sync_bytes=runtime.in_sync_bytes,
-            pull_errors=runtime.pull_errors,
-            watch_error=runtime.watch_error,
-        )
+        runtime = dataclasses.replace(runtime, sequence=sequence or runtime.sequence)
     elif event_type == "FolderPaused" and _folder_match():
         folder_state = "paused"
     elif event_type == "FolderResumed" and _folder_match():

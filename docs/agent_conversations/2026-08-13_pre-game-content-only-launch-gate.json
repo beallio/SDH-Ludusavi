@@ -1,0 +1,50 @@
+{
+  "date": "2026-08-13",
+  "task_objective": "Implement Task 1 of the review-gated pre-game content-only launch gate plan: expose Syncthing content need counters without changing runtime behaviour.",
+  "files_modified": [
+    "docs/agent_conversations/2026-08-13_pre-game-content-only-launch-gate.json",
+    "py_modules/sdh_ludusavi/syncthing/_types.py",
+    "py_modules/sdh_ludusavi/syncthing/activity.py",
+    "tests/test_activity.py"
+  ],
+  "tests_added": [
+    "test_parse_folder_runtime_keeps_content_need_separate_from_deletes",
+    "test_local_index_update_preserves_content_need_counts"
+  ],
+  "red_proof": {
+    "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-1-red.log'",
+    "exit_code": 1,
+    "result": "2 failed, 60 passed in 0.07s",
+    "failures": [
+      "test_parse_folder_runtime_keeps_content_need_separate_from_deletes: AttributeError: FolderRuntime has no need_content_items property",
+      "test_local_index_update_preserves_content_need_counts: TypeError: FolderRuntime does not accept need_files"
+    ]
+  },
+  "mutation_proof": {
+    "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-1-mutation.log'",
+    "exit_code": 1,
+    "result": "2 failed, 60 passed in 0.08s",
+    "failures": [
+      "test_parse_folder_runtime_keeps_content_need_separate_from_deletes failed when need_content_items and the status counter parsing were removed",
+      "test_local_index_update_preserves_content_need_counts failed with need_files reset from 3 to 0 when the explicit FolderRuntime reconstruction replaced dataclasses.replace"
+    ],
+    "restored_green": "./run.sh uv run pytest tests/test_activity.py -q --no-cov: 62 passed in 0.06s."
+  },
+  "design_decisions": [
+    "Task 1 preserves need_total_items exactly as supplied by Syncthing and exposes separate file, directory, and symlink counters through need_content_items without reading that property in runtime decisions.",
+    "LocalIndexUpdated now uses dataclasses.replace so future FolderRuntime fields survive sequence-only updates rather than silently resetting to their defaults."
+  ],
+  "quality_gates": {
+    "command": "scripts/orchestration/run-quality-gates",
+    "exit_code": 0,
+    "frontend": "33 test files passed; 335 tests passed; TypeScript typecheck and Rollup build passed.",
+    "ruff": "All checks passed; 141 files left unchanged after formatting.",
+    "ty": "All checks passed.",
+    "pytest": "948 passed in 24.09s; total coverage 89.68% with 83% required.",
+    "review_note_integrity": "no deleted review notes"
+  },
+  "results": "Task 1 implementation and its quality gates are complete; the task is ready for its atomic commit and round-complete marker.",
+  "deferred_verification": [
+    "The plan's live-device verification remains outstanding; this task only exposes and preserves counters and does not change the launch gate."
+  ]
+}
