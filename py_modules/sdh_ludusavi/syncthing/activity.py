@@ -469,11 +469,13 @@ def process_event(
                 )
     elif event_type == "ItemStarted" and _folder_match():
         item = str(data.get("item") or "unknown")
-        local_activity.active_items[item] = now
+        if data.get("action") != "delete":
+            local_activity.active_items[item] = now
     elif event_type == "ItemFinished" and _folder_match():
         item = str(data.get("item") or "unknown")
         local_activity.active_items.pop(item, None)
-        local_activity.last_item_finished_monotonic = now
+        if data.get("action") != "delete":
+            local_activity.last_item_finished_monotonic = now
     elif event_type == "LocalChangeDetected" and _folder_match():
         local_activity.last_local_change_monotonic = now
     elif event_type == "LocalIndexUpdated" and _folder_match():

@@ -342,6 +342,73 @@ def test_local_index_update_preserves_content_need_counts() -> None:
     assert runtime.need_content_items == 3
 
 
+@pytest.mark.parametrize(
+    ("action", "expected_finished_monotonic"),
+    [
+        ("delete", 0.0),
+        ("update", 101.0),
+        (None, 101.0),
+    ],
+    ids=["delete", "update", "missing-action"],
+)
+def test_item_events_distinguish_deletes_from_content(
+    action: str | None, expected_finished_monotonic: float
+) -> None:
+    folder = FolderSelection(folder_id="folder-a", label="Folder A", path="/sync/a")
+    local_activity = LocalActivity()
+    data = {"folder": "folder-a", "item": "save.dat"}
+    if action is not None:
+        data["action"] = action
+
+    process_event(
+        event={"type": "ItemStarted", "data": data},
+        folder=folder,
+        folder_state="idle",
+        runtime=FolderRuntime(),
+        remote_progress={},
+        local_activity=local_activity,
+        now=100.0,
+    )
+
+    if action == "delete":
+        assert local_activity.active_items == {}
+    else:
+        assert local_activity.active_items == {"save.dat": 100.0}
+
+    process_event(
+        event={"type": "ItemFinished", "data": data},
+        folder=folder,
+        folder_state="idle",
+        runtime=FolderRuntime(),
+        remote_progress={},
+        local_activity=local_activity,
+        now=101.0,
+    )
+
+    assert local_activity.active_items == {}
+    assert local_activity.last_item_finished_monotonic == expected_finished_monotonic
+
+
+def test_delete_item_finished_prunes_mismatched_active_item_without_rearming() -> None:
+    local_activity = LocalActivity(active_items={"snapshot": 99.0})
+
+    process_event(
+        event={
+            "type": "ItemFinished",
+            "data": {"folder": "folder-a", "item": "snapshot", "action": "delete"},
+        },
+        folder=FolderSelection(folder_id="folder-a", label="Folder A", path="/sync/a"),
+        folder_state="idle",
+        runtime=FolderRuntime(),
+        remote_progress={},
+        local_activity=local_activity,
+        now=100.0,
+    )
+
+    assert local_activity.active_items == {}
+    assert local_activity.last_item_finished_monotonic == 0.0
+
+
 def test_receive_needed_ignores_deleted_items_in_folder_status() -> None:
     status = compute_activity_status(
         folder_state="idle",
