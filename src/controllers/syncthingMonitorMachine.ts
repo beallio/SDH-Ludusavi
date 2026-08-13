@@ -197,17 +197,22 @@ export function transition(
         nextState.activityObserved = true;
       }
 
+      // Display activity and count settling independently: a settled delete-only tail is
+      // quiet, but still needs three samples before it can release the pre-game gate.
       let newStatus: WatchLatestStatus = "idle";
       if (sample.downloading && state.phase !== "post_game") {
         newStatus = "downloading";
-        nextState.settledCount = 0;
       } else if (sample.uploading) {
         newStatus = "uploading";
-        nextState.settledCount = 0;
-      } else if (sample.update_in_progress && state.phase !== "post_game") {
-        newStatus = "downloading";
-        nextState.settledCount = 0;
       } else if (
+        sample.update_in_progress &&
+        !sample.settled &&
+        state.phase !== "post_game"
+      ) {
+        newStatus = "downloading";
+      }
+
+      if (
         nextState.mutationObserved &&
         sample.settled &&
         (state.phase !== "post_game" || state.handoffActivated)

@@ -1,14 +1,16 @@
 {
   "date": "2026-08-13",
-  "task_objective": "Implement Task 1 of the review-gated pre-game-gate-settle-counting plan: add reducer coverage that distinguishes a settled delete-only tail from content transfer before changing production code.",
+  "task_objective": "Complete the round-01 review for the pre-game-gate-settle-counting plan: add the missing content-pending reducer guard and implement the independent display and settle-count decisions from Task 2.",
   "files_modified": [
     "docs/agent_conversations/2026-08-13_pre-game-gate-settle-counting.json",
+    "src/controllers/syncthingMonitorMachine.ts",
     "src/controllers/syncthingMonitorMachine.test.ts"
   ],
   "tests_added": [
     "releases after three settled delete-tail samples",
     "never claims downloading during a settled delete tail",
     "keeps content downloads blocking pre-game settlement",
+    "keeps missing but not-yet-transferring content blocking pre-game settlement",
     "resets a delete-tail count when content appears mid-tail",
     "preserves post-game delete-tail and download signatures"
   ],
@@ -31,7 +33,7 @@
       "result": "1 test file passed; 2 tests passed and 60 skipped."
     }
   },
-  "quality_gates": {
+  "task_1_quality_gates": {
     "command": "scripts/orchestration/run-quality-gates",
     "exit_code": 1,
     "result": "The frontend suite stopped at the same three intentional red Task 1 failures. This expected red checkpoint cannot be green until Task 2 changes the reducer; the normal pre-commit hook was also run and rejected for those same failures."
@@ -39,7 +41,55 @@
   "design_decisions": [
     "Each replay starts in watching with mutationObserved true, matching a real watch after it has seen a mutation, and assigns a distinct timestamp so reducer duplicate suppression cannot hide a sample.",
     "The delete-tail sample preserves the backend contract exactly: sync-preparing, update_in_progress true, settled true, no download, and no upload.",
-    "The post-game signatures are asserted before Task 2 so the phase-guarded reset behaviour remains a deliberate regression boundary."
+    "The post-game signatures are asserted before Task 2 so the phase-guarded reset behaviour remains a deliberate regression boundary.",
+    "A content-pending fixture uses the backend's UPDATE_NEEDED payload: sync-preparing and update_in_progress true, but settled false and no active transfer.",
+    "The reducer now selects the display status first, then independently resets or increments the settle count; this keeps a settled delete-only tail quiet while preserving the three-sample release guard."
   ],
-  "results": "Task 1 is complete as the plan's intentional red-test checkpoint. Cases 1, 2, and 4 prove the existing reducer loses settled delete tails; cases 3 and 5 retain the content and post-game safety boundaries."
+  "round_02": {
+    "review_note": "docs/review/pre-game-gate-settle-counting-review-01.md",
+    "test_changes": [
+      "Set contentDownloadSample.update_in_progress to true so it matches active-transfer backend samples.",
+      "Added six UPDATE_NEEDED samples proving that missing content which has not begun transferring remains blocked."
+    ],
+    "red_proof": {
+      "command": "set -o pipefail; ./run.sh pnpm exec vitest run src/controllers/syncthingMonitorMachine.test.ts |& tee /tmp/sdh_ludusavi/pre-game-gate-settle-counting-task-2-red.log",
+      "exit_code": 1,
+      "result": "1 failed test file; 3 failed and 60 passed tests.",
+      "failures": [
+        "releases after three settled delete-tail samples: expected [ +0, +0, +0, +0, +0, +0 ] to deeply equal [ 1, 2, 3, 3, 3, 3 ]",
+        "never claims downloading during a settled delete tail: expected [ 'downloading', 'downloading', ...(4) ] to not include 'downloading'",
+        "resets a delete-tail count when content appears mid-tail: expected [ +0, +0, +0, +0, +0, +0, +0 ] to deeply equal [ 1, 2, +0, +0, 1, 2, 3 ]"
+      ]
+    },
+    "green_proof": {
+      "command": "./run.sh pnpm exec vitest run src/controllers/syncthingMonitorMachine.test.ts",
+      "exit_code": 0,
+      "result": "1 test file passed; 63 tests passed."
+    },
+    "mutation_checks": [
+      {
+        "mutation": "Re-couple update_in_progress to a settle-count reset while retaining the display guard.",
+        "command": "set -o pipefail; ./run.sh pnpm exec vitest run src/controllers/syncthingMonitorMachine.test.ts |& tee /tmp/sdh_ludusavi/pre-game-gate-settle-counting-mutation-a.log",
+        "exit_code": 1,
+        "result": "Only the release and mid-tail-reset cases failed: 2 failed and 61 passed tests."
+      },
+      {
+        "mutation": "Remove !sample.settled from the update_in_progress display condition.",
+        "command": "set -o pipefail; ./run.sh pnpm exec vitest run src/controllers/syncthingMonitorMachine.test.ts |& tee /tmp/sdh_ludusavi/pre-game-gate-settle-counting-mutation-b.log",
+        "exit_code": 1,
+        "result": "Only the false-download-claim case failed: 1 failed and 62 passed tests."
+      }
+    ],
+    "quality_gates": {
+      "command": "scripts/orchestration/run-quality-gates",
+      "exit_code": 0,
+      "result": "33 frontend test files and 341 tests passed; TypeScript typecheck and Rollup build passed; Ruff check and format passed; ty passed; Python suite later confirmed 974 passed in 24.49s at 89.84% coverage."
+    },
+    "review_note_guard": {
+      "command": "scripts/orchestration/check-review-notes-not-deleted",
+      "exit_code": 0,
+      "result": "no deleted review notes"
+    }
+  },
+  "results": "Task 1's red proof remains preserved, and the round-01 review is resolved: the reducer now counts settled delete-only samples independently of display status, while missing or actively transferring content continues to block pre-game release. Task 3 remains for a subsequent review-gated round."
 }

@@ -241,8 +241,18 @@ describe("SyncthingMonitorMachine", () => {
           folder_state: "syncing",
           downloading: true,
           uploading: false,
-          update_in_progress: false,
+          update_in_progress: true,
           status: "ACTIVE_TRANSFER",
+          settled: false,
+        });
+
+        const contentPendingSample = (timestamp_unix: number): SyncthingActivitySample => ({
+          timestamp_unix,
+          folder_state: "sync-preparing",
+          downloading: false,
+          uploading: false,
+          update_in_progress: true,
+          status: "UPDATE_NEEDED",
           settled: false,
         });
 
@@ -302,6 +312,18 @@ describe("SyncthingMonitorMachine", () => {
           const states = replaySamples(
             preGameWatchState(),
             [1, 2, 3, 4, 5, 6].map(contentDownloadSample),
+          );
+          const finalState = states.at(-1)!;
+
+          expect(states.map((state) => state.settledCount)).toEqual([0, 0, 0, 0, 0, 0]);
+          expect(finalState.completionObserved).toBe(false);
+          expect(finalState.latestStatus).toBe("downloading");
+        });
+
+        it("keeps missing but not-yet-transferring content blocking pre-game settlement", () => {
+          const states = replaySamples(
+            preGameWatchState(),
+            [1, 2, 3, 4, 5, 6].map(contentPendingSample),
           );
           const finalState = states.at(-1)!;
 
