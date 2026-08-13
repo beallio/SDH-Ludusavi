@@ -283,14 +283,6 @@ def compute_activity_status(
         local_activity.last_local_change_monotonic > 0
         and now - local_activity.last_local_change_monotonic <= settle_quiet_window
     )
-    settle_local_index_recent = (
-        local_activity.last_local_index_monotonic > 0
-        and now - local_activity.last_local_index_monotonic <= settle_quiet_window
-    )
-    settle_sequence_change_recent = (
-        local_activity.last_sequence_change_monotonic > 0
-        and now - local_activity.last_sequence_change_monotonic <= settle_quiet_window
-    )
     settle_scan_progress_recent = (
         local_activity.last_scan_progress_monotonic > 0
         and now - local_activity.last_scan_progress_monotonic <= settle_quiet_window
@@ -339,23 +331,20 @@ def compute_activity_status(
         or bool(active_items)
         or item_finished_recent
     )
-    settle_update_in_progress = (
-        active_transfer
-        or receive_needed
-        or preparing
-        or normalized_state in SCANNING_STATES
-        or settle_scan_progress_recent
-        or settle_local_change_recent
-        or settle_local_index_recent
-        or settle_sequence_change_recent
-        or bool(active_items)
-        or item_finished_recent
-    )
-    settled = (
-        normalized_state == "idle"
-        and not settle_update_in_progress
-        and not local_activity.active_download_files
+    content_present = (
+        not receive_needed
+        and local_activity.active_download_files == 0
         and not remote_progress
+        and not active_items
+    )
+    content_state_allows_settlement = normalized_state == "idle" or preparing
+    settled = (
+        content_state_allows_settlement
+        and content_present
+        and not active_transfer
+        and not settle_local_change_recent
+        and not settle_scan_progress_recent
+        and not item_finished_recent
         and runtime.pull_errors == 0
         and not runtime.watch_error
     )

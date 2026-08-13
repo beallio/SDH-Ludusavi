@@ -644,6 +644,117 @@ def test_post_game_content_complete_peer_with_deletes_stays_settled() -> None:
     assert status.status == "IDLE"
 
 
+@pytest.mark.parametrize(
+    "delete_churn_field",
+    ["last_local_index_monotonic", "last_sequence_change_monotonic"],
+)
+def test_sync_preparing_delete_tail_settles_without_content_activity(
+    delete_churn_field: str,
+) -> None:
+    now = 100.0
+    local_activity = LocalActivity()
+    setattr(local_activity, delete_churn_field, now)
+
+    status = compute_activity_status(
+        folder_state="sync-preparing",
+        remote_progress={},
+        local_activity=local_activity,
+        runtime=FolderRuntime(need_deletes=46, need_total_items=46),
+        active_window_seconds=15.0,
+        settle_quiet_window_seconds=3.0,
+        now=now,
+    )
+
+    assert status.settled is True
+    assert status.update_in_progress is True
+    assert status.status == "PREPARING"
+
+
+def test_sync_preparing_content_item_remains_unsettled() -> None:
+    status = compute_activity_status(
+        folder_state="sync-preparing",
+        remote_progress={},
+        local_activity=LocalActivity(),
+        runtime=FolderRuntime(need_files=1),
+        active_window_seconds=15.0,
+        settle_quiet_window_seconds=3.0,
+        now=100.0,
+    )
+
+    assert status.settled is False
+
+
+@pytest.mark.parametrize("folder_state", ["syncing", "scanning", "error", "paused"])
+def test_content_only_settlement_rejects_unsafe_folder_states(folder_state: str) -> None:
+    status = compute_activity_status(
+        folder_state=folder_state,
+        remote_progress={},
+        local_activity=LocalActivity(),
+        runtime=FolderRuntime(),
+        active_window_seconds=15.0,
+        settle_quiet_window_seconds=3.0,
+        now=100.0,
+    )
+
+    assert status.settled is False
+
+
+@pytest.mark.parametrize(
+    "runtime",
+    [FolderRuntime(pull_errors=1), FolderRuntime(watch_error="status poll failed")],
+    ids=["pull-errors", "watch-error"],
+)
+def test_sync_preparing_content_only_settlement_keeps_runtime_errors_blocking(
+    runtime: FolderRuntime,
+) -> None:
+    status = compute_activity_status(
+        folder_state="sync-preparing",
+        remote_progress={},
+        local_activity=LocalActivity(),
+        runtime=runtime,
+        active_window_seconds=15.0,
+        settle_quiet_window_seconds=3.0,
+        now=100.0,
+    )
+
+    assert status.settled is False
+
+
+@pytest.mark.parametrize(
+    ("local_activity", "remote_progress"),
+    [
+        (LocalActivity(active_download_files=1), {}),
+        (LocalActivity(active_items={"save.dat": 100.0}), {}),
+        (
+            LocalActivity(),
+            {
+                "REMOTE-A": RemoteProgress(
+                    device_id="REMOTE-A",
+                    file_count=1,
+                    last_seen_monotonic=100.0,
+                )
+            },
+        ),
+    ],
+    ids=["active-download", "active-content-item", "remote-progress"],
+)
+def test_sync_preparing_content_only_settlement_requires_no_content_activity(
+    local_activity: LocalActivity,
+    remote_progress: dict[str, RemoteProgress],
+) -> None:
+    status = compute_activity_status(
+        folder_state="sync-preparing",
+        remote_progress=remote_progress,
+        local_activity=local_activity,
+        runtime=FolderRuntime(),
+        active_window_seconds=15.0,
+        settle_quiet_window_seconds=3.0,
+        now=100.0,
+    )
+
+    assert status.settled is False
+
+
 def test_settle_window_is_shorter_than_reported_activity_window() -> None:
     now = 100.0
     local_activity = LocalActivity(
