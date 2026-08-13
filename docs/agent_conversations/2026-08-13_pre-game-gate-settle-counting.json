@@ -1,0 +1,45 @@
+{
+  "date": "2026-08-13",
+  "task_objective": "Implement Task 1 of the review-gated pre-game-gate-settle-counting plan: add reducer coverage that distinguishes a settled delete-only tail from content transfer before changing production code.",
+  "files_modified": [
+    "docs/agent_conversations/2026-08-13_pre-game-gate-settle-counting.json",
+    "src/controllers/syncthingMonitorMachine.test.ts"
+  ],
+  "tests_added": [
+    "releases after three settled delete-tail samples",
+    "never claims downloading during a settled delete tail",
+    "keeps content downloads blocking pre-game settlement",
+    "resets a delete-tail count when content appears mid-tail",
+    "preserves post-game delete-tail and download signatures"
+  ],
+  "baseline": {
+    "frontend": "33 test files passed; 335 tests passed; TypeScript typecheck passed.",
+    "backend": "974 passed in 25.18s at 89.84% coverage."
+  },
+  "red_proof": {
+    "command": "bash -o pipefail -c './run.sh pnpm test 2>&1 | tee /tmp/sdh_ludusavi/pre-game-gate-settle-counting-task-1-red.log'",
+    "exit_code": 1,
+    "result": "1 failed and 32 passed test files; 3 failed and 337 passed tests.",
+    "failures": [
+      "releases after three settled delete-tail samples: AssertionError: expected [ +0, +0, +0, +0, +0, +0 ] to deeply equal [ 1, 2, 3, 3, 3, 3 ]",
+      "never claims downloading during a settled delete tail: AssertionError: expected [ 'downloading', 'downloading', ...(4) ] to not include 'downloading'",
+      "resets a delete-tail count when content appears mid-tail: AssertionError: expected [ +0, +0, +0, +0, +0, +0, +0 ] to deeply equal [ 1, 2, +0, +0, 1, 2, 3 ]"
+    ],
+    "already_green_safety_controls": {
+      "command": "./run.sh pnpm exec vitest run src/controllers/syncthingMonitorMachine.test.ts -t 'keeps content downloads blocking pre-game settlement|preserves post-game delete-tail and download signatures'",
+      "exit_code": 0,
+      "result": "1 test file passed; 2 tests passed and 60 skipped."
+    }
+  },
+  "quality_gates": {
+    "command": "scripts/orchestration/run-quality-gates",
+    "exit_code": 1,
+    "result": "The frontend suite stopped at the same three intentional red Task 1 failures. This expected red checkpoint cannot be green until Task 2 changes the reducer; the normal pre-commit hook was also run and rejected for those same failures."
+  },
+  "design_decisions": [
+    "Each replay starts in watching with mutationObserved true, matching a real watch after it has seen a mutation, and assigns a distinct timestamp so reducer duplicate suppression cannot hide a sample.",
+    "The delete-tail sample preserves the backend contract exactly: sync-preparing, update_in_progress true, settled true, no download, and no upload.",
+    "The post-game signatures are asserted before Task 2 so the phase-guarded reset behaviour remains a deliberate regression boundary."
+  ],
+  "results": "Task 1 is complete as the plan's intentional red-test checkpoint. Cases 1, 2, and 4 prove the existing reducer loses settled delete tails; cases 3 and 5 retain the content and post-game safety boundaries."
+}
