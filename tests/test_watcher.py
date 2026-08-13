@@ -576,10 +576,11 @@ def _stopped_watch_for_tick(
     [
         pytest.param("post_game", 4.0, True, id="post-game-settles-after-four-seconds"),
         pytest.param("post_game", 2.0, False, id="post-game-remains-active-after-two-seconds"),
-        pytest.param("pre_game", 4.0, False, id="pre-game-keeps-fifteen-second-launch-gate"),
+        pytest.param("pre_game", 4.0, True, id="pre-game-settles-after-four-seconds"),
+        pytest.param("pre_game", 2.0, False, id="pre-game-remains-active-after-two-seconds"),
     ],
 )
-def test_watch_uses_short_settle_window_only_for_post_game(
+def test_watch_uses_short_settle_window_for_both_phases(
     phase: str, quiet_seconds: float, settled: bool
 ) -> None:
     now = 100.0
@@ -986,6 +987,79 @@ def _poll_first_peer_completion_sequence(
     return timestamps, settled_flags
 
 
+def _poll_pre_game_delete_tail_sequence(
+    manager: SyncthingWatchManager, watch: SyncthingWatch, *, need_files: int
+) -> tuple[list[float], list[bool]]:
+    """Replay delete-only Syncthing batches through the watcher and manager poll contract."""
+    manager.watches[watch.watch_id] = watch
+    timestamps = []
+    settled_flags = []
+
+    for batch_index, now in enumerate((100.0, 102.0, 104.0)):
+        status_sequence = 100 + batch_index
+        next_sequence = status_sequence + 1
+        total_items = 46 + need_files
+        event_id = watch.cursor + 1
+        delete_item = f"old-snapshot-{batch_index}"
+        events = [
+            {
+                "id": event_id,
+                "type": "ItemStarted",
+                "data": {
+                    "folder": "test-folder",
+                    "item": delete_item,
+                    "action": "delete",
+                },
+            },
+            {
+                "id": event_id + 1,
+                "type": "ItemFinished",
+                "data": {
+                    "folder": "test-folder",
+                    "item": delete_item,
+                    "action": "delete",
+                },
+            },
+            {
+                "id": event_id + 2,
+                "type": "LocalIndexUpdated",
+                "data": {"folder": "test-folder", "sequence": next_sequence},
+            },
+        ]
+
+        with (
+            patch(
+                "sdh_ludusavi.syncthing.watcher.get_connection_snapshot",
+                return_value=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
+            ),
+            patch(
+                "sdh_ludusavi.syncthing.watcher.get_folder_status",
+                return_value={
+                    "state": "sync-preparing",
+                    "sequence": status_sequence,
+                    "needBytes": 0,
+                    "needFiles": need_files,
+                    "needDirectories": 0,
+                    "needSymlinks": 0,
+                    "needDeletes": 46,
+                    "needTotalItems": total_items,
+                },
+            ),
+            patch("sdh_ludusavi.syncthing.watcher.get_events", return_value=events),
+            patch("sdh_ludusavi.syncthing.watcher.time.monotonic", return_value=now),
+            patch("sdh_ludusavi.syncthing.activity.time.time", return_value=now),
+        ):
+            watch._tick(now)
+
+        response = manager.poll_watch(watch.watch_id)
+        assert response["status"] == "activity"
+        sample = response["sample"]
+        timestamps.append(sample["timestamp_unix"])
+        settled_flags.append(sample["settled"])
+
+    return timestamps, settled_flags
+
+
 @pytest.mark.parametrize(
     ("log_level",),
     [
@@ -1027,6 +1101,32 @@ def test_manager_poll_sequence_keeps_three_distinct_settled_samples_after_first_
     assert settled_timestamps == [4.0, 5.0, 6.0]
     assert len(set(settled_timestamps)) >= 3
     assert not watch.stop_event.is_set()
+
+
+def test_pre_game_launch_gate_releases_during_delete_only_tail() -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch.phase = "pre_game"
+    manager = SyncthingWatchManager()
+
+    timestamps, settled_flags = _poll_pre_game_delete_tail_sequence(manager, watch, need_files=0)
+
+    settled_timestamps = [
+        timestamp for timestamp, settled in zip(timestamps, settled_flags, strict=True) if settled
+    ]
+    assert len(settled_timestamps) == 3
+    assert len(set(settled_timestamps)) == 3
+    assert settled_timestamps[-1] - settled_timestamps[0] < 10.0
+
+    content_missing_watch = _stopped_watch_for_tick(("DEV-A",))
+    content_missing_watch.watch_id = "watch-content-missing"
+    content_missing_watch.phase = "pre_game"
+    content_missing_manager = SyncthingWatchManager()
+
+    _, content_missing_settled_flags = _poll_pre_game_delete_tail_sequence(
+        content_missing_manager, content_missing_watch, need_files=1
+    )
+
+    assert content_missing_settled_flags == [False, False, False]
 
 
 def test_manager_poll_sequence_exposes_frozen_sample_for_stopped_registered_watch(caplog) -> None:
@@ -1349,6 +1449,75 @@ def test_peer_completion_diagnostics_are_transition_only_and_privacy_safe(caplog
     assert "peers_pending_deletes=1" in caplog.text
     assert "DEV-A" not in caplog.text
     assert "test-folder" not in caplog.text
+
+
+def test_pre_game_quiescence_diagnostics_are_transition_only(caplog) -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch.phase = "pre_game"
+    watch.folder_state = "sync-preparing"
+    watch.runtime = FolderRuntime(
+        need_bytes=99,
+        need_files=3,
+        need_deletes=46,
+        need_total_items=49,
+    )
+    watch.local_activity = LocalActivity(
+        active_download_files=2,
+        active_items={"save.dat": 1.0},
+    )
+
+    with caplog.at_level("INFO", logger="sdh_ludusavi.syncthing.watcher"):
+        watch._tick_sample(1.0)
+        watch._tick_sample(1.5)
+
+    transition_records = [
+        record for record in caplog.records if "pre-game quiescence" in record.message
+    ]
+    assert [record.getMessage() for record in transition_records] == [
+        "Syncthing pre-game quiescence: phase=pre_game folder_state=sync-preparing "
+        "need_bytes=99 need_content_items=3 need_deletes=46 active_download_files=2 "
+        "active_items=1 settled=False"
+    ]
+
+
+def test_pre_game_quiescence_diagnostics_report_content_need_transitions(caplog) -> None:
+    watch = _stopped_watch_for_tick(("DEV-A",))
+    watch.phase = "pre_game"
+    watch.folder_state = "sync-preparing"
+    watch.runtime = FolderRuntime(need_deletes=46, need_total_items=46)
+
+    with caplog.at_level("INFO", logger="sdh_ludusavi.syncthing.watcher"):
+        watch._tick_sample(1.0)
+        watch.runtime = FolderRuntime(need_files=1, need_deletes=46, need_total_items=47)
+        watch._tick_sample(2.0)
+
+    transition_messages = [
+        record.getMessage() for record in caplog.records if "pre-game quiescence" in record.message
+    ]
+    assert len(transition_messages) == 2
+    assert "need_content_items=0" in transition_messages[0]
+    assert "need_content_items=1" in transition_messages[1]
+
+
+def test_pre_game_quiescence_diagnostics_are_privacy_safe(caplog) -> None:
+    watch = _stopped_watch_for_tick(("SECRET-DEVICE-ID",))
+    watch.phase = "pre_game"
+    watch.folder = FolderSelection(
+        folder_id="SECRET-FOLDER-ID",
+        label="SECRET-FOLDER-LABEL",
+        path="/home/deck/SECRET-PRE-GAME-PATH",
+        device_ids=("SECRET-DEVICE-ID",),
+    )
+    watch.local_activity = LocalActivity(active_items={"SECRET-FILE-NAME": 1.0})
+
+    with caplog.at_level("INFO", logger="sdh_ludusavi.syncthing.watcher"):
+        watch._tick_sample(1.0)
+
+    assert "Syncthing pre-game quiescence" in caplog.text
+    assert "SECRET-DEVICE-ID" not in caplog.text
+    assert "SECRET-FOLDER-ID" not in caplog.text
+    assert "SECRET-PRE-GAME-PATH" not in caplog.text
+    assert "SECRET-FILE-NAME" not in caplog.text
 
 
 def test_post_game_completion_settles_at_content_boundary_not_pruning_boundary() -> None:

@@ -1,0 +1,390 @@
+{
+  "date": "2026-08-13",
+  "task_objective": "Implement Task 1 of the review-gated pre-game content-only launch gate plan: expose Syncthing content need counters without changing runtime behaviour.",
+  "files_modified": [
+    "docs/agent_conversations/2026-08-13_pre-game-content-only-launch-gate.json",
+    "py_modules/sdh_ludusavi/syncthing/_types.py",
+    "py_modules/sdh_ludusavi/syncthing/activity.py",
+    "tests/test_activity.py"
+  ],
+  "tests_added": [
+    "test_parse_folder_runtime_keeps_content_need_separate_from_deletes",
+    "test_local_index_update_preserves_content_need_counts"
+  ],
+  "red_proof": {
+    "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-1-red.log'",
+    "exit_code": 1,
+    "result": "2 failed, 60 passed in 0.07s",
+    "failures": [
+      "test_parse_folder_runtime_keeps_content_need_separate_from_deletes: AttributeError: FolderRuntime has no need_content_items property",
+      "test_local_index_update_preserves_content_need_counts: TypeError: FolderRuntime does not accept need_files"
+    ]
+  },
+  "mutation_proof": {
+    "local_index_update": {
+      "mutation": "Replaced dataclasses.replace with the prior explicit FolderRuntime reconstruction.",
+      "result": "test_local_index_update_preserves_content_need_counts failed with need_files reset from 3 to 0."
+    },
+    "content_counter_parsing": {
+      "mutation": "Removed only the needFiles, needDirectories, and needSymlinks int_field calls from parse_folder_runtime while retaining need_content_items.",
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py::test_parse_folder_runtime_keeps_content_need_separate_from_deletes -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-review-01-parsing-mutation.log'",
+      "exit_code": 1,
+      "result": "1 failed in 0.05s",
+      "failure": "AssertionError: assert 0 == 2 at assert runtime.need_files == 2."
+    },
+    "restored_green": "./run.sh uv run pytest tests/test_activity.py -q --no-cov: 62 passed in 0.06s."
+  },
+  "design_decisions": [
+    "Task 1 preserves need_total_items exactly as supplied by Syncthing and exposes separate file, directory, and symlink counters through need_content_items without reading that property in runtime decisions.",
+    "LocalIndexUpdated now uses dataclasses.replace so future FolderRuntime fields survive sequence-only updates rather than silently resetting to their defaults."
+  ],
+  "quality_gates": {
+    "command": "scripts/orchestration/run-quality-gates",
+    "exit_code": 0,
+    "frontend": "33 test files passed; 335 tests passed; TypeScript typecheck and Rollup build passed.",
+    "ruff": "All checks passed; 141 files left unchanged after formatting.",
+    "ty": "All checks passed.",
+    "pytest": "948 passed in 24.09s; total coverage 89.68% with 83% required.",
+    "review_note_integrity": "no deleted review notes"
+  },
+  "review_follow_up": {
+    "round": "01",
+    "review_commit": "fba288ac603d673d4c5b00102e0dbee31da7bd30",
+    "changes": [
+      "Changed the parsing fixture to use distinct non-zero file, directory, and symlink counters and asserted each parsed value.",
+      "Proved the corrected test fails specifically when only the three counter parsing calls are removed."
+    ]
+  },
+  "task_2": {
+    "objective": "Implement Task 2 of the review-gated pre-game content-only launch gate plan: make receive_needed depend only on bytes and content items, never pending deletions.",
+    "files_modified": [
+      "docs/agent_conversations/2026-08-13_pre-game-content-only-launch-gate.json",
+      "py_modules/sdh_ludusavi/syncthing/activity.py",
+      "tests/test_activity.py"
+    ],
+    "tests_added": [
+      "test_receive_needed_ignores_deleted_items_in_folder_status",
+      "test_receive_needed_blocks_content_items_even_without_bytes",
+      "test_receive_needed_blocks_bytes_without_content_items",
+      "test_post_game_content_complete_peer_with_deletes_stays_settled"
+    ],
+    "red_proof": {
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py::test_receive_needed_ignores_deleted_items_in_folder_status tests/test_activity.py::test_receive_needed_blocks_content_items_even_without_bytes tests/test_activity.py::test_receive_needed_blocks_bytes_without_content_items tests/test_activity.py::test_post_game_content_complete_peer_with_deletes_stays_settled -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-2-red.log'",
+      "exit_code": 1,
+      "result": "2 failed, 2 passed in 0.07s",
+      "failures": [
+        "test_receive_needed_ignores_deleted_items_in_folder_status: AssertionError: assert True is False",
+        "test_receive_needed_blocks_content_items_even_without_bytes: AssertionError: assert False is True"
+      ],
+      "already_green_regressions": [
+        "test_receive_needed_blocks_bytes_without_content_items",
+        "test_post_game_content_complete_peer_with_deletes_stays_settled"
+      ]
+    },
+    "green_after": {
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py::test_receive_needed_ignores_deleted_items_in_folder_status tests/test_activity.py::test_receive_needed_blocks_content_items_even_without_bytes tests/test_activity.py::test_receive_needed_blocks_bytes_without_content_items tests/test_activity.py::test_post_game_content_complete_peer_with_deletes_stays_settled -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-2-green.log'",
+      "exit_code": 0,
+      "result": "4 passed in 0.04s"
+    },
+    "mutation_proof": {
+      "mutation": "Reverted only the receive_needed expression to need_bytes > 0 or need_total_items > 0 or need_deletes > 0, retaining the new tests and all other production code.",
+      "command": "bash -o pipefail -c 'scripts/orchestration/run-quality-gates 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-2-mutation.log'",
+      "exit_code": 1,
+      "result": "2 failed, 950 passed in 23.97s",
+      "failures": [
+        "test_receive_needed_ignores_deleted_items_in_folder_status: AssertionError: assert True is False",
+        "test_receive_needed_blocks_content_items_even_without_bytes: AssertionError: assert False is True"
+      ],
+      "restored_green": "scripts/orchestration/run-quality-gates exited 0: 33 frontend test files and 335 tests passed; TypeScript typecheck and Rollup build passed; Ruff reported All checks passed and formatting left 141 files unchanged; ty reported All checks passed; pytest reported 952 passed in 24.73s at 89.68% coverage; no review notes were deleted."
+    },
+    "design_decisions": [
+      "receive_needed now gates on need_bytes and need_content_items only. Syncthing Counts.TotalItems() includes Deleted, so need_total_items would reintroduce delete gating.",
+      "The bytes-only check remains because a non-zero byte count is still missing content; the content-item check keeps an unfinished temp file blocking after Syncthing reports its remaining bytes as zero.",
+      "Post-game peer completion remains content-only: a fresh peer with pending deletes still produces an idle, settled sample."
+    ],
+    "results": "Task 2 is complete and isolated to the receive-needed predicate. Delete-only folder-status tails no longer classify as missing content, while content items and bytes continue to block."
+  },
+  "task_3": {
+    "objective": "Implement Task 3 of the review-gated pre-game content-only launch gate plan: prevent Syncthing delete item events from registering as content activity.",
+    "files_modified": [
+      "docs/agent_conversations/2026-08-13_pre-game-content-only-launch-gate.json",
+      "py_modules/sdh_ludusavi/syncthing/activity.py",
+      "tests/test_activity.py"
+    ],
+    "tests_added": [
+      "test_item_events_distinguish_deletes_from_content",
+      "test_delete_item_finished_prunes_mismatched_active_item_without_rearming"
+    ],
+    "red_proof": {
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py::test_item_events_distinguish_deletes_from_content tests/test_activity.py::test_delete_item_finished_prunes_mismatched_active_item_without_rearming -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-3-red.log'",
+      "exit_code": 1,
+      "result": "2 failed, 2 passed in 0.08s",
+      "failures": [
+        "test_item_events_distinguish_deletes_from_content[delete]: AssertionError: assert {'save.dat': 100.0} == {}",
+        "test_delete_item_finished_prunes_mismatched_active_item_without_rearming: AssertionError: assert 100.0 == 0.0"
+      ]
+    },
+    "green_after": {
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py::test_item_events_distinguish_deletes_from_content tests/test_activity.py::test_delete_item_finished_prunes_mismatched_active_item_without_rearming -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-3-green.log'",
+      "exit_code": 0,
+      "result": "4 passed in 0.04s"
+    },
+    "mutation_proof": {
+      "mutation": "Reverted only the action == delete guards in ItemStarted and ItemFinished, retaining the new tests and every other production change.",
+      "command": "bash -o pipefail -c 'scripts/orchestration/run-quality-gates 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-3-mutation.log'",
+      "exit_code": 1,
+      "result": "2 failed, 954 passed in 24.28s",
+      "failures": [
+        "test_item_events_distinguish_deletes_from_content[delete]: AssertionError: assert {'save.dat': 100.0} == {}",
+        "test_delete_item_finished_prunes_mismatched_active_item_without_rearming: AssertionError: assert 100.0 == 0.0"
+      ]
+    },
+    "quality_gates": {
+      "command": "scripts/orchestration/run-quality-gates",
+      "exit_code": 0,
+      "frontend": "33 test files passed; 335 tests passed; TypeScript typecheck and Rollup build passed.",
+      "ruff": "All checks passed; 141 files left unchanged after formatting.",
+      "ty": "All checks passed.",
+      "pytest": "956 passed in 24.09s; total coverage 89.80% with 83% required.",
+      "review_note_integrity": "no deleted review notes"
+    },
+    "design_decisions": [
+      "Only an explicit action value of delete is ignored. update and an absent action retain the existing content-activity behavior, so unknown events fail toward holding the launch gate.",
+      "Delete ItemFinished events still remove their item key before skipping the finished timestamp, so an unmatched delete completion cannot strand an active item."
+    ]
+  },
+  "task_4": {
+    "objective": "Implement Task 4 of the review-gated pre-game content-only launch gate plan: allow content-complete delete tails to settle without weakening any content or post-game safety gate.",
+    "files_modified": [
+      "docs/agent_conversations/2026-08-13_pre-game-content-only-launch-gate.json",
+      "py_modules/sdh_ludusavi/syncthing/activity.py",
+      "tests/test_activity.py"
+    ],
+    "tests_added": [
+      "test_sync_preparing_delete_tail_settles_without_content_activity",
+      "test_sync_preparing_content_item_remains_unsettled",
+      "test_content_only_settlement_rejects_unsafe_folder_states",
+      "test_sync_preparing_content_only_settlement_keeps_runtime_errors_blocking",
+      "test_sync_preparing_content_only_settlement_requires_no_content_activity",
+      "test_post_game_delete_tail_settles_during_pruning_but_not_syncing"
+    ],
+    "red_proof": {
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py -q --no-cov -k \"sync_preparing_delete_tail_settles_without_content_activity or sync_preparing_content_item_remains_unsettled or content_only_settlement_rejects_unsafe_folder_states or sync_preparing_content_only_settlement_keeps_runtime_errors_blocking or sync_preparing_content_only_settlement_requires_no_content_activity\" 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-4-red.log'",
+      "exit_code": 1,
+      "result": "2 failed, 10 passed, 70 deselected in 0.09s",
+      "failures": [
+        "test_sync_preparing_delete_tail_settles_without_content_activity[last_local_index_monotonic]: AssertionError: assert False is True",
+        "test_sync_preparing_delete_tail_settles_without_content_activity[last_sequence_change_monotonic]: AssertionError: assert False is True"
+      ],
+      "already_green_safety_controls": [
+        "test_sync_preparing_content_item_remains_unsettled",
+        "test_content_only_settlement_rejects_unsafe_folder_states",
+        "test_sync_preparing_content_only_settlement_keeps_runtime_errors_blocking",
+        "test_sync_preparing_content_only_settlement_requires_no_content_activity"
+      ]
+    },
+    "green_after": {
+      "command": "./run.sh uv run pytest tests/test_activity.py tests/test_watcher.py -q --no-cov",
+      "exit_code": 0,
+      "result": "159 passed in 0.66s"
+    },
+    "mutation_proof": {
+      "prior_settle_predicate": {
+        "mutation": "Restored only the former idle-only settled predicate, including its local-index and sequence quiet checks, while retaining every Task 4 test.",
+        "command": "bash -o pipefail -c 'PYTEST_ADDOPTS=\"-q\" scripts/orchestration/run-quality-gates 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-4-mutation.log'",
+        "exit_code": 1,
+        "result": "2 failed, 966 passed in 24.33s",
+        "failures": [
+          "test_sync_preparing_delete_tail_settles_without_content_activity[last_local_index_monotonic]: AssertionError: assert False is True",
+          "test_sync_preparing_delete_tail_settles_without_content_activity[last_sequence_change_monotonic]: AssertionError: assert False is True"
+        ]
+      },
+      "post_game_guard": {
+        "mutation": "Added an intentional and not peer_completion_tracking term to the restored settled predicate to simulate suppressing post-game settlement.",
+        "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py::test_post_game_content_complete_peer_with_deletes_stays_settled -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-4-post-game-mutation.log'",
+        "exit_code": 1,
+        "result": "1 failed in 0.05s",
+        "failure": "test_post_game_content_complete_peer_with_deletes_stays_settled: AssertionError: assert False is True"
+      },
+      "failure_recovery": {
+        "initial_failure": "The first full gate after the implementation reported 12 failed, 956 passed in 24.77s. The failures showed that treating scan_rate activity outside the settle quiet window as a permanent blocker changed established settling behavior, and that omitting active_transfer released post-game outbound peer-confirmation holds.",
+        "fix": "Removed the broad scanning check from settled and retained the pre-existing active_transfer block. SCANNING_STATES remain excluded because only idle and PREPARING_STATES are allowed states; fresh scan progress remains blocked by settle_scan_progress_recent.",
+        "targeted_recovery": "./run.sh uv run pytest tests/test_activity.py tests/test_watcher.py -q --no-cov: 159 passed in 0.66s."
+      },
+      "restored_green": "scripts/orchestration/run-quality-gates exited 0 after restoration: 33 frontend test files and 335 tests passed; TypeScript typecheck and Rollup build passed; Ruff reported All checks passed and formatting left 141 files unchanged; ty reported All checks passed; pytest reported 968 passed in 24.17s at 89.82% coverage; no review notes were deleted."
+    },
+    "mechanism_coverage": [
+      "test_sync_preparing_delete_tail_settles_without_content_activity exercises mechanism 1 by accepting sync-preparing only after Task 2 has established no content need, and mechanism 5 by proving fresh LocalIndexUpdated and sequence churn no longer re-arms settlement.",
+      "test_sync_preparing_content_item_remains_unsettled exercises mechanism 2's safety boundary: need_files keeps the launch gate closed even when need_bytes is zero.",
+      "test_sync_preparing_content_only_settlement_requires_no_content_activity exercises mechanism 3 by requiring active content items, active downloads, and remote progress to remain blocking.",
+      "Mechanism 4 remains covered by Task 3's test_item_events_distinguish_deletes_from_content and test_delete_item_finished_prunes_mismatched_active_item_without_rearming; delete ItemFinished events no longer arm the two-second window before Task 4 evaluates it.",
+      "test_content_only_settlement_rejects_unsafe_folder_states and test_sync_preparing_content_only_settlement_keeps_runtime_errors_blocking prove that syncing, scanning, error, paused, pull-error, and watch-error states still block despite the narrow PREPARING_STATES exception."
+    ],
+    "design_decisions": [
+      "settled now separates content presence from diagnostic status. It accepts only idle or PREPARING_STATES and keeps status and update_in_progress unchanged, so delete-only sync-preparing tails can settle while still reporting PREPARING.",
+      "LocalIndexUpdated and sequence-change quiet windows were removed only from settlement because their events contain no action. Fresh local changes, scan progress, and a recent content ItemFinished remain quiet-window blockers.",
+      "active_transfer remains a settled blocker to preserve the post-game peer-completion and outbound-observation safety contract even when there is no remote progress object.",
+      "settled is shared by pre-game and post-game. Therefore post-game can now settle during sync-preparing and cleaning when peer content is complete, whereas it previously required idle. This is safe and matches the v0.4.4 decision that local snapshot-pruning deletes must not gate completion: content is present, no download or remote-progress activity remains, and syncing still blocks."
+    ],
+    "results": "Task 4 is complete. A delete-only sync-preparing tail can settle as soon as content is complete, while content need, active content, unsafe states, runtime errors, and post-game confirmation holds remain blocking."
+  },
+  "task_5": {
+    "objective": "Implement Task 5 of the review-gated pre-game content-only launch gate plan: give pre-game an explicit three-second settle window without changing activity pruning.",
+    "files_modified": [
+      "docs/agent_conversations/2026-08-13_pre-game-content-only-launch-gate.json",
+      "py_modules/sdh_ludusavi/syncthing/_types.py",
+      "py_modules/sdh_ludusavi/syncthing/watcher.py",
+      "tests/test_watcher.py"
+    ],
+    "tests_changed": [
+      "Renamed test_watch_uses_short_settle_window_only_for_post_game to test_watch_uses_short_settle_window_for_both_phases.",
+      "Changed the pre-game expectation from a fifteen-second hold to settlement after four seconds, and added a two-second negative control."
+    ],
+    "red_proof": {
+      "command": "./run.sh uv run pytest tests/test_watcher.py::test_watch_uses_short_settle_window_for_both_phases -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-5-red.log",
+      "exit_code": 1,
+      "result": "1 failed, 3 passed in 0.14s",
+      "failure": "test_watch_uses_short_settle_window_for_both_phases[pre-game-settles-after-four-seconds]: AssertionError: assert False is True"
+    },
+    "green_after": {
+      "command": "./run.sh uv run pytest tests/test_watcher.py::test_watch_uses_short_settle_window_for_both_phases tests/test_watcher.py::test_watcher_keeps_activity_pruning_on_the_fifteen_second_window -q --no-cov",
+      "exit_code": 0,
+      "result": "5 passed in 0.04s"
+    },
+    "mutation_proof": {
+      "mutation": "Reverted only _tick_sample's pre-game settle-window selection to None while retaining the new constant and all Task 5 test expectations.",
+      "command": "bash -o pipefail -c 'scripts/orchestration/run-quality-gates 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-5-mutation.log'",
+      "exit_code": 1,
+      "result": "1 failed, 969 passed in 24.32s",
+      "failure": "test_watch_uses_short_settle_window_for_both_phases[pre-game-settles-after-four-seconds]: AssertionError: assert False is True",
+      "failure_recovery": "The mutation gate's Ruff fix removed the temporarily unused pre-game import. Restoring that import before the final gate resolved F821 Undefined name PRE_GAME_SETTLE_QUIET_WINDOW_SECONDS."
+    },
+    "quality_gates": {
+      "command": "scripts/orchestration/run-quality-gates; scripts/orchestration/check-review-notes-not-deleted",
+      "exit_code": 0,
+      "frontend": "33 test files and 335 tests passed; TypeScript typecheck and Rollup build passed.",
+      "ruff": "All checks passed; 141 files left unchanged after formatting.",
+      "ty": "All checks passed.",
+      "pytest": "970 passed in 24.78s; total coverage 89.82% with 83% required.",
+      "review_note_integrity": "no deleted review notes"
+    },
+    "design_decisions": [
+      "PRE_GAME_SETTLE_QUIET_WINDOW_SECONDS is explicitly three seconds, matching the existing post-game settle window; compute_activity_status retains its None fallback for direct callers and tests.",
+      "_tick_sample now passes an explicit settle window in both phases. Pruning remains on DEFAULT_ACTIVE_WINDOW_SECONDS, as protected by the unchanged activity-pruning regression.",
+      "The renamed parameterized watcher test exercises both phases at four seconds and two seconds, so it fails if pre-game is accidentally returned to the fifteen-second default."
+    ],
+    "results": "Task 5 is complete. A content-complete pre-game watch can settle after three seconds of quiet, while a two-second quiet period remains blocking and activity pruning remains fifteen seconds."
+  },
+  "review_round_05": {
+    "review_commit": "7c40c65d43b53d1f48bdde1ecdd5385147d78c14",
+    "requested_changes": [
+      "Record the intentional shared post-game settlement widening.",
+      "Add a regression that a content-complete peer with pending deletes settles in sync-preparing but not syncing."
+    ],
+    "production_changes": "None. The new regression passed against the reviewed predicate and no real problem was revealed.",
+    "test_added": "test_post_game_delete_tail_settles_during_pruning_but_not_syncing",
+    "mutation_proof": {
+      "mutation": "Temporarily re-narrowed content_state_allows_settlement from idle or preparing to idle only while retaining the new test.",
+      "command": "./run.sh uv run pytest tests/test_activity.py::test_post_game_delete_tail_settles_during_pruning_but_not_syncing -q --no-cov",
+      "exit_code": 1,
+      "result": "1 failed in 0.05s",
+      "failure": "AssertionError: assert False is True at assert preparing_status.settled is True.",
+      "restored_green": "The original predicate was restored unchanged; the targeted test passed in 0.04s."
+    },
+    "quality_gates": {
+      "command": "scripts/orchestration/run-quality-gates; scripts/orchestration/check-review-notes-not-deleted",
+      "exit_code": 0,
+      "frontend": "33 test files passed; 335 tests passed; TypeScript typecheck and Rollup build passed.",
+      "ruff": "All checks passed; 141 files left unchanged after formatting.",
+      "ty": "All checks passed.",
+      "pytest": "969 passed in 24.66s; total coverage 89.82% with 83% required.",
+      "review_note_integrity": "no deleted review notes"
+    }
+  },
+  "task_6": {
+    "objective": "Implement the final Task 6 round: transition-only pre-game quiescence diagnostics and an end-to-end delete-tail launch-gate replay.",
+    "files_modified": [
+      "docs/agent_conversations/2026-08-13_pre-game-content-only-launch-gate.json",
+      "py_modules/sdh_ludusavi/syncthing/watcher.py",
+      "tests/test_watcher.py"
+    ],
+    "tests_added": [
+      "test_pre_game_quiescence_diagnostics_are_transition_only",
+      "test_pre_game_quiescence_diagnostics_report_content_need_transitions",
+      "test_pre_game_quiescence_diagnostics_are_privacy_safe",
+      "test_pre_game_launch_gate_releases_during_delete_only_tail"
+    ],
+    "red_proof": {
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_watcher.py::test_pre_game_launch_gate_releases_during_delete_only_tail tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_transition_only tests/test_watcher.py::test_pre_game_quiescence_diagnostics_report_content_need_transitions tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_privacy_safe -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-6-red.log'",
+      "exit_code": 1,
+      "result": "3 failed, 1 passed in 0.18s",
+      "failures": [
+        "test_pre_game_quiescence_diagnostics_are_transition_only: no pre-game quiescence record was emitted.",
+        "test_pre_game_quiescence_diagnostics_report_content_need_transitions: zero transition records were emitted instead of two.",
+        "test_pre_game_quiescence_diagnostics_are_privacy_safe: the expected sanitized diagnostic line was absent."
+      ],
+      "already_green_control": "test_pre_game_launch_gate_releases_during_delete_only_tail passed because Tasks 1 through 5 were already implemented."
+    },
+    "green_after": {
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_watcher.py::test_pre_game_launch_gate_releases_during_delete_only_tail tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_transition_only tests/test_watcher.py::test_pre_game_quiescence_diagnostics_report_content_need_transitions tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_privacy_safe -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-6-green.log'",
+      "exit_code": 0,
+      "result": "4 passed in 0.04s"
+    },
+    "end_to_end_negative_control": {
+      "source": "git archive of dev at fb529868b0c7dc50e09c17f93514e6f89e63704e, with only the replay helper and test applied in a disposable /tmp snapshot.",
+      "command": "./run.sh uv run --no-sync pytest tests/test_watcher.py::test_pre_game_launch_gate_releases_during_delete_only_tail -q --no-cov",
+      "exit_code": 1,
+      "result": "1 failed in 0.14s",
+      "failure": "AssertionError: assert 0 == 3 at assert len(settled_timestamps) == 3.",
+      "meaning": "The dev implementation published no settled samples during the same sync-preparing delete tail, so the replay is a real control for all five mechanisms rather than an assumed scenario."
+    },
+    "mutation_proof": {
+      "mutation": "Removed only the _log_pre_game_quiescence_transition(status) call from _tick_sample, retaining the diagnostic implementation, all new tests, and the delete-tail replay.",
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_watcher.py::test_pre_game_launch_gate_releases_during_delete_only_tail tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_transition_only tests/test_watcher.py::test_pre_game_quiescence_diagnostics_report_content_need_transitions tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_privacy_safe -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-6-diagnostic-mutation.log'",
+      "exit_code": 1,
+      "result": "3 failed, 1 passed in 0.10s",
+      "failures": [
+        "test_pre_game_quiescence_diagnostics_are_transition_only",
+        "test_pre_game_quiescence_diagnostics_report_content_need_transitions",
+        "test_pre_game_quiescence_diagnostics_are_privacy_safe"
+      ],
+      "restored_green": "bash -o pipefail -c './run.sh uv run pytest tests/test_watcher.py::test_pre_game_launch_gate_releases_during_delete_only_tail tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_transition_only tests/test_watcher.py::test_pre_game_quiescence_diagnostics_report_content_need_transitions tests/test_watcher.py::test_pre_game_quiescence_diagnostics_are_privacy_safe -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-6-restored-green.log': 4 passed in 0.05s."
+    },
+    "quality_gates": {
+      "command": "scripts/orchestration/run-quality-gates; scripts/orchestration/check-review-notes-not-deleted",
+      "exit_code": 0,
+      "verbatim_tallies": [
+        "Test Files  33 passed (33)",
+        "Tests  335 passed (335)",
+        "created dist in 2.2s",
+        "All checks passed!",
+        "1 file reformatted, 140 files left unchanged",
+        "All checks passed!",
+        "collected 974 items",
+        "TOTAL                                             4489    456    90%",
+        "Required test coverage of 83% reached. Total coverage: 89.84%",
+        "============================= 974 passed in 25.21s =============================",
+        "no deleted review notes",
+        "quality gates passed"
+      ]
+    },
+    "design_decisions": [
+      "Pre-game diagnostics compare exactly the reported phase, folder state, need bytes, content-item count, pending deletes, active download-file count, active-item count, and settled value. They emit at INFO only when that tuple changes.",
+      "The diagnostic reads the computed ActivityStatus and FolderRuntime but does not add device IDs, folder identifiers or paths, item names, or raw API data to the line.",
+      "The replay drives SyncthingWatch._tick and SyncthingWatchManager.poll_watch rather than calling _tick_sample directly. Each of its three roughly two-second batches contains delete start and finish events followed by a sequence-advancing LocalIndexUpdated event."
+    ],
+    "unverified": [
+      "Real device behaviour remains unverified; this round used unit and replay coverage only, not a Steam Deck or live Syncthing folder.",
+      "Syncthing versions other than v2.1.2 remain unverified; a future version could route deletions through syncing instead of sync-preparing.",
+      "The needBytes-reaches-zero-before-commit in-flight temporary-file hazard has no live reproduction, although content-item counts continue to gate it.",
+      "Whether the 3.0-second pre-game settle window is the correct operational value remains unmeasured on a device.",
+      "The pre-game stall window and the frontend and backend ceilings remain untouched and unproven on hardware."
+    ],
+    "results": "Task 6 is complete. The pre-game watcher now logs safe quiescence transitions, delete-only tails publish three distinct settled samples in under ten seconds, and a persistent content item prevents every replayed settled sample."
+  },
+  "results": "Tasks 1 through 6 and their review follow-ups are complete; the implementation is ready for final review.",
+  "deferred_verification": [
+    "The plan's live-device verification remains outstanding; no Task 6 command ran against a Steam Deck or a live Syncthing folder.",
+    "No verification in this plan exercised Syncthing versions other than v2.1.2, reproduced the in-flight temporary-file hazard, measured whether three seconds is correct, or exercised the unchanged stall window and frontend/backend ceilings on hardware."
+  ]
+}
