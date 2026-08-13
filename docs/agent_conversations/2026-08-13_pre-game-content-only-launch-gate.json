@@ -104,6 +104,55 @@
     ],
     "results": "Task 2 is complete and isolated to the receive-needed predicate. Delete-only folder-status tails no longer classify as missing content, while content items and bytes continue to block."
   },
+  "task_3": {
+    "objective": "Implement Task 3 of the review-gated pre-game content-only launch gate plan: prevent Syncthing delete item events from registering as content activity.",
+    "files_modified": [
+      "docs/agent_conversations/2026-08-13_pre-game-content-only-launch-gate.json",
+      "py_modules/sdh_ludusavi/syncthing/activity.py",
+      "tests/test_activity.py"
+    ],
+    "tests_added": [
+      "test_item_events_distinguish_deletes_from_content",
+      "test_delete_item_finished_prunes_mismatched_active_item_without_rearming"
+    ],
+    "red_proof": {
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py::test_item_events_distinguish_deletes_from_content tests/test_activity.py::test_delete_item_finished_prunes_mismatched_active_item_without_rearming -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-3-red.log'",
+      "exit_code": 1,
+      "result": "2 failed, 2 passed in 0.08s",
+      "failures": [
+        "test_item_events_distinguish_deletes_from_content[delete]: AssertionError: assert {'save.dat': 100.0} == {}",
+        "test_delete_item_finished_prunes_mismatched_active_item_without_rearming: AssertionError: assert 100.0 == 0.0"
+      ]
+    },
+    "green_after": {
+      "command": "bash -o pipefail -c './run.sh uv run pytest tests/test_activity.py::test_item_events_distinguish_deletes_from_content tests/test_activity.py::test_delete_item_finished_prunes_mismatched_active_item_without_rearming -q --no-cov 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-3-green.log'",
+      "exit_code": 0,
+      "result": "4 passed in 0.04s"
+    },
+    "mutation_proof": {
+      "mutation": "Reverted only the action == delete guards in ItemStarted and ItemFinished, retaining the new tests and every other production change.",
+      "command": "bash -o pipefail -c 'scripts/orchestration/run-quality-gates 2>&1 | tee /tmp/sdh_ludusavi/pre-game-content-only-launch-gate-task-3-mutation.log'",
+      "exit_code": 1,
+      "result": "2 failed, 954 passed in 24.28s",
+      "failures": [
+        "test_item_events_distinguish_deletes_from_content[delete]: AssertionError: assert {'save.dat': 100.0} == {}",
+        "test_delete_item_finished_prunes_mismatched_active_item_without_rearming: AssertionError: assert 100.0 == 0.0"
+      ]
+    },
+    "quality_gates": {
+      "command": "scripts/orchestration/run-quality-gates",
+      "exit_code": 0,
+      "frontend": "33 test files passed; 335 tests passed; TypeScript typecheck and Rollup build passed.",
+      "ruff": "All checks passed; 141 files left unchanged after formatting.",
+      "ty": "All checks passed.",
+      "pytest": "956 passed in 24.09s; total coverage 89.80% with 83% required.",
+      "review_note_integrity": "no deleted review notes"
+    },
+    "design_decisions": [
+      "Only an explicit action value of delete is ignored. update and an absent action retain the existing content-activity behavior, so unknown events fail toward holding the launch gate.",
+      "Delete ItemFinished events still remove their item key before skipping the finished timestamp, so an unmatched delete completion cannot strand an active item."
+    ]
+  },
   "results": "Task 1 implementation and the round-01 review follow-up are complete; the strengthened parsing test now proves the safety-critical counters are parsed rather than merely defaulted.",
   "deferred_verification": [
     "The plan's live-device verification remains outstanding; this task only exposes and preserves counters and does not change the launch gate."
