@@ -3,8 +3,10 @@
   "task_objective": "Complete the round-01 review for the pre-game-gate-settle-counting plan: add the missing content-pending reducer guard and implement the independent display and settle-count decisions from Task 2.",
   "files_modified": [
     "docs/agent_conversations/2026-08-13_pre-game-gate-settle-counting.json",
+    "docs/specs/sdh_ludusavi_sync.md",
     "src/controllers/syncthingMonitorMachine.ts",
-    "src/controllers/syncthingMonitorMachine.test.ts"
+    "src/controllers/syncthingMonitorMachine.test.ts",
+    "tests/test_watcher.py"
   ],
   "tests_added": [
     "releases after three settled delete-tail samples",
@@ -91,5 +93,30 @@
       "result": "no deleted review notes"
     }
   },
-  "results": "Task 1's red proof remains preserved, and the round-01 review is resolved: the reducer now counts settled delete-only samples independently of display status, while missing or actively transferring content continues to block pre-game release. Task 3 remains for a subsequent review-gated round."
+  "round_03": {
+    "review_note": "docs/review/pre-game-gate-settle-counting-review-02.md",
+    "changes": [
+      "Renamed the backend delete-tail test to state that it proves publication of settled samples, and linked its comment to the reducer coverage that proves frontend gate release.",
+      "Documented the independent pre-game display and settle-count contract, including the load-bearing !sample.settled guard and the phase-guarded post-game boundary."
+    ],
+    "targeted_verification": {
+      "coverage_enforced_command": "./run.sh uv run pytest tests/test_watcher.py -k pre_game_delete_only_tail_publishes_three_settled_samples",
+      "coverage_enforced_exit_code": 1,
+      "coverage_enforced_result": "The selected assertion passed, but the repository-wide 83% coverage threshold rejected the one-test selection at 9.78% aggregate coverage.",
+      "test_only_command": "./run.sh uv run pytest --no-cov tests/test_watcher.py -k pre_game_delete_only_tail_publishes_three_settled_samples",
+      "test_only_exit_code": 0,
+      "test_only_result": "1 passed, 81 deselected in 0.05s."
+    },
+    "quality_gates": {
+      "command": "./run.sh scripts/orchestration/run-quality-gates",
+      "exit_code": 0,
+      "result": "33 frontend test files and 341 tests passed; TypeScript typecheck and Rollup build passed; Ruff check and format passed; ty passed; 974 Python tests passed in 24.11s at 89.84% coverage."
+    },
+    "review_note_guard": {
+      "command": "./run.sh scripts/orchestration/check-review-notes-not-deleted",
+      "exit_code": 0,
+      "result": "no deleted review notes"
+    }
+  },
+  "results": "Task 1's red proof remains preserved. The reducer now counts settled delete-only samples independently of display status, while missing or actively transferring content continues to block pre-game release. Task 3 corrected the backend replay's claim and recorded the frontend/backend contract; all planned tasks are complete."
 }

@@ -1103,7 +1103,9 @@ def test_manager_poll_sequence_keeps_three_distinct_settled_samples_after_first_
     assert not watch.stop_event.is_set()
 
 
-def test_pre_game_launch_gate_releases_during_delete_only_tail() -> None:
+def test_pre_game_delete_only_tail_publishes_three_settled_samples() -> None:
+    # The reducer replay in src/controllers/syncthingMonitorMachine.test.ts proves that these
+    # backend samples release the launch gate after frontend confirmation.
     watch = _stopped_watch_for_tick(("DEV-A",))
     watch.phase = "pre_game"
     manager = SyncthingWatchManager()
