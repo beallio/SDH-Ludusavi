@@ -9,6 +9,7 @@ import {
   WatchPhase,
   WatchMachineState,
 } from "./syncthingMonitorMachine";
+import type { SyncthingActivitySample } from "../types";
 
 describe("SyncthingMonitorMachine", () => {
   describe("createInitialWatchState", () => {
@@ -222,6 +223,162 @@ describe("SyncthingMonitorMachine", () => {
 
         expect(result.state.completionObserved).toBe(true);
         expect(result.effects.resolveQuiescence).toBe("settled");
+      });
+
+      describe("pre-game delete-tail settlement", () => {
+        const deleteTailSample = (timestamp_unix: number): SyncthingActivitySample => ({
+          timestamp_unix,
+          folder_state: "sync-preparing",
+          downloading: false,
+          uploading: false,
+          update_in_progress: true,
+          status: "PREPARING",
+          settled: true,
+        });
+
+        const contentDownloadSample = (timestamp_unix: number): SyncthingActivitySample => ({
+          timestamp_unix,
+          folder_state: "syncing",
+          downloading: true,
+          uploading: false,
+          update_in_progress: true,
+          status: "ACTIVE_TRANSFER",
+          settled: false,
+        });
+
+        const contentPendingSample = (timestamp_unix: number): SyncthingActivitySample => ({
+          timestamp_unix,
+          folder_state: "sync-preparing",
+          downloading: false,
+          uploading: false,
+          update_in_progress: true,
+          status: "UPDATE_NEEDED",
+          settled: false,
+        });
+
+        const preGameWatchState = (): WatchMachineState => ({
+          ...createInitialWatchState("pre_game"),
+          step: "watching",
+          initialized: true,
+          publicationEnabled: true,
+          mutationObserved: true,
+        });
+
+        const postGameWatchState = (): WatchMachineState => ({
+          ...createInitialWatchState("post_game"),
+          step: "watching",
+          initialized: true,
+          mutationObserved: true,
+          handoffActivated: true,
+        });
+
+        const replaySamples = (
+          initialState: WatchMachineState,
+          samples: SyncthingActivitySample[],
+        ): WatchMachineState[] => {
+          let state = initialState;
+          const states: WatchMachineState[] = [];
+
+          for (const sample of samples) {
+            state = transition(state, { type: "sample", sample }).state;
+            states.push(state);
+          }
+
+          return states;
+        };
+
+        it("releases after three settled delete-tail samples", () => {
+          const states = replaySamples(
+            preGameWatchState(),
+            [1, 2, 3, 4, 5, 6].map(deleteTailSample),
+          );
+          const finalState = states.at(-1)!;
+
+          expect(states.map((state) => state.settledCount)).toEqual([1, 2, 3, 3, 3, 3]);
+          expect(finalState.completionObserved).toBe(true);
+          expect(finalState.latestStatus).toBe("complete");
+        });
+
+        it("never claims downloading during a settled delete tail", () => {
+          const states = replaySamples(
+            preGameWatchState(),
+            [1, 2, 3, 4, 5, 6].map(deleteTailSample),
+          );
+
+          expect(states.map((state) => state.latestStatus)).not.toContain("downloading");
+        });
+
+        it("keeps content downloads blocking pre-game settlement", () => {
+          const states = replaySamples(
+            preGameWatchState(),
+            [1, 2, 3, 4, 5, 6].map(contentDownloadSample),
+          );
+          const finalState = states.at(-1)!;
+
+          expect(states.map((state) => state.settledCount)).toEqual([0, 0, 0, 0, 0, 0]);
+          expect(finalState.completionObserved).toBe(false);
+          expect(finalState.latestStatus).toBe("downloading");
+        });
+
+        it("keeps missing but not-yet-transferring content blocking pre-game settlement", () => {
+          const states = replaySamples(
+            preGameWatchState(),
+            [1, 2, 3, 4, 5, 6].map(contentPendingSample),
+          );
+          const finalState = states.at(-1)!;
+
+          expect(states.map((state) => state.settledCount)).toEqual([0, 0, 0, 0, 0, 0]);
+          expect(finalState.completionObserved).toBe(false);
+          expect(finalState.latestStatus).toBe("downloading");
+        });
+
+        it("resets a delete-tail count when content appears mid-tail", () => {
+          const states = replaySamples(preGameWatchState(), [
+            deleteTailSample(1),
+            deleteTailSample(2),
+            contentDownloadSample(3),
+            contentDownloadSample(4),
+            deleteTailSample(5),
+            deleteTailSample(6),
+            deleteTailSample(7),
+          ]);
+          const finalState = states.at(-1)!;
+
+          expect(states.map((state) => state.settledCount)).toEqual([1, 2, 0, 0, 1, 2, 3]);
+          expect(finalState.completionObserved).toBe(true);
+          expect(finalState.latestStatus).toBe("complete");
+        });
+
+        it("preserves post-game delete-tail and download signatures", () => {
+          const signature = (state: WatchMachineState) =>
+            `${state.settledCount}${state.completionObserved ? "*" : ""}:${state.latestStatus}`;
+
+          const deleteTailStates = replaySamples(
+            postGameWatchState(),
+            [1, 2, 3, 4, 5, 6].map(deleteTailSample),
+          );
+          const contentDownloadStates = replaySamples(
+            postGameWatchState(),
+            [1, 2, 3, 4, 5, 6].map(contentDownloadSample),
+          );
+
+          expect(deleteTailStates.map(signature)).toEqual([
+            "1:idle",
+            "2:idle",
+            "3*:complete",
+            "3*:complete",
+            "3*:complete",
+            "3*:complete",
+          ]);
+          expect(contentDownloadStates.map(signature)).toEqual([
+            "0:idle",
+            "0:idle",
+            "0:idle",
+            "0:idle",
+            "0:idle",
+            "0:idle",
+          ]);
+        });
       });
 
       it("deduplicates repeated pre-game semantic states but preserves direction changes", () => {
