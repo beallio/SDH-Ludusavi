@@ -124,6 +124,14 @@ To track synchronization of backup data to other devices, the plugin monitors Sy
   `syncthing_unavailable`; the latter remains reserved for API and initialization
   failures.
 - **Pre-game Boundary**: Pre-game watches do not call the completion endpoint and do not use remote peer lag to extend the launch gate. Their existing folder-local incoming, scan, need, index, and `RemoteDownloadProgress` evidence remains the sole settlement input.
+- **Pre-game Settle and Display Contract**: The frontend decides the strip's displayed
+  status and the settle count independently. A delete-only tail has no content pending,
+  so it displays nothing and, after three consecutive content-complete samples, publishes
+  `COMPLETE`. Missing or transferring content instead resets the count and keeps the
+  launch gate closed. The `!sample.settled` display-branch guard is load-bearing for that
+  gate as well as for the strip: removing it would again treat a settled delete tail as
+  downloading and restore the long launch hold. The reducer tests cover that boundary.
+  Post-game behavior is unchanged because the reset remains phase-guarded.
 
 ## Manual Sync
 
