@@ -72,7 +72,7 @@ def test_pnpm_workspace_contains_supply_chain_policy() -> None:
     for required_text in [
         "minimumReleaseAge: 20160",
         "postcss@8.5.23",
-        "nanoid@3.3.17",
+        "nanoid@3.3.18",
         "storeDir: /tmp/sdh_ludusavi/.pnpm-store",
         "virtualStoreDir: /tmp/sdh_ludusavi/pnpm-virtual-store",
         "sideEffectsCache: false",
@@ -85,8 +85,10 @@ def test_pnpm_workspace_contains_supply_chain_policy() -> None:
         # GHSA-fxqj-rqcc-2cmp (arbitrary .map read): patched in 8.5.23.
         "postcss@<=8.5.22: 8.5.23",
         # GHSA-mwcw-c2x4-8c55 / GHSA-2v37-7h3g-55p8 (unbounded loops in the
-        # non-secure and custom generators): patched in 3.3.16 / 3.3.17.
-        "nanoid@<3.3.17: 3.3.17",
+        # non-secure and custom generators): patched in 3.3.16 / 3.3.18. The
+        # custom-generator advisory first named 3.3.17 as the fix and was later
+        # widened to <3.3.18, which is why this pin moved a second time.
+        "nanoid@<3.3.18: 3.3.18",
         # GHSA-mh99-v99m-4gvg: the vulnerable brace-expansion builds were only
         # reachable through these two legacy build tools, so forcing both to
         # current majors removes the advisory instead of suppressing it.

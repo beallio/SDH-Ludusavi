@@ -30,6 +30,7 @@ EVENT_TYPES = ",".join(
 
 DEFAULT_API_URL = "http://127.0.0.1:8384"
 DEFAULT_ACTIVE_WINDOW_SECONDS = 15.0
+PRE_GAME_SETTLE_QUIET_WINDOW_SECONDS = 3.0
 # Seven post-backup captures spread local activity across 0.051s to 0.111s, so
 # three seconds is about 30x the worst burst. Below roughly 6.5s, first-peer
 # confirmation binds first, making shorter values equivalent in practice.
@@ -114,11 +115,18 @@ class FolderRuntime:
     need_bytes: int = 0
     need_total_items: int = 0
     need_deletes: int = 0
+    need_files: int = 0
+    need_directories: int = 0
+    need_symlinks: int = 0
     global_bytes: int = 0
     local_bytes: int = 0
     in_sync_bytes: int = 0
     pull_errors: int = 0
     watch_error: str = ""
+
+    @property
+    def need_content_items(self) -> int:
+        return self.need_files + self.need_directories + self.need_symlinks
 
 
 @dataclass
@@ -299,6 +307,9 @@ def parse_folder_runtime(data: dict[str, Any]) -> FolderRuntime:
         need_bytes=int_field(data, "needBytes", 0),
         need_total_items=int_field(data, "needTotalItems", 0),
         need_deletes=int_field(data, "needDeletes", 0),
+        need_files=int_field(data, "needFiles", 0),
+        need_directories=int_field(data, "needDirectories", 0),
+        need_symlinks=int_field(data, "needSymlinks", 0),
         global_bytes=int_field(data, "globalBytes", 0),
         local_bytes=int_field(data, "localBytes", 0),
         in_sync_bytes=int_field(data, "inSyncBytes", 0),
