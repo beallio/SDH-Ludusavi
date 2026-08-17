@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 import time
 import math
@@ -282,22 +283,14 @@ def compute_activity_status(
         local_activity.last_local_change_monotonic > 0
         and now - local_activity.last_local_change_monotonic <= settle_quiet_window
     )
-    settle_local_index_recent = (
-        local_activity.last_local_index_monotonic > 0
-        and now - local_activity.last_local_index_monotonic <= settle_quiet_window
-    )
-    settle_sequence_change_recent = (
-        local_activity.last_sequence_change_monotonic > 0
-        and now - local_activity.last_sequence_change_monotonic <= settle_quiet_window
-    )
     settle_scan_progress_recent = (
         local_activity.last_scan_progress_monotonic > 0
         and now - local_activity.last_scan_progress_monotonic <= settle_quiet_window
     )
 
-    receive_needed = (
-        runtime.need_bytes > 0 or runtime.need_total_items > 0 or runtime.need_deletes > 0
-    )
+    # Syncthing's Counts.TotalItems() includes Deleted, so using need_total_items
+    # here would reintroduce delete gating.
+    receive_needed = runtime.need_bytes > 0 or runtime.need_content_items > 0
     preparing = normalized_state in PREPARING_STATES
     scanning = normalized_state in SCANNING_STATES or scan_progress_recent
 
@@ -338,23 +331,20 @@ def compute_activity_status(
         or bool(active_items)
         or item_finished_recent
     )
-    settle_update_in_progress = (
-        active_transfer
-        or receive_needed
-        or preparing
-        or normalized_state in SCANNING_STATES
-        or settle_scan_progress_recent
-        or settle_local_change_recent
-        or settle_local_index_recent
-        or settle_sequence_change_recent
-        or bool(active_items)
-        or item_finished_recent
-    )
-    settled = (
-        normalized_state == "idle"
-        and not settle_update_in_progress
-        and not local_activity.active_download_files
+    content_present = (
+        not receive_needed
+        and local_activity.active_download_files == 0
         and not remote_progress
+        and not active_items
+    )
+    content_state_allows_settlement = normalized_state == "idle" or preparing
+    settled = (
+        content_state_allows_settlement
+        and content_present
+        and not active_transfer
+        and not settle_local_change_recent
+        and not settle_scan_progress_recent
+        and not item_finished_recent
         and runtime.pull_errors == 0
         and not runtime.watch_error
     )
@@ -468,11 +458,13 @@ def process_event(
                 )
     elif event_type == "ItemStarted" and _folder_match():
         item = str(data.get("item") or "unknown")
-        local_activity.active_items[item] = now
+        if data.get("action") != "delete":
+            local_activity.active_items[item] = now
     elif event_type == "ItemFinished" and _folder_match():
         item = str(data.get("item") or "unknown")
         local_activity.active_items.pop(item, None)
-        local_activity.last_item_finished_monotonic = now
+        if data.get("action") != "delete":
+            local_activity.last_item_finished_monotonic = now
     elif event_type == "LocalChangeDetected" and _folder_match():
         local_activity.last_local_change_monotonic = now
     elif event_type == "LocalIndexUpdated" and _folder_match():
@@ -489,17 +481,7 @@ def process_event(
                 local_activity.outbound_observation_hold_deadline_monotonic,
                 now + OUTBOUND_OBSERVATION_HOLD_SECONDS,
             )
-        runtime = FolderRuntime(
-            sequence=sequence or runtime.sequence,
-            need_bytes=runtime.need_bytes,
-            need_total_items=runtime.need_total_items,
-            need_deletes=runtime.need_deletes,
-            global_bytes=runtime.global_bytes,
-            local_bytes=runtime.local_bytes,
-            in_sync_bytes=runtime.in_sync_bytes,
-            pull_errors=runtime.pull_errors,
-            watch_error=runtime.watch_error,
-        )
+        runtime = dataclasses.replace(runtime, sequence=sequence or runtime.sequence)
     elif event_type == "FolderPaused" and _folder_match():
         folder_state = "paused"
     elif event_type == "FolderResumed" and _folder_match():
