@@ -28,10 +28,13 @@ viewport, and toggles BrowserView visibility with the autosync state. The Browse
 owner is normalized through known Decky/Steam wrapper shapes, including `m_browserView`,
 before required methods are used.
 
-Module-level timers own status expiry. Running states have a 930-second safety ceiling,
-active Syncthing statuses remain visible until the monitor replaces them, result states
-hide after 2 seconds, hide events clear pending timers, and plugin dismount clears
-pending timers before destroying the BrowserView.
+Module-level timers own status expiry. Real Ludusavi operations and preview/status checks each
+fail after three minutes. Running states have a separate 210-second cleanup ceiling, active
+Syncthing statuses remain visible until the monitor replaces them, result states hide after 2
+seconds, hide events clear pending timers, and plugin dismount clears pending timers before
+destroying the BrowserView. The backend launch gate retains its distinct four-minute emergency
+ceiling; Syncthing's independent 120-second pre-game and 300/900-second post-game observation
+limits are unchanged.
 
 BrowserView updates hide the reused BrowserView before loading each new visible
 `data:text/html` document. Identical visible statuses are deduplicated and do not navigate, hide, or replay the reveal delay. For genuine status transitions, the view is revealed only after a short guarded delay so the previous status document, such as `GAME SAVE UP TO DATE`, cannot flash before a new `VERIFYING GAME SAVE` document finishes navigating. The reveal callback is

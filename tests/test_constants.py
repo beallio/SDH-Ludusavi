@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import inspect
 
-import pytest
 
 import sdh_ludusavi.constants as constants
 from sdh_ludusavi.constants import (
@@ -23,19 +22,11 @@ def test_constants_defined() -> None:
     assert MAX_INSTALLED_APP_IDS_BYTES == 16384
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 1 pins the requested timeout policy before Task 2 applies it.",
-)
 def test_ludusavi_timeouts_are_capped_at_three_minutes() -> None:
     assert LUDUSAVI_OPERATION_TIMEOUT_SECONDS == 180.0
     assert LUDUSAVI_PREVIEW_TIMEOUT_SECONDS == 180.0
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 1 pins the requested watchdog derivation before Task 2 applies it.",
-)
 def test_watchdog_emergency_ceiling_is_derived_from_the_longest_ludusavi_timeout() -> None:
     assert WATCHDOG_ABSOLUTE_RESUME_SECONDS == 240.0
 

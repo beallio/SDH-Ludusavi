@@ -231,7 +231,11 @@ invalid/stale identity, and any incomplete transition fail closed, unwind the or
 stop when its identity still matches, and best-effort thaw a partial scope. There is no
 PID-signal fallback that can report a successful gate. Renewals verify the stored scope rather
 than requiring the launcher PID to remain alive, and resume, lease expiry, the absolute
-watchdog ceiling, and plugin shutdown thaw that same scope.
+watchdog ceiling, and plugin shutdown thaw that same scope. Real Ludusavi backup, restore, and
+snapshot commands, plus every preview/status check, have a three-minute subprocess ceiling. The
+frontend status strip retains a separate 210-second cleanup boundary, while the backend launch
+gate has a four-minute emergency ceiling. Syncthing's independent 120-second pre-game and
+300/900-second post-game observation limits are unchanged.
 
 Successful transitions are logged as `Froze Steam app scope ... for root PID ...` and
 `Thawed Steam app scope ... for root PID ...`. Acquisition, discovery, transition, renewal,

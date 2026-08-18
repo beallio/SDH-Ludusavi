@@ -29,16 +29,15 @@ CACHE_MARKER_UNCHANGED = object()
 # this many seconds newer than the local save, treat it as ambiguous.
 RECENCY_TIMESTAMP_MARGIN_SECONDS: float = 120.0
 
-# Upper bound for real (non-preview) Ludusavi backup/restore subprocesses.
-# Deliberately generous: Ludusavi-managed cloud sync of large saves over slow
-# links is legitimate. On expiry, subprocess.run kills the child and the
-# operation surfaces as an ordinary failure, releasing the global lock.
-LUDUSAVI_OPERATION_TIMEOUT_SECONDS = 900.0
+# Three-minute upper bound for real (non-preview) Ludusavi backup and restore
+# subprocesses. On expiry, the operation surfaces as an ordinary failure and
+# releases the global lock.
+LUDUSAVI_OPERATION_TIMEOUT_SECONDS = 180.0
 
-# Upper bound for preview/recency Ludusavi subprocesses. Generous because the
-# backup command may perform a manifest update on first run. This also bounds
-# the worst-case launch-gate pause during check_game_start.
-LUDUSAVI_PREVIEW_TIMEOUT_SECONDS = 300.0
+# Three-minute upper bound for Ludusavi preview, recency, and status-check
+# subprocesses. This also bounds the normal launch-gate pause during
+# check_game_start.
+LUDUSAVI_PREVIEW_TIMEOUT_SECONDS = 180.0
 
 # Watchdog: A pause lease is valid for this many seconds from its last renewal.
 LAUNCH_GATE_LEASE_TTL_SECONDS = 30.0
@@ -46,7 +45,9 @@ LAUNCH_GATE_LEASE_TTL_SECONDS = 30.0
 # Watchdog: The frontend should renew a lease every this many seconds.
 LAUNCH_GATE_RENEW_INTERVAL_SECONDS = 5.0
 
-# Watchdog: thaw a frozen Steam app scope after this long UNCONDITIONALLY, even if
-# an operation still claims to be running. Sized to outlast the longest legal
-# operation so it only fires when something is genuinely wedged.
-WATCHDOG_ABSOLUTE_RESUME_SECONDS = LUDUSAVI_OPERATION_TIMEOUT_SECONDS + 60.0
+# Watchdog: four-minute emergency ceiling for a frozen Steam app scope. It is
+# derived from the longest legal Ludusavi command plus one minute, so it only
+# fires when the normal three-minute operation is genuinely wedged.
+WATCHDOG_ABSOLUTE_RESUME_SECONDS = (
+    max(LUDUSAVI_OPERATION_TIMEOUT_SECONDS, LUDUSAVI_PREVIEW_TIMEOUT_SECONDS) + 60.0
+)

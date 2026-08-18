@@ -42,7 +42,7 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
 
   const loggedMessages = () => logMock.mock.calls.map((call) => `${call[0]}:${call[1]}`);
 
-  it.fails("uses a 210-second ceiling for a running Ludusavi status", () => {
+  it("uses a 210-second ceiling for a running Ludusavi status", () => {
     expect(RUNNING_STATUS_HIDE_CEILING_MS).toBe(210_000);
   });
 

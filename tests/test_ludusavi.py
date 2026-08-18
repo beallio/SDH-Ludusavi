@@ -532,10 +532,6 @@ def test_newest_backup_when_returns_none_when_no_when_keys() -> None:
     assert _newest_backup_when(backups) is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 1 requires the three-minute preview timeout before Task 2 applies it.",
-)
 def test_refresh_statuses_forwards_game_names_to_client() -> None:
     calls = []
 
@@ -558,50 +554,30 @@ def test_refresh_statuses_forwards_game_names_to_client() -> None:
     assert ("backups_list", ["Hades"]) in calls
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 1 requires the three-minute operation timeout before Task 2 applies it.",
-)
 def test_adapter_backup_passes_operation_timeout() -> None:
     adapter, client = adapter_with_backups({"games": {}})
     adapter.backup("Hades")
     assert ("backup", ("Hades",), False, 180.0) in client.calls
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 1 requires the three-minute preview timeout before Task 2 applies it.",
-)
 def test_adapter_backup_preview_passes_preview_timeout() -> None:
     adapter, client = adapter_with_backups({"games": {}})
     adapter.backup("Hades", preview=True)
     assert ("backup", ("Hades",), True, 180.0) in client.calls
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 1 requires the three-minute operation timeout before Task 2 applies it.",
-)
 def test_adapter_restore_passes_operation_timeout() -> None:
     adapter, client = adapter_with_backups({"games": {}})
     adapter.restore("Hades")
     assert ("restore", ("Hades",), False, 180.0) in client.calls
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 1 requires the three-minute snapshot timeout before Task 2 applies it.",
-)
 def test_adapter_snapshot_restore_passes_operation_timeout() -> None:
     adapter, client = adapter_with_backups({"games": {}})
     adapter.restore_backup("Hades", "full")
     assert ("restore", ("Hades",), False, 180.0) in client.calls
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 1 requires the three-minute preview timeout before Task 2 applies it.",
-)
 def test_refresh_statuses_uses_preview_timeout() -> None:
     """The bulk preview inside refresh_statuses must pass the preview budget."""
     calls = []
@@ -622,10 +598,6 @@ def test_refresh_statuses_uses_preview_timeout() -> None:
     assert ("backup", None, True, 180.0) in calls
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 1 requires the three-minute recency timeout before Task 2 applies it.",
-)
 def test_compare_recency_restore_preview_uses_preview_timeout() -> None:
     adapter, client = adapter_with_backups(
         backup_data={"games": {"Hades": {"backups": [{"when": "2026-05-10T00:00:00Z"}]}}}
@@ -634,10 +606,6 @@ def test_compare_recency_restore_preview_uses_preview_timeout() -> None:
     assert ("restore", ("Hades",), True, 180.0) in client.calls
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 1 requires the three-minute conflict-preview timeout before Task 2 applies it.",
-)
 def test_get_conflict_metadata_preview_uses_preview_timeout() -> None:
     adapter, client = adapter_with_backups({"games": {}})
     adapter.get_conflict_metadata("Hades")
