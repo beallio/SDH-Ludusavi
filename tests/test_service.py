@@ -1822,7 +1822,7 @@ def test_automatic_lifecycle_checks_wait_for_fresh_data_after_a_running_operatio
     strict=True,
     reason="RED Task 7: automatic mutations must report contention without stale writes",
 )
-@pytest.mark.parametrize("mutation", ["restore", "backup"])
+@pytest.mark.parametrize("mutation", ["restore", "keep_local", "restore_backup", "backup"])
 def test_automatic_mutations_fail_fast_after_a_check_when_a_new_operation_wins_the_lock(
     tmp_path: Path,
     mutation: str,
@@ -1848,6 +1848,20 @@ def test_automatic_mutations_fail_fast_after_a_check_when_a_new_operation_wins_t
             return service.restore_game_on_start(
                 "Hades",
                 "1145360",
+                4567,
+                str(paused["lease_id"]),
+            )
+
+    elif mutation in ("keep_local", "restore_backup"):
+        adapter.recency["Hades"] = "ambiguous"
+        assert service.check_game_start("Hades")["status"] == "conflict"
+        paused = service.pause_game_process(4567)
+
+        def action() -> dict[str, object]:
+            return service.resolve_game_start_conflict(
+                "Hades",
+                "1145360",
+                mutation,
                 4567,
                 str(paused["lease_id"]),
             )
