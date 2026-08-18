@@ -88,7 +88,10 @@ def _is_running(pid: int) -> bool:
     stat_path = Path(f"/proc/{pid}/stat")
     if not stat_path.exists():
         return False
-    return stat_path.read_text(encoding="utf-8").split()[2] != "Z"
+    try:
+        return stat_path.read_text(encoding="utf-8").split()[2] != "Z"
+    except FileNotFoundError:
+        return False
 
 
 def _wait_until_stopped(pid: int, timeout: float = 2.0) -> None:
@@ -98,6 +101,22 @@ def _wait_until_stopped(pid: int, timeout: float = 2.0) -> None:
             return
         time.sleep(0.01)
     raise AssertionError(f"process {pid} remained running after cancellation")
+
+
+def test_process_check_treats_a_vanished_proc_entry_as_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The process can exit after the probe succeeds but before /proc is read."""
+
+    def vanished_proc_entry(self: Path, *, encoding: str) -> str:
+        del self, encoding
+        raise FileNotFoundError
+
+    monkeypatch.setattr(os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    monkeypatch.setattr(Path, "read_text", vanished_proc_entry)
+
+    assert _is_running(4242) is False
 
 
 def test_managed_executor_preserves_pyludusavi_json_text_stdin_and_error_contracts(
