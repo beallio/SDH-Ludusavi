@@ -90,7 +90,7 @@ def _is_running(pid: int) -> bool:
         return False
     try:
         return stat_path.read_text(encoding="utf-8").split()[2] != "Z"
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return False
 
 
@@ -111,6 +111,22 @@ def test_process_check_treats_a_vanished_proc_entry_as_stopped(
     def vanished_proc_entry(self: Path, *, encoding: str) -> str:
         del self, encoding
         raise FileNotFoundError
+
+    monkeypatch.setattr(os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    monkeypatch.setattr(Path, "read_text", vanished_proc_entry)
+
+    assert _is_running(4242) is False
+
+
+def test_process_check_treats_a_proc_lookup_race_as_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Linux can report this equivalent disappearance exception while reading /proc."""
+
+    def vanished_proc_entry(self: Path, *, encoding: str) -> str:
+        del self, encoding
+        raise ProcessLookupError
 
     monkeypatch.setattr(os, "kill", lambda pid, sig: None)
     monkeypatch.setattr(Path, "exists", lambda self: True)
