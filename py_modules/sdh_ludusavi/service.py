@@ -178,7 +178,18 @@ class SDHLudusaviService:
                 "reason": "cancellation_unconfirmed",
                 "retained_gate": True,
             }
-        self._watchdog.stop()
+        if not self._watchdog.stop():
+            self.log(
+                "error",
+                "Launch-gate shutdown could not confirm every guarded callback had finished; "
+                "retaining launch gates",
+                "launch_gate",
+            )
+            return {
+                "status": "failed",
+                "reason": "cancellation_unconfirmed",
+                "retained_gate": True,
+            }
         self._syncthing_watch_manager.stop_all()
         return {"status": "stopped"}
 
