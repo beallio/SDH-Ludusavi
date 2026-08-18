@@ -60,6 +60,11 @@ export type ExitDecision = {
   nextRpc?: "backup" | "handoff";
   stateUpdates: Partial<ExitState>;
 };
+
+function shouldRetainPreGameWatch(result: OperationResult | LifecycleCheckResult): boolean {
+  return result.status !== "failed" && result.reason !== "operation_running";
+}
+
 export function evaluateStartCheck(state: StartState, checkResult: LifecycleCheckResult): StartDecision {
   if (checkResult.status === "skipped" && SILENT_SKIPPED_REASONS.indexOf(checkResult.reason ?? "") !== -1) {
     return {
@@ -109,7 +114,7 @@ export function evaluateStartCheck(state: StartState, checkResult: LifecycleChec
   }
   return {
     commands,
-    stateUpdates: { retainPreGameWatch: checkResult.status !== "failed" }
+    stateUpdates: { retainPreGameWatch: shouldRetainPreGameWatch(checkResult) }
   };
 }
 export function evaluateStartRestore(_state: StartState, result: OperationResult): StartDecision {
@@ -119,7 +124,7 @@ export function evaluateStartRestore(_state: StartState, result: OperationResult
   }
   return {
     commands,
-    stateUpdates: { retainPreGameWatch: result.status !== "failed" }
+    stateUpdates: { retainPreGameWatch: shouldRetainPreGameWatch(result) }
   };
 }
 export function evaluateStartConflictResolution(state: StartState, resolution: ConflictResolution | null, result?: OperationResult): StartDecision {
@@ -141,7 +146,7 @@ export function evaluateStartConflictResolution(state: StartState, resolution: C
   }
   return {
     commands,
-    stateUpdates: { retainPreGameWatch: result.status !== "failed" }
+    stateUpdates: { retainPreGameWatch: shouldRetainPreGameWatch(result) }
   };
 }
 

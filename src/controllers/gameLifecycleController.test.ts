@@ -1231,14 +1231,15 @@ describe("GameLifecycleController", () => {
     });
     controller.start();
 
-    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
-    await vi.runAllTimersAsync();
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 1, bRunning: true });
+    await vi.advanceTimersByTimeAsync(100);
 
     expect(mockStatusSurface.complete).toHaveBeenCalledWith(
       expect.objectContaining({ status: "skipped", reason: "operation_running" }),
       expect.objectContaining({ lifecycle: "lifecycle_start" }),
     );
     expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
+    expect(mockRpc.stopSyncthingActivityWatch).toHaveBeenCalledWith("w1");
   });
 
   it("completes and notifies once when the exit backup loses the operation race", async () => {
