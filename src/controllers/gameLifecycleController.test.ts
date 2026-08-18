@@ -1221,6 +1221,46 @@ describe("GameLifecycleController", () => {
     );
   });
 
+  it.fails("completes and notifies once when the start check times out on another operation", async () => {
+    mockRpc.checkGameStart.mockResolvedValue({ status: "skipped", reason: "operation_running" });
+
+    const controller = createGameLifecycleController({
+      store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "skipped", reason: "operation_running" }),
+      expect.objectContaining({ lifecycle: "lifecycle_start" }),
+    );
+    expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it.fails("completes and notifies once when the exit backup loses the operation race", async () => {
+    mockRpc.checkGameExit.mockResolvedValue({ status: "skipped", reason: "operation_running" });
+
+    const controller = createGameLifecycleController({
+      store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 1, bRunning: false });
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "skipped", reason: "operation_running" }),
+      expect.objectContaining({ lifecycle: "lifecycle_exit" }),
+    );
+    expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
+  });
+
   it("awaits syncthingMonitor.stop() before allocating the next watch", async () => {
     mockStore.isTracked.mockReturnValue(true);
     let stopResolved = false;

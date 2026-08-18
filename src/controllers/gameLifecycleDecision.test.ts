@@ -7,6 +7,57 @@ describe("gameLifecycleDecision", () => {
     expect(SILENT_SKIPPED_REASONS).not.toContain("game_sync_disabled");
   });
 
+  it.fails("keeps coordinator contention visible for start checks", () => {
+    const decision = evaluateStartCheck(
+      {
+        name: "Test Game",
+        appID: "123",
+        tracked: true,
+        autoSyncEnabled: true,
+        paused: true,
+        watchActive: true,
+        retainPreGameWatch: false,
+      },
+      { status: "skipped", reason: "operation_running" },
+    );
+
+    expect(decision.commands).toEqual([
+      {
+        type: "completeStatus",
+        result: { status: "skipped", reason: "operation_running" },
+      },
+      {
+        type: "notifyFailure",
+        result: { status: "skipped", reason: "operation_running" },
+      },
+    ]);
+  });
+
+  it.fails("keeps coordinator contention visible for exit checks", () => {
+    const decision = evaluateExitCheck(
+      {
+        name: "Test Game",
+        appID: "123",
+        tracked: true,
+        autoSyncEnabled: true,
+        watchActive: true,
+        handoffTransferred: false,
+      },
+      { status: "skipped", reason: "operation_running" },
+    );
+
+    expect(decision.commands).toEqual([
+      {
+        type: "completeStatus",
+        result: { status: "skipped", reason: "operation_running" },
+      },
+      {
+        type: "notifyFailure",
+        result: { status: "skipped", reason: "operation_running" },
+      },
+    ]);
+  });
+
   describe("Start", () => {
     const baseState: StartState = {
       name: "Test Game",

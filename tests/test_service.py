@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import sdh_ludusavi.lifecycle as lifecycle_module
 from sdh_ludusavi.service import OperationLockedError, SDHLudusaviService
 from sdh_ludusavi.persistence import JsonSettingsStore
 from sdh_ludusavi.types import GameStatus
@@ -1695,6 +1696,256 @@ def test_concurrent_operations_are_rejected_by_thread_safe_lock(tmp_path: Path) 
     assert not first_thread.is_alive()
     assert first_errors == []
     assert first_result == [{"ok": True}]
+
+
+def test_manual_and_registry_operations_keep_the_fail_fast_coordinator_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = service_with_state(tmp_path)
+    service.refresh_games()
+    coordinator_calls: list[tuple[str, dict[str, object]]] = []
+    original_run_locked = service._coordinator.run_locked
+
+    def observe_run_locked(
+        operation: str,
+        game_name: str | None,
+        callback: object,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        coordinator_calls.append((operation, dict(kwargs)))
+        return original_run_locked(operation, game_name, callback, *args, **kwargs)
+
+    monkeypatch.setattr(service._coordinator, "run_locked", observe_run_locked)
+
+    assert service.force_backup("Hades")["status"] == "backed_up"
+    assert service.refresh_games(force=True)["dependency_error"] is None
+    assert [operation for operation, _kwargs in coordinator_calls] == ["backup", "refresh"]
+    assert all(
+        call_kwargs.get("wait_timeout_seconds") is None for _, call_kwargs in coordinator_calls
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="RED Task 7: automatic checks must wait briefly and decide after acquisition",
+)
+@pytest.mark.parametrize("lifecycle", ["start", "exit"])
+def test_automatic_lifecycle_checks_wait_for_fresh_data_after_a_running_operation_releases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lifecycle: str,
+) -> None:
+    monkeypatch.setattr(
+        lifecycle_module,
+        "LIFECYCLE_OPERATION_WAIT_SECONDS",
+        0.2,
+        raising=False,
+    )
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    active_started = threading.Event()
+    release_active = threading.Event()
+    check_finished = threading.Event()
+    results: list[dict[str, object]] = []
+    errors: list[BaseException] = []
+    preview_has_changes = False
+
+    def active_callback() -> dict[str, object]:
+        active_started.set()
+        assert release_active.wait(timeout=0.5)
+        return {"ok": True}
+
+    def backup(game_name: str, preview: bool = False) -> dict[str, object]:
+        if not preview:
+            return {"ok": True, "game": game_name}
+        return {
+            "games": {
+                game_name: {
+                    "change": "Different",
+                    "files": {"save.dat": {}} if preview_has_changes else {},
+                    "registry": {},
+                }
+            }
+        }
+
+    adapter.backup = backup
+    active = threading.Thread(
+        target=service._run_locked,
+        args=("refresh", None, active_callback),
+        daemon=True,
+    )
+
+    def run_check() -> None:
+        try:
+            if lifecycle == "start":
+                results.append(service.check_game_start("Hades"))
+            else:
+                results.append(service.check_game_exit("Hades"))
+        except BaseException as exc:  # pragma: no cover - asserted after synchronization.
+            errors.append(exc)
+        finally:
+            check_finished.set()
+
+    check = threading.Thread(target=run_check, daemon=True)
+    active.start()
+    assert active_started.wait(timeout=0.2)
+    check.start()
+
+    try:
+        assert not check_finished.wait(timeout=0.02)
+        if lifecycle == "start":
+            adapter.recency["Hades"] = "backup_newer"
+        else:
+            preview_has_changes = True
+        release_active.set()
+        check.join(timeout=0.5)
+
+        assert not check.is_alive()
+        assert errors == []
+        expected = {
+            "status": "needed",
+            "operation": "restore" if lifecycle == "start" else "backup",
+            "game": "Hades",
+        }
+        assert results == [expected]
+    finally:
+        release_active.set()
+        active.join(timeout=0.5)
+        check.join(timeout=0.5)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="RED Task 7: automatic mutations must report contention without stale writes",
+)
+@pytest.mark.parametrize("mutation", ["restore", "backup"])
+def test_automatic_mutations_fail_fast_after_a_check_when_a_new_operation_wins_the_lock(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    adapter = FakeAdapter()
+    adapter.recency["Hades"] = "backup_newer"
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    active_started = threading.Event()
+    release_active = threading.Event()
+
+    def active_callback() -> dict[str, object]:
+        active_started.set()
+        assert release_active.wait(timeout=0.5)
+        return {"ok": True}
+
+    if mutation == "restore":
+        assert service.check_game_start("Hades")["status"] == "needed"
+        paused = service.pause_game_process(4567)
+
+        def action() -> dict[str, object]:
+            return service.restore_game_on_start(
+                "Hades",
+                "1145360",
+                4567,
+                str(paused["lease_id"]),
+            )
+
+    else:
+        assert service.check_game_exit("Hades")["status"] == "needed"
+
+        def action() -> dict[str, object]:
+            return service.backup_game_on_exit("Hades", "1145360")
+
+    active = threading.Thread(
+        target=service._run_locked,
+        args=("refresh", None, active_callback),
+        daemon=True,
+    )
+    active.start()
+    assert active_started.wait(timeout=0.2)
+
+    try:
+        assert action() == {
+            "status": "skipped",
+            "game": "Hades",
+            "reason": "operation_running",
+        }
+        assert adapter.restores == []
+        assert adapter.backups == []
+    finally:
+        release_active.set()
+        active.join(timeout=0.5)
+        service.resume_all_paused_processes()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="RED Task 7: a queued launch check must revalidate its gate before restoring",
+)
+def test_queued_start_revalidates_a_lost_gate_after_the_coordinator_wait(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        lifecycle_module,
+        "LIFECYCLE_OPERATION_WAIT_SECONDS",
+        0.2,
+        raising=False,
+    )
+    adapter = FakeAdapter()
+    adapter.recency["Hades"] = "backup_newer"
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    paused = service.pause_game_process(4567)
+    lease_id = str(paused["lease_id"])
+    active_started = threading.Event()
+    release_active = threading.Event()
+    start_finished = threading.Event()
+    results: list[dict[str, object]] = []
+    errors: list[BaseException] = []
+
+    def active_callback() -> dict[str, object]:
+        active_started.set()
+        assert release_active.wait(timeout=0.5)
+        return {"ok": True}
+
+    active = threading.Thread(
+        target=service._run_locked,
+        args=("refresh", None, active_callback),
+        daemon=True,
+    )
+
+    def run_start() -> None:
+        try:
+            results.append(service.handle_game_start("Hades", "1145360", 4567, lease_id))
+        except BaseException as exc:  # pragma: no cover - asserted after synchronization.
+            errors.append(exc)
+        finally:
+            start_finished.set()
+
+    start = threading.Thread(target=run_start, daemon=True)
+    active.start()
+    assert active_started.wait(timeout=0.2)
+    start.start()
+
+    try:
+        assert not start_finished.wait(timeout=0.02)
+        assert service.resume_game_process(4567, lease_id)["status"] == "resumed"
+        release_active.set()
+        start.join(timeout=0.5)
+
+        assert not start.is_alive()
+        assert errors == []
+        assert results == [{"status": "skipped", "game": "Hades", "reason": "gate_lost"}]
+        assert adapter.restores == []
+    finally:
+        release_active.set()
+        active.join(timeout=0.5)
+        start.join(timeout=0.5)
+        service.resume_all_paused_processes()
 
 
 def test_version_lookup_and_missing_dependency_states_are_logged(
