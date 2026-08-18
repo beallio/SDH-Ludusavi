@@ -1,0 +1,285 @@
+"""Contract tests for the project-owned, cancellable Ludusavi executor."""
+
+from __future__ import annotations
+
+import importlib
+import os
+from pathlib import Path
+import queue
+import sys
+import threading
+import time
+from typing import Any
+
+import pytest
+
+from pyludusavi import LudusaviContractError, LudusaviExecutionError, LudusaviTimeoutError
+
+
+pytestmark = pytest.mark.xfail(
+    strict=True,
+    reason="RED: the project-owned managed Ludusavi executor has not been implemented",
+)
+
+
+_HELPER_SOURCE = r"""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+action = sys.argv[1]
+arguments = sys.argv[2:]
+
+if action == "json":
+    print(json.dumps({"arguments": arguments, "base": os.environ.get("BASE")}))
+elif action == "text":
+    print("plain response")
+elif action == "stdin-json":
+    print(json.dumps({"input": json.load(sys.stdin), "arguments": arguments}))
+elif action == "bad-json":
+    print("not json")
+elif action == "fail":
+    print("expected stdout")
+    print("expected stderr", file=sys.stderr)
+    raise SystemExit(7)
+elif action == "spawn":
+    Path(os.environ["SPAWN_FILE"]).write_text("started", encoding="utf-8")
+elif action == "tree":
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    Path(os.environ["PID_FILE"]).write_text(
+        f"{os.getpid()} {child.pid}", encoding="utf-8"
+    )
+    while True:
+        time.sleep(1)
+else:
+    raise RuntimeError(f"unknown action: {action}")
+"""
+
+
+def _managed_executor_module() -> Any:
+    return importlib.import_module("sdh_ludusavi.ludusavi_executor")
+
+
+def _new_executor(command_prefix: list[str], env: dict[str, str] | None = None) -> Any:
+    module = _managed_executor_module()
+    return module.ManagedLudusaviExecutor(command_prefix, env=env)
+
+
+def _helper_command(tmp_path: Path) -> list[str]:
+    helper = tmp_path / "ludusavi_helper.py"
+    helper.write_text(_HELPER_SOURCE, encoding="utf-8")
+    return [sys.executable, str(helper)]
+
+
+def _wait_for_text(path: Path, timeout: float = 2.0) -> str:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            return path.read_text(encoding="utf-8")
+        time.sleep(0.01)
+    raise AssertionError(f"timed out waiting for helper output at {path.name}")
+
+
+def _is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+
+    stat_path = Path(f"/proc/{pid}/stat")
+    if not stat_path.exists():
+        return False
+    return stat_path.read_text(encoding="utf-8").split()[2] != "Z"
+
+
+def _wait_until_stopped(pid: int, timeout: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _is_running(pid):
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"process {pid} remained running after cancellation")
+
+
+def test_managed_executor_preserves_pyludusavi_json_text_stdin_and_error_contracts(
+    tmp_path: Path,
+) -> None:
+    executor = _new_executor(_helper_command(tmp_path), env={"BASE": "adapter"})
+
+    json_response = executor.execute(["json"], mode="JSON")
+    assert json_response.data == {"arguments": ["--api"], "base": "adapter"}
+    assert json_response.raw == json_response.data
+    assert json_response.warnings == ""
+    assert json_response.command[-2:] == ["json", "--api"]
+
+    text_response = executor.execute(["text"], mode="TEXT")
+    assert text_response.data == "plain response\n"
+    assert text_response.raw == "plain response\n"
+
+    stdin_response = executor.execute(
+        ["stdin-json"], mode="STDIN_JSON", input_data={"game": "Hades"}
+    )
+    assert stdin_response.data == {
+        "input": {"game": "Hades"},
+        "arguments": ["--api"],
+    }
+
+    with pytest.raises(LudusaviExecutionError) as execution_error:
+        executor.execute(["fail"], mode="TEXT")
+    assert execution_error.value.returncode == 7
+    assert execution_error.value.stdout == "expected stdout\n"
+    assert execution_error.value.stderr == "expected stderr\n"
+
+    with pytest.raises(LudusaviContractError):
+        executor.execute(["bad-json"], mode="JSON")
+
+
+def test_managed_executor_merges_per_command_environment_and_preserves_spawn_mode(
+    tmp_path: Path,
+) -> None:
+    spawn_file = tmp_path / "spawned.txt"
+    executor = _new_executor(
+        _helper_command(tmp_path),
+        env={"BASE": "adapter", "SPAWN_FILE": str(spawn_file)},
+    )
+
+    response = executor.execute(["json"], mode="JSON", env={"BASE": "override"})
+    assert response.data["base"] == "override"
+
+    assert executor.execute(["spawn"], mode="SPAWN") is None
+    assert _wait_for_text(spawn_file) == "started"
+
+
+def test_timeout_cancels_and_reaps_the_entire_managed_process_group(tmp_path: Path) -> None:
+    pid_file = tmp_path / "timeout-pids.txt"
+    executor = _new_executor(
+        _helper_command(tmp_path),
+        env={"PID_FILE": str(pid_file)},
+    )
+
+    with pytest.raises(LudusaviTimeoutError) as timeout_error:
+        executor.execute(["tree"], mode="TEXT", timeout=0.1)
+
+    parent_pid, child_pid = (int(pid) for pid in _wait_for_text(pid_file).split())
+    _wait_until_stopped(parent_pid)
+    _wait_until_stopped(child_pid)
+    assert str(tmp_path) not in str(timeout_error.value)
+    assert len(str(timeout_error.value)) < 512
+
+
+def test_token_cancellation_stops_only_its_own_process_group(tmp_path: Path) -> None:
+    executor = _new_executor(_helper_command(tmp_path))
+    first_token: queue.Queue[Any] = queue.Queue()
+    second_token: queue.Queue[Any] = queue.Queue()
+    failures: queue.Queue[BaseException] = queue.Queue()
+
+    def run_tree(token_queue: queue.Queue[Any], pid_file: Path) -> None:
+        try:
+            with executor.operation_scope() as token:
+                token_queue.put(token)
+                executor.execute(
+                    ["tree"], mode="TEXT", timeout=5.0, env={"PID_FILE": str(pid_file)}
+                )
+        except BaseException as exc:
+            failures.put(exc)
+
+    first_pids = tmp_path / "first-pids.txt"
+    second_pids = tmp_path / "second-pids.txt"
+    first_thread = threading.Thread(target=run_tree, args=(first_token, first_pids))
+    second_thread = threading.Thread(target=run_tree, args=(second_token, second_pids))
+    first_thread.start()
+    second_thread.start()
+
+    first = first_token.get(timeout=1)
+    second = second_token.get(timeout=1)
+    first_parent, first_child = (int(pid) for pid in _wait_for_text(first_pids).split())
+    second_parent, second_child = (int(pid) for pid in _wait_for_text(second_pids).split())
+
+    first.cancel()
+    first_thread.join(timeout=2)
+    assert not first_thread.is_alive()
+    cancelled_error = getattr(_managed_executor_module(), "LudusaviOperationCancelledError")
+    assert isinstance(failures.get(timeout=1), cancelled_error)
+    _wait_until_stopped(first_parent)
+    _wait_until_stopped(first_child)
+    assert _is_running(second_parent)
+    assert _is_running(second_child)
+
+    second.cancel()
+    second_thread.join(timeout=2)
+    assert not second_thread.is_alive()
+    assert isinstance(failures.get(timeout=1), cancelled_error)
+    _wait_until_stopped(second_parent)
+    _wait_until_stopped(second_child)
+
+
+def test_completed_token_cannot_cancel_a_later_operation_even_if_a_pid_is_reused(
+    tmp_path: Path,
+) -> None:
+    executor = _new_executor(_helper_command(tmp_path))
+
+    with executor.operation_scope() as completed_token:
+        assert executor.execute(["text"], mode="TEXT").data == "plain response\n"
+    completed_token.cancel()
+    completed_token.cancel()
+
+    active_token: queue.Queue[Any] = queue.Queue()
+    failures: queue.Queue[BaseException] = queue.Queue()
+    active_pids = tmp_path / "active-pids.txt"
+
+    def run_later_tree() -> None:
+        try:
+            with executor.operation_scope() as token:
+                active_token.put(token)
+                executor.execute(
+                    ["tree"], mode="TEXT", timeout=5.0, env={"PID_FILE": str(active_pids)}
+                )
+        except BaseException as exc:
+            failures.put(exc)
+
+    active_thread = threading.Thread(target=run_later_tree)
+    active_thread.start()
+    later_token = active_token.get(timeout=1)
+    later_parent, later_child = (int(pid) for pid in _wait_for_text(active_pids).split())
+
+    completed_token.cancel()
+    assert _is_running(later_parent)
+    assert _is_running(later_child)
+
+    later_token.cancel()
+    active_thread.join(timeout=2)
+    assert not active_thread.is_alive()
+    cancelled_error = getattr(_managed_executor_module(), "LudusaviOperationCancelledError")
+    assert isinstance(failures.get(timeout=1), cancelled_error)
+    _wait_until_stopped(later_parent)
+    _wait_until_stopped(later_child)
+
+
+def test_adapter_installs_managed_executor_without_breaking_new_only_test_clients(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import pyludusavi
+
+    from sdh_ludusavi.ludusavi import PyludusaviAdapter
+
+    class FakeLudusavi:
+        command_prefix = _helper_command(tmp_path)
+
+        def __init__(self, **kwargs: object) -> None:
+            self.executor = object()
+
+    monkeypatch.setattr(pyludusavi, "Ludusavi", FakeLudusavi)
+    adapter = PyludusaviAdapter()
+    assert isinstance(adapter._client.executor, _managed_executor_module().ManagedLudusaviExecutor)
+
+    class NewOnlyClient:
+        def backup(self, **kwargs: object) -> Any:
+            return type("Response", (), {"data": {"games": {}}})()
+
+    test_adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
+    test_adapter._client = NewOnlyClient()
+    assert test_adapter.backup("Hades") == {"games": {}}
