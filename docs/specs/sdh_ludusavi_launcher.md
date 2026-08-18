@@ -638,8 +638,19 @@ Device evidence from three launches on 2026-07-14 shows that scope creation foll
 | 22:13 (pid 5334) | 10.435 | 10.937 (~502ms hold) | 10.991 | +556ms | +54ms |
 | 22:21 (pid 6074) | 19.498 | 19.999 (~501ms hold) | 20.052 | +554ms | +53ms |
 
-Both gate types use renewable leases. Immediately before a conflict choice restores files
-into the game's save directory, the backend must verify that the exact lease is unexpired
-and that its gate is still held. A missing, mismatched, expired, resumed, or thawed gate
-fails closed with `gate_lost`; keeping the local save does not require this restore-side
-check because that path copies saves outward.
+Both gate types use renewable leases. Every start-side mutation requires the exact backend-owned
+`(pid, lease_id)` pair: the normal restore and both conflict choices, including `keep_local`.
+Copying live saves outward still changes save state during launch, so it is not exempt from the
+launch gate. After the operation coordinator is acquired, the backend atomically verifies and
+pins the matching frozen lease before Ludusavi starts. A missing, mismatched, expired, resumed,
+thawed, or concurrently released gate fails closed with `gate_lost` and makes no mutation; the
+transport-level optional arguments exist only so older callers receive that structured result.
+
+The guarded operation owns the matching managed Ludusavi cancellation scope. Explicit resume,
+lease expiry, the 240-second watchdog emergency boundary, and plugin shutdown request
+token-scoped cancellation, wait for the command worker to acknowledge completion, and only then
+thaw the scope. If the process group cannot be confirmed reaped, the failure remains fail-closed
+and the gate is retained. Both real Ludusavi commands and preview/status checks have a 180-second
+subprocess limit. Automatic lifecycle checks may wait for an active coordinator operation for up
+to 30 seconds so their decisions use fresh data; start-side mutations remain fail-fast, returning
+the user-visible `operation_running` outcome rather than copying from a stale decision.
