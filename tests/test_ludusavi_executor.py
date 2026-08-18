@@ -73,10 +73,50 @@ def _helper_command(tmp_path: Path) -> list[str]:
 def _wait_for_text(path: Path, timeout: float = 2.0) -> str:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if path.exists():
-            return path.read_text(encoding="utf-8")
+        try:
+            output = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            output = ""
+        if output:
+            return output
         time.sleep(0.01)
     raise AssertionError(f"timed out waiting for helper output at {path.name}")
+
+
+def test_wait_for_text_waits_for_populated_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Helper processes can create their output file before its content is written."""
+
+    output_path = tmp_path / "helper-output.txt"
+    output_path.touch()
+    first_read = threading.Event()
+    original_read_text = Path.read_text
+
+    def record_output_read(
+        path: Path,
+        encoding: str | None = None,
+        errors: str | None = None,
+    ) -> str:
+        output = original_read_text(path, encoding=encoding, errors=errors)
+        if path == output_path:
+            first_read.set()
+        return output
+
+    monkeypatch.setattr(Path, "read_text", record_output_read)
+
+    def populate_output() -> None:
+        assert first_read.wait(timeout=1.0)
+        output_path.write_text("ready", encoding="utf-8")
+
+    writer = threading.Thread(target=populate_output)
+    writer.start()
+    try:
+        assert _wait_for_text(output_path, timeout=1.0) == "ready"
+    finally:
+        writer.join(timeout=1.0)
+    assert not writer.is_alive()
 
 
 def _is_running(pid: int) -> bool:
