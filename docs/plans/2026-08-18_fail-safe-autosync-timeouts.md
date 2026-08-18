@@ -511,9 +511,9 @@ but every round still runs `scripts/orchestration/run-quality-gates` before comp
 Required focused verification:
 
 ```bash
-./run.sh uv run pytest tests/test_constants.py tests/test_ludusavi.py tests/test_ludusavi_executor.py
-./run.sh uv run pytest tests/test_coordinator.py tests/test_watchdog.py tests/test_watchdog_lease.py
-./run.sh uv run pytest tests/test_lifecycle.py tests/test_service.py tests/test_main.py tests/test_main_rpc.py tests/test_compatibility.py
+./run.sh uv run pytest -o addopts='' tests/test_constants.py tests/test_ludusavi.py tests/test_ludusavi_executor.py
+./run.sh uv run pytest -o addopts='' tests/test_coordinator.py tests/test_watchdog.py tests/test_watchdog_lease.py
+./run.sh uv run pytest -o addopts='' tests/test_lifecycle.py tests/test_service.py tests/test_main.py tests/test_main_rpc.py tests/test_compatibility.py
 ./run.sh pnpm exec vitest run src/controllers/launchGateLease.test.ts src/controllers/gameLifecycleController.test.ts src/controllers/gameLifecycleDecision.test.ts src/surfaces/autoSyncStatusSurface.suppression.test.ts
 ./run.sh pnpm run typecheck
 ./run.sh pnpm run build
