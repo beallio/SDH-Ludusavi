@@ -23,12 +23,19 @@
       "src/surfaces/autoSyncStatusSurface.tsx"
     ],
     "tests": [
+      "tests/test_backup_browser.py",
+      "tests/test_compatibility.py",
       "tests/test_constants.py",
       "tests/test_coordinator.py",
+      "tests/test_decision_logging.py",
+      "tests/test_last_operation_sync.py",
       "tests/test_ludusavi.py",
       "tests/test_ludusavi_executor.py",
       "tests/test_lifecycle.py",
+      "tests/test_main.py",
+      "tests/test_recency_direction.py",
       "tests/test_service.py",
+      "tests/test_status_flow_diagram.py",
       "tests/test_watchdog.py",
       "src/controllers/gameLifecycleController.test.ts",
       "src/controllers/gameLifecycleDecision.test.ts",
@@ -48,14 +55,16 @@
     "Task 3 established the missing project-owned executor API, process-group timeout/reap behavior, token-scoped cancellation, PID-reuse protection, and adapter installation as RED coverage before the executor was added.",
     "Task 5 established missing, stale, expired, thawed, and replacement-gate rejection; cancellation-before-thaw; shutdown ordering; and zero-mutation behavior without the exact gate before backend-gate implementation.",
     "Task 7 established bounded coordinator waiting for lifecycle checks, fail-fast mutations, fresh-state decisions, and visible `operation_running` outcomes before contention behavior was implemented.",
-    "Task 9 added `test_process_check_treats_a_proc_lookup_race_as_stopped`. It failed before the helper change with an uncaught `ProcessLookupError` from `Path.read_text()` after the process probe succeeded."
+    "Task 9 added `test_process_check_treats_a_proc_lookup_race_as_stopped`. It failed before the helper change with an uncaught `ProcessLookupError` from `Path.read_text()` after the process probe succeeded.",
+    "Task 9 also added `test_wait_for_text_waits_for_populated_file`. It failed before the helper fix because the empty output file was returned as an empty string before its writer populated it."
   ],
   "mutation_checks": [
     "Restoring an old timeout value makes the exact-value timeout-policy test fail.",
     "Bypassing managed process-group termination makes the descendant-process assertion fail.",
     "Bypassing a backend launch-gate guard makes the in-flight lease-loss safety test fail.",
     "Restoring non-blocking lifecycle checks or treating `operation_running` as silent makes the focused contention tests fail.",
-    "The Task 9 helper regression passes only when `_is_running()` treats both `FileNotFoundError` and `ProcessLookupError` from the disappearing `/proc/<pid>/stat` entry as a stopped process."
+    "The Task 9 helper regression passes only when `_is_running()` treats both `FileNotFoundError` and `ProcessLookupError` from the disappearing `/proc/<pid>/stat` entry as a stopped process.",
+    "The empty PID-file regression passes only when `_wait_for_text()` waits for non-empty helper output instead of returning as soon as its file exists."
   ],
   "design_decisions": [
     "The project-owned executor preserves pyludusavi's public response/error contract while owning new-session process groups and token-scoped cancellation; vendored pyludusavi files remain unchanged.",
@@ -73,12 +82,24 @@
     "task_9_focused_green": {
       "command": "./run.sh uv run pytest -o addopts='' tests/test_ludusavi_executor.py tests/test_status_flow_diagram.py",
       "exit_code": 0,
-      "result": "16 passed in 0.38s."
+      "result": "17 passed after both executor helper races were covered."
+    },
+    "task_9_empty_file_red_proof": {
+      "command": "./run.sh uv run pytest -o addopts='' tests/test_ludusavi_executor.py -k wait_for_text_waits_for_populated_file",
+      "exit_code": 1,
+      "result": "1 failed and 12 deselected; `_wait_for_text()` returned an empty string from the newly created but not-yet-populated file."
     },
     "full_quality_gates": {
       "command": "./run.sh scripts/orchestration/run-quality-gates",
       "exit_code": 0,
-      "result": "33 frontend test files and 358 frontend tests passed; TypeScript typecheck and Rollup build passed; Ruff check and formatting passed; ty passed; 1027 Python tests passed."
+      "result": "33 frontend test files and 358 frontend tests passed; TypeScript typecheck and Rollup build passed; Ruff check and formatting passed; ty passed; 1028 Python tests passed."
+    },
+    "final_reconciliation": {
+      "vendored_pyludusavi": "No vendored pyludusavi diff remained after final inspection.",
+      "tracked_worktree": "The tracked worktree was clean after the final commits.",
+      "python_cache_isolation": "No Python cache was generated in the repository during this session; the wrapper directs Python bytecode and tool caches to /tmp/sdh_ludusavi.",
+      "preexisting_ignored_python_caches": "Ignored repository __pycache__ directories observed with June/July timestamps predate this session.",
+      "frontend_ignored_outputs": "Ignored node_modules, dist, and out are frontend dependency, build, and package output respectively, not Python cache evidence."
     }
   },
   "deferred_steam_deck_device_verification": [
