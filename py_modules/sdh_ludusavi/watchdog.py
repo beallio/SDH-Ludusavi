@@ -239,8 +239,8 @@ class ProcessWatchdog:
                     None,
                 )
 
-    def stop(self) -> None:
-        """Shut down the watchdog thread and thaw every tracked scope."""
+    def stop(self) -> bool:
+        """Shut down the watchdog and report whether every tracked gate was released."""
         self._watchdog_stop.set()
         thread = self._watchdog_thread
         if thread is not None and thread.is_alive():
@@ -250,7 +250,7 @@ class ProcessWatchdog:
             with self._paused_pids_lock:
                 retained = tuple(self._paused_pids.values())
             if not retained:
-                return
+                return True
             if attempt < SHUTDOWN_THAW_ATTEMPTS:
                 time.sleep(SHUTDOWN_THAW_RETRY_SECONDS)
         units, attempts = _retained_summary(retained)
@@ -261,6 +261,7 @@ class ProcessWatchdog:
             "launch_gate",
             None,
         )
+        return False
 
     def _verified_frozen(self, scope: SteamAppScope) -> ScopeTransitionResult:
         if not self._scope_controller.freeze_requested(scope):

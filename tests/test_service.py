@@ -1245,6 +1245,74 @@ def test_service_stop_returns_failure_without_thaw_when_cancellation_cannot_be_c
         service.resume_all_paused_processes()
 
 
+def test_service_stop_retains_gate_when_guarded_callback_outlives_successful_adapter_shutdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful executor shutdown cannot override an unconfirmed guarded callback."""
+    from unittest.mock import MagicMock
+
+    class SuccessfulShutdownBlockedRestoreAdapter(FakeAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.restore_started = threading.Event()
+            self.allow_restore_return = threading.Event()
+            self.shutdown_calls = 0
+
+        def restore(self, game_name: str, preview: bool = False) -> dict[str, object]:
+            if preview:
+                return super().restore(game_name, preview=True)
+            self.restore_started.set()
+            assert self.allow_restore_return.wait(timeout=1)
+            return super().restore(game_name)
+
+        def shutdown(self) -> bool:
+            self.shutdown_calls += 1
+            return True
+
+    monkeypatch.setattr("sdh_ludusavi.watchdog.GUARDED_OPERATION_RELEASE_SECONDS", 0.01)
+    adapter = SuccessfulShutdownBlockedRestoreAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    paused = service.pause_game_process(4567)
+    lease = service._watchdog._paused_pids[4567]
+    scope_controller = service._watchdog._scope_controller
+    syncthing_watch_manager = MagicMock()
+    service._syncthing_watch_manager = syncthing_watch_manager
+    restore_errors: list[BaseException] = []
+
+    def restore() -> None:
+        try:
+            service.restore_game_on_start("Hades", "1145360", 4567, str(paused["lease_id"]))
+        except BaseException as exc:  # pragma: no cover - asserted below after cleanup.
+            restore_errors.append(exc)
+
+    worker = threading.Thread(target=restore, daemon=True)
+    worker.start()
+    try:
+        assert adapter.restore_started.wait(timeout=1)
+
+        stopped = service.stop()
+
+        assert stopped == {
+            "status": "failed",
+            "reason": "cancellation_unconfirmed",
+            "retained_gate": True,
+        }
+        assert adapter.shutdown_calls == 1
+        assert service._watchdog._paused_pids[4567] is lease
+        assert scope_controller.thaw_calls == []
+        syncthing_watch_manager.stop_all.assert_not_called()
+    finally:
+        adapter.allow_restore_return.set()
+        worker.join(timeout=1)
+        service.resume_all_paused_processes()
+
+    assert not worker.is_alive()
+    assert restore_errors == []
+
+
 def test_check_game_start_reports_conflict_for_ambiguous_recency(tmp_path: Path) -> None:
     adapter = FakeAdapter()
     service = service_with_state(tmp_path, adapter)
