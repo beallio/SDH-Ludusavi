@@ -148,7 +148,7 @@ class ManagedLudusaviExecutor(LudusaviExecutor):
                 stdout, stderr = process.communicate(input=stdin_content, timeout=timeout)
             except subprocess.TimeoutExpired:
                 self._request_cancel(record, wait_for_completion=False)
-                self._reap_after_timeout(process)
+                self._reap_after_timeout(record)
                 raise LudusaviTimeoutError("Ludusavi command exceeded its configured timeout")
 
             if record.cancellation_requested.is_set():
@@ -177,7 +177,7 @@ class ManagedLudusaviExecutor(LudusaviExecutor):
         for record in records:
             record.cancellation_requested.set()
             self._request_cancel(record, wait_for_completion=False)
-        return all(self._wait_for_completion(record) for record in records)
+        return self._wait_for_records(records)
 
     def shutdown(self) -> bool:
         """Reject new managed commands and cancel every command already running."""
@@ -224,7 +224,7 @@ class ManagedLudusaviExecutor(LudusaviExecutor):
         for record in records:
             record.cancellation_requested.set()
             self._request_cancel(record, wait_for_completion=False)
-        return all(self._wait_for_completion(record) for record in records)
+        return self._wait_for_records(records)
 
     def _request_cancel(self, record: _ProcessRecord, *, wait_for_completion: bool) -> bool:
         record.cancellation_requested.set()
@@ -239,9 +239,17 @@ class ManagedLudusaviExecutor(LudusaviExecutor):
         self._signal_process_group(record, signal.SIGKILL)
         return record.completion.wait(_KILL_GRACE_SECONDS)
 
+    def _wait_for_records(self, records: tuple[_ProcessRecord, ...]) -> bool:
+        """Wait for every captured record even when an earlier one cannot be reaped."""
+        all_completed = True
+        for record in records:
+            if not self._wait_for_completion(record):
+                all_completed = False
+        return all_completed
+
     def _signal_process_group(self, record: _ProcessRecord, sig: signal.Signals) -> None:
         with record.state_lock:
-            if record.completion.is_set():
+            if record.completion.is_set() or record.process.returncode is not None:
                 return
             if sig == signal.SIGTERM:
                 if record.terminate_sent:
@@ -256,21 +264,15 @@ class ManagedLudusaviExecutor(LudusaviExecutor):
             except ProcessLookupError:
                 return
 
-    def _reap_after_timeout(self, process: subprocess.Popen[str]) -> None:
+    def _reap_after_timeout(self, record: _ProcessRecord) -> None:
+        process = record.process
         try:
             process.communicate(timeout=_TERMINATE_GRACE_SECONDS)
             return
         except subprocess.TimeoutExpired:
             pass
-        self._signal_process_group_for_timeout(process)
+        self._signal_process_group(record, signal.SIGKILL)
         try:
             process.communicate(timeout=_KILL_GRACE_SECONDS)
         except subprocess.TimeoutExpired:
             raise LudusaviTimeoutError("Ludusavi command did not exit after cancellation") from None
-
-    @staticmethod
-    def _signal_process_group_for_timeout(process: subprocess.Popen[str]) -> None:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            return
