@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { evaluateStartCheck, evaluateStartConflictResolution, evaluatePreGameQuiescence, evaluateExitCheck, evaluateExitBackup, evaluateExitHandoff, getStartCleanup, getExitCleanup, SILENT_SKIPPED_REASONS } from "./gameLifecycleDecision";
+import { evaluateStartCheck, evaluateStartRestore, evaluateStartConflictResolution, evaluatePreGameQuiescence, evaluateExitCheck, evaluateExitBackup, evaluateExitHandoff, getStartCleanup, getExitCleanup, SILENT_SKIPPED_REASONS } from "./gameLifecycleDecision";
 import type { StartState, ExitState } from "./gameLifecycleDecision";
 
 describe("gameLifecycleDecision", () => {
@@ -88,6 +88,15 @@ describe("gameLifecycleDecision", () => {
       expect(decision.commands).toContainEqual(expect.objectContaining({ type: "notifyFailure" }));
     });
 
+    it.fails("keeps coordinator contention visible for the start restore action", () => {
+      const result = { status: "skipped" as const, game: "Test Game", reason: "operation_running" };
+
+      expect(evaluateStartRestore(baseState, result).commands).toEqual([
+        { type: "completeStatus", result },
+        { type: "notifyFailure", result },
+      ]);
+    });
+
     it("maps an interrupted active pre-game transfer to one safe failure", () => {
       const decision = evaluatePreGameQuiescence({ status: "timeout", activityObserved: true });
       expect(decision).toEqual({
@@ -109,6 +118,24 @@ describe("gameLifecycleDecision", () => {
           type: "completeStatus",
           result: { status: "skipped", game: "Test Game", reason: "conflict_unresolved" },
         },
+      ]);
+    });
+
+    it.fails("keeps coordinator contention visible for the keep-local conflict action", () => {
+      const result = { status: "skipped" as const, game: "Test Game", reason: "operation_running" };
+
+      expect(evaluateStartConflictResolution(baseState, "keep_local", result).commands).toEqual([
+        { type: "completeStatus", result },
+        { type: "notifyFailure", result },
+      ]);
+    });
+
+    it.fails("keeps coordinator contention visible for the restore-backup conflict action", () => {
+      const result = { status: "skipped" as const, game: "Test Game", reason: "operation_running" };
+
+      expect(evaluateStartConflictResolution(baseState, "restore_backup", result).commands).toEqual([
+        { type: "completeStatus", result },
+        { type: "notifyFailure", result },
       ]);
     });
     
@@ -143,6 +170,15 @@ describe("gameLifecycleDecision", () => {
 
       expect(decision.commands).toEqual([{ type: "completeStatus", result }]);
       expect(decision.nextRpc).toBe("handoff");
+    });
+
+    it.fails("keeps coordinator contention visible for the exit backup action", () => {
+      const result = { status: "skipped" as const, game: "Test Game", reason: "operation_running" };
+
+      expect(evaluateExitBackup(baseState, result).commands).toEqual([
+        { type: "completeStatus", result },
+        { type: "notifyFailure", result },
+      ]);
     });
 
     it("publishes uploading when the post-game handoff reports buffered peer activity", () => {
