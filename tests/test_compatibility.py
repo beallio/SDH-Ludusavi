@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+import re
+
+import pytest
 
 from sdh_ludusavi.service import SDHLudusaviService
 from sdh_ludusavi.persistence import JsonSettingsStore
@@ -88,8 +91,8 @@ EXPECTED_METHODS: dict[str, list[str]] = {
         "gate_pid",
         "gate_lease_id",
     ],
-    "restore_game_on_start": ["game_name", "app_id"],
-    "handle_game_start": ["game_name", "app_id"],
+    "restore_game_on_start": ["game_name", "app_id", "gate_pid", "gate_lease_id"],
+    "handle_game_start": ["game_name", "app_id", "gate_pid", "gate_lease_id"],
     "check_game_exit": ["game_name", "app_id"],
     "backup_game_on_exit": ["game_name", "app_id"],
     "handle_game_exit": ["game_name", "app_id"],
@@ -106,6 +109,10 @@ EXPECTED_METHODS: dict[str, list[str]] = {
 }
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="RED: Task 5 pins the gate identity on restore and compatibility façade methods.",
+)
 def test_facade_method_signatures(tmp_path: Path) -> None:
     service = SDHLudusaviService(
         adapter=DummyAdapter(),
@@ -126,6 +133,43 @@ def test_facade_method_signatures(tmp_path: Path) -> None:
         assert method is not None, f"main.py calls service.{name} but it does not exist"
         assert inspect.ismethod(method), name
         assert list(inspect.signature(method).parameters) == params, name
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="RED: Task 5 requires the exact gate identity across Python and TypeScript launch RPCs.",
+)
+def test_start_mutation_contracts_propagate_pid_and_lease_id_across_every_boundary() -> None:
+    from sdh_ludusavi.lifecycle import GameLifecycleManager
+
+    for method in (
+        SDHLudusaviService.restore_game_on_start,
+        SDHLudusaviService.handle_game_start,
+        GameLifecycleManager.restore_game_on_start,
+        GameLifecycleManager.handle_game_start,
+    ):
+        assert list(inspect.signature(method).parameters)[-2:] == ["gate_pid", "gate_lease_id"]
+
+    rpc_source = Path("src/api/ludusaviRpc.ts").read_text(encoding="utf-8")
+    lifecycle_rpc_source = Path("src/controllers/gameLifecycleRpc.ts").read_text(encoding="utf-8")
+    controller_source = Path("src/controllers/gameLifecycleController.tsx").read_text(
+        encoding="utf-8"
+    )
+
+    assert re.search(
+        r"restoreGameOnStartCall\s*=\s*callable<\[\s*gameName: string,\s*"
+        r"app_id\?: string,\s*gatePid\?: number,\s*gateLeaseId\?: string",
+        rpc_source,
+        re.DOTALL,
+    )
+    assert re.search(
+        r"restoreGameOnStart:\s*\(gameName: string, appID\?: string, gatePid\?: number, "
+        r"gateLeaseId\?: string\)",
+        lifecycle_rpc_source,
+    )
+    assert (
+        "restoreGameOnStart(name, appID, pauseHandle.pid, pauseHandle.leaseId)" in controller_source
+    )
 
 
 def test_sdh_ludusavi_service_facade_behavior(tmp_path: Path) -> None:
