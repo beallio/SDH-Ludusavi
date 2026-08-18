@@ -146,9 +146,8 @@ def get_deps():
     gateway = MagicMock()
     history = MagicMock()
     # Mock run_locked to execute immediately
-    run_locked = MagicMock(side_effect=lambda op, game, fn: fn())
+    run_locked = MagicMock(side_effect=lambda op, game, fn, **_kwargs: fn())
     is_auto_sync_enabled = MagicMock(return_value=False)
-    is_coordinator_running = MagicMock(return_value=False)
     log = MagicMock()
     skip = MagicMock(return_value={"status": "skipped"})
     conflict_metadata = MagicMock()
@@ -157,7 +156,6 @@ def get_deps():
         registry=registry,
         gateway=gateway,
         history=history,
-        is_coordinator_running=is_coordinator_running,
         run_locked=run_locked,
         is_auto_sync_enabled=is_auto_sync_enabled,
         is_game_sync_enabled=lambda _name: True,

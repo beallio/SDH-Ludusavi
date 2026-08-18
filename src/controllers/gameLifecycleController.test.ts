@@ -529,6 +529,76 @@ describe("GameLifecycleController", () => {
     expect(mockRpc.resumeGameProcess).toHaveBeenCalledOnce();
   });
 
+  it("passes the exact backend launch gate to the start restore RPC", async () => {
+    mockRpc.checkGameStart.mockResolvedValue({ status: "needed", operation: "restore" });
+    mockRpc.startSyncthingActivityWatch.mockResolvedValue({ status: "watching", watch_id: "w1" });
+    mockRpc.getSyncthingActivity.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: { status: "IDLE", folder_state: "idle", settled: true, timestamp_unix: 1 },
+    });
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(mockRpc.restoreGameOnStart).toHaveBeenCalledWith(
+      "Hades",
+      "1145300",
+      2,
+      "mock_lease",
+    );
+  });
+
+  it("keeps the lease-release acknowledgement in the renewal-loss failure path", async () => {
+    let acknowledgeCancellation: (() => void) | undefined;
+    mockRpc.checkGameStart.mockResolvedValue({ status: "needed", operation: "restore" });
+    mockRpc.startSyncthingActivityWatch.mockResolvedValue({ status: "watching", watch_id: "w1" });
+    mockRpc.getSyncthingActivity.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: { status: "IDLE", folder_state: "idle", settled: true, timestamp_unix: 1 },
+    });
+    mockRpc.restoreGameOnStart.mockReturnValue(new Promise(() => {}));
+    mockRpc.renewGameProcessPause.mockResolvedValue({ status: "failed", message: "lease_lost" });
+    mockRpc.resumeGameProcess.mockReturnValue(new Promise((resolve) => {
+      acknowledgeCancellation = () => resolve({ status: "resumed", pid: 2 });
+    }));
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.advanceTimersByTimeAsync(5_001);
+
+    expect(mockRpc.resumeGameProcess).toHaveBeenCalledWith(2, "mock_lease");
+    expect(mockRpc.restoreGameOnStart).toHaveBeenCalledWith(
+      "Hades",
+      "1145300",
+      2,
+      "mock_lease",
+    );
+    expect(mockSyncGlobalHistory).not.toHaveBeenCalled();
+    acknowledgeCancellation?.();
+    await vi.runAllTimersAsync();
+    expect(mockSyncGlobalHistory).toHaveBeenCalledOnce();
+    expect(mockNotifyFailure).toHaveBeenCalledOnce();
+  });
+
   it("fails safely after active pre-game polling is interrupted and still resumes", async () => {
     mockRpc.checkGameStart.mockResolvedValue({ status: "skipped", reason: "local_current" });
     mockRpc.startSyncthingActivityWatch.mockResolvedValue({ status: "watching", watch_id: "w1" });
@@ -1149,6 +1219,137 @@ describe("GameLifecycleController", () => {
       expect.objectContaining({ status: "failed" }),
       expect.any(Object)
     );
+  });
+
+  it("completes and notifies once when the start check times out on another operation", async () => {
+    mockRpc.checkGameStart.mockResolvedValue({ status: "skipped", reason: "operation_running" });
+
+    const controller = createGameLifecycleController({
+      store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 1, bRunning: true });
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(mockStatusSurface.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "skipped", reason: "operation_running" }),
+      expect.objectContaining({ lifecycle: "lifecycle_start" }),
+    );
+    expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
+    expect(mockRpc.stopSyncthingActivityWatch).toHaveBeenCalledWith("w1");
+  });
+
+  it("completes and notifies once when the exit backup loses the operation race", async () => {
+    mockRpc.checkGameExit.mockResolvedValue({ status: "skipped", reason: "operation_running" });
+
+    const controller = createGameLifecycleController({
+      store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 1, bRunning: false });
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "skipped", reason: "operation_running" }),
+      expect.objectContaining({ lifecycle: "lifecycle_exit" }),
+    );
+    expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes and notifies once when the start restore loses the operation race", async () => {
+    mockRpc.checkGameStart.mockResolvedValue({ status: "needed", operation: "restore" });
+    mockRpc.restoreGameOnStart.mockResolvedValue({ status: "skipped", reason: "operation_running" });
+
+    const controller = createGameLifecycleController({
+      store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.complete).toHaveBeenCalledTimes(1);
+    expect(mockStatusSurface.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "skipped", reason: "operation_running" }),
+      expect.objectContaining({ lifecycle: "lifecycle_start" }),
+    );
+    expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes and notifies once when the keep-local conflict action loses the operation race", async () => {
+    mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
+    mockResolveConflict.mockResolvedValue("keep_local");
+    mockRpc.resolveGameStartConflict.mockResolvedValue({ status: "skipped", reason: "operation_running" });
+
+    const controller = createGameLifecycleController({
+      store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.complete).toHaveBeenCalledTimes(1);
+    expect(mockStatusSurface.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "skipped", reason: "operation_running" }),
+      expect.objectContaining({ lifecycle: "lifecycle_start" }),
+    );
+    expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes and notifies once when the restore-backup conflict action loses the operation race", async () => {
+    mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
+    mockResolveConflict.mockResolvedValue("restore_backup");
+    mockRpc.resolveGameStartConflict.mockResolvedValue({ status: "skipped", reason: "operation_running" });
+
+    const controller = createGameLifecycleController({
+      store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.complete).toHaveBeenCalledTimes(1);
+    expect(mockStatusSurface.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "skipped", reason: "operation_running" }),
+      expect.objectContaining({ lifecycle: "lifecycle_start" }),
+    );
+    expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes and notifies once when the exit backup action loses the operation race", async () => {
+    mockRpc.checkGameExit.mockResolvedValue({ status: "needed", operation: "backup" });
+    mockRpc.backupGameOnExit.mockResolvedValue({ status: "skipped", reason: "operation_running" });
+
+    const controller = createGameLifecycleController({
+      store: mockStore, rpc: mockRpc, statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict, notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory, ensureStateReady: mockEnsureStateReady,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 1, bRunning: false });
+    await vi.runAllTimersAsync();
+
+    expect(mockStatusSurface.complete).toHaveBeenCalledTimes(1);
+    expect(mockStatusSurface.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "skipped", reason: "operation_running" }),
+      expect.objectContaining({ lifecycle: "lifecycle_exit" }),
+    );
+    expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
   });
 
   it("awaits syncthingMonitor.stop() before allocating the next watch", async () => {

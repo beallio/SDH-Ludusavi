@@ -102,8 +102,8 @@ class WatchContext {
 const EMPTY_SAMPLE_RETRY_MS = 250;
 const ACTIVE_POLL_INTERVAL_MS = 500;
 export const PRE_GAME_QUIESCENCE_TIMEOUT_MS = 120_000;
-// The 15-minute backend ceiling handles measurable peer need; this shorter frontend cap
-// bounds silent awaiting-fresh-completion watches, which provide no need to measure.
+// The independent 900-second backend Syncthing observation ceiling handles peer need; this
+// shorter frontend cap bounds silent awaiting-fresh-completion watches without a need to measure.
 export const POST_GAME_WATCH_HARD_CEILING_MS = 300_000;
 export class SyncthingMonitor {
   private rpc: SyncthingRpc;

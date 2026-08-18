@@ -12,7 +12,7 @@ import type {
 
 export type LifecycleRpc = {
   checkGameStart: (gameName: string, appID?: string) => Promise<RpcResult<LifecycleCheckResult>>;
-  restoreGameOnStart: (gameName: string, appID?: string) => Promise<RpcResult<OperationResult>>;
+  restoreGameOnStart: (gameName: string, appID?: string, gatePid?: number, gateLeaseId?: string) => Promise<RpcResult<OperationResult>>;
   resolveGameStartConflict: (
     gameName: string,
     appID: string | undefined,

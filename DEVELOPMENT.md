@@ -230,8 +230,24 @@ state polling have separate short bounded timeouts. Missing systemd or cgroup su
 invalid/stale identity, and any incomplete transition fail closed, unwind the original PID
 stop when its identity still matches, and best-effort thaw a partial scope. There is no
 PID-signal fallback that can report a successful gate. Renewals verify the stored scope rather
-than requiring the launcher PID to remain alive, and resume, lease expiry, the absolute
-watchdog ceiling, and plugin shutdown thaw that same scope.
+than requiring the launcher PID to remain alive. Explicit resume, lease expiry, the absolute
+watchdog ceiling, and plugin shutdown first request cancellation for the exact pinned operation;
+the scope is thawed only after its cancellation callback returns and its worker confirms
+completion. If process-group termination or reaping cannot be confirmed, the gate remains frozen
+and the release is reported as failed rather than risking concurrent save writes.
+
+Every start-side mutation — the normal start restore and both conflict choices including
+`keep_local` — requires the exact backend-owned `(pid, lease_id)` pair. After the coordinator
+lock is acquired, the watchdog atomically revalidates and pins that lease before the managed
+executor can start Ludusavi. A missing, stale, mismatched, expired, resumed, or concurrently
+released gate returns `gate_lost` and makes no mutation. Each real Ludusavi operation and every
+preview/status check has a 180-second subprocess ceiling. The frontend running-status strip has
+a separate 210-second cleanup boundary, and the backend launch-gate emergency boundary is 240
+seconds. Automatic lifecycle checks may wait up to 30 seconds for the coordinator so they can
+inspect fresh state; automatic mutations remain fail-fast after that check, preventing stale
+decisions. A remaining `operation_running` result is a visible failure, not a silent autosync
+completion. Syncthing's independent 120-second pre-game and 300/900-second post-game observation
+limits are unchanged.
 
 Successful transitions are logged as `Froze Steam app scope ... for root PID ...` and
 `Thawed Steam app scope ... for root PID ...`. Acquisition, discovery, transition, renewal,
@@ -361,7 +377,9 @@ The primary operation labels are:
 
 ### Skip Reasons
 - `auto_sync_disabled`: Automatic Sync is off.
-- `operation_running`: Another refresh, backup, restore, or version lookup is already running.
+- `operation_running`: A lifecycle check exceeded its 30-second coordinator wait, or an
+  automatic mutation encountered the fail-fast coordinator lock. This is surfaced as one visible
+  autosync failure instead of a silent skip.
 - `unmatched_game`: Confident match with a Ludusavi game name failed.
 - `no_backup`: Restore requested, but no backup exists.
 - `local_current`: Local save is already current.

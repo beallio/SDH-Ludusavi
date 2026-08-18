@@ -250,9 +250,10 @@ export function createGameLifecycleController(
       const dec1 = evaluateStartCheck(state, checkResult);
       execCmds(dec1.commands);
       Object.assign(state, dec1.stateUpdates);
-
       if (dec1.nextRpc === "restore") {
-        const restoreRes = await withLease(() => restoreGameOnStart(name, appID));
+        const guardHandle = pauseHandle;
+        if (!guardHandle) throw new Error("Launch gate unavailable before restore");
+        const restoreRes = await withLease(() => restoreGameOnStart(name, appID, guardHandle.pid, guardHandle.leaseId));
         if (isStaleLifecycle(epoch, "start", name)) return;
         log("info", `restore_game_on_start result for ${name} (${appID}): ${summarizeLifecycleResult(restoreRes)}`, "lifecycle", name);
         const dec2 = evaluateStartRestore(state, restoreRes);
@@ -291,7 +292,19 @@ export function createGameLifecycleController(
       }
     } catch (err) {
       log("error", `App start handling failed for ${name} (${appID}): ${err}`, "lifecycle", name);
-      hideAutoSyncStatus({ source: "hide", gameName: name, appID, tracked, resultStatus: "failed" });
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.startsWith("Lease lost:")) {
+        const result: OperationResult = {
+          status: "failed",
+          game: name,
+          reason: "gate_lost",
+          message: "Launch gate was lost before save synchronization finished.",
+        };
+        completeAutoSyncStatus(result, { lifecycle: "lifecycle_start", gameName: name, appID, tracked });
+        notifyFailure("SDH-Ludusavi Auto-sync", summarizeOperationResult(result, "Auto-sync"));
+      } else {
+        hideAutoSyncStatus({ source: "hide", gameName: name, appID, tracked, resultStatus: "failed" });
+      }
     } finally {
       const cleanup = getStartCleanup(state);
       for (const cmd of cleanup) {
