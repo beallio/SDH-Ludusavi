@@ -7,7 +7,7 @@ describe("gameLifecycleDecision", () => {
     expect(SILENT_SKIPPED_REASONS).not.toContain("game_sync_disabled");
   });
 
-  it.fails("keeps coordinator contention visible for start checks", () => {
+  it("keeps coordinator contention visible for start checks", () => {
     const decision = evaluateStartCheck(
       {
         name: "Test Game",
@@ -33,7 +33,7 @@ describe("gameLifecycleDecision", () => {
     ]);
   });
 
-  it.fails("keeps coordinator contention visible for exit checks", () => {
+  it("keeps coordinator contention visible for exit checks", () => {
     const decision = evaluateExitCheck(
       {
         name: "Test Game",
@@ -88,7 +88,7 @@ describe("gameLifecycleDecision", () => {
       expect(decision.commands).toContainEqual(expect.objectContaining({ type: "notifyFailure" }));
     });
 
-    it.fails("keeps coordinator contention visible for the start restore action", () => {
+    it("keeps coordinator contention visible for the start restore action", () => {
       const result = { status: "skipped" as const, game: "Test Game", reason: "operation_running" };
 
       expect(evaluateStartRestore(baseState, result).commands).toEqual([
@@ -121,7 +121,7 @@ describe("gameLifecycleDecision", () => {
       ]);
     });
 
-    it.fails("keeps coordinator contention visible for the keep-local conflict action", () => {
+    it("keeps coordinator contention visible for the keep-local conflict action", () => {
       const result = { status: "skipped" as const, game: "Test Game", reason: "operation_running" };
 
       expect(evaluateStartConflictResolution(baseState, "keep_local", result).commands).toEqual([
@@ -130,7 +130,7 @@ describe("gameLifecycleDecision", () => {
       ]);
     });
 
-    it.fails("keeps coordinator contention visible for the restore-backup conflict action", () => {
+    it("keeps coordinator contention visible for the restore-backup conflict action", () => {
       const result = { status: "skipped" as const, game: "Test Game", reason: "operation_running" };
 
       expect(evaluateStartConflictResolution(baseState, "restore_backup", result).commands).toEqual([
@@ -172,7 +172,7 @@ describe("gameLifecycleDecision", () => {
       expect(decision.nextRpc).toBe("handoff");
     });
 
-    it.fails("keeps coordinator contention visible for the exit backup action", () => {
+    it("keeps coordinator contention visible for the exit backup action", () => {
       const result = { status: "skipped" as const, game: "Test Game", reason: "operation_running" };
 
       expect(evaluateExitBackup(baseState, result).commands).toEqual([

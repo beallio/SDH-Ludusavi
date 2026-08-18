@@ -119,7 +119,6 @@ class SDHLudusaviService:
                 registry=self._registry,
                 gateway=self._gateway,
                 history=self._history,
-                is_coordinator_running=lambda: self._coordinator.is_running,
                 run_locked=self._run_locked,
                 is_auto_sync_enabled=lambda: self._auto_sync_enabled,
                 is_game_sync_enabled=lambda name: self.is_game_sync_enabled(name),
@@ -162,8 +161,21 @@ class SDHLudusaviService:
     def _ludusavi(self) -> LudusaviAdapter:
         return self._gateway.get_adapter()
 
-    def _run_locked(self, operation: str, game_name: str | None, callback: Any) -> Any:
-        return self._coordinator.run_locked(operation, game_name, callback, self.log)
+    def _run_locked(
+        self,
+        operation: str,
+        game_name: str | None,
+        callback: Any,
+        *,
+        wait_timeout_seconds: float | None = None,
+    ) -> Any:
+        return self._coordinator.run_locked(
+            operation,
+            game_name,
+            callback,
+            self.log,
+            wait_timeout_seconds=wait_timeout_seconds,
+        )
 
     def stop(self) -> dict[str, object]:
         """Cancel managed work before any guarded launch scope can thaw."""

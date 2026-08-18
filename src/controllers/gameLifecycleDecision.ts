@@ -5,7 +5,7 @@ import type {
   AutoSyncStatusKind,
 } from "../types";
 import type { PostGameHandoffResult, PreGameQuiescenceResult } from "./syncthingMonitor";
-export const SILENT_SKIPPED_REASONS = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
+export const SILENT_SKIPPED_REASONS = ["auto_sync_disabled", "unmatched_game", "not_processed"];
 export type LifecycleCommand =
   | { type: "publishStatus"; status: AutoSyncStatusKind; resultStatus?: string }
   | { type: "hideStatus"; resultStatus?: string }
@@ -104,7 +104,7 @@ export function evaluateStartCheck(state: StartState, checkResult: LifecycleChec
     };
   }
   const commands: LifecycleCommand[] = [{ type: "completeStatus", result: checkResult }];
-  if (checkResult.status === "failed") {
+  if (checkResult.status === "failed" || checkResult.reason === "operation_running") {
     commands.push({ type: "notifyFailure", result: checkResult });
   }
   return {
@@ -114,7 +114,7 @@ export function evaluateStartCheck(state: StartState, checkResult: LifecycleChec
 }
 export function evaluateStartRestore(_state: StartState, result: OperationResult): StartDecision {
   const commands: LifecycleCommand[] = [{ type: "completeStatus", result }];
-  if (result.status === "failed") {
+  if (result.status === "failed" || result.reason === "operation_running") {
     commands.push({ type: "notifyFailure", result });
   }
   return {
@@ -136,7 +136,7 @@ export function evaluateStartConflictResolution(state: StartState, resolution: C
     };
   }
   const commands: LifecycleCommand[] = [{ type: "completeStatus", result }];
-  if (result.status === "failed") {
+  if (result.status === "failed" || result.reason === "operation_running") {
     commands.push({ type: "notifyFailure", result });
   }
   return {
@@ -174,7 +174,7 @@ export function evaluateExitCheck(_state: ExitState, checkResult: LifecycleCheck
   }
 
   const commands: LifecycleCommand[] = [{ type: "completeStatus", result: checkResult }];
-  if (checkResult.status === "failed") {
+  if (checkResult.status === "failed" || checkResult.reason === "operation_running") {
     commands.push({ type: "notifyFailure", result: checkResult });
   }
   return {
@@ -193,7 +193,7 @@ export function evaluateExitBackup(_state: ExitState, result: OperationResult): 
   }
 
   const commands: LifecycleCommand[] = [{ type: "completeStatus", result }];
-  if (result.status === "failed") {
+  if (result.status === "failed" || result.reason === "operation_running") {
     commands.push({ type: "notifyFailure", result });
   }
   return {

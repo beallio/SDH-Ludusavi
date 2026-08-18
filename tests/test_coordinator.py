@@ -56,10 +56,6 @@ def test_operation_coordinator_lock_contention() -> None:
     t.join()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED Task 7: lifecycle checks need bounded coordinator waiting",
-)
 def test_operation_coordinator_waits_for_a_released_operation_before_running_callback() -> None:
     coord = OperationCoordinator()
     active_started = threading.Event()
@@ -117,10 +113,6 @@ def test_operation_coordinator_waits_for_a_released_operation_before_running_cal
         queued.join(timeout=0.5)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED Task 7: timed-out lifecycle waits must leave queued callbacks untouched",
-)
 def test_operation_coordinator_timeout_preserves_active_operation_and_skips_queued_callback() -> (
     None
 ):

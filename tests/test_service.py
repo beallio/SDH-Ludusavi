@@ -1001,6 +1001,7 @@ def test_check_game_start_skips_if_operation_starts_after_initial_guard(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(lifecycle_module, "LIFECYCLE_OPERATION_WAIT_SECONDS", 0.01)
     service = service_with_state(tmp_path)
     service.refresh_games()
     service.set_auto_sync_enabled(True)
@@ -1496,6 +1497,7 @@ def test_check_game_exit_skips_if_operation_starts_after_initial_guard(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(lifecycle_module, "LIFECYCLE_OPERATION_WAIT_SECONDS", 0.01)
     service = service_with_state(tmp_path)
     service.refresh_games()
     service.set_auto_sync_enabled(True)
@@ -1727,10 +1729,6 @@ def test_manual_and_registry_operations_keep_the_fail_fast_coordinator_default(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED Task 7: automatic checks must wait briefly and decide after acquisition",
-)
 @pytest.mark.parametrize("lifecycle", ["start", "exit"])
 def test_automatic_lifecycle_checks_wait_for_fresh_data_after_a_running_operation_releases(
     tmp_path: Path,
@@ -1818,10 +1816,6 @@ def test_automatic_lifecycle_checks_wait_for_fresh_data_after_a_running_operatio
         check.join(timeout=0.5)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED Task 7: automatic mutations must report contention without stale writes",
-)
 @pytest.mark.parametrize("mutation", ["restore", "keep_local", "restore_backup", "backup"])
 def test_automatic_mutations_fail_fast_after_a_check_when_a_new_operation_wins_the_lock(
     tmp_path: Path,
@@ -1894,10 +1888,6 @@ def test_automatic_mutations_fail_fast_after_a_check_when_a_new_operation_wins_t
         service.resume_all_paused_processes()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED Task 7: a queued launch check must revalidate its gate before restoring",
-)
 def test_queued_start_revalidates_a_lost_gate_after_the_coordinator_wait(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -15,6 +15,10 @@ from sdh_ludusavi.game_names import sanitize_game_name
 
 LOGGER = logging.getLogger("sdh_ludusavi.service.lifecycle")
 
+# Lifecycle checks may briefly wait for an in-flight Ludusavi operation so their
+# preview and decision are based on fresh save state. Mutations stay fail-fast.
+LIFECYCLE_OPERATION_WAIT_SECONDS = 30.0
+
 
 def _deny_gate(_pid: int, _lease_id: str) -> bool:
     return False
@@ -77,7 +81,6 @@ class LifecycleDependencies:
     registry: GameRegistry
     gateway: LudusaviGateway
     history: HistoryManager
-    is_coordinator_running: Callable[[], bool]
     run_locked: Callable[..., Any]
     is_auto_sync_enabled: Callable[[], bool]
     is_game_sync_enabled: Callable[[str], bool]
@@ -228,17 +231,21 @@ class GameLifecycleManager:
                 raise _GateLostError()
             return result
 
-        return self._execute_operation(
-            operation=operation,
-            trigger=trigger,
-            game_name=game_name,
-            adapter_call=guarded_adapter_call,
-            same_handling=False,
-            refresh=False,
-            record_order=record_order,
-            success_status=success_status,
-            success_log=success_log,
-        )
+        try:
+            return self._execute_operation(
+                operation=operation,
+                trigger=trigger,
+                game_name=game_name,
+                adapter_call=guarded_adapter_call,
+                same_handling=False,
+                refresh=False,
+                record_order=record_order,
+                success_status=success_status,
+                success_log=success_log,
+                skip_locked_history=True,
+            )
+        except OperationLockedError:
+            return self.dependencies.skip("start", game_name, "operation_running")
 
     def _has_exact_gate(self, gate_pid: int | None, gate_lease_id: str | None) -> bool:
         return (
@@ -260,8 +267,6 @@ class GameLifecycleManager:
         )
         if not self.dependencies.is_auto_sync_enabled():
             return self.dependencies.skip("start", game_name, "auto_sync_disabled")
-        if self.dependencies.is_coordinator_running():
-            return self.dependencies.skip("start", game_name, "operation_running")
 
         game = self.dependencies.registry.match_game(game_name, app_id=app_id)
         if game is None:
@@ -273,11 +278,21 @@ class GameLifecycleManager:
         if game.error:
             return self.dependencies.skip("start", game.name, "game_error")
 
+        def inspect_recency() -> tuple[str, dict[str, object]]:
+            recency = self.dependencies.gateway.get_adapter().compare_recency(game.name)
+            metadata = (
+                self.dependencies.conflict_metadata(game.name)
+                if recency not in ("backup_newer", "local_current")
+                else {}
+            )
+            return recency, metadata
+
         try:
-            recency = self.dependencies.run_locked(
+            recency, metadata = self.dependencies.run_locked(
                 "start_check",
                 game.name,
-                lambda: self.dependencies.gateway.get_adapter().compare_recency(game.name),
+                inspect_recency,
+                wait_timeout_seconds=LIFECYCLE_OPERATION_WAIT_SECONDS,
             )
         except OperationLockedError:
             return self.dependencies.skip("start", game.name, "operation_running")
@@ -293,7 +308,6 @@ class GameLifecycleManager:
         if recency == "local_current":
             return self.dependencies.skip("start", game.name, "local_current")
 
-        metadata = self.dependencies.conflict_metadata(game.name)
         local_modified_at = metadata.get("localModifiedAt")
         backup_modified_at = metadata.get("backupModifiedAt")
 
@@ -457,8 +471,6 @@ class GameLifecycleManager:
         )
         if not self.dependencies.is_auto_sync_enabled():
             return self.dependencies.skip("exit", game_name, "auto_sync_disabled")
-        if self.dependencies.is_coordinator_running():
-            return self.dependencies.skip("exit", game_name, "operation_running")
 
         game = self.dependencies.registry.match_game(game_name, app_id=app_id)
         if game is None:
@@ -473,6 +485,7 @@ class GameLifecycleManager:
                 "exit_check",
                 game.name,
                 lambda: self.dependencies.gateway.get_adapter().backup(game.name, preview=True),
+                wait_timeout_seconds=LIFECYCLE_OPERATION_WAIT_SECONDS,
             )
             games_output = cast(dict[str, Any], preview.get("games", {}))
 
@@ -529,17 +542,21 @@ class GameLifecycleManager:
         if game.error:
             return self.dependencies.skip("exit", game.name, "game_error")
 
-        return self._execute_operation(
-            operation="backup",
-            trigger="auto_exit",
-            game_name=game.name,
-            adapter_call=lambda: self.dependencies.gateway.get_adapter().backup(game.name),
-            same_handling=False,
-            refresh=True,
-            record_order="before_log",
-            success_status="backed_up",
-            success_log=f"Backed up {game.name} after exit",
-        )
+        try:
+            return self._execute_operation(
+                operation="backup",
+                trigger="auto_exit",
+                game_name=game.name,
+                adapter_call=lambda: self.dependencies.gateway.get_adapter().backup(game.name),
+                same_handling=False,
+                refresh=True,
+                record_order="before_log",
+                success_status="backed_up",
+                success_log=f"Backed up {game.name} after exit",
+                skip_locked_history=True,
+            )
+        except OperationLockedError:
+            return self.dependencies.skip("exit", game.name, "operation_running")
 
     def handle_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Compatibility wrapper for the original one-call exit autosync flow."""
