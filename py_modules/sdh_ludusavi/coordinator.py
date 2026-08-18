@@ -42,14 +42,24 @@ class OperationCoordinator:
         game_name: str | None,
         callback: Callable[[], Any],
         log_callback: Callable[[str, str, str | None, str | None], None] | None = None,
+        *,
+        wait_timeout_seconds: float | None = None,
     ) -> Any:
-        """Execute a callback while holding the operation lock, ensuring exclusive access."""
+        """Execute a callback while holding the operation lock, ensuring exclusive access.
+
+        Calls remain fail-fast by default. Lifecycle checks may opt into a bounded
+        wait so they can make a fresh decision after an active operation finishes.
+        """
 
         def log(level: str, msg: str) -> None:
             if log_callback:
                 log_callback(level, msg, operation, game_name)
 
-        if not self._operation_lock.acquire(blocking=False):
+        if wait_timeout_seconds is None:
+            acquired = self._operation_lock.acquire(blocking=False)
+        else:
+            acquired = self._operation_lock.acquire(timeout=wait_timeout_seconds)
+        if not acquired:
             raise OperationLockedError(f"{self._operation.name or 'operation'} is already running")
 
         log("info", f"Starting {operation}")

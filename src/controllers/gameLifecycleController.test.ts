@@ -1221,7 +1221,7 @@ describe("GameLifecycleController", () => {
     );
   });
 
-  it.fails("completes and notifies once when the start check times out on another operation", async () => {
+  it("completes and notifies once when the start check times out on another operation", async () => {
     mockRpc.checkGameStart.mockResolvedValue({ status: "skipped", reason: "operation_running" });
 
     const controller = createGameLifecycleController({
@@ -1241,7 +1241,7 @@ describe("GameLifecycleController", () => {
     expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
   });
 
-  it.fails("completes and notifies once when the exit backup loses the operation race", async () => {
+  it("completes and notifies once when the exit backup loses the operation race", async () => {
     mockRpc.checkGameExit.mockResolvedValue({ status: "skipped", reason: "operation_running" });
 
     const controller = createGameLifecycleController({
@@ -1261,7 +1261,7 @@ describe("GameLifecycleController", () => {
     expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
   });
 
-  it.fails("completes and notifies once when the start restore loses the operation race", async () => {
+  it("completes and notifies once when the start restore loses the operation race", async () => {
     mockRpc.checkGameStart.mockResolvedValue({ status: "needed", operation: "restore" });
     mockRpc.restoreGameOnStart.mockResolvedValue({ status: "skipped", reason: "operation_running" });
 
@@ -1283,7 +1283,7 @@ describe("GameLifecycleController", () => {
     expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
   });
 
-  it.fails("completes and notifies once when the keep-local conflict action loses the operation race", async () => {
+  it("completes and notifies once when the keep-local conflict action loses the operation race", async () => {
     mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
     mockResolveConflict.mockResolvedValue("keep_local");
     mockRpc.resolveGameStartConflict.mockResolvedValue({ status: "skipped", reason: "operation_running" });
@@ -1306,7 +1306,7 @@ describe("GameLifecycleController", () => {
     expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
   });
 
-  it.fails("completes and notifies once when the restore-backup conflict action loses the operation race", async () => {
+  it("completes and notifies once when the restore-backup conflict action loses the operation race", async () => {
     mockRpc.checkGameStart.mockResolvedValue({ status: "conflict" });
     mockResolveConflict.mockResolvedValue("restore_backup");
     mockRpc.resolveGameStartConflict.mockResolvedValue({ status: "skipped", reason: "operation_running" });
@@ -1329,7 +1329,7 @@ describe("GameLifecycleController", () => {
     expect(mockNotifyFailure).toHaveBeenCalledTimes(1);
   });
 
-  it.fails("completes and notifies once when the exit backup action loses the operation race", async () => {
+  it("completes and notifies once when the exit backup action loses the operation race", async () => {
     mockRpc.checkGameExit.mockResolvedValue({ status: "needed", operation: "backup" });
     mockRpc.backupGameOnExit.mockResolvedValue({ status: "skipped", reason: "operation_running" });
 

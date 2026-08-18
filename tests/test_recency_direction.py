@@ -29,7 +29,6 @@ def _make_manager(
     gateway.get_adapter.return_value = adapter
 
     history = MagicMock()
-    is_coordinator_running = MagicMock(return_value=False)
     is_auto_sync_enabled = MagicMock(return_value=auto_sync)
     log = MagicMock()
     skip = MagicMock(return_value={"status": "skipped"})
@@ -42,13 +41,12 @@ def _make_manager(
         }
     )
 
-    run_locked = MagicMock(side_effect=lambda _lock, _name, fn: fn())
+    run_locked = MagicMock(side_effect=lambda _lock, _name, fn, **_kwargs: fn())
 
     deps = LifecycleDependencies(
         registry=registry,
         gateway=gateway,
         history=history,
-        is_coordinator_running=is_coordinator_running,
         run_locked=run_locked,
         is_auto_sync_enabled=is_auto_sync_enabled,
         is_game_sync_enabled=lambda _name: True,
