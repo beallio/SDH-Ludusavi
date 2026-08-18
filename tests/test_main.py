@@ -273,6 +273,10 @@ def test_call_maps_base_exception_from_worker_thread(
     assert logger.exceptions == ["refresh failed"]
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="RED: Task 5 requires main.py to forward the exact launch gate for restores.",
+)
 def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -292,9 +296,13 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
             return {"status": "needed", "operation": "restore", "game": game_name}
 
         def restore_game_on_start(
-            self, game_name: str, app_id: str | None = None
+            self,
+            game_name: str,
+            app_id: str | None = None,
+            gate_pid: int | None = None,
+            gate_lease_id: str | None = None,
         ) -> dict[str, object]:
-            calls.append(("restore_start", game_name, app_id))
+            calls.append(("restore_start", game_name, app_id, gate_pid, gate_lease_id))
             return {"status": "restored", "game": game_name}
 
         def check_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
@@ -326,7 +334,7 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
             "operation": "restore",
             "game": "Hades",
         }
-        assert await plugin.restore_game_on_start("Hades", "1145360") == {
+        assert await plugin.restore_game_on_start("Hades", "1145360", 4567, "lease") == {
             "status": "restored",
             "game": "Hades",
         }
@@ -350,7 +358,7 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
 
     assert calls == [
         ("check_start", "Hades", "1145360"),
-        ("restore_start", "Hades", "1145360"),
+        ("restore_start", "Hades", "1145360", 4567, "lease"),
         ("check_exit", "Hades", "1145360"),
         ("backup_exit", "Hades", "1145360"),
         ("resolve_restore_backup", "Hades", "1145360", 4567, "lease"),

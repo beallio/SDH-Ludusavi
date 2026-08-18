@@ -529,6 +529,74 @@ describe("GameLifecycleController", () => {
     expect(mockRpc.resumeGameProcess).toHaveBeenCalledOnce();
   });
 
+  it.fails("passes the exact backend launch gate to the start restore RPC", async () => {
+    mockRpc.checkGameStart.mockResolvedValue({ status: "needed", operation: "restore" });
+    mockRpc.startSyncthingActivityWatch.mockResolvedValue({ status: "watching", watch_id: "w1" });
+    mockRpc.getSyncthingActivity.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: { status: "IDLE", folder_state: "idle", settled: true, timestamp_unix: 1 },
+    });
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(mockRpc.restoreGameOnStart).toHaveBeenCalledWith(
+      "Hades",
+      "1145300",
+      2,
+      "mock_lease",
+    );
+  });
+
+  it.fails("keeps the lease-release acknowledgement in the renewal-loss failure path", async () => {
+    let acknowledgeCancellation: (() => void) | undefined;
+    mockRpc.checkGameStart.mockResolvedValue({ status: "needed", operation: "restore" });
+    mockRpc.startSyncthingActivityWatch.mockResolvedValue({ status: "watching", watch_id: "w1" });
+    mockRpc.getSyncthingActivity.mockResolvedValue({
+      status: "activity",
+      watch_id: "w1",
+      sample: { status: "IDLE", folder_state: "idle", settled: true, timestamp_unix: 1 },
+    });
+    mockRpc.restoreGameOnStart.mockReturnValue(new Promise(() => {}));
+    mockRpc.renewGameProcessPause.mockResolvedValue({ status: "failed", message: "lease_lost" });
+    mockRpc.resumeGameProcess.mockReturnValue(new Promise((resolve) => {
+      acknowledgeCancellation = () => resolve({ status: "resumed", pid: 2 });
+    }));
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    lifecycleCallback({ unAppID: 1145300, nInstanceID: 2, bRunning: true });
+    await vi.advanceTimersByTimeAsync(5_001);
+
+    expect(mockRpc.resumeGameProcess).toHaveBeenCalledWith(2, "mock_lease");
+    expect(mockRpc.restoreGameOnStart).toHaveBeenCalledWith(
+      "Hades",
+      "1145300",
+      2,
+      "mock_lease",
+    );
+    acknowledgeCancellation?.();
+    await vi.runAllTimersAsync();
+    expect(mockNotifyFailure).toHaveBeenCalledOnce();
+  });
+
   it("fails safely after active pre-game polling is interrupted and still resumes", async () => {
     mockRpc.checkGameStart.mockResolvedValue({ status: "skipped", reason: "local_current" });
     mockRpc.startSyncthingActivityWatch.mockResolvedValue({ status: "watching", watch_id: "w1" });
