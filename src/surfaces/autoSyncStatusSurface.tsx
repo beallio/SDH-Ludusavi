@@ -12,7 +12,8 @@ import type { AutoSyncStatusBrowserViewApi } from "./autoSyncStatusBrowserView";
 
 export { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus };
 
-export const RUNNING_STATUS_HIDE_CEILING_MS = 930000;
+// A three-minute Ludusavi command plus 30 seconds for RPC delivery and cleanup.
+export const RUNNING_STATUS_HIDE_CEILING_MS = 210_000;
 export const RESULT_HIDE_DELAY_MS = 2000;
 export const HAS_BACKUP_MIN_DWELL_MS = 900;
 
@@ -242,7 +243,9 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       result: OperationResult | LifecycleCheckResult,
       options: AutoSyncStatusCompleteOptions
     ) {
-      if (result.status === "failed") {
+      const isError = result.status === "failed" ||
+        (result.status === "skipped" && result.reason === "operation_running");
+      if (isError) {
         api.publish("error", {
           ...options,
           source: "rpc_result",

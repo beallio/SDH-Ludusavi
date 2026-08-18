@@ -260,11 +260,15 @@ class Plugin:
         return result if isinstance(result, bool) else False
 
     async def handle_game_start(
-        self, game_name: str, app_id: str | None = None
+        self,
+        game_name: str,
+        app_id: str | None = None,
+        gate_pid: int | None = None,
+        gate_lease_id: str | None = None,
     ) -> dict[str, object]:
         return await self._call(
             "handle_game_start",
-            lambda: self._service().handle_game_start(game_name, app_id),
+            lambda: self._service().handle_game_start(game_name, app_id, gate_pid, gate_lease_id),
         )
 
     async def check_game_start(
@@ -276,11 +280,17 @@ class Plugin:
         )
 
     async def restore_game_on_start(
-        self, game_name: str, app_id: str | None = None
+        self,
+        game_name: str,
+        app_id: str | None = None,
+        gate_pid: int | None = None,
+        gate_lease_id: str | None = None,
     ) -> dict[str, object]:
         return await self._call(
             "restore_game_on_start",
-            lambda: self._service().restore_game_on_start(game_name, app_id),
+            lambda: self._service().restore_game_on_start(
+                game_name, app_id, gate_pid, gate_lease_id
+            ),
         )
 
     async def resolve_game_start_conflict(
@@ -414,7 +424,11 @@ class Plugin:
         try:
             if backend is not None:
                 result = await self._call("unload_stop", backend.stop)
-                if isinstance(result, dict) and result.get("status") == "failed":
+                if (
+                    isinstance(result, dict)
+                    and result.get("status") == "failed"
+                    and not result.get("retained_gate")
+                ):
                     decky.logger.warning(
                         "Offloaded unload stop failed; falling back to synchronous stop"
                     )

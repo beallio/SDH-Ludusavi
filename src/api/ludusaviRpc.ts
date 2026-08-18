@@ -77,7 +77,12 @@ export const resumeGameProcessCall = callable<
   RpcResult<ProcessSignalResult>
 >("resume_game_process");
 export const checkGameStartCall = callable<[gameName: string, app_id?: string], RpcResult<LifecycleCheckResult>>("check_game_start");
-export const restoreGameOnStartCall = callable<[gameName: string, app_id?: string], RpcResult<OperationResult>>("restore_game_on_start");
+export const restoreGameOnStartCall = callable<[
+  gameName: string,
+  app_id?: string,
+  gatePid?: number,
+  gateLeaseId?: string,
+], RpcResult<OperationResult>>("restore_game_on_start");
 export const resolveGameStartConflictCall = callable<[
   gameName: string,
   app_id: string | undefined,

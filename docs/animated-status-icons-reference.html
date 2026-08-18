@@ -133,7 +133,7 @@
         <div class="label">Verifying Game Save</div>
         <div class="kind">checking</div>
         <div class="when">Shown on <strong>game launch and game exit</strong>, before the auto-sync RPC check runs, while Ludusavi compares the local save against the backup. Only appears when the status bar is enabled for the tracked game.</div>
-        <div class="tags"><span class="tag anim">spin</span><span class="tag">auto-hide ~15.5&nbsp;min ceiling</span></div>
+        <div class="tags"><span class="tag anim">spin</span><span class="tag">auto-hide 210&nbsp;s ceiling</span></div>
       </div>
     </div>
 
@@ -144,7 +144,7 @@
         <div class="label">Restoring Backup Save</div>
         <div class="kind">restoring</div>
         <div class="when">On <strong>launch</strong>, when the pre-check returns <code>needed / restore</code> and the launch was paused at the gate. The backup save is being written down to local. Same arrow as backing-up, rotated 180° (points down).</div>
-        <div class="tags"><span class="tag anim">fill ↓</span><span class="tag">auto-hide ~15.5&nbsp;min ceiling</span></div>
+        <div class="tags"><span class="tag anim">fill ↓</span><span class="tag">auto-hide 210&nbsp;s ceiling</span></div>
       </div>
     </div>
 
@@ -155,7 +155,7 @@
         <div class="label">Backing Up Local Save</div>
         <div class="kind">backing_up</div>
         <div class="when">On <strong>exit</strong>, when the pre-check returns <code>needed / backup</code>. The local save is being copied up into the backup. Up-arrow fills repeatedly while <code>backup_game_on_exit</code> runs.</div>
-        <div class="tags"><span class="tag anim">fill ↑</span><span class="tag">auto-hide ~15.5&nbsp;min ceiling</span></div>
+        <div class="tags"><span class="tag anim">fill ↑</span><span class="tag">auto-hide 210&nbsp;s ceiling</span></div>
       </div>
     </div>
 
@@ -247,7 +247,7 @@
       <div class="meta">
         <div class="label">Unable To Sync</div>
         <div class="kind">error</div>
-        <div class="when">Operation <strong>failed</strong>, restore couldn't run (launch gate unavailable), or skipped for a hard reason: <code>ambiguous_recency</code>, <code>game_error</code>, or <code>preview_failed</code>. Red.</div>
+        <div class="when">Operation <strong>failed</strong>, restore couldn't run (launch gate unavailable), or skipped for a hard reason: <code>ambiguous_recency</code>, <code>game_error</code>, <code>preview_failed</code>, or <code>operation_running</code>. Red.</div>
         <div class="tags"><span class="tag">static</span><span class="tag">auto-hide 2s</span></div>
       </div>
     </div>
@@ -293,7 +293,7 @@
   <h2>Hide / persistence timing</h2>
   <div class="timing">
     <ul>
-      <li><strong>Running states</strong> (<code>checking</code>, <code>backing_up</code>, <code>restoring</code>) — stay visible until the result arrives; safety ceiling auto-hides at <code>RUNNING_STATUS_HIDE_CEILING_MS</code> = 930&nbsp;000&nbsp;ms (~15.5&nbsp;min). If they time out, the final result is suppressed.</li>
+      <li><strong>Running states</strong> (<code>checking</code>, <code>backing_up</code>, <code>restoring</code>) — stay visible until the result arrives; safety ceiling auto-hides at <code>RUNNING_STATUS_HIDE_CEILING_MS</code> = 210&nbsp;000&nbsp;ms (210&nbsp;s). If it fires, a late success is suppressed but a late failure still shows its toast.</li>
       <li><strong>Active Syncthing states</strong> (<code>syncthing_pending_upload</code>, <code>syncthing_downloading</code>, <code>syncthing_uploading</code>) — do <em>not</em> auto-hide; they stay up until a newer status replaces them.</li>
       <li><strong>All other result states</strong> — auto-hide after <code>RESULT_HIDE_DELAY_MS</code> = 2&nbsp;000&nbsp;ms.</li>
     </ul>
