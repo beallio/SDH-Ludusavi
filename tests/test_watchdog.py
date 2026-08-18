@@ -798,6 +798,58 @@ def test_guarded_operation_runs_once_for_the_exact_live_lease() -> None:
 
 @pytest.mark.xfail(
     strict=True,
+    reason=(
+        "RED: Task 5 requires guarded-operation completion to clear its pin exactly once "
+        "without cancelling or thawing a still-owned gate."
+    ),
+)
+@pytest.mark.parametrize("outcome", ["success", "adapter_exception"])
+def test_guarded_operation_completion_leaves_exact_resume_to_thaw_once(
+    outcome: str,
+) -> None:
+    controller = FakeScopeController()
+    wd, _ = watchdog(controller)
+    paused = wd.pause(4567)
+    lease_id = str(paused["lease_id"])
+    cancellation_calls: list[str] = []
+
+    def mutation() -> str:
+        if outcome == "adapter_exception":
+            raise RuntimeError("adapter failed")
+        return "changed"
+
+    try:
+        if outcome == "adapter_exception":
+            with pytest.raises(RuntimeError, match="adapter failed"):
+                wd.run_guarded_operation(  # type: ignore[attr-defined]
+                    4567,
+                    lease_id,
+                    callback=mutation,
+                    cancel_callback=lambda: cancellation_calls.append("cancel") or True,
+                )
+        else:
+            assert (
+                wd.run_guarded_operation(  # type: ignore[attr-defined]
+                    4567,
+                    lease_id,
+                    callback=mutation,
+                    cancel_callback=lambda: cancellation_calls.append("cancel") or True,
+                )
+                == "changed"
+            )
+
+        assert cancellation_calls == []
+        assert controller.thaw_calls == []
+        assert wd.resume(4567, lease_id) == {"status": "resumed", "pid": 4567}
+        assert len(controller.thaw_calls) == 1
+        assert wd.resume(4567, lease_id)["status"] == "failed"
+        assert len(controller.thaw_calls) == 1
+    finally:
+        wd.stop()
+
+
+@pytest.mark.xfail(
+    strict=True,
     reason="RED: Task 5 requires a late guarded completion to leave a replacement lease untouched.",
 )
 def test_guarded_operation_completion_cannot_release_or_change_a_replacement_lease() -> None:
@@ -903,6 +955,17 @@ def test_guarded_operation_defers_every_release_until_cancellation_and_completio
     try:
         assert mutation_started.wait(timeout=1)
 
+        lock_probe_finished_before_release = threading.Event()
+        lock_probe_before_release = threading.Thread(
+            target=lambda: (
+                wd.verify_gate(4567, lease_id),
+                lock_probe_finished_before_release.set(),
+            ),
+            daemon=True,
+        )
+        lock_probe_before_release.start()
+        assert lock_probe_finished_before_release.wait(timeout=1)
+
         def request_release() -> None:
             if release_kind == "resume":
                 wd.resume(4567, lease_id)
@@ -938,6 +1001,8 @@ def test_guarded_operation_defers_every_release_until_cancellation_and_completio
         assert not releaser.is_alive()
         assert mutation_errors == []
         assert mutation_results == [None]
+        assert len(controller.thaw_calls) == 1
+        assert wd.resume(4567, lease_id)["status"] == "failed"
         assert len(controller.thaw_calls) == 1
     finally:
         allow_cancellation_return.set()

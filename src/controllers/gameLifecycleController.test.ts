@@ -592,8 +592,10 @@ describe("GameLifecycleController", () => {
       2,
       "mock_lease",
     );
+    expect(mockSyncGlobalHistory).not.toHaveBeenCalled();
     acknowledgeCancellation?.();
     await vi.runAllTimersAsync();
+    expect(mockSyncGlobalHistory).toHaveBeenCalledOnce();
     expect(mockNotifyFailure).toHaveBeenCalledOnce();
   });
 

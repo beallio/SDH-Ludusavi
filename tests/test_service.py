@@ -1219,6 +1219,43 @@ def test_service_stop_waits_for_adapter_cancellation_before_thawing_a_paused_gam
         service.resume_all_paused_processes()
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "RED: Task 5 requires failed managed-executor shutdown to retain the exact launch gate."
+    ),
+)
+def test_service_stop_returns_failure_without_thaw_when_cancellation_cannot_be_confirmed(
+    tmp_path: Path,
+) -> None:
+    class UnreapedShutdownAdapter(FakeAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.shutdown_calls = 0
+
+        def shutdown(self) -> bool:
+            self.shutdown_calls += 1
+            return False
+
+    adapter = UnreapedShutdownAdapter()
+    service = service_with_state(tmp_path, adapter)
+    paused = service.pause_game_process(4567)
+    assert paused["status"] == "paused"
+    lease = service._watchdog._paused_pids[4567]
+    scope_controller = service._watchdog._scope_controller
+
+    try:
+        stopped = service.stop()
+
+        assert isinstance(stopped, dict)
+        assert stopped["status"] == "failed"
+        assert adapter.shutdown_calls == 1
+        assert service._watchdog._paused_pids[4567] is lease
+        assert scope_controller.thaw_calls == []
+    finally:
+        service.resume_all_paused_processes()
+
+
 def test_check_game_start_reports_conflict_for_ambiguous_recency(tmp_path: Path) -> None:
     adapter = FakeAdapter()
     service = service_with_state(tmp_path, adapter)

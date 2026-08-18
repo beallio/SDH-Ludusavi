@@ -570,6 +570,51 @@ def test_unload_logs_synchronous_stop_fallback_failure(
     assert logger.infos[-1] == "SDH-ludusavi backend unloaded"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "RED: Task 5 requires unload to preserve a retained launch gate instead of retrying "
+        "it through the synchronous fallback."
+    ),
+)
+def test_unload_waits_for_guarded_stop_before_executor_shutdown_and_preserves_retained_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decky, _logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+    calls: list[str] = []
+
+    class Backend:
+        def stop(self) -> dict[str, object]:
+            calls.extend(["stop", "guarded_callback_unwound"])
+            return {
+                "status": "failed",
+                "reason": "cancellation_unconfirmed",
+                "retained_gate": True,
+            }
+
+    class Executor:
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            assert wait is False
+            assert cancel_futures is True
+            assert calls == ["stop", "guarded_callback_unwound"]
+            calls.append("executor_shutdown")
+
+    async def fake_call(operation: str, callback: Any) -> object:
+        assert operation == "unload_stop"
+        return callback()
+
+    plugin._backend = Backend()
+    plugin._executor = Executor()
+    monkeypatch.setattr(plugin, "_call", fake_call)
+
+    asyncio.run(plugin._unload())
+
+    assert calls == ["stop", "guarded_callback_unwound", "executor_shutdown"]
+
+
 def test_unload_shuts_down_executor_and_post_shutdown_call_fails_cleanly(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
