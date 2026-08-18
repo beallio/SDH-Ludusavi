@@ -6,7 +6,6 @@ import inspect
 from pathlib import Path
 import re
 
-import pytest
 
 from sdh_ludusavi.service import SDHLudusaviService
 from sdh_ludusavi.persistence import JsonSettingsStore
@@ -109,10 +108,6 @@ EXPECTED_METHODS: dict[str, list[str]] = {
 }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 5 pins the gate identity on restore and compatibility façade methods.",
-)
 def test_facade_method_signatures(tmp_path: Path) -> None:
     service = SDHLudusaviService(
         adapter=DummyAdapter(),
@@ -135,10 +130,6 @@ def test_facade_method_signatures(tmp_path: Path) -> None:
         assert list(inspect.signature(method).parameters) == params, name
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 5 requires the exact gate identity across Python and TypeScript launch RPCs.",
-)
 def test_start_mutation_contracts_propagate_pid_and_lease_id_across_every_boundary() -> None:
     from sdh_ludusavi.lifecycle import GameLifecycleManager
 
@@ -168,7 +159,7 @@ def test_start_mutation_contracts_propagate_pid_and_lease_id_across_every_bounda
         lifecycle_rpc_source,
     )
     assert (
-        "restoreGameOnStart(name, appID, pauseHandle.pid, pauseHandle.leaseId)" in controller_source
+        "restoreGameOnStart(name, appID, guardHandle.pid, guardHandle.leaseId)" in controller_source
     )
 
 

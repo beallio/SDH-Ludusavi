@@ -126,7 +126,11 @@ class SDHLudusaviService:
                 log=self.log,
                 skip=lambda op, game, r: _skip(self, op, game, r),
                 conflict_metadata=lambda game_name: _conflict_metadata(self, game_name),
-                verify_gate=self._watchdog.verify_gate,
+                verify_gate=lambda pid, lease_id: self._watchdog.verify_gate(pid, lease_id),
+                run_guarded_operation=lambda *args, **kwargs: self._watchdog.run_guarded_operation(
+                    *args, **kwargs
+                ),
+                operation_scope=self._gateway.operation_scope,
             )
         )
 
@@ -161,10 +165,22 @@ class SDHLudusaviService:
     def _run_locked(self, operation: str, game_name: str | None, callback: Any) -> Any:
         return self._coordinator.run_locked(operation, game_name, callback, self.log)
 
-    def stop(self) -> None:
-        """Shut down the watchdog thread and resume all paused processes."""
+    def stop(self) -> dict[str, object]:
+        """Cancel managed work before any guarded launch scope can thaw."""
+        if not self._gateway.shutdown():
+            self.log(
+                "error",
+                "Managed Ludusavi shutdown could not confirm process exit; retaining launch gates",
+                "launch_gate",
+            )
+            return {
+                "status": "failed",
+                "reason": "cancellation_unconfirmed",
+                "retained_gate": True,
+            }
         self._watchdog.stop()
         self._syncthing_watch_manager.stop_all()
+        return {"status": "stopped"}
 
     def start_syncthing_activity_watch(
         self, phase: str, game_name: str | None, app_id: str | None
@@ -327,13 +343,25 @@ class SDHLudusaviService:
             gate_lease_id,
         )
 
-    def restore_game_on_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+    def restore_game_on_start(
+        self,
+        game_name: str,
+        app_id: str | None = None,
+        gate_pid: int | None = None,
+        gate_lease_id: str | None = None,
+    ) -> dict[str, object]:
         """Restore a game's backup during launch after a check reports it is needed."""
-        return self._lifecycle.restore_game_on_start(game_name, app_id)
+        return self._lifecycle.restore_game_on_start(game_name, app_id, gate_pid, gate_lease_id)
 
-    def handle_game_start(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
+    def handle_game_start(
+        self,
+        game_name: str,
+        app_id: str | None = None,
+        gate_pid: int | None = None,
+        gate_lease_id: str | None = None,
+    ) -> dict[str, object]:
         """Compatibility wrapper for the original one-call launch autosync flow."""
-        return self._lifecycle.handle_game_start(game_name, app_id)
+        return self._lifecycle.handle_game_start(game_name, app_id, gate_pid, gate_lease_id)
 
     def check_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Check whether a game exit needs a backup without writing backup data."""

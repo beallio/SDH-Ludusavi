@@ -529,7 +529,7 @@ describe("GameLifecycleController", () => {
     expect(mockRpc.resumeGameProcess).toHaveBeenCalledOnce();
   });
 
-  it.fails("passes the exact backend launch gate to the start restore RPC", async () => {
+  it("passes the exact backend launch gate to the start restore RPC", async () => {
     mockRpc.checkGameStart.mockResolvedValue({ status: "needed", operation: "restore" });
     mockRpc.startSyncthingActivityWatch.mockResolvedValue({ status: "watching", watch_id: "w1" });
     mockRpc.getSyncthingActivity.mockResolvedValue({
@@ -558,7 +558,7 @@ describe("GameLifecycleController", () => {
     );
   });
 
-  it.fails("keeps the lease-release acknowledgement in the renewal-loss failure path", async () => {
+  it("keeps the lease-release acknowledgement in the renewal-loss failure path", async () => {
     let acknowledgeCancellation: (() => void) | undefined;
     mockRpc.checkGameStart.mockResolvedValue({ status: "needed", operation: "restore" });
     mockRpc.startSyncthingActivityWatch.mockResolvedValue({ status: "watching", watch_id: "w1" });

@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
 from ._version import resolve_version
 from .types import LudusaviAdapter
@@ -108,6 +109,33 @@ class LudusaviGateway:
     def get_diagnostics(self) -> dict[str, object]:
         """Get diagnostics dict from the adapter."""
         return self.get_adapter().get_diagnostics()
+
+    @contextmanager
+    def operation_scope(self) -> Iterator[Callable[[], bool]]:
+        """Yield the adapter's one-operation cancellation handle when available."""
+        adapter = self.get_adapter()
+        scope_factory = getattr(adapter, "operation_scope", None)
+        if not callable(scope_factory):
+            yield lambda: True
+            return
+        with scope_factory() as cancel:
+            yield cancel if callable(cancel) else (lambda: True)
+
+    def shutdown(self) -> bool:
+        """Reject new managed work and reap active adapter processes before thawing."""
+        with self._adapter_lock:
+            adapter = self._adapter
+        if adapter is None:
+            return True
+        shutdown = getattr(adapter, "shutdown", None)
+        if not callable(shutdown):
+            return True
+        try:
+            return bool(shutdown())
+        # Intentionally broad: a shutdown error must keep the launch gate frozen.
+        except Exception as exc:
+            self._log("error", f"Unable to stop managed Ludusavi work: {exc}", "launch_gate")
+            return False
 
     def get_ludusavi_command(self) -> dict[str, object] | None:
         """Return the command path and args used by the plugin for GUI launching."""
