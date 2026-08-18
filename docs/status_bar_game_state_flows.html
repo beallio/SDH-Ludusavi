@@ -292,7 +292,9 @@
         The status bar must describe the verified save state, not the work the plugin
         might do later. Both lifecycle paths begin with the same check state, then move
         to download, upload, current, unknown, or unable-to-sync copy after the backend
-        has checked Ludusavi.
+        has checked Ludusavi. A check may wait up to 30 seconds for another operation so it
+        can inspect fresh save data; copy actions fail immediately on contention, and either
+        outcome is shown as one unable-to-sync result instead of silently hiding the strip.
       </p>
     </section>
 
@@ -464,7 +466,7 @@
           <tr>
             <td><code>operation_running</code></td>
             <td><code>UNABLE TO SYNC</code></td>
-            <td>Another Ludusavi operation did not finish in time, so auto-sync stops and reports the skipped save action.</td>
+            <td>A check exceeded its 30-second wait, or a copy action found the lock busy. Auto-sync stops and visibly reports the skipped save action.</td>
           </tr>
           <tr>
             <td><code>auto_sync_disabled</code>, <code>unmatched_game</code>, <code>not_processed</code></td>

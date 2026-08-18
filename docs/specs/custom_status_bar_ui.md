@@ -33,7 +33,10 @@ fail after three minutes. Running states have a separate 210-second cleanup ceil
 Syncthing statuses remain visible until the monitor replaces them, result states hide after 2
 seconds, hide events clear pending timers, and plugin dismount clears pending timers before
 destroying the BrowserView. The backend launch gate retains its distinct four-minute emergency
-ceiling; Syncthing's independent 120-second pre-game and 300/900-second post-game observation
+ceiling. Automatic lifecycle checks may wait up to 30 seconds for a currently active Ludusavi
+operation so they can inspect fresh state, while automatic save-copy actions remain fail-fast.
+An `operation_running` result is therefore rendered as one visible failure rather than a silent
+completion. Syncthing's independent 120-second pre-game and 300/900-second post-game observation
 limits are unchanged.
 
 BrowserView updates hide the reused BrowserView before loading each new visible
@@ -69,6 +72,13 @@ the gate fails safely and the frontend does not restore, back up, or resolve a c
 the game loads. The existing `Launch gate unavailable; conflict resolution skipped while game
 is loading.` notification remains the required visible failure state; it must not be hidden
 or replaced by an unverified conflict modal.
+
+The frontend lease race is an early warning only; the backend owns the authority to protect a
+save mutation. Start restore and both conflict choices, including `keep_local`, pass the exact
+gate PID and lease ID. The watchdog verifies and pins that lease immediately around the managed
+Ludusavi command. Resume, lease loss, watchdog expiry, and unload request cancellation for that
+exact command and do not thaw the scope until cancellation returns and the worker has completed.
+If the process group cannot be reaped, the gate remains frozen and the failure stays visible.
 
 The same renewable lease protects pre-game Syncthing settlement. An initialized idle
 watch adds no launch delay. If relevant folder activity is observed, the launch stays
@@ -171,7 +181,8 @@ Automatic lifecycle sync is split into check and action RPCs so the strip can ve
 save state before showing action copy:
 
 - `check_game_start(game_name, app_id?)`
-- `restore_game_on_start(game_name, app_id?)`
+- `restore_game_on_start(game_name, app_id?, gate_pid?, gate_lease_id?)`
+- `resolve_game_start_conflict(game_name, app_id?, resolution, gate_pid?, gate_lease_id?)`
 - `check_game_exit(game_name, app_id?)`
 - `backup_game_on_exit(game_name, app_id?)`
 
@@ -180,6 +191,10 @@ The existing `handle_game_start(game_name, app_id?)` and
 original result shapes. No persisted state or package dependencies change. The
 frontend notification preferences panel no longer exposes autosync progress/result
 toast toggles because those routine states move to the status strip.
+
+Gate arguments remain optional only at the RPC transport boundary for compatibility. The backend
+requires a matching active gate before every start-side mutation; a missing or malformed pair
+returns the structured fail-closed `gate_lost` result without invoking the adapter.
 
 Manual force backup and force restore keep their existing notification behavior.
 
@@ -215,6 +230,9 @@ Autosync status strip behavior:
 - Unknown/non-actionable save state: show `UNKNOWN` for 2 seconds.
 - Failed or unsafe-to-sync state: show `UNABLE TO SYNC` and emit one Decky failure
   toast.
+- A lifecycle check can wait at most 30 seconds for an active operation; an automatic restore,
+  conflict choice, or exit backup does not wait behind a new operation. Either contention path
+  reports `operation_running` as the same visible failure with one toast.
 
 During launch, visible `SYNCTHING DOWNLOADING` or `SYNCTHING UPLOADING` activity takes
 precedence over a stale `local_current` result. After observed incoming activity settles,
@@ -228,10 +246,10 @@ visible even for a very fast peer transfer.
 
 Checking and running states stay visible while their operation runs and are replaced
 when the operation's result is published. A stuck-bar safety ceiling force-hides them
-after 930 seconds (just above the backend's 900-second operation bound), and only if
-that ceiling fires does a late success stay quiet. A late failure always shows the
-failure toast. Publishing any new running status clears a previous ceiling
-suppression.
+after 210 seconds (the three-minute Ludusavi ceiling plus 30 seconds for RPC delivery
+and cleanup). If that ceiling fires, a late success stays quiet, but a late failure
+still shows the failure toast. Publishing any new running status clears a previous
+ceiling suppression.
 
 ## Dependency Requirements
 
