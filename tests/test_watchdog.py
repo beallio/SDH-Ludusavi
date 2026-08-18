@@ -728,10 +728,6 @@ def test_same_scope_acquisition_rotation_receives_existing_verified_scope() -> N
     assert controller.thaw_calls == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 5 requires an atomic backend-owned guarded-operation lease check.",
-)
 @pytest.mark.parametrize("gate_state", ["missing", "wrong", "expired", "thawed", "replaced"])
 def test_guarded_operation_rejects_every_non_exact_live_lease_before_mutation(
     gate_state: str,
@@ -772,10 +768,6 @@ def test_guarded_operation_rejects_every_non_exact_live_lease_before_mutation(
     assert mutations == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 5 requires a valid lease to pin exactly one guarded mutation.",
-)
 def test_guarded_operation_runs_once_for_the_exact_live_lease() -> None:
     controller = FakeScopeController()
     wd, _ = watchdog(controller)
@@ -796,13 +788,6 @@ def test_guarded_operation_runs_once_for_the_exact_live_lease() -> None:
     assert mutations == ["mutated"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RED: Task 5 requires guarded-operation completion to clear its pin exactly once "
-        "without cancelling or thawing a still-owned gate."
-    ),
-)
 @pytest.mark.parametrize("outcome", ["success", "adapter_exception"])
 def test_guarded_operation_completion_leaves_exact_resume_to_thaw_once(
     outcome: str,
@@ -848,10 +833,6 @@ def test_guarded_operation_completion_leaves_exact_resume_to_thaw_once(
         wd.stop()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 5 requires a late guarded completion to leave a replacement lease untouched.",
-)
 def test_guarded_operation_completion_cannot_release_or_change_a_replacement_lease() -> None:
     controller = FakeScopeController()
     wd, _ = watchdog(controller)
@@ -898,12 +879,6 @@ def test_guarded_operation_completion_cannot_release_or_change_a_replacement_lea
         wd.stop()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RED: Task 5 requires cancellation and completion to finish before any guarded gate thaws."
-    ),
-)
 @pytest.mark.parametrize("release_kind", ["resume", "lease_expiry", "absolute_expiry", "stop"])
 def test_guarded_operation_defers_every_release_until_cancellation_and_completion(
     release_kind: str,

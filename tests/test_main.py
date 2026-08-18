@@ -273,10 +273,6 @@ def test_call_maps_base_exception_from_worker_thread(
     assert logger.exceptions == ["refresh failed"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 5 requires main.py to forward the exact launch gate for restores.",
-)
 def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -570,13 +566,6 @@ def test_unload_logs_synchronous_stop_fallback_failure(
     assert logger.infos[-1] == "SDH-ludusavi backend unloaded"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RED: Task 5 requires unload to preserve a retained launch gate instead of retrying "
-        "it through the synchronous fallback."
-    ),
-)
 def test_unload_waits_for_guarded_stop_before_executor_shutdown_and_preserves_retained_gate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

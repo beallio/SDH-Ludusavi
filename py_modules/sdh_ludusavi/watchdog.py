@@ -13,12 +13,12 @@ from .launch_gate_acquire import LaunchScopeAcquirer
 from .launch_gate_process import _coerce_signal_pid
 from .watchdog_lease import (
     _PauseLease,
+    _GuardedOperationManager,
     _ScopeAcquirer,
     _ScopeController,
     _bounded_reason,
     _gate_held_message,
     _lease_expiry_reason,
-    _release_gate,
     _release_stop_only_identity,
     _retained_summary,
     _scope_thawed_message,
@@ -27,6 +27,7 @@ from .watchdog_lease import (
 
 SHUTDOWN_THAW_ATTEMPTS = 3
 SHUTDOWN_THAW_RETRY_SECONDS = 0.05
+GUARDED_OPERATION_RELEASE_SECONDS = 2.0
 
 
 class ProcessWatchdog:
@@ -56,6 +57,8 @@ class ProcessWatchdog:
         # The state lock is never held while invoking systemd or waiting on cgroup state.
         self._pid_locks: dict[int, threading.Lock] = {}
         self._pid_locks_lock = threading.Lock()
+        self._guarded_operations = _GuardedOperationManager(self, GUARDED_OPERATION_RELEASE_SECONDS)
+        self.run_guarded_operation: Callable[..., object | None] = self._guarded_operations.run
 
     def _get_pid_lock(self, pid: int) -> threading.Lock:
         with self._pid_locks_lock:
@@ -71,9 +74,22 @@ class ProcessWatchdog:
             self._log("warning", f"Invalid PID passed to pause: {exc}", "launch_gate", None)
             return {"status": "failed", "message": str(exc)}
 
+        if not self._guarded_operations.wait_for_pending_release(valid_pid):
+            return self._acquisition_failure(
+                valid_pid, "Previous launch-gate release is still pending"
+            )
+
         with self._get_pid_lock(valid_pid):
             with self._paused_pids_lock:
                 existing = self._paused_pids.get(valid_pid)
+            if existing is not None and (
+                existing.guarded_active
+                or existing.release_requested
+                or existing.release_in_progress
+            ):
+                return self._acquisition_failure(
+                    valid_pid, "Launch gate has a guarded operation or release in progress"
+                )
             if existing is not None and existing.recovery_scopes:
                 return self._acquisition_failure(valid_pid, "Scope recovery is still pending")
             try:
@@ -154,6 +170,8 @@ class ProcessWatchdog:
                 return self._lease_failure(valid_pid, "Process not paused")
             if lease.lease_id != lease_id:
                 return self._lease_failure(valid_pid, "Lease ID mismatch")
+            if lease.release_requested or lease.release_in_progress:
+                return self._lease_failure(valid_pid, "Launch gate release is already in progress")
             stop_failure = _stop_only_gate_failure(self._proc_root, valid_pid, lease)
             if lease.scope is None and stop_failure is not None:
                 return self._lease_failure(valid_pid, stop_failure)
@@ -188,6 +206,8 @@ class ProcessWatchdog:
                 lease = self._paused_pids.get(valid_pid)
             if lease is None or lease.lease_id != lease_id:
                 return False
+            if lease.release_requested or lease.release_in_progress:
+                return False
             if _lease_expiry_reason(lease, self._monotonic()) is not None:
                 return False
             if lease.scope is None:
@@ -201,40 +221,7 @@ class ProcessWatchdog:
         except ValueError as exc:
             self._log("warning", f"Invalid PID passed to resume: {exc}", "launch_gate", None)
             return {"status": "failed", "message": str(exc)}
-        with self._get_pid_lock(valid_pid):
-            return self._resume_locked(valid_pid, lease_id)
-
-    def _resume_locked(self, valid_pid: int, lease_id: str | None = None) -> dict[str, object]:
-        with self._paused_pids_lock:
-            lease = self._paused_pids.get(valid_pid)
-        if lease is None:
-            return self._lease_failure(valid_pid, "Process not paused")
-        if lease_id is not None and lease.lease_id != lease_id:
-            return self._lease_failure(valid_pid, "Lease ID mismatch")
-
-        released = _release_gate(
-            self._scope_controller, self._signal, valid_pid, lease, self._proc_root
-        )
-        for thawed in released.thawed:
-            self._log_thawed(thawed)
-        if released.success:
-            self._remove_lease(valid_pid, lease)
-            if lease.scope is not None:
-                return {"status": "resumed", "pid": valid_pid}
-            self._log(
-                "info",
-                f"Released SIGSTOP gate for launch PID {valid_pid}",
-                "launch_gate",
-                None,
-            )
-            return {"status": "resumed", "pid": valid_pid}
-
-        if released.retained:
-            with self._paused_pids_lock:
-                if self._paused_pids.get(valid_pid) is lease:
-                    lease.scope = released.retained[0][0]
-                    lease.recovery_scopes = tuple(scope for scope, _ in released.retained[1:])
-        return self._lease_failure(valid_pid, released.reason)
+        return self._guarded_operations.request_release(valid_pid, lease_id, "explicit resume")
 
     def resume_all(self) -> None:
         """Best-effort thaw for plugin unload or launch-gate failures."""
@@ -359,7 +346,7 @@ class ProcessWatchdog:
                         "watchdog",
                         None,
                     )
-                    self._resume_locked(pid, expected_lease_id)
+                self._guarded_operations.request_release(pid, expected_lease_id, reason)
             # Intentionally broad: keep the background watchdog alive after one scope failure.
             except Exception as exc:
                 self._log(

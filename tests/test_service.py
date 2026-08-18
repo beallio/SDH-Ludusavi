@@ -858,13 +858,20 @@ def test_start_matches_steam_and_non_steam_names_conservatively(tmp_path: Path) 
     service.refresh_games()
     service.set_auto_sync_enabled(True)
 
-    steam_result = service.handle_game_start("hades", app_id="1145360")
+    paused = service.pause_game_process(4567)
+    steam_result = service.handle_game_start(
+        "hades",
+        app_id="1145360",
+        gate_pid=4567,
+        gate_lease_id=str(paused["lease_id"]),
+    )
     non_steam_result = service.handle_game_start("Celeste")
 
     assert steam_result["status"] == "restored"
     assert non_steam_result["status"] == "skipped"
     assert non_steam_result["reason"] == "no_backup"
     assert adapter.restores == ["Hades"]
+    service.resume_all_paused_processes()
 
 
 def test_check_game_start_reports_restore_needed_without_restoring(tmp_path: Path) -> None:
@@ -1043,18 +1050,21 @@ def test_restore_game_on_start_performs_restore_and_records_history(tmp_path: Pa
     service.refresh_games()
     service.set_auto_sync_enabled(True)
 
-    result = service.restore_game_on_start("Hades", app_id="1145360")
+    paused = service.pause_game_process(4567)
+    result = service.restore_game_on_start(
+        "Hades",
+        app_id="1145360",
+        gate_pid=4567,
+        gate_lease_id=str(paused["lease_id"]),
+    )
 
     assert result["status"] == "restored"
     assert adapter.restores == ["Hades"]
     refresh = service.refresh_games()
     assert refresh["history"]["Hades"]["last_restore"]["trigger"] == "auto_start"
+    service.resume_all_paused_processes()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 5 requires every automatic start mutation to reject a lost gate.",
-)
 @pytest.mark.parametrize("mutation", ["restore", "keep_local"])
 @pytest.mark.parametrize("gate_state", ["missing", "wrong", "expired"])
 def test_start_mutations_fail_closed_without_the_exact_gate(
@@ -1093,10 +1103,6 @@ def test_start_mutations_fail_closed_without_the_exact_gate(
     assert adapter.restores == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 5 requires each automatic start mutation to use the watchdog guard.",
-)
 @pytest.mark.parametrize("mutation", ["restore", "keep_local", "restore_backup"])
 def test_start_mutations_run_once_through_the_exact_watchdog_guard(
     tmp_path: Path,
@@ -1144,13 +1150,6 @@ def test_start_mutations_run_once_through_the_exact_watchdog_guard(
     assert adapter.restores == expected_restores
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RED: Task 5 requires guarded cancellation to record a failure and never publish "
-        "a late restore success."
-    ),
-)
 def test_cancelled_guarded_restore_records_failure_and_releases_the_coordinator_lock(
     tmp_path: Path,
 ) -> None:
@@ -1180,10 +1179,6 @@ def test_cancelled_guarded_restore_records_failure_and_releases_the_coordinator_
     assert service.get_operation_status()["is_running"] is False
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RED: Task 5 requires managed cancellation to finish before service shutdown thaws a gate.",
-)
 def test_service_stop_waits_for_adapter_cancellation_before_thawing_a_paused_game(
     tmp_path: Path,
 ) -> None:
@@ -1219,12 +1214,6 @@ def test_service_stop_waits_for_adapter_cancellation_before_thawing_a_paused_gam
         service.resume_all_paused_processes()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RED: Task 5 requires failed managed-executor shutdown to retain the exact launch gate."
-    ),
-)
 def test_service_stop_returns_failure_without_thaw_when_cancellation_cannot_be_confirmed(
     tmp_path: Path,
 ) -> None:
@@ -1321,12 +1310,9 @@ def test_resolve_game_start_conflict_applies_selected_save(
     service = service_with_state(tmp_path, adapter)
     service.refresh_games()
     service.set_auto_sync_enabled(True)
-    gate_pid: int | None = None
-    gate_lease_id: str | None = None
-    if resolution == "restore_backup":
-        paused = service.pause_game_process(4567)
-        gate_pid = 4567
-        gate_lease_id = str(paused["lease_id"])
+    paused = service.pause_game_process(4567)
+    gate_pid = 4567
+    gate_lease_id = str(paused["lease_id"])
 
     result = service.resolve_game_start_conflict(
         "Hades",
