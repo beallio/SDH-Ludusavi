@@ -6,6 +6,8 @@ import importlib
 import os
 from pathlib import Path
 import queue
+import signal
+import subprocess
 import sys
 import threading
 import time
@@ -216,7 +218,7 @@ def test_token_cancellation_stops_only_its_own_process_group(tmp_path: Path) -> 
     _wait_until_stopped(second_child)
 
 
-def test_completed_token_cannot_cancel_a_later_operation_even_if_a_pid_is_reused(
+def test_completed_token_cannot_cancel_a_later_real_process_group(
     tmp_path: Path,
 ) -> None:
     executor = _new_executor(_helper_command(tmp_path))
@@ -256,6 +258,100 @@ def test_completed_token_cannot_cancel_a_later_operation_even_if_a_pid_is_reused
     assert isinstance(failures.get(timeout=1), cancelled_error)
     _wait_until_stopped(later_parent)
     _wait_until_stopped(later_child)
+
+
+def test_completed_token_cannot_cancel_later_pid_reuse_fake_process_group(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A completed token must not signal a newer record with the recycled PID."""
+
+    module = _managed_executor_module()
+    reused_pid = 4242
+
+    class FakeProcess:
+        def __init__(self, *, complete: bool) -> None:
+            self.args: list[str] = []
+            self.pid = reused_pid
+            self.returncode: int | None = 0 if complete else None
+            self._finished = threading.Event()
+            if complete:
+                self._finished.set()
+
+        def communicate(
+            self,
+            input: str | None = None,
+            timeout: float | None = None,
+        ) -> tuple[str, str]:
+            del input
+            if not self._finished.wait(timeout):
+                raise subprocess.TimeoutExpired(self.args, timeout)
+            return "plain response\n", ""
+
+        def wait(self, timeout: float | None = None) -> int:
+            if not self._finished.wait(timeout):
+                raise subprocess.TimeoutExpired(self.args, timeout)
+            assert self.returncode is not None
+            return self.returncode
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+        def finish(self, returncode: int) -> None:
+            self.returncode = returncode
+            self._finished.set()
+
+    completed_process = FakeProcess(complete=True)
+    active_process = FakeProcess(complete=False)
+    processes: queue.Queue[FakeProcess] = queue.Queue()
+    processes.put(completed_process)
+    processes.put(active_process)
+    process_group_signals: list[tuple[int, signal.Signals]] = []
+
+    def fake_popen(*args: object, **kwargs: object) -> FakeProcess:
+        del args, kwargs
+        return processes.get_nowait()
+
+    def fake_killpg(pgid: int, sig: signal.Signals) -> None:
+        process_group_signals.append((pgid, sig))
+        assert pgid == reused_pid
+        active_process.finish(-int(sig))
+
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(module.os, "killpg", fake_killpg)
+    executor = _new_executor(_helper_command(tmp_path))
+
+    with executor.operation_scope() as completed_token:
+        assert executor.execute(["text"], mode="TEXT").data == "plain response\n"
+
+    active_token: queue.Queue[Any] = queue.Queue()
+    failures: queue.Queue[BaseException] = queue.Queue()
+
+    def run_reused_pid_process() -> None:
+        try:
+            with executor.operation_scope() as token:
+                active_token.put(token)
+                executor.execute(["text"], mode="TEXT", timeout=5.0)
+        except BaseException as exc:
+            failures.put(exc)
+
+    active_thread = threading.Thread(target=run_reused_pid_process)
+    active_thread.start()
+    later_token = active_token.get(timeout=1)
+    assert later_token is not completed_token
+    assert active_process.poll() is None
+
+    completed_token.cancel()
+    assert process_group_signals == []
+    assert active_process.poll() is None
+    assert active_thread.is_alive()
+
+    later_token.cancel()
+    active_thread.join(timeout=2)
+    assert not active_thread.is_alive()
+    assert process_group_signals == [(reused_pid, signal.SIGTERM)]
+    cancelled_error = getattr(module, "LudusaviOperationCancelledError")
+    assert isinstance(failures.get(timeout=1), cancelled_error)
 
 
 def test_adapter_installs_managed_executor_without_breaking_new_only_test_clients(
