@@ -4,6 +4,7 @@ import os
 import signal
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -725,3 +726,263 @@ def test_same_scope_acquisition_rotation_receives_existing_verified_scope() -> N
     assert wd._paused_pids[4567].paused_at == original_paused_at
     assert len(controller.freeze_calls) == 1
     assert controller.thaw_calls == []
+
+
+@pytest.mark.parametrize("gate_state", ["missing", "wrong", "expired", "thawed", "replaced"])
+def test_guarded_operation_rejects_every_non_exact_live_lease_before_mutation(
+    gate_state: str,
+) -> None:
+    controller = FakeScopeController()
+    clock = FakeClock()
+    wd = ProcessWatchdog(
+        MagicMock(),
+        scope_controller=controller,
+        scope_acquirer=FakeScopeAcquirer(controller),
+        monotonic=clock.monotonic,
+    )
+    wd._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
+    paused = wd.pause(4567)
+    lease_id = str(paused["lease_id"])
+    gate_pid = 4567
+
+    if gate_state == "missing":
+        gate_pid = 9999
+    elif gate_state == "wrong":
+        lease_id = "wrong-lease"
+    elif gate_state == "expired":
+        wd._paused_pids[4567].lease_deadline = clock.now - 0.001
+    elif gate_state == "thawed":
+        controller.requested = False
+    else:
+        wd.pause(4567)
+
+    mutations: list[str] = []
+    result = wd.run_guarded_operation(  # type: ignore[attr-defined]
+        gate_pid,
+        lease_id,
+        callback=lambda: mutations.append("mutated"),
+        cancel_callback=lambda: True,
+    )
+
+    assert result is None
+    assert mutations == []
+
+
+def test_guarded_operation_runs_once_for_the_exact_live_lease() -> None:
+    controller = FakeScopeController()
+    wd, _ = watchdog(controller)
+    paused = wd.pause(4567)
+    mutations: list[str] = []
+
+    try:
+        result = wd.run_guarded_operation(  # type: ignore[attr-defined]
+            4567,
+            str(paused["lease_id"]),
+            callback=lambda: mutations.append("mutated") or "changed",
+            cancel_callback=lambda: True,
+        )
+    finally:
+        wd.stop()
+
+    assert result == "changed"
+    assert mutations == ["mutated"]
+
+
+@pytest.mark.parametrize("outcome", ["success", "adapter_exception"])
+def test_guarded_operation_completion_leaves_exact_resume_to_thaw_once(
+    outcome: str,
+) -> None:
+    controller = FakeScopeController()
+    wd, _ = watchdog(controller)
+    paused = wd.pause(4567)
+    lease_id = str(paused["lease_id"])
+    cancellation_calls: list[str] = []
+
+    def mutation() -> str:
+        if outcome == "adapter_exception":
+            raise RuntimeError("adapter failed")
+        return "changed"
+
+    try:
+        if outcome == "adapter_exception":
+            with pytest.raises(RuntimeError, match="adapter failed"):
+                wd.run_guarded_operation(  # type: ignore[attr-defined]
+                    4567,
+                    lease_id,
+                    callback=mutation,
+                    cancel_callback=lambda: cancellation_calls.append("cancel") or True,
+                )
+        else:
+            assert (
+                wd.run_guarded_operation(  # type: ignore[attr-defined]
+                    4567,
+                    lease_id,
+                    callback=mutation,
+                    cancel_callback=lambda: cancellation_calls.append("cancel") or True,
+                )
+                == "changed"
+            )
+
+        assert cancellation_calls == []
+        assert controller.thaw_calls == []
+        assert wd.resume(4567, lease_id) == {"status": "resumed", "pid": 4567}
+        assert len(controller.thaw_calls) == 1
+        assert wd.resume(4567, lease_id)["status"] == "failed"
+        assert len(controller.thaw_calls) == 1
+    finally:
+        wd.stop()
+
+
+def test_guarded_operation_completion_cannot_release_or_change_a_replacement_lease() -> None:
+    controller = FakeScopeController()
+    wd, _ = watchdog(controller)
+    paused = wd.pause(4567)
+    original_lease_id = str(paused["lease_id"])
+    mutation_started = threading.Event()
+    allow_mutation_return = threading.Event()
+    worker_errors: list[BaseException] = []
+
+    def mutation() -> str:
+        mutation_started.set()
+        assert allow_mutation_return.wait(timeout=1)
+        return "finished"
+
+    def run_mutation() -> None:
+        try:
+            wd.run_guarded_operation(  # type: ignore[attr-defined]
+                4567,
+                original_lease_id,
+                callback=mutation,
+                cancel_callback=lambda: True,
+            )
+        except BaseException as exc:  # pragma: no cover - asserted by the RED marker.
+            worker_errors.append(exc)
+
+    worker = threading.Thread(target=run_mutation, daemon=True)
+    worker.start()
+    try:
+        assert mutation_started.wait(timeout=1)
+        with wd._paused_pids_lock:
+            replacement = replace(wd._paused_pids[4567], lease_id="replacement-lease")
+            wd._paused_pids[4567] = replacement
+
+        allow_mutation_return.set()
+        worker.join(timeout=1)
+
+        assert not worker.is_alive()
+        assert worker_errors == []
+        assert wd._paused_pids[4567] is replacement
+        assert controller.thaw_calls == []
+    finally:
+        allow_mutation_return.set()
+        worker.join(timeout=1)
+        wd.stop()
+
+
+@pytest.mark.parametrize("release_kind", ["resume", "lease_expiry", "absolute_expiry", "stop"])
+def test_guarded_operation_defers_every_release_until_cancellation_and_completion(
+    release_kind: str,
+) -> None:
+    controller = FakeScopeController()
+    clock = FakeClock()
+    wd = ProcessWatchdog(
+        MagicMock(),
+        scope_controller=controller,
+        scope_acquirer=FakeScopeAcquirer(controller),
+        monotonic=clock.monotonic,
+    )
+    wd._ensure_watchdog_running = lambda: None  # type: ignore[method-assign]
+    paused = wd.pause(4567)
+    lease_id = str(paused["lease_id"])
+    mutation_started = threading.Event()
+    allow_mutation_return = threading.Event()
+    cancellation_started = threading.Event()
+    allow_cancellation_return = threading.Event()
+    mutation_results: list[object] = []
+    mutation_errors: list[BaseException] = []
+
+    def mutation() -> str:
+        mutation_started.set()
+        assert allow_mutation_return.wait(timeout=1)
+        return "late-success"
+
+    def cancel() -> bool:
+        cancellation_started.set()
+        assert allow_cancellation_return.wait(timeout=1)
+        return True
+
+    def run_mutation() -> None:
+        try:
+            mutation_results.append(
+                wd.run_guarded_operation(  # type: ignore[attr-defined]
+                    4567,
+                    lease_id,
+                    callback=mutation,
+                    cancel_callback=cancel,
+                )
+            )
+        except BaseException as exc:  # pragma: no cover - asserted by the RED marker.
+            mutation_errors.append(exc)
+
+    worker = threading.Thread(target=run_mutation, daemon=True)
+    releaser: threading.Thread | None = None
+    worker.start()
+    try:
+        assert mutation_started.wait(timeout=1)
+
+        lock_probe_finished_before_release = threading.Event()
+        lock_probe_before_release = threading.Thread(
+            target=lambda: (
+                wd.verify_gate(4567, lease_id),
+                lock_probe_finished_before_release.set(),
+            ),
+            daemon=True,
+        )
+        lock_probe_before_release.start()
+        assert lock_probe_finished_before_release.wait(timeout=1)
+
+        def request_release() -> None:
+            if release_kind == "resume":
+                wd.resume(4567, lease_id)
+            elif release_kind == "lease_expiry":
+                clock.now = wd._paused_pids[4567].lease_deadline + 0.001
+                wd._check_and_resume_stuck_pids()
+            elif release_kind == "absolute_expiry":
+                clock.now = wd._paused_pids[4567].paused_at + WATCHDOG_ABSOLUTE_RESUME_SECONDS
+                wd._check_and_resume_stuck_pids()
+            else:
+                wd.stop()
+
+        releaser = threading.Thread(target=request_release, daemon=True)
+        releaser.start()
+        assert cancellation_started.wait(timeout=1)
+        assert controller.thaw_calls == []
+
+        lock_probe_finished = threading.Event()
+        lock_probe = threading.Thread(
+            target=lambda: (wd.verify_gate(4567, lease_id), lock_probe_finished.set()),
+            daemon=True,
+        )
+        lock_probe.start()
+        assert lock_probe_finished.wait(timeout=1)
+
+        allow_cancellation_return.set()
+        assert controller.thaw_calls == []
+        allow_mutation_return.set()
+        worker.join(timeout=1)
+        releaser.join(timeout=1)
+
+        assert not worker.is_alive()
+        assert not releaser.is_alive()
+        assert mutation_errors == []
+        assert mutation_results == [None]
+        assert len(controller.thaw_calls) == 1
+        assert wd.resume(4567, lease_id)["status"] == "failed"
+        assert len(controller.thaw_calls) == 1
+    finally:
+        allow_cancellation_return.set()
+        allow_mutation_return.set()
+        worker.join(timeout=1)
+        if releaser is not None:
+            releaser.join(timeout=1)
+        wd.stop()

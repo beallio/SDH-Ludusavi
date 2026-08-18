@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import sdh_ludusavi.lifecycle as lifecycle_module
 from sdh_ludusavi.service import OperationLockedError, SDHLudusaviService
 from sdh_ludusavi.persistence import JsonSettingsStore
 from sdh_ludusavi.types import GameStatus
@@ -858,13 +859,20 @@ def test_start_matches_steam_and_non_steam_names_conservatively(tmp_path: Path) 
     service.refresh_games()
     service.set_auto_sync_enabled(True)
 
-    steam_result = service.handle_game_start("hades", app_id="1145360")
+    paused = service.pause_game_process(4567)
+    steam_result = service.handle_game_start(
+        "hades",
+        app_id="1145360",
+        gate_pid=4567,
+        gate_lease_id=str(paused["lease_id"]),
+    )
     non_steam_result = service.handle_game_start("Celeste")
 
     assert steam_result["status"] == "restored"
     assert non_steam_result["status"] == "skipped"
     assert non_steam_result["reason"] == "no_backup"
     assert adapter.restores == ["Hades"]
+    service.resume_all_paused_processes()
 
 
 def test_check_game_start_reports_restore_needed_without_restoring(tmp_path: Path) -> None:
@@ -993,6 +1001,7 @@ def test_check_game_start_skips_if_operation_starts_after_initial_guard(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(lifecycle_module, "LIFECYCLE_OPERATION_WAIT_SECONDS", 0.01)
     service = service_with_state(tmp_path)
     service.refresh_games()
     service.set_auto_sync_enabled(True)
@@ -1043,12 +1052,267 @@ def test_restore_game_on_start_performs_restore_and_records_history(tmp_path: Pa
     service.refresh_games()
     service.set_auto_sync_enabled(True)
 
-    result = service.restore_game_on_start("Hades", app_id="1145360")
+    paused = service.pause_game_process(4567)
+    result = service.restore_game_on_start(
+        "Hades",
+        app_id="1145360",
+        gate_pid=4567,
+        gate_lease_id=str(paused["lease_id"]),
+    )
 
     assert result["status"] == "restored"
     assert adapter.restores == ["Hades"]
     refresh = service.refresh_games()
     assert refresh["history"]["Hades"]["last_restore"]["trigger"] == "auto_start"
+    service.resume_all_paused_processes()
+
+
+@pytest.mark.parametrize("mutation", ["restore", "keep_local"])
+@pytest.mark.parametrize("gate_state", ["missing", "wrong", "expired"])
+def test_start_mutations_fail_closed_without_the_exact_gate(
+    tmp_path: Path,
+    mutation: str,
+    gate_state: str,
+) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    gate_pid: int | None = None
+    gate_lease_id: str | None = None
+
+    if gate_state != "missing":
+        paused = service.pause_game_process(4567)
+        gate_pid = 4567
+        gate_lease_id = str(paused["lease_id"])
+        if gate_state == "wrong":
+            gate_lease_id = "wrong-lease"
+        else:
+            service._watchdog._paused_pids[4567].lease_deadline = 0
+
+    try:
+        if mutation == "restore":
+            result = service.restore_game_on_start("Hades", "1145360", gate_pid, gate_lease_id)
+        else:
+            result = service.resolve_game_start_conflict(
+                "Hades", "1145360", "keep_local", gate_pid, gate_lease_id
+            )
+    finally:
+        service.resume_all_paused_processes()
+
+    assert result == {"status": "skipped", "game": "Hades", "reason": "gate_lost"}
+    assert adapter.backups == []
+    assert adapter.restores == []
+
+
+@pytest.mark.parametrize("mutation", ["restore", "keep_local", "restore_backup"])
+def test_start_mutations_run_once_through_the_exact_watchdog_guard(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    paused = service.pause_game_process(4567)
+    lease_id = str(paused["lease_id"])
+    guarded_calls: list[tuple[int, str]] = []
+
+    def run_guarded_operation(
+        pid: int,
+        provided_lease_id: str,
+        *,
+        callback: object,
+        cancel_callback: object,
+    ) -> object:
+        assert callable(callback)
+        assert callable(cancel_callback)
+        guarded_calls.append((pid, provided_lease_id))
+        return callback()
+
+    monkeypatch.setattr(service._watchdog, "run_guarded_operation", run_guarded_operation)
+    try:
+        if mutation == "restore":
+            result = service.restore_game_on_start("Hades", "1145360", 4567, lease_id)
+            expected_backups: list[str] = []
+            expected_restores = ["Hades"]
+        else:
+            result = service.resolve_game_start_conflict(
+                "Hades", "1145360", mutation, 4567, lease_id
+            )
+            expected_backups = ["Hades"] if mutation == "keep_local" else []
+            expected_restores = ["Hades"] if mutation == "restore_backup" else []
+    finally:
+        service.resume_all_paused_processes()
+
+    assert result["status"] in {"backed_up", "restored"}
+    assert guarded_calls == [(4567, lease_id)]
+    assert adapter.backups == expected_backups
+    assert adapter.restores == expected_restores
+
+
+def test_cancelled_guarded_restore_records_failure_and_releases_the_coordinator_lock(
+    tmp_path: Path,
+) -> None:
+    from sdh_ludusavi.ludusavi_executor import LudusaviOperationCancelledError
+
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    paused = service.pause_game_process(4567)
+
+    def cancelled_restore(game_name: str, preview: bool = False) -> dict[str, object]:
+        del game_name, preview
+        raise LudusaviOperationCancelledError("launch gate cancellation acknowledged")
+
+    adapter.restore = cancelled_restore
+    try:
+        with pytest.raises(LudusaviOperationCancelledError):
+            service.restore_game_on_start("Hades", "1145360", 4567, str(paused["lease_id"]))
+    finally:
+        service.resume_all_paused_processes()
+
+    history = service.get_game_history()["Hades"]
+    assert history["last_failure"]["operation"] == "restore"
+    assert history["last_failure"]["status"] == "failed"
+    assert history["last_restore"] is None
+    assert service.get_operation_status()["is_running"] is False
+
+
+def test_service_stop_waits_for_adapter_cancellation_before_thawing_a_paused_game(
+    tmp_path: Path,
+) -> None:
+    class BlockingShutdownAdapter(FakeAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cancellation_started = threading.Event()
+            self.allow_cancellation_return = threading.Event()
+
+        def shutdown(self) -> bool:
+            self.cancellation_started.set()
+            assert self.allow_cancellation_return.wait(timeout=1)
+            return True
+
+    adapter = BlockingShutdownAdapter()
+    service = service_with_state(tmp_path, adapter)
+    paused = service.pause_game_process(4567)
+    assert paused["status"] == "paused"
+    scope_controller = service._watchdog._scope_controller
+    stopped = threading.Thread(target=service.stop, daemon=True)
+    stopped.start()
+    try:
+        assert adapter.cancellation_started.wait(timeout=1)
+        assert service._watchdog._paused_pids[4567].scope is not None
+        assert scope_controller.thaw_calls == []
+        adapter.allow_cancellation_return.set()
+        stopped.join(timeout=1)
+        assert not stopped.is_alive()
+        assert service._watchdog._paused_pids == {}
+    finally:
+        adapter.allow_cancellation_return.set()
+        stopped.join(timeout=1)
+        service.resume_all_paused_processes()
+
+
+def test_service_stop_returns_failure_without_thaw_when_cancellation_cannot_be_confirmed(
+    tmp_path: Path,
+) -> None:
+    class UnreapedShutdownAdapter(FakeAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.shutdown_calls = 0
+
+        def shutdown(self) -> bool:
+            self.shutdown_calls += 1
+            return False
+
+    adapter = UnreapedShutdownAdapter()
+    service = service_with_state(tmp_path, adapter)
+    paused = service.pause_game_process(4567)
+    assert paused["status"] == "paused"
+    lease = service._watchdog._paused_pids[4567]
+    scope_controller = service._watchdog._scope_controller
+
+    try:
+        stopped = service.stop()
+
+        assert isinstance(stopped, dict)
+        assert stopped["status"] == "failed"
+        assert adapter.shutdown_calls == 1
+        assert service._watchdog._paused_pids[4567] is lease
+        assert scope_controller.thaw_calls == []
+    finally:
+        service.resume_all_paused_processes()
+
+
+def test_service_stop_retains_gate_when_guarded_callback_outlives_successful_adapter_shutdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful executor shutdown cannot override an unconfirmed guarded callback."""
+    from unittest.mock import MagicMock
+
+    class SuccessfulShutdownBlockedRestoreAdapter(FakeAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.restore_started = threading.Event()
+            self.allow_restore_return = threading.Event()
+            self.shutdown_calls = 0
+
+        def restore(self, game_name: str, preview: bool = False) -> dict[str, object]:
+            if preview:
+                return super().restore(game_name, preview=True)
+            self.restore_started.set()
+            assert self.allow_restore_return.wait(timeout=1)
+            return super().restore(game_name)
+
+        def shutdown(self) -> bool:
+            self.shutdown_calls += 1
+            return True
+
+    monkeypatch.setattr("sdh_ludusavi.watchdog.GUARDED_OPERATION_RELEASE_SECONDS", 0.01)
+    adapter = SuccessfulShutdownBlockedRestoreAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    paused = service.pause_game_process(4567)
+    lease = service._watchdog._paused_pids[4567]
+    scope_controller = service._watchdog._scope_controller
+    syncthing_watch_manager = MagicMock()
+    service._syncthing_watch_manager = syncthing_watch_manager
+    restore_errors: list[BaseException] = []
+
+    def restore() -> None:
+        try:
+            service.restore_game_on_start("Hades", "1145360", 4567, str(paused["lease_id"]))
+        except BaseException as exc:  # pragma: no cover - asserted below after cleanup.
+            restore_errors.append(exc)
+
+    worker = threading.Thread(target=restore, daemon=True)
+    worker.start()
+    try:
+        assert adapter.restore_started.wait(timeout=1)
+
+        stopped = service.stop()
+
+        assert stopped == {
+            "status": "failed",
+            "reason": "cancellation_unconfirmed",
+            "retained_gate": True,
+        }
+        assert adapter.shutdown_calls == 1
+        assert service._watchdog._paused_pids[4567] is lease
+        assert scope_controller.thaw_calls == []
+        syncthing_watch_manager.stop_all.assert_not_called()
+    finally:
+        adapter.allow_restore_return.set()
+        worker.join(timeout=1)
+        service.resume_all_paused_processes()
+
+    assert not worker.is_alive()
+    assert restore_errors == []
 
 
 def test_check_game_start_reports_conflict_for_ambiguous_recency(tmp_path: Path) -> None:
@@ -1116,12 +1380,9 @@ def test_resolve_game_start_conflict_applies_selected_save(
     service = service_with_state(tmp_path, adapter)
     service.refresh_games()
     service.set_auto_sync_enabled(True)
-    gate_pid: int | None = None
-    gate_lease_id: str | None = None
-    if resolution == "restore_backup":
-        paused = service.pause_game_process(4567)
-        gate_pid = 4567
-        gate_lease_id = str(paused["lease_id"])
+    paused = service.pause_game_process(4567)
+    gate_pid = 4567
+    gate_lease_id = str(paused["lease_id"])
 
     result = service.resolve_game_start_conflict(
         "Hades",
@@ -1236,6 +1497,7 @@ def test_check_game_exit_skips_if_operation_starts_after_initial_guard(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(lifecycle_module, "LIFECYCLE_OPERATION_WAIT_SECONDS", 0.01)
     service = service_with_state(tmp_path)
     service.refresh_games()
     service.set_auto_sync_enabled(True)
@@ -1436,6 +1698,258 @@ def test_concurrent_operations_are_rejected_by_thread_safe_lock(tmp_path: Path) 
     assert not first_thread.is_alive()
     assert first_errors == []
     assert first_result == [{"ok": True}]
+
+
+def test_manual_and_registry_operations_keep_the_fail_fast_coordinator_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = service_with_state(tmp_path)
+    service.refresh_games()
+    coordinator_calls: list[tuple[str, dict[str, object]]] = []
+    original_run_locked = service._coordinator.run_locked
+
+    def observe_run_locked(
+        operation: str,
+        game_name: str | None,
+        callback: object,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        coordinator_calls.append((operation, dict(kwargs)))
+        return original_run_locked(operation, game_name, callback, *args, **kwargs)
+
+    monkeypatch.setattr(service._coordinator, "run_locked", observe_run_locked)
+
+    assert service.force_backup("Hades")["status"] == "backed_up"
+    assert service.refresh_games(force=True)["dependency_error"] is None
+    assert [operation for operation, _kwargs in coordinator_calls] == ["backup", "refresh"]
+    assert all(
+        call_kwargs.get("wait_timeout_seconds") is None for _, call_kwargs in coordinator_calls
+    )
+
+
+@pytest.mark.parametrize("lifecycle", ["start", "exit"])
+def test_automatic_lifecycle_checks_wait_for_fresh_data_after_a_running_operation_releases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lifecycle: str,
+) -> None:
+    monkeypatch.setattr(
+        lifecycle_module,
+        "LIFECYCLE_OPERATION_WAIT_SECONDS",
+        0.2,
+        raising=False,
+    )
+    adapter = FakeAdapter()
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    active_started = threading.Event()
+    release_active = threading.Event()
+    check_finished = threading.Event()
+    results: list[dict[str, object]] = []
+    errors: list[BaseException] = []
+    preview_has_changes = False
+
+    def active_callback() -> dict[str, object]:
+        active_started.set()
+        assert release_active.wait(timeout=0.5)
+        return {"ok": True}
+
+    def backup(game_name: str, preview: bool = False) -> dict[str, object]:
+        if not preview:
+            return {"ok": True, "game": game_name}
+        return {
+            "games": {
+                game_name: {
+                    "change": "Different",
+                    "files": {"save.dat": {}} if preview_has_changes else {},
+                    "registry": {},
+                }
+            }
+        }
+
+    adapter.backup = backup
+    active = threading.Thread(
+        target=service._run_locked,
+        args=("refresh", None, active_callback),
+        daemon=True,
+    )
+
+    def run_check() -> None:
+        try:
+            if lifecycle == "start":
+                results.append(service.check_game_start("Hades"))
+            else:
+                results.append(service.check_game_exit("Hades"))
+        except BaseException as exc:  # pragma: no cover - asserted after synchronization.
+            errors.append(exc)
+        finally:
+            check_finished.set()
+
+    check = threading.Thread(target=run_check, daemon=True)
+    active.start()
+    assert active_started.wait(timeout=0.2)
+    check.start()
+
+    try:
+        assert not check_finished.wait(timeout=0.02)
+        if lifecycle == "start":
+            adapter.recency["Hades"] = "backup_newer"
+        else:
+            preview_has_changes = True
+        release_active.set()
+        check.join(timeout=0.5)
+
+        assert not check.is_alive()
+        assert errors == []
+        expected = {
+            "status": "needed",
+            "operation": "restore" if lifecycle == "start" else "backup",
+            "game": "Hades",
+        }
+        assert results == [expected]
+    finally:
+        release_active.set()
+        active.join(timeout=0.5)
+        check.join(timeout=0.5)
+
+
+@pytest.mark.parametrize("mutation", ["restore", "keep_local", "restore_backup", "backup"])
+def test_automatic_mutations_fail_fast_after_a_check_when_a_new_operation_wins_the_lock(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    adapter = FakeAdapter()
+    adapter.recency["Hades"] = "backup_newer"
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    active_started = threading.Event()
+    release_active = threading.Event()
+
+    def active_callback() -> dict[str, object]:
+        active_started.set()
+        assert release_active.wait(timeout=0.5)
+        return {"ok": True}
+
+    if mutation == "restore":
+        assert service.check_game_start("Hades")["status"] == "needed"
+        paused = service.pause_game_process(4567)
+
+        def action() -> dict[str, object]:
+            return service.restore_game_on_start(
+                "Hades",
+                "1145360",
+                4567,
+                str(paused["lease_id"]),
+            )
+
+    elif mutation in ("keep_local", "restore_backup"):
+        adapter.recency["Hades"] = "ambiguous"
+        assert service.check_game_start("Hades")["status"] == "conflict"
+        paused = service.pause_game_process(4567)
+
+        def action() -> dict[str, object]:
+            return service.resolve_game_start_conflict(
+                "Hades",
+                "1145360",
+                mutation,
+                4567,
+                str(paused["lease_id"]),
+            )
+
+    else:
+        assert service.check_game_exit("Hades")["status"] == "needed"
+
+        def action() -> dict[str, object]:
+            return service.backup_game_on_exit("Hades", "1145360")
+
+    active = threading.Thread(
+        target=service._run_locked,
+        args=("refresh", None, active_callback),
+        daemon=True,
+    )
+    active.start()
+    assert active_started.wait(timeout=0.2)
+
+    try:
+        assert action() == {
+            "status": "skipped",
+            "game": "Hades",
+            "reason": "operation_running",
+        }
+        assert adapter.restores == []
+        assert adapter.backups == []
+    finally:
+        release_active.set()
+        active.join(timeout=0.5)
+        service.resume_all_paused_processes()
+
+
+def test_queued_start_revalidates_a_lost_gate_after_the_coordinator_wait(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        lifecycle_module,
+        "LIFECYCLE_OPERATION_WAIT_SECONDS",
+        0.2,
+        raising=False,
+    )
+    adapter = FakeAdapter()
+    adapter.recency["Hades"] = "backup_newer"
+    service = service_with_state(tmp_path, adapter)
+    service.refresh_games()
+    service.set_auto_sync_enabled(True)
+    paused = service.pause_game_process(4567)
+    lease_id = str(paused["lease_id"])
+    active_started = threading.Event()
+    release_active = threading.Event()
+    start_finished = threading.Event()
+    results: list[dict[str, object]] = []
+    errors: list[BaseException] = []
+
+    def active_callback() -> dict[str, object]:
+        active_started.set()
+        assert release_active.wait(timeout=0.5)
+        return {"ok": True}
+
+    active = threading.Thread(
+        target=service._run_locked,
+        args=("refresh", None, active_callback),
+        daemon=True,
+    )
+
+    def run_start() -> None:
+        try:
+            results.append(service.handle_game_start("Hades", "1145360", 4567, lease_id))
+        except BaseException as exc:  # pragma: no cover - asserted after synchronization.
+            errors.append(exc)
+        finally:
+            start_finished.set()
+
+    start = threading.Thread(target=run_start, daemon=True)
+    active.start()
+    assert active_started.wait(timeout=0.2)
+    start.start()
+
+    try:
+        assert not start_finished.wait(timeout=0.02)
+        assert service.resume_game_process(4567, lease_id)["status"] == "resumed"
+        release_active.set()
+        start.join(timeout=0.5)
+
+        assert not start.is_alive()
+        assert errors == []
+        assert results == [{"status": "skipped", "game": "Hades", "reason": "gate_lost"}]
+        assert adapter.restores == []
+    finally:
+        release_active.set()
+        active.join(timeout=0.5)
+        start.join(timeout=0.5)
+        service.resume_all_paused_processes()
 
 
 def test_version_lookup_and_missing_dependency_states_are_logged(

@@ -292,9 +292,13 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
             return {"status": "needed", "operation": "restore", "game": game_name}
 
         def restore_game_on_start(
-            self, game_name: str, app_id: str | None = None
+            self,
+            game_name: str,
+            app_id: str | None = None,
+            gate_pid: int | None = None,
+            gate_lease_id: str | None = None,
         ) -> dict[str, object]:
-            calls.append(("restore_start", game_name, app_id))
+            calls.append(("restore_start", game_name, app_id, gate_pid, gate_lease_id))
             return {"status": "restored", "game": game_name}
 
         def check_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
@@ -326,7 +330,7 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
             "operation": "restore",
             "game": "Hades",
         }
-        assert await plugin.restore_game_on_start("Hades", "1145360") == {
+        assert await plugin.restore_game_on_start("Hades", "1145360", 4567, "lease") == {
             "status": "restored",
             "game": "Hades",
         }
@@ -350,7 +354,7 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
 
     assert calls == [
         ("check_start", "Hades", "1145360"),
-        ("restore_start", "Hades", "1145360"),
+        ("restore_start", "Hades", "1145360", 4567, "lease"),
         ("check_exit", "Hades", "1145360"),
         ("backup_exit", "Hades", "1145360"),
         ("resolve_restore_backup", "Hades", "1145360", 4567, "lease"),
@@ -560,6 +564,44 @@ def test_unload_logs_synchronous_stop_fallback_failure(
     assert logger.warnings == ["Offloaded unload stop failed; falling back to synchronous stop"]
     assert logger.exceptions == ["Synchronous unload stop fallback failed"]
     assert logger.infos[-1] == "SDH-ludusavi backend unloaded"
+
+
+def test_unload_waits_for_guarded_stop_before_executor_shutdown_and_preserves_retained_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decky, _logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+    calls: list[str] = []
+
+    class Backend:
+        def stop(self) -> dict[str, object]:
+            calls.extend(["stop", "guarded_callback_unwound"])
+            return {
+                "status": "failed",
+                "reason": "cancellation_unconfirmed",
+                "retained_gate": True,
+            }
+
+    class Executor:
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            assert wait is False
+            assert cancel_futures is True
+            assert calls == ["stop", "guarded_callback_unwound"]
+            calls.append("executor_shutdown")
+
+    async def fake_call(operation: str, callback: Any) -> object:
+        assert operation == "unload_stop"
+        return callback()
+
+    plugin._backend = Backend()
+    plugin._executor = Executor()
+    monkeypatch.setattr(plugin, "_call", fake_call)
+
+    asyncio.run(plugin._unload())
+
+    assert calls == ["stop", "guarded_callback_unwound", "executor_shutdown"]
 
 
 def test_unload_shuts_down_executor_and_post_shutdown_call_fails_cleanly(

@@ -41,6 +41,12 @@ def test_status_bar_game_state_flow_diagram_documents_lifecycle_paths() -> None:
     ]:
         assert required_text in source
 
+    assert (
+        "<td><code>operation_running</code></td>\n            <td><code>UNABLE TO SYNC</code></td>"
+        in source
+    )
+    assert "<code>auto_sync_disabled</code>, <code>operation_running</code>" not in source
+
 
 def test_status_bar_game_state_flow_diagram_is_standalone_html() -> None:
     source = DIAGRAM.read_text(encoding="utf-8")

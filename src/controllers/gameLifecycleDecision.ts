@@ -5,7 +5,7 @@ import type {
   AutoSyncStatusKind,
 } from "../types";
 import type { PostGameHandoffResult, PreGameQuiescenceResult } from "./syncthingMonitor";
-export const SILENT_SKIPPED_REASONS = ["auto_sync_disabled", "operation_running", "unmatched_game", "not_processed"];
+export const SILENT_SKIPPED_REASONS = ["auto_sync_disabled", "unmatched_game", "not_processed"];
 export type LifecycleCommand =
   | { type: "publishStatus"; status: AutoSyncStatusKind; resultStatus?: string }
   | { type: "hideStatus"; resultStatus?: string }
@@ -60,6 +60,11 @@ export type ExitDecision = {
   nextRpc?: "backup" | "handoff";
   stateUpdates: Partial<ExitState>;
 };
+
+function shouldRetainPreGameWatch(result: OperationResult | LifecycleCheckResult): boolean {
+  return result.status !== "failed" && result.reason !== "operation_running";
+}
+
 export function evaluateStartCheck(state: StartState, checkResult: LifecycleCheckResult): StartDecision {
   if (checkResult.status === "skipped" && SILENT_SKIPPED_REASONS.indexOf(checkResult.reason ?? "") !== -1) {
     return {
@@ -104,22 +109,22 @@ export function evaluateStartCheck(state: StartState, checkResult: LifecycleChec
     };
   }
   const commands: LifecycleCommand[] = [{ type: "completeStatus", result: checkResult }];
-  if (checkResult.status === "failed") {
+  if (checkResult.status === "failed" || checkResult.reason === "operation_running") {
     commands.push({ type: "notifyFailure", result: checkResult });
   }
   return {
     commands,
-    stateUpdates: { retainPreGameWatch: checkResult.status !== "failed" }
+    stateUpdates: { retainPreGameWatch: shouldRetainPreGameWatch(checkResult) }
   };
 }
 export function evaluateStartRestore(_state: StartState, result: OperationResult): StartDecision {
   const commands: LifecycleCommand[] = [{ type: "completeStatus", result }];
-  if (result.status === "failed") {
+  if (result.status === "failed" || result.reason === "operation_running") {
     commands.push({ type: "notifyFailure", result });
   }
   return {
     commands,
-    stateUpdates: { retainPreGameWatch: result.status !== "failed" }
+    stateUpdates: { retainPreGameWatch: shouldRetainPreGameWatch(result) }
   };
 }
 export function evaluateStartConflictResolution(state: StartState, resolution: ConflictResolution | null, result?: OperationResult): StartDecision {
@@ -136,12 +141,12 @@ export function evaluateStartConflictResolution(state: StartState, resolution: C
     };
   }
   const commands: LifecycleCommand[] = [{ type: "completeStatus", result }];
-  if (result.status === "failed") {
+  if (result.status === "failed" || result.reason === "operation_running") {
     commands.push({ type: "notifyFailure", result });
   }
   return {
     commands,
-    stateUpdates: { retainPreGameWatch: result.status !== "failed" }
+    stateUpdates: { retainPreGameWatch: shouldRetainPreGameWatch(result) }
   };
 }
 
@@ -174,7 +179,7 @@ export function evaluateExitCheck(_state: ExitState, checkResult: LifecycleCheck
   }
 
   const commands: LifecycleCommand[] = [{ type: "completeStatus", result: checkResult }];
-  if (checkResult.status === "failed") {
+  if (checkResult.status === "failed" || checkResult.reason === "operation_running") {
     commands.push({ type: "notifyFailure", result: checkResult });
   }
   return {
@@ -193,7 +198,7 @@ export function evaluateExitBackup(_state: ExitState, result: OperationResult): 
   }
 
   const commands: LifecycleCommand[] = [{ type: "completeStatus", result }];
-  if (result.status === "failed") {
+  if (result.status === "failed" || result.reason === "operation_running") {
     commands.push({ type: "notifyFailure", result });
   }
   return {

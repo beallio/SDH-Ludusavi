@@ -55,14 +55,25 @@ def test_get_game_history_empty_by_default(tmp_path: Path) -> None:
     assert service.get_game_history() == {}
 
 
-def test_get_game_history_populated_by_auto_actions(tmp_path: Path) -> None:
+def test_get_game_history_populated_by_auto_actions(tmp_path: Path, monkeypatch) -> None:
     adapter = FakeAdapter()
     service = service_with_state(tmp_path, adapter)
     service.refresh_games()
     service.set_auto_sync_enabled(True)
 
     # Perform an auto restore on start
-    service.restore_game_on_start("Hades", app_id="1145360")
+    monkeypatch.setattr(service._watchdog, "verify_gate", lambda _pid, _lease_id: True)
+    monkeypatch.setattr(
+        service._watchdog,
+        "run_guarded_operation",
+        lambda _pid, _lease_id, *, callback, cancel_callback: callback(),
+    )
+    service.restore_game_on_start(
+        "Hades",
+        app_id="1145360",
+        gate_pid=4567,
+        gate_lease_id="test-lease",
+    )
 
     # The history should now contain Hades with the last_restore record
     history = service.get_game_history()
