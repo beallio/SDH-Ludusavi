@@ -348,6 +348,160 @@ def test_completed_token_cannot_cancel_later_pid_reuse_fake_process_group(
     assert isinstance(failures.get(timeout=1), cancelled_error)
 
 
+def test_completed_process_cannot_be_signalled_during_final_deregistration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A completed owned process must not be signalled before registry cleanup finishes."""
+
+    module = _managed_executor_module()
+    process_group_signals: list[tuple[int, signal.Signals]] = []
+
+    class CompletedProcess:
+        args: list[str] = []
+        pid = 4242
+
+        def __init__(self) -> None:
+            self.returncode: int | None = None
+
+        def communicate(
+            self,
+            input: str | None = None,
+            timeout: float | None = None,
+        ) -> tuple[str, str]:
+            del input, timeout
+            self.returncode = 0
+            return "plain response\n", ""
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+    process = CompletedProcess()
+
+    def fake_popen(*args: object, **kwargs: object) -> CompletedProcess:
+        del args, kwargs
+        return process
+
+    def fake_killpg(pgid: int, sig: signal.Signals) -> None:
+        process_group_signals.append((pgid, sig))
+
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(module.os, "killpg", fake_killpg)
+    executor = _new_executor(_helper_command(tmp_path))
+    original_complete_record = executor._complete_record
+    original_wait_for_completion = executor._wait_for_completion
+    cleanup_entered = threading.Event()
+    allow_cleanup = threading.Event()
+    wait_entered = threading.Event()
+    token_queue: queue.Queue[Any] = queue.Queue()
+    cancellation_results: queue.Queue[bool] = queue.Queue()
+    worker_errors: queue.Queue[BaseException] = queue.Queue()
+
+    def block_complete_record(record_key: str, record: Any) -> None:
+        cleanup_entered.set()
+        assert allow_cleanup.wait(timeout=2)
+        original_complete_record(record_key, record)
+
+    def track_wait_for_completion(record: Any) -> bool:
+        wait_entered.set()
+        return original_wait_for_completion(record)
+
+    monkeypatch.setattr(executor, "_complete_record", block_complete_record)
+    monkeypatch.setattr(executor, "_wait_for_completion", track_wait_for_completion)
+
+    def run_completed_command() -> None:
+        try:
+            with executor.operation_scope() as token:
+                token_queue.put(token)
+                executor.execute(["text"], mode="TEXT", timeout=5.0)
+        except BaseException as exc:
+            worker_errors.put(exc)
+
+    worker = threading.Thread(target=run_completed_command)
+    worker.start()
+    token = token_queue.get(timeout=1)
+    assert cleanup_entered.wait(timeout=1)
+
+    canceller = threading.Thread(target=lambda: cancellation_results.put(token.cancel()))
+    canceller.start()
+    assert wait_entered.wait(timeout=1)
+    try:
+        assert process.returncode == 0
+        assert process_group_signals == []
+    finally:
+        allow_cleanup.set()
+
+    canceller.join(timeout=2)
+    worker.join(timeout=2)
+    assert not canceller.is_alive()
+    assert not worker.is_alive()
+    assert cancellation_results.get(timeout=1) is True
+    assert worker_errors.empty()
+
+
+def test_cancel_all_waits_for_every_captured_record(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed first wait must not skip later records captured by cancel-all."""
+
+    module = _managed_executor_module()
+    executor = _new_executor(_helper_command(tmp_path))
+    first = module._ProcessRecord(token=None, process=object())
+    second = module._ProcessRecord(token=None, process=object())
+    executor._records = {"first": first, "second": second}
+    cancellation_requests: list[Any] = []
+    waited_records: list[Any] = []
+
+    def fake_request_cancel(record: Any, *, wait_for_completion: bool) -> bool:
+        assert wait_for_completion is False
+        cancellation_requests.append(record)
+        return True
+
+    def fake_wait_for_completion(record: Any) -> bool:
+        waited_records.append(record)
+        return record is second
+
+    monkeypatch.setattr(executor, "_request_cancel", fake_request_cancel)
+    monkeypatch.setattr(executor, "_wait_for_completion", fake_wait_for_completion)
+
+    assert executor.cancel_all() is False
+    assert cancellation_requests == [first, second]
+    assert waited_records == [first, second]
+
+
+def test_token_cancellation_waits_for_every_captured_record(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed token-scoped wait must not skip a second owned record."""
+
+    module = _managed_executor_module()
+    executor = _new_executor(_helper_command(tmp_path))
+    token = module._OperationToken(executor)
+    first = module._ProcessRecord(token=token, process=object())
+    second = module._ProcessRecord(token=token, process=object())
+    executor._records = {"first": first, "second": second}
+    cancellation_requests: list[Any] = []
+    waited_records: list[Any] = []
+
+    def fake_request_cancel(record: Any, *, wait_for_completion: bool) -> bool:
+        assert wait_for_completion is False
+        cancellation_requests.append(record)
+        return True
+
+    def fake_wait_for_completion(record: Any) -> bool:
+        waited_records.append(record)
+        return record is second
+
+    monkeypatch.setattr(executor, "_request_cancel", fake_request_cancel)
+    monkeypatch.setattr(executor, "_wait_for_completion", fake_wait_for_completion)
+
+    assert token.cancel() is False
+    assert cancellation_requests == [first, second]
+    assert waited_records == [first, second]
+
+
 def test_adapter_installs_managed_executor_without_breaking_new_only_test_clients(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
