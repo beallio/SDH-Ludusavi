@@ -42,6 +42,10 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
 
   const loggedMessages = () => logMock.mock.calls.map((call) => `${call[0]}:${call[1]}`);
 
+  it.fails("uses a 210-second ceiling for a running Ludusavi status", () => {
+    expect(RUNNING_STATUS_HIDE_CEILING_MS).toBe(210_000);
+  });
+
   it("logs when the running status times out and warns the final result will be hidden", async () => {
     const surface = freshSurface();
     surface.publish("backing_up", {
@@ -86,6 +90,27 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
     ).toBe(true);
     // The suppressed result must not surface as a new status publication.
     expect(messages.some((message) => message.includes("Status update:"))).toBe(false);
+  });
+
+  it("surfaces a late failure after the running status ceiling", async () => {
+    const surface = freshSurface();
+    surface.publish("backing_up", {
+      source: "lifecycle_exit",
+      gameName: "Hades",
+      appID: "1145300",
+      tracked: true,
+    });
+    await vi.advanceTimersByTimeAsync(RUNNING_STATUS_HIDE_CEILING_MS);
+    logMock.mockClear();
+
+    surface.complete(
+      { status: "failed", game: "Hades", reason: "timeout" },
+      { lifecycle: "lifecycle_exit", gameName: "Hades", appID: "1145300", tracked: true },
+    );
+
+    const messages = loggedMessages();
+    expect(messages.some((message) => message.includes("Status update:") && message.includes("status=error"))).toBe(true);
+    expect(messages.some((message) => message.includes("suppressed"))).toBe(false);
   });
 
   it("logs the auto-hide schedule at debug level", async () => {
