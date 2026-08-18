@@ -7,10 +7,6 @@ from unittest.mock import patch
 import pytest
 
 import pyludusavi
-from sdh_ludusavi.constants import (
-    LUDUSAVI_OPERATION_TIMEOUT_SECONDS,
-    LUDUSAVI_PREVIEW_TIMEOUT_SECONDS,
-)
 from sdh_ludusavi.ludusavi import (
     FLATPAK_ID,
     PyludusaviAdapter,
@@ -554,26 +550,32 @@ def test_refresh_statuses_forwards_game_names_to_client() -> None:
     adapter._client = MockClient()
 
     adapter.refresh_statuses(game_names=["Hades"])
-    assert ("backup", ["Hades"], True, LUDUSAVI_PREVIEW_TIMEOUT_SECONDS) in calls
+    assert ("backup", ["Hades"], True, 180.0) in calls
     assert ("backups_list", ["Hades"]) in calls
 
 
 def test_adapter_backup_passes_operation_timeout() -> None:
     adapter, client = adapter_with_backups({"games": {}})
     adapter.backup("Hades")
-    assert ("backup", ("Hades",), False, LUDUSAVI_OPERATION_TIMEOUT_SECONDS) in client.calls
+    assert ("backup", ("Hades",), False, 180.0) in client.calls
 
 
 def test_adapter_backup_preview_passes_preview_timeout() -> None:
     adapter, client = adapter_with_backups({"games": {}})
     adapter.backup("Hades", preview=True)
-    assert ("backup", ("Hades",), True, LUDUSAVI_PREVIEW_TIMEOUT_SECONDS) in client.calls
+    assert ("backup", ("Hades",), True, 180.0) in client.calls
 
 
 def test_adapter_restore_passes_operation_timeout() -> None:
     adapter, client = adapter_with_backups({"games": {}})
     adapter.restore("Hades")
-    assert ("restore", ("Hades",), False, LUDUSAVI_OPERATION_TIMEOUT_SECONDS) in client.calls
+    assert ("restore", ("Hades",), False, 180.0) in client.calls
+
+
+def test_adapter_snapshot_restore_passes_operation_timeout() -> None:
+    adapter, client = adapter_with_backups({"games": {}})
+    adapter.restore_backup("Hades", "full")
+    assert ("restore", ("Hades",), False, 180.0) in client.calls
 
 
 def test_refresh_statuses_uses_preview_timeout() -> None:
@@ -593,7 +595,7 @@ def test_refresh_statuses_uses_preview_timeout() -> None:
     adapter = PyludusaviAdapter.__new__(PyludusaviAdapter)
     adapter._client = MockClient()
     adapter.refresh_statuses()
-    assert ("backup", None, True, LUDUSAVI_PREVIEW_TIMEOUT_SECONDS) in calls
+    assert ("backup", None, True, 180.0) in calls
 
 
 def test_compare_recency_restore_preview_uses_preview_timeout() -> None:
@@ -601,10 +603,10 @@ def test_compare_recency_restore_preview_uses_preview_timeout() -> None:
         backup_data={"games": {"Hades": {"backups": [{"when": "2026-05-10T00:00:00Z"}]}}}
     )
     adapter.compare_recency("Hades")
-    assert ("restore", ("Hades",), True, LUDUSAVI_PREVIEW_TIMEOUT_SECONDS) in client.calls
+    assert ("restore", ("Hades",), True, 180.0) in client.calls
 
 
 def test_get_conflict_metadata_preview_uses_preview_timeout() -> None:
     adapter, client = adapter_with_backups({"games": {}})
     adapter.get_conflict_metadata("Hades")
-    assert ("backup", ("Hades",), True, LUDUSAVI_PREVIEW_TIMEOUT_SECONDS) in client.calls
+    assert ("backup", ("Hades",), True, 180.0) in client.calls

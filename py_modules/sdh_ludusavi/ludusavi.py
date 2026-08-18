@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import logging
@@ -18,6 +19,7 @@ from .constants import (
     LUDUSAVI_OPERATION_TIMEOUT_SECONDS,
     LUDUSAVI_PREVIEW_TIMEOUT_SECONDS,
 )
+from .ludusavi_executor import ManagedLudusaviExecutor
 
 
 FLATPAK_ID = "com.github.mtkennerly.ludusavi"
@@ -67,12 +69,28 @@ class PyludusaviAdapter:
         env = _ludusavi_env()
         LOGGER.debug("Using Ludusavi environment overrides: %s", env)
         self._client = Ludusavi(flatpak_id=flatpak_id, env=env)
+        self._client.executor = ManagedLudusaviExecutor(self._client.command_prefix, env=env)
         self._cached_config_path: str | None = None
         self._cached_versions: dict[str, str] | None = None
         self._cached_diagnostics: dict[str, object] | None = None
         self._cached_aliases: dict[str, str] | None = None
         self._cached_aliases_mtime_ns: int | None = None
         self._aliases_lock = threading.Lock()
+
+    @contextmanager
+    def operation_scope(self) -> Iterator[Callable[[], bool]]:
+        """Bind one adapter command tree to the caller's cancellation handle."""
+        executor = self._client.executor
+        if not isinstance(executor, ManagedLudusaviExecutor):
+            yield lambda: True
+            return
+        with executor.operation_scope() as token:
+            yield token.cancel
+
+    def shutdown(self) -> bool:
+        """Reject new Ludusavi work and reap every managed command tree."""
+        executor = self._client.executor
+        return executor.shutdown() if isinstance(executor, ManagedLudusaviExecutor) else True
 
     def refresh_statuses(self, game_names: list[str] | None = None) -> list[dict[str, object]]:
         with ThreadPoolExecutor(max_workers=2) as executor:
