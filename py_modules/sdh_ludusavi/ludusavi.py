@@ -18,6 +18,7 @@ from .constants import (
     LUDUSAVI_OPERATION_TIMEOUT_SECONDS,
     LUDUSAVI_PREVIEW_TIMEOUT_SECONDS,
 )
+from .ludusavi_executor import ManagedLudusaviExecutor
 
 
 FLATPAK_ID = "com.github.mtkennerly.ludusavi"
@@ -67,6 +68,7 @@ class PyludusaviAdapter:
         env = _ludusavi_env()
         LOGGER.debug("Using Ludusavi environment overrides: %s", env)
         self._client = Ludusavi(flatpak_id=flatpak_id, env=env)
+        self._client.executor = ManagedLudusaviExecutor(self._client.command_prefix, env=env)
         self._cached_config_path: str | None = None
         self._cached_versions: dict[str, str] | None = None
         self._cached_diagnostics: dict[str, object] | None = None

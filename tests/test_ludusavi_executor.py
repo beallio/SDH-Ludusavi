@@ -18,12 +18,6 @@ import pytest
 from pyludusavi import LudusaviContractError, LudusaviExecutionError, LudusaviTimeoutError
 
 
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    reason="RED: the project-owned managed Ludusavi executor has not been implemented",
-)
-
-
 _HELPER_SOURCE = r"""
 import json
 import os
