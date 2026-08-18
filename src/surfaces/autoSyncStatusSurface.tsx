@@ -243,7 +243,9 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       result: OperationResult | LifecycleCheckResult,
       options: AutoSyncStatusCompleteOptions
     ) {
-      if (result.status === "failed") {
+      const isError = result.status === "failed" ||
+        (result.status === "skipped" && result.reason === "operation_running");
+      if (isError) {
         api.publish("error", {
           ...options,
           source: "rpc_result",

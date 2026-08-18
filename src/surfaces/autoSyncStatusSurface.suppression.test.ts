@@ -113,6 +113,19 @@ describe("AutoSyncStatusSurface timeout suppression logging", () => {
     expect(messages.some((message) => message.includes("suppressed"))).toBe(false);
   });
 
+  it("surfaces skipped operation contention as an error", () => {
+    const surface = freshSurface();
+
+    surface.complete(
+      { status: "skipped", game: "Hades", reason: "operation_running" },
+      { lifecycle: "lifecycle_start", gameName: "Hades", appID: "1145300", tracked: true },
+    );
+
+    const messages = loggedMessages();
+    expect(messages.some((message) => message.includes("Status update:") && message.includes("status=error"))).toBe(true);
+    expect(messages.some((message) => message.includes("status=unknown"))).toBe(false);
+  });
+
   it("logs the auto-hide schedule at debug level", async () => {
     const surface = freshSurface();
     surface.publish("backing_up", {
