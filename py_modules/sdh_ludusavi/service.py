@@ -243,6 +243,8 @@ class SDHLudusaviService:
         kind = patch.get("kind")
         if not isinstance(kind, str):
             raise ValueError("Settings patch requires a string kind")
+        if kind == "game_sync" and not _patch_game_name(patch):
+            return self.get_settings()
 
         def mutate(settings: dict[str, Any]) -> dict[str, Any]:
             updated = dict(settings)
@@ -532,17 +534,6 @@ class SDHLudusaviService:
                 **self._updater.cache_payload(),
             }
             self._persistence.save_cache(cache_payload)
-
-    # Updater helper methods
-    def set_update_channel(self, channel: str) -> dict[str, Any]:
-        """Update the update channel setting and persist it to disk."""
-        self._updater.set_channel(channel)
-        return self.get_settings()
-
-    def set_automatic_update_checks(self, enabled: bool) -> dict[str, Any]:
-        """Update the automatic update checks setting and persist it to disk."""
-        self._updater.set_automatic_checks(enabled)
-        return self.get_settings()
 
     def get_update_check_context(self) -> dict[str, Any]:
         return self._updater.get_context()

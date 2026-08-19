@@ -189,6 +189,18 @@ def test_bundled_frontend_does_not_depend_on_removed_compatibility_rpcs() -> Non
 
     assert public_async_methods.isdisjoint(removed_rpc_names)
 
+    service_source = Path("py_modules/sdh_ludusavi/service.py").read_text(encoding="utf-8")
+    service_tree = ast.parse(service_source)
+    service_class = next(
+        node
+        for node in service_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "SDHLudusaviService"
+    )
+    service_methods = {
+        node.name for node in service_class.body if isinstance(node, ast.FunctionDef)
+    }
+    assert service_methods.isdisjoint({"set_update_channel", "set_automatic_update_checks"})
+
 
 def test_sdh_ludusavi_service_facade_behavior(tmp_path: Path) -> None:
     """

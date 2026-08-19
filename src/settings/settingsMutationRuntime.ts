@@ -331,7 +331,6 @@ export function createSettingsMutationRuntime() {
     settingsQueue.length = 0;
     latestSequenceByKey.clear();
     settingsProcessing = false;
-    nextSequence = 0;
     persistedSettings = null;
     lastQueuedSelectedGame = null;
   }

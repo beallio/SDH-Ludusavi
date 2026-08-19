@@ -294,6 +294,18 @@ def test_update_settings_rejects_malformed_typed_patches(
         service.update_settings(patch)
 
 
+def test_game_sync_patch_ignores_empty_sanitized_game_name(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+    service.update_settings({"kind": "game_sync", "game_name": "Hades", "enabled": False})
+    settings_path = tmp_path / "settings.json"
+    persisted_before = json.loads(settings_path.read_text(encoding="utf-8"))
+
+    result = service.update_settings({"kind": "game_sync", "game_name": "  ", "enabled": False})
+
+    assert result == expected_settings(sync_disabled_games=["Hades"])
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == persisted_before
+
+
 def test_typed_settings_patches_merge_across_service_instances(tmp_path: Path) -> None:
     first = service_with_state(tmp_path)
     second = service_with_state(tmp_path)
