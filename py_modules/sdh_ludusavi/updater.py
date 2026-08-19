@@ -57,13 +57,20 @@ class PluginUpdater:
         settings: Mapping[str, object],
         cache: Mapping[str, object],
     ) -> None:
+        self._adopt_settings(settings)
+        self._adopt_cache(cache)
+
+    def adopt_persisted_settings(self, settings: Mapping[str, object]) -> None:
+        """Refresh updater preferences after an atomic settings mutation."""
+        with self._state_lock:
+            self._adopt_settings(settings)
+
+    def _adopt_settings(self, settings: Mapping[str, object]) -> None:
         channel = settings.get("update_channel")
         self._channel = str(channel) if channel in ("stable", "development") else "stable"
 
         auto = settings.get("automatic_update_checks")
         self._automatic_checks = bool(auto) if isinstance(auto, bool) else True
-
-        self._adopt_cache(cache)
 
     def adopt_persisted_cache(self, cache: Mapping[str, object]) -> None:
         """Replace update bookkeeping with a freshly persisted snapshot.

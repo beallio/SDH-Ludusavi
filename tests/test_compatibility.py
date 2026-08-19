@@ -58,14 +58,8 @@ def test_facade_public_symbols() -> None:
 EXPECTED_METHODS: dict[str, list[str]] = {
     "get_settings": [],
     "get_game_history": [],
-    "set_auto_sync_enabled": ["enabled"],
-    "set_game_sync_enabled": ["game_name", "enabled"],
-    "set_selected_game": ["game_name"],
-    "set_notification_settings": ["settings"],
-    "set_debug_logging": ["enabled"],
+    "update_settings": ["patch"],
     "log": ["level", "message", "operation", "game_name"],
-    "set_update_channel": ["channel"],
-    "set_automatic_update_checks": ["enabled"],
     "get_update_check_context": [],
     "check_for_plugin_update": ["current_version", "force"],
     "record_update_install_requested": ["candidate"],
@@ -164,6 +158,13 @@ def test_bundled_frontend_does_not_depend_on_removed_compatibility_rpcs() -> Non
         "handle_game_start",
         "handle_game_exit",
         "clear_ludusavi_launcher_shortcut_id",
+        "set_auto_sync_enabled",
+        "set_game_sync_enabled",
+        "set_selected_game",
+        "set_notification_settings",
+        "set_debug_logging",
+        "set_update_channel",
+        "set_automatic_update_checks",
     }
     frontend_sources = [
         path
