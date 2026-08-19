@@ -819,10 +819,7 @@ def test_clear_stale_cache_drops_last_notified_tag() -> None:
         now=lambda: datetime.datetime.now(datetime.timezone.utc),
         monotonic=time.monotonic,
     )
-    updater.load_state(
-        {},
-        {"update_check_cache": {"last_notified_tag": "v1.2.3"}},
-    )
+    updater.adopt_persisted_cache({"update_check_cache": {"last_notified_tag": "v1.2.3"}})
 
     updater._clear_stale_cache()
 

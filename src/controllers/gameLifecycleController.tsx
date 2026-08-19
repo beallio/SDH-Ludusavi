@@ -153,7 +153,8 @@ export function createGameLifecycleController(
   }
   function logPreRpcStatusBarSuppressed(phase: "start" | "exit", name: string, tracked: boolean) {
     const snapshot = ludusaviStore.getSnapshot();
-    const detail = `tracked=${tracked} autoSyncNotificationsEnabled=${snapshot.autoSyncNotificationsEnabled} trackedNames=${snapshot.trackedNames?.size ?? 0} trackedAppIDs=${snapshot.trackedAppIDs?.size ?? 0}`;
+    const autoSyncNotificationsEnabled = snapshot.settings?.auto_sync_enabled ?? false;
+    const detail = `tracked=${tracked} autoSyncNotificationsEnabled=${autoSyncNotificationsEnabled} trackedNames=${snapshot.trackedNames?.size ?? 0} trackedAppIDs=${snapshot.trackedAppIDs?.size ?? 0}`;
     log("info", `Pre-check status bar not shown on ${phase} for ${name}: ${detail}`, "lifecycle", name);
   }
   const handleAppStart = async (name: string, appID: string, instanceID?: number) => {

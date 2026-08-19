@@ -211,9 +211,7 @@ class SDHLudusaviService:
         backup_path = self._gateway.get_diagnostics().get("backupPath")
         if not isinstance(backup_path, str) or backup_path == "unknown" or not backup_path.strip():
             backup_path = None
-        return self._syncthing_watch_manager.start_watch(
-            phase, game_name, app_id, backup_path, debug_logging=self._debug_logging
-        )
+        return self._syncthing_watch_manager.start_watch(phase, game_name, app_id, backup_path)
 
     def get_syncthing_activity(self, watch_id: str) -> dict[str, Any]:
         return self._syncthing_watch_manager.poll_watch(watch_id)
@@ -237,6 +235,54 @@ class SDHLudusaviService:
             "notifications": dict(self._notification_settings),
             **self._updater.settings_payload(),
         }
+
+    def update_settings(self, patch: dict[str, object]) -> dict[str, Any]:
+        """Atomically apply one typed frontend settings patch."""
+        kind = patch.get("kind")
+        if not isinstance(kind, str):
+            raise ValueError("Settings patch requires a string kind")
+        if kind == "game_sync" and not _patch_game_name(patch):
+            return self.get_settings()
+
+        def mutate(settings: dict[str, Any]) -> dict[str, Any]:
+            updated = dict(settings)
+            if kind == "auto_sync":
+                updated["auto_sync_enabled"] = _patch_bool(patch, "enabled")
+            elif kind == "game_sync":
+                game_name = _patch_game_name(patch)
+                disabled_games = _coerce_sync_disabled_games(updated.get("sync_disabled_games"))
+                if _patch_bool(patch, "enabled"):
+                    disabled_games.discard(game_name)
+                else:
+                    disabled_games.add(game_name)
+                updated["sync_disabled_games"] = sorted(disabled_games)
+            elif kind == "selected_game":
+                updated["selected_game"] = _patch_game_name(patch)
+            elif kind == "notification":
+                key = patch.get("key")
+                if not isinstance(key, str) or key not in DEFAULT_NOTIFICATION_SETTINGS:
+                    raise ValueError("Settings notification patch has an invalid key")
+                notifications = _coerce_notification_settings(updated.get("notifications"))
+                notifications[key] = _patch_bool(patch, "enabled")
+                updated["notifications"] = notifications
+            elif kind == "update_channel":
+                channel = patch.get("channel")
+                if channel not in ("stable", "development"):
+                    raise ValueError("Settings update channel is invalid")
+                updated["update_channel"] = channel
+            elif kind == "automatic_update_checks":
+                updated["automatic_update_checks"] = _patch_bool(patch, "enabled")
+            elif kind == "debug_logging":
+                updated["debug_logging"] = _patch_bool(patch, "enabled")
+            else:
+                raise ValueError(f"Unknown settings patch kind: {kind}")
+            return updated
+
+        with self._state_lock:
+            persisted = self._persistence.mutate_settings(mutate)
+            self._adopt_persisted_settings(persisted)
+        self.log("info", f"Settings patch applied: {kind}")
+        return self.get_settings()
 
     def get_game_history(self) -> dict[str, dict[str, Any]]:
         """Return the current game operation history."""
@@ -325,13 +371,6 @@ class SDHLudusaviService:
         self.log("info", f"Saved Ludusavi launcher shortcut ID: {app_id}")
         return True
 
-    def clear_ludusavi_launcher_shortcut_id(self) -> bool:
-        """Remove the saved shortcut app ID from config."""
-        self._ludusavi_launcher_shortcut_id = -1
-        self._save_state()
-        self.log("info", "Cleared Ludusavi launcher shortcut ID")
-        return True
-
     def get_ludusavi_command(self) -> dict[str, object] | None:
         """Return the command path and args used by the plugin for GUI launching."""
         return self._gateway.get_ludusavi_command()
@@ -376,16 +415,6 @@ class SDHLudusaviService:
         """Restore a game's backup during launch after a check reports it is needed."""
         return self._lifecycle.restore_game_on_start(game_name, app_id, gate_pid, gate_lease_id)
 
-    def handle_game_start(
-        self,
-        game_name: str,
-        app_id: str | None = None,
-        gate_pid: int | None = None,
-        gate_lease_id: str | None = None,
-    ) -> dict[str, object]:
-        """Compatibility wrapper for the original one-call launch autosync flow."""
-        return self._lifecycle.handle_game_start(game_name, app_id, gate_pid, gate_lease_id)
-
     def check_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Check whether a game exit needs a backup without writing backup data."""
         return self._lifecycle.check_game_exit(game_name, app_id)
@@ -393,10 +422,6 @@ class SDHLudusaviService:
     def backup_game_on_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Back up a game during exit after a check reports it is needed."""
         return self._lifecycle.backup_game_on_exit(game_name, app_id)
-
-    def handle_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
-        """Compatibility wrapper for the original one-call exit autosync flow."""
-        return self._lifecycle.handle_game_exit(game_name, app_id)
 
     def force_backup(self, game_name: str) -> dict[str, object]:
         """Trigger a manual backup for the specified game."""
@@ -458,16 +483,7 @@ class SDHLudusaviService:
         settings = data["settings"]
         cache = data["cache"]
 
-        self._auto_sync_enabled = bool(settings.get("auto_sync_enabled", False))
-        self._sync_disabled_games = _coerce_sync_disabled_games(
-            settings.get("sync_disabled_games", [])
-        )
-        self._selected_game = str(settings.get("selected_game", ""))
-        self._debug_logging = bool(settings.get("debug_logging", True))
-        self._apply_log_level()
-        self._notification_settings = _coerce_notification_settings(
-            settings.get("notifications", {})
-        )
+        self._adopt_persisted_settings(settings)
 
         raw_shortcut_id = cache.get("ludusaviLauncherShortcutAppId", -1)
         try:
@@ -478,8 +494,20 @@ class SDHLudusaviService:
         self._registry.load_cache(cache)
         self._game_history_raw = cache.get("game_history", {})
 
-        # Load update properties
-        self._updater.load_state(settings, cache)
+        self._updater.adopt_persisted_cache(cache)
+
+    def _adopt_persisted_settings(self, settings: dict[str, Any]) -> None:
+        self._auto_sync_enabled = bool(settings.get("auto_sync_enabled", False))
+        self._sync_disabled_games = _coerce_sync_disabled_games(
+            settings.get("sync_disabled_games", [])
+        )
+        self._selected_game = str(settings.get("selected_game", ""))
+        self._debug_logging = bool(settings.get("debug_logging", True))
+        self._apply_log_level()
+        self._notification_settings = _coerce_notification_settings(
+            settings.get("notifications", {})
+        )
+        self._updater.adopt_persisted_settings(settings)
 
     def _save_state(self) -> None:
         """Persist current plugin settings and runtime cache."""
@@ -504,17 +532,6 @@ class SDHLudusaviService:
                 **self._updater.cache_payload(),
             }
             self._persistence.save_cache(cache_payload)
-
-    # Updater helper methods
-    def set_update_channel(self, channel: str) -> dict[str, Any]:
-        """Update the update channel setting and persist it to disk."""
-        self._updater.set_channel(channel)
-        return self.get_settings()
-
-    def set_automatic_update_checks(self, enabled: bool) -> dict[str, Any]:
-        """Update the automatic update checks setting and persist it to disk."""
-        self._updater.set_automatic_checks(enabled)
-        return self.get_settings()
 
     def get_update_check_context(self) -> dict[str, Any]:
         return self._updater.get_context()
@@ -638,3 +655,17 @@ def _coerce_sync_disabled_games(value: object) -> set[str]:
     sanitized = {sanitize_game_name(entry) for entry in value if isinstance(entry, str)}
     sanitized.discard("")
     return sanitized
+
+
+def _patch_bool(patch: dict[str, object], key: str) -> bool:
+    value = patch.get(key)
+    if not isinstance(value, bool):
+        raise ValueError(f"Settings patch requires boolean {key}")
+    return value
+
+
+def _patch_game_name(patch: dict[str, object]) -> str:
+    value = patch.get("game_name")
+    if not isinstance(value, str):
+        raise ValueError("Settings patch requires string game_name")
+    return sanitize_game_name(value)

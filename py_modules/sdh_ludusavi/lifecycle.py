@@ -447,19 +447,6 @@ class GameLifecycleManager:
             success_log=f"Restored {game.name} before launch",
         )
 
-    def handle_game_start(
-        self,
-        game_name: str,
-        app_id: str | None = None,
-        gate_pid: int | None = None,
-        gate_lease_id: str | None = None,
-    ) -> dict[str, object]:
-        """Compatibility wrapper for the original one-call launch autosync flow."""
-        result = self.check_game_start(game_name, app_id)
-        if result.get("status") == "needed" and result.get("operation") == "restore":
-            return self.restore_game_on_start(str(result["game"]), app_id, gate_pid, gate_lease_id)
-        return result
-
     def check_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Check whether a game exit needs a backup without writing backup data."""
         game_name = sanitize_game_name(game_name)
@@ -557,13 +544,6 @@ class GameLifecycleManager:
             )
         except OperationLockedError:
             return self.dependencies.skip("exit", game.name, "operation_running")
-
-    def handle_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
-        """Compatibility wrapper for the original one-call exit autosync flow."""
-        result = self.check_game_exit(game_name, app_id)
-        if result.get("status") == "needed" and result.get("operation") == "backup":
-            return self.backup_game_on_exit(str(result["game"]), app_id)
-        return result
 
     def force_backup(self, game_name: str) -> dict[str, object]:
         """Trigger a manual backup for the specified game."""

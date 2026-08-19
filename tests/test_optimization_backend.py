@@ -69,7 +69,6 @@ def test_new_wrapped_rpcs_defer_service_lookup_into_worker() -> None:
         and node.name
         in {
             "get_settings",
-            "clear_ludusavi_launcher_shortcut_id",
             "get_ludusavi_command",
             "get_ludusavi_logs",
         }

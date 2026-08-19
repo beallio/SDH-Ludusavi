@@ -79,8 +79,6 @@ export type LudusaviStateSnapshot = {
   ludusaviCommand: LudusaviLaunchCommand | null;
   trackedAppIDs: Set<string>;
   trackedNames: Set<string>;
-  autoSyncNotificationsEnabled: boolean;
-  notificationSettings: NotificationSettings;
   trackingReadiness: TrackingReadiness;
 };
 
@@ -96,8 +94,6 @@ function createInitialSnapshot(): LudusaviStateSnapshot {
     ludusaviCommand: null,
     trackedAppIDs: new Set<string>(),
     trackedNames: new Set<string>(),
-    autoSyncNotificationsEnabled: false,
-    notificationSettings: { ...defaultNotificationSettings },
     trackingReadiness: "cold"
   };
 }
@@ -137,11 +133,7 @@ export class LudusaviStateStore {
 
   applySettings(settings: Settings) {
     const normalized = normalizeSettings(settings);
-    this.commit({
-      settings: normalized,
-      autoSyncNotificationsEnabled: normalized.auto_sync_enabled,
-      notificationSettings: normalized.notifications
-    });
+    this.commit({ settings: normalized });
     return normalized;
   }
 
@@ -227,7 +219,8 @@ export class LudusaviStateStore {
   }
 
   shouldShowNotification(category: NotificationCategory): boolean {
-    return this.snapshot.notificationSettings.enabled && this.snapshot.notificationSettings[category];
+    const notifications = this.snapshot.settings?.notifications ?? defaultNotificationSettings;
+    return notifications.enabled && notifications[category];
   }
 
   isTracked(
@@ -317,7 +310,7 @@ export class LudusaviStateStore {
     const trackingCacheEmpty =
       this.snapshot.trackedAppIDs.size === 0 && this.snapshot.trackedNames.size === 0;
     return (
-      (this.snapshot.settings === null || this.snapshot.autoSyncNotificationsEnabled) &&
+      (this.snapshot.settings === null || this.snapshot.settings.auto_sync_enabled) &&
       (tracked || trackingCacheEmpty)
     );
   }

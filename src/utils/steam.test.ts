@@ -1,5 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
-import { logCurrentGameNoMatch } from "./steam";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import {
+  logCurrentGameNoMatch,
+  startBoundedSteamUiGameContextCapture,
+} from "./steam";
 
 vi.mock("@decky/api", () => ({
   callable: () => () => Promise.resolve(),
@@ -36,5 +39,39 @@ describe("logCurrentGameNoMatch", () => {
       "qam_context",
       undefined
     );
+  });
+});
+
+describe("startBoundedSteamUiGameContextCapture", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stops scraping after ten samples during a minute hidden", () => {
+    vi.useFakeTimers();
+    const capture = vi.fn();
+
+    const cancel = startBoundedSteamUiGameContextCapture(capture);
+
+    expect(capture).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(4_500);
+    expect(capture).toHaveBeenCalledTimes(10);
+
+    vi.advanceTimersByTime(60_000);
+    expect(capture).toHaveBeenCalledTimes(10);
+    cancel();
+  });
+
+  it("cancels the remaining hidden-QAM capture burst", () => {
+    vi.useFakeTimers();
+    const capture = vi.fn();
+
+    const cancel = startBoundedSteamUiGameContextCapture(capture);
+    vi.advanceTimersByTime(500);
+    expect(capture).toHaveBeenCalledTimes(2);
+
+    cancel();
+    vi.advanceTimersByTime(60_000);
+    expect(capture).toHaveBeenCalledTimes(2);
   });
 });
