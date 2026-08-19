@@ -39,8 +39,8 @@ import type {
 } from "../../types";
 import { log, logUiEvent } from "../../utils/logging";
 import {
-  captureSteamUiGameContext,
-  getInstalledAppIdsString
+  getInstalledAppIdsString,
+  startBoundedSteamUiGameContextCapture,
 } from "../../utils/steam";
 import { AutoSyncSettingsSection } from "./AutoSyncSettingsSection";
 import { GameSettingsSection } from "./GameSettingsSection";
@@ -240,9 +240,7 @@ export function LudusaviContent({
       return;
     }
 
-    captureSteamUiGameContext();
-    const contextIntervalID = window.setInterval(captureSteamUiGameContext, 500);
-    return () => window.clearInterval(contextIntervalID);
+    return startBoundedSteamUiGameContextCapture();
   }, [isQuickAccessVisible]);
 
 

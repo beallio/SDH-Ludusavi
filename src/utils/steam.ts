@@ -6,6 +6,8 @@ import { getRouterMainRunningApp, getGamepadMainWindow, getAppStore, getSteamCli
 let lastSteamUiGameContext: RunningSession | null = null;
 let lastSteamUiGameContextCapturedAt = 0;
 const STEAM_UI_GAME_CONTEXT_TTL_MS = 10_000;
+const STEAM_UI_CONTEXT_CAPTURE_INTERVAL_MS = 500;
+const STEAM_UI_CONTEXT_CAPTURE_SAMPLES = 10;
 const STEAM_UI_REACT_FIBER_MAX_DEPTH = 12;
 const STEAM_UI_REACT_CANDIDATE_MAX_COUNT = 64;
 const STEAM_UI_HOVERED_ELEMENT_MAX_COUNT = 4;
@@ -295,6 +297,21 @@ export function captureSteamUiGameContext(): RunningSession | null {
     lastSteamUiGameContextCapturedAt = Date.now();
   }
   return session;
+}
+
+export function startBoundedSteamUiGameContextCapture(
+  capture: () => unknown = captureSteamUiGameContext,
+): () => void {
+  let samples = 1;
+  capture();
+  const intervalID = globalThis.setInterval(() => {
+    capture();
+    samples += 1;
+    if (samples >= STEAM_UI_CONTEXT_CAPTURE_SAMPLES) {
+      globalThis.clearInterval(intervalID);
+    }
+  }, STEAM_UI_CONTEXT_CAPTURE_INTERVAL_MS);
+  return () => globalThis.clearInterval(intervalID);
 }
 
 export function getRecentSteamUiGameContext(): RunningSession | null {
