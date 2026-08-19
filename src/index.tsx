@@ -211,9 +211,6 @@ export default definePlugin(() => {
   const runtime = createPluginRuntime();
 
   const ludusaviStore = createLudusaviStateStore();
-  runtime.settings.setActiveStore(ludusaviStore, (title, body) => {
-    notify(ludusaviStore, "failures_errors", title, body, <FaExclamationTriangle />);
-  });
   const startupHydration = createStartupHydration({
     fetchSettings: getSettings,
     fetchTracking: async () => {

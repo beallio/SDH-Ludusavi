@@ -23,12 +23,7 @@ vi.mock("react/jsx-dev-runtime", () => ({
 
 vi.mock("../api/ludusaviRpc", () => {
   return {
-    setAutoSyncEnabled: vi.fn(),
-    setGameSyncEnabledCall: vi.fn(),
-    setNotificationSettings: vi.fn(),
-    setSelectedGameCall: vi.fn(),
-    setUpdateChannelCall: vi.fn(),
-    setAutomaticUpdateChecksCall: vi.fn()
+    updateSettingsCall: vi.fn()
   };
 });
 
@@ -48,6 +43,53 @@ describe("SettingsMutationRuntime", () => {
     vi.useRealTimers();
   });
 
+  it("sends every setting through the typed patch RPC", async () => {
+    const store = createLudusaviStateStore();
+    const runtime = createSettingsMutationRuntime();
+    const rpc = await import("../api/ludusaviRpc");
+    runtime.applySettings(store, {
+      auto_sync_enabled: false,
+      sync_disabled_games: [],
+      selected_game: "",
+      notifications: {
+        enabled: true,
+        auto_sync_progress: true,
+        auto_sync_results: true,
+        manual_operations: true,
+        refresh_status: true,
+        failures_errors: true,
+        update_available: true,
+      },
+      update_channel: "stable",
+      automatic_update_checks: true,
+      debug_logging: true,
+    });
+    vi.mocked(rpc.updateSettingsCall).mockResolvedValue(store.getSnapshot().settings!);
+    const controller = runtime.createController({
+      ludusaviStore: store,
+      notifyFailure: vi.fn(),
+    });
+
+    controller.toggleAutoSync(true);
+    controller.toggleGameSync("Hades", false);
+    controller.onGameChange("Hades");
+    controller.toggleNotificationSetting("failures_errors", false);
+    controller.toggleUpdateChannel(true);
+    controller.toggleAutomaticUpdateChecks(false);
+    controller.toggleDebugLogging(false);
+    await vi.runAllTimersAsync();
+
+    expect(vi.mocked(rpc.updateSettingsCall).mock.calls.map(([patch]) => patch)).toEqual([
+      { kind: "auto_sync", enabled: true },
+      { kind: "game_sync", game_name: "Hades", enabled: false },
+      { kind: "selected_game", game_name: "Hades" },
+      { kind: "notification", key: "failures_errors", enabled: false },
+      { kind: "update_channel", channel: "development" },
+      { kind: "automatic_update_checks", enabled: false },
+      { kind: "debug_logging", enabled: false },
+    ]);
+  });
+
   it("settings writes do not trigger a disabling busy label (flicker regression)", async () => {
     const store = createLudusaviStateStore();
     store.applySettings({ auto_sync_enabled: false } as any);
@@ -56,20 +98,19 @@ describe("SettingsMutationRuntime", () => {
     
     const notifyFailure = vi.fn();
 
-    runtime.setActiveStore(store, notifyFailure);
     const controller = runtime.createController({
       ludusaviStore: store,
       notifyFailure
     });
 
     let resolveRpc: (res: any) => void;
-    vi.mocked(rpc.setAutoSyncEnabled).mockReturnValueOnce(
+    vi.mocked(rpc.updateSettingsCall).mockReturnValueOnce(
       new Promise((resolve) => {
         resolveRpc = resolve;
       })
     );
     let resolveRpcNotification: (res: any) => void;
-    vi.mocked(rpc.setNotificationSettings).mockReturnValueOnce(
+    vi.mocked(rpc.updateSettingsCall).mockReturnValueOnce(
       new Promise((resolve) => {
         resolveRpcNotification = resolve;
       })
@@ -96,7 +137,6 @@ describe("SettingsMutationRuntime", () => {
     const rpc = await import("../api/ludusaviRpc");
 
     const notifyFailure = vi.fn();
-    runtime.setActiveStore(store, notifyFailure);
     const controller = runtime.createController({
       ludusaviStore: store,
       notifyFailure
@@ -105,7 +145,7 @@ describe("SettingsMutationRuntime", () => {
     store.setAutoSyncEnabled(false);
     runtime.applySettings(store, { auto_sync_enabled: false } as any);
 
-    vi.mocked(rpc.setAutoSyncEnabled).mockRejectedValueOnce(new Error("RPC failed"));
+    vi.mocked(rpc.updateSettingsCall).mockRejectedValueOnce(new Error("RPC failed"));
 
     controller.toggleAutoSync(true);
 
@@ -117,6 +157,28 @@ describe("SettingsMutationRuntime", () => {
     // Rollback to previous state
     expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(false);
     expect(notifyFailure).toHaveBeenCalled();
+  });
+
+  it("routes auto-sync through the typed settings-patch RPC", async () => {
+    const store = createLudusaviStateStore();
+    const runtime = createSettingsMutationRuntime();
+    const rpc = await import("../api/ludusaviRpc");
+    const controller = runtime.createController({
+      ludusaviStore: store,
+      notifyFailure: vi.fn(),
+    });
+
+    vi.mocked(rpc.updateSettingsCall).mockResolvedValueOnce({
+      auto_sync_enabled: true,
+    } as any);
+
+    controller.toggleAutoSync(true);
+    await vi.runAllTimersAsync();
+
+    expect(rpc.updateSettingsCall).toHaveBeenCalledWith({
+      kind: "auto_sync",
+      enabled: true,
+    });
   });
 
   it("keeps the displayed game when auto-sync returns a different persisted preference", async () => {
@@ -133,7 +195,7 @@ describe("SettingsMutationRuntime", () => {
       ludusaviStore: store,
       notifyFailure: vi.fn(),
     });
-    vi.mocked(rpc.setAutoSyncEnabled).mockResolvedValueOnce({
+    vi.mocked(rpc.updateSettingsCall).mockResolvedValueOnce({
       auto_sync_enabled: true,
       selected_game: "B",
       sync_disabled_games: [],
@@ -152,7 +214,6 @@ describe("SettingsMutationRuntime", () => {
     const runtime = createSettingsMutationRuntime();
     const rpc = await import("../api/ludusaviRpc");
 
-    runtime.setActiveStore(store, vi.fn());
     const controller = runtime.createController({
       ludusaviStore: store,
       notifyFailure: vi.fn()
@@ -160,7 +221,7 @@ describe("SettingsMutationRuntime", () => {
 
     let resolveFirst: any;
     let resolveSecond: any;
-    vi.mocked(rpc.setAutoSyncEnabled)
+    vi.mocked(rpc.updateSettingsCall)
       .mockReturnValueOnce(new Promise(r => resolveFirst = r))
       .mockReturnValueOnce(new Promise(r => resolveSecond = r));
 
@@ -187,7 +248,6 @@ describe("SettingsMutationRuntime", () => {
     const runtime = createSettingsMutationRuntime();
     const rpc = await import("../api/ludusaviRpc");
 
-    runtime.setActiveStore(store, vi.fn());
     const controller = runtime.createController({
       ludusaviStore: store,
       notifyFailure: vi.fn()
@@ -195,7 +255,7 @@ describe("SettingsMutationRuntime", () => {
 
     let resolveFirst: any;
     let resolveSecond: any;
-    vi.mocked(rpc.setUpdateChannelCall)
+    vi.mocked(rpc.updateSettingsCall)
       .mockReturnValueOnce(new Promise(r => resolveFirst = r))
       .mockReturnValueOnce(new Promise(r => resolveSecond = r));
 
@@ -220,7 +280,6 @@ describe("SettingsMutationRuntime", () => {
     const runtime = createSettingsMutationRuntime();
     const rpc = await import("../api/ludusaviRpc");
 
-    runtime.setActiveStore(store, vi.fn());
     const controller = runtime.createController({
       ludusaviStore: store,
       notifyFailure: vi.fn()
@@ -232,9 +291,9 @@ describe("SettingsMutationRuntime", () => {
     let resolveSelectedGame: any;
     let resolveNotification: any;
 
-    vi.mocked(rpc.setAutoSyncEnabled).mockReturnValueOnce(new Promise(r => resolveAutoSync = r));
-    vi.mocked(rpc.setSelectedGameCall).mockReturnValueOnce(new Promise(r => resolveSelectedGame = r));
-    vi.mocked(rpc.setNotificationSettings).mockReturnValueOnce(new Promise(r => resolveNotification = r));
+    vi.mocked(rpc.updateSettingsCall).mockReturnValueOnce(new Promise(r => resolveAutoSync = r));
+    vi.mocked(rpc.updateSettingsCall).mockReturnValueOnce(new Promise(r => resolveSelectedGame = r));
+    vi.mocked(rpc.updateSettingsCall).mockReturnValueOnce(new Promise(r => resolveNotification = r));
 
     // 1. autoSync starts (generation 1)
     controller.toggleAutoSync(true);
@@ -298,7 +357,7 @@ describe("SettingsMutationRuntime", () => {
   it("optimistically updates one game and applies a successful result", async () => {
     const rpc = await import("../api/ludusaviRpc");
     const { store, controller } = setupGameSync();
-    vi.mocked(rpc.setGameSyncEnabledCall).mockResolvedValueOnce({
+    vi.mocked(rpc.updateSettingsCall).mockResolvedValueOnce({
       sync_disabled_games: ["Hades"],
     } as any);
 
@@ -317,7 +376,7 @@ describe("SettingsMutationRuntime", () => {
       selected_game: "B",
     } as any);
     store.setDisplayedGame("A");
-    vi.mocked(rpc.setGameSyncEnabledCall).mockResolvedValueOnce({
+    vi.mocked(rpc.updateSettingsCall).mockResolvedValueOnce({
       ...store.getSnapshot().settings,
       selected_game: "B",
       sync_disabled_games: ["A"],
@@ -333,7 +392,7 @@ describe("SettingsMutationRuntime", () => {
   it("rolls back only the failed game against hydrated persisted state", async () => {
     const rpc = await import("../api/ludusaviRpc");
     const { store, controller } = setupGameSync(["Hades"]);
-    vi.mocked(rpc.setGameSyncEnabledCall).mockRejectedValueOnce(new Error("RPC failed"));
+    vi.mocked(rpc.updateSettingsCall).mockRejectedValueOnce(new Error("RPC failed"));
 
     controller.toggleGameSync("Celeste", false);
     expect(store.getSnapshot().settings?.sync_disabled_games).toEqual(["Celeste", "Hades"]);
@@ -345,7 +404,7 @@ describe("SettingsMutationRuntime", () => {
   it("keeps A persisted when A succeeds and B fails", async () => {
     const rpc = await import("../api/ludusaviRpc");
     const { store, controller } = setupGameSync();
-    vi.mocked(rpc.setGameSyncEnabledCall)
+    vi.mocked(rpc.updateSettingsCall)
       .mockResolvedValueOnce({ sync_disabled_games: ["A"] } as any)
       .mockRejectedValueOnce(new Error("B failed"));
 
@@ -364,7 +423,7 @@ describe("SettingsMutationRuntime", () => {
     window.setTimeout = globalThis.setTimeout;
     window.clearTimeout = globalThis.clearTimeout;
     let resolveRpc: (settings: any) => void = () => {};
-    vi.mocked(rpc.setGameSyncEnabledCall).mockReturnValueOnce(
+    vi.mocked(rpc.updateSettingsCall).mockReturnValueOnce(
       new Promise((resolve) => {
         resolveRpc = resolve;
       }),
@@ -385,7 +444,7 @@ describe("SettingsMutationRuntime", () => {
   it("tracks rapid toggles for different games independently", async () => {
     const rpc = await import("../api/ludusaviRpc");
     const { store, controller } = setupGameSync();
-    vi.mocked(rpc.setGameSyncEnabledCall)
+    vi.mocked(rpc.updateSettingsCall)
       .mockResolvedValueOnce({ sync_disabled_games: ["A"] } as any)
       .mockResolvedValueOnce({ sync_disabled_games: ["A", "B"] } as any);
 
@@ -393,14 +452,14 @@ describe("SettingsMutationRuntime", () => {
     controller.toggleGameSync("B", false);
     await vi.runAllTimersAsync();
 
-    expect(rpc.setGameSyncEnabledCall).toHaveBeenCalledTimes(2);
+    expect(rpc.updateSettingsCall).toHaveBeenCalledTimes(2);
     expect(store.getSnapshot().settings?.sync_disabled_games).toEqual(["A", "B"]);
   });
 
   it("rolls a failed same-game re-enable back to the preceding successful disable", async () => {
     const rpc = await import("../api/ludusaviRpc");
     const { store, controller } = setupGameSync();
-    vi.mocked(rpc.setGameSyncEnabledCall)
+    vi.mocked(rpc.updateSettingsCall)
       .mockResolvedValueOnce({ sync_disabled_games: ["A"] } as any)
       .mockRejectedValueOnce(new Error("re-enable failed"));
 

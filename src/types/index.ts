@@ -53,6 +53,15 @@ export type Settings = {
   debug_logging: boolean;
 };
 
+export type SettingsPatch =
+  | { kind: "auto_sync"; enabled: boolean }
+  | { kind: "game_sync"; game_name: string; enabled: boolean }
+  | { kind: "selected_game"; game_name: string }
+  | { kind: "notification"; key: keyof NotificationSettings; enabled: boolean }
+  | { kind: "update_channel"; channel: UpdateChannel }
+  | { kind: "automatic_update_checks"; enabled: boolean }
+  | { kind: "debug_logging"; enabled: boolean };
+
 export type GameOperationHistoryEntry = {
   operation: "backup" | "restore" | "start" | "exit";
   trigger: "manual_backup" | "manual_restore" | "auto_start" | "auto_exit";

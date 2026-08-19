@@ -232,6 +232,80 @@ def test_settings_do_not_initialize_ludusavi_adapter(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("patch", "expected"),
+    [
+        ({"kind": "auto_sync", "enabled": True}, {"auto_sync_enabled": True}),
+        (
+            {"kind": "game_sync", "game_name": "Hades", "enabled": False},
+            {"sync_disabled_games": ["Hades"]},
+        ),
+        ({"kind": "selected_game", "game_name": "Hades"}, {"selected_game": "Hades"}),
+        (
+            {
+                "kind": "notification",
+                "key": "auto_sync_progress",
+                "enabled": False,
+            },
+            {
+                "notifications": {
+                    **DEFAULT_NOTIFICATIONS,
+                    "auto_sync_progress": False,
+                }
+            },
+        ),
+        ({"kind": "update_channel", "channel": "development"}, {"update_channel": "development"}),
+        (
+            {"kind": "automatic_update_checks", "enabled": False},
+            {"automatic_update_checks": False},
+        ),
+        ({"kind": "debug_logging", "enabled": False}, {"debug_logging": False}),
+    ],
+)
+def test_update_settings_applies_each_typed_patch(
+    tmp_path: Path, patch: dict[str, object], expected: dict[str, object]
+) -> None:
+    service = service_with_state(tmp_path)
+
+    updated = service.update_settings(patch)
+
+    assert updated == expected_settings(**expected)
+    assert service_with_state(tmp_path).get_settings() == expected_settings(**expected)
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"kind": "unknown", "enabled": True},
+        {"kind": "auto_sync", "enabled": "yes"},
+        {"kind": "game_sync", "game_name": 123, "enabled": True},
+        {"kind": "notification", "key": "unknown", "enabled": False},
+        {"kind": "update_channel", "channel": "nightly"},
+        {"kind": "automatic_update_checks"},
+        {"kind": "debug_logging", "enabled": None},
+    ],
+)
+def test_update_settings_rejects_malformed_typed_patches(
+    tmp_path: Path, patch: dict[str, object]
+) -> None:
+    service = service_with_state(tmp_path)
+
+    with pytest.raises(ValueError, match="Settings|Unknown"):
+        service.update_settings(patch)
+
+
+def test_typed_settings_patches_merge_across_service_instances(tmp_path: Path) -> None:
+    first = service_with_state(tmp_path)
+    second = service_with_state(tmp_path)
+
+    first.update_settings({"kind": "auto_sync", "enabled": True})
+    result = second.update_settings({"kind": "update_channel", "channel": "development"})
+
+    expected = expected_settings(auto_sync_enabled=True, update_channel="development")
+    assert result == expected
+    assert service_with_state(tmp_path).get_settings() == expected
+
+
 def test_notification_settings_default_to_enabled_and_persist(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
 

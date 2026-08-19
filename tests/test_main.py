@@ -361,30 +361,31 @@ def test_plugin_exposes_split_lifecycle_check_and_action_rpcs(
     ]
 
 
-def test_plugin_exposes_game_sync_setting_rpc(
+def test_plugin_exposes_typed_settings_patch_rpc(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     decky, _logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
     module = import_main(monkeypatch, decky)
     plugin = module.Plugin()
-    calls: list[tuple[str, bool]] = []
+    calls: list[dict[str, object]] = []
 
     class CapturingService:
         def __init__(self, settings_store: object, cache_path: Path) -> None:
             self.settings_store = settings_store
             self.cache_path = cache_path
 
-        def set_game_sync_enabled(self, game_name: str, enabled: bool) -> dict[str, object]:
-            calls.append((game_name, enabled))
-            return {"sync_disabled_games": [] if enabled else [game_name]}
+        def update_settings(self, patch: dict[str, object]) -> dict[str, object]:
+            calls.append(patch)
+            return {"sync_disabled_games": [str(patch["game_name"])]}
 
     monkeypatch.setattr(module, "SDHLudusaviService", CapturingService)
 
-    result = asyncio.run(plugin.set_game_sync_enabled("Hades", False))
+    patch = {"kind": "game_sync", "game_name": "Hades", "enabled": False}
+    result = asyncio.run(plugin.update_settings(patch))
 
     assert result == {"sync_disabled_games": ["Hades"]}
-    assert calls == [("Hades", False)]
+    assert calls == [patch]
 
 
 def test_decky_settings_store_reads_sync_disabled_games(tmp_path: Path, monkeypatch) -> None:
