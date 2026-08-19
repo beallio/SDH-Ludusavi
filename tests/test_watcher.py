@@ -64,7 +64,6 @@ def test_watch_manager(mock_resolve_path, mock_resolve_creds) -> None:
         assert res["status"] == "watching"
         assert res["folder_id"] == "test-folder"
         watch_id = res["watch_id"]
-        assert manager.watches[watch_id]._debug_logging is False
 
         # Poll watch
         time.sleep(0.1)  # Let the daemon thread run one iteration
@@ -552,9 +551,7 @@ def test_watch_manager_classifies_connection_endpoint_failure(
     assert result["reason"] == "api_unavailable"
 
 
-def _stopped_watch_for_tick(
-    device_ids: tuple[str, ...], *, debug_logging: bool | None = None
-) -> SyncthingWatch:
+def _stopped_watch_for_tick(device_ids: tuple[str, ...]) -> SyncthingWatch:
     watch = SyncthingWatch(
         "watch-1",
         "post_game",
@@ -563,7 +560,6 @@ def _stopped_watch_for_tick(
         _shared_folder(device_ids),
         None,
         initial_snapshot=ConnectionSnapshot(connected_devices=frozenset({"DEV-A"})),
-        **({"debug_logging": debug_logging} if debug_logging is not None else {}),
     )
     watch.cursor = 100
     watch.folder_state = "idle"
@@ -931,8 +927,8 @@ def test_captured_peer_sequence_completes_before_the_straggler() -> None:
     assert not watch.stop_event.is_set()
 
 
-def _first_peer_completion_watch(*, debug_logging: bool | None = None) -> SyncthingWatch:
-    watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"), debug_logging=debug_logging)
+def _first_peer_completion_watch() -> SyncthingWatch:
+    watch = _stopped_watch_for_tick(("DEV-A", "DEV-B"))
     watch.connected_devices = frozenset({"DEV-A", "DEV-B"})
     watch.folder_state = "idle"
     watch.runtime = FolderRuntime(sequence=1)
@@ -1147,236 +1143,32 @@ def test_manager_poll_sequence_exposes_frozen_sample_for_stopped_registered_watc
     assert settled_flags == [True, True, True, True]
 
 
-def test_debug_logging_false_stops_at_first_peer_even_when_plugin_logger_is_debug(caplog) -> None:
-    watch = _first_peer_completion_watch(debug_logging=False)
+@pytest.mark.parametrize(
+    "logger_level",
+    [logging.INFO, logging.DEBUG],
+    ids=["info", "debug"],
+)
+def test_debug_logging_does_not_change_watch_stop_semantics(caplog, logger_level: int) -> None:
+    watch = _first_peer_completion_watch()
     manager = SyncthingWatchManager()
     manager.watches[watch.watch_id] = watch
     plugin_logger = logging.getLogger("sdh_ludusavi")
     prior_level = plugin_logger.level
 
     try:
-        plugin_logger.setLevel(logging.DEBUG)
-        with caplog.at_level(logging.INFO):
+        plugin_logger.setLevel(logger_level)
+        with caplog.at_level(logger_level, logger="sdh_ludusavi.syncthing.watcher"):
             _confirm_first_peer(watch)
     finally:
         plugin_logger.setLevel(prior_level)
 
-    assert not watch.is_debug_extending_peer_completion
-    assert manager.stop_watch(watch.watch_id) == {
-        "status": "stopped",
-        "watch_id": watch.watch_id,
-    }
-    assert watch.stop_event.is_set()
-
-
-def test_released_debug_observation_continues_until_pending_deletes_drain(caplog) -> None:
-    watch = _first_peer_completion_watch(debug_logging=True)
-    normal_watch = _first_peer_completion_watch()
-    manager = SyncthingWatchManager()
-    manager.watches[watch.watch_id] = watch
-
-    with caplog.at_level(logging.INFO):
-        _confirm_first_peer(watch)
-        _confirm_first_peer(normal_watch)
-
-        assert watch.is_debug_extending_peer_completion
-        assert manager.stop_watch(watch.watch_id) == {
-            "status": "observing",
-            "watch_id": watch.watch_id,
-        }
-
-        pending_delete_completion = PeerCompletion("DEV-B", 100.0, 0, 0, 27, 5.0)
-        watch.peer_completions["DEV-B"] = pending_delete_completion
-        normal_watch.peer_completions["DEV-B"] = pending_delete_completion
-        _tick_first_peer_completion(watch, 5.0)
-        _tick_first_peer_completion(normal_watch, 5.0)
-
-        # The diagnostic observation must not change the completion sample the frontend saw.
-        assert watch.latest_sample == normal_watch.latest_sample
-        assert watch.latest_sample["sample"]["timestamp_unix"] == 5.0
-        assert not watch.stop_event.is_set()
-        assert manager._observing_watches == {watch.watch_id: watch}
-
-        watch.peer_completions["DEV-B"] = PeerCompletion("DEV-B", 100.0, 0, 0, 0, 6.0)
-        _tick_first_peer_completion(watch, 6.0)
-
-    latch_records = [
-        record
-        for record in caplog.records
-        if record.getMessage().startswith("Syncthing post-game peer-completion latch:")
-        and "debug_observation_selected=True" in record.getMessage()
-    ]
-    assert [record.getMessage() for record in latch_records] == [
-        "Syncthing post-game peer-completion latch: phase=post_game "
-        "debug_observation_selected=True connected_relevant_peers=2"
-    ]
-    assert "DEV-A" not in caplog.text
-    assert "DEV-B" not in caplog.text
-    assert "test-folder" not in caplog.text
-    assert watch.stop_event.is_set()
-    assert manager._observing_watches == {}
-
-
-def test_unreleased_debug_watch_keeps_publishing_after_all_peers_finish(caplog) -> None:
-    watch = _first_peer_completion_watch(debug_logging=True)
-
-    with caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"):
-        _confirm_first_peer(watch)
-        watch.peer_completions["DEV-B"] = PeerCompletion("DEV-B", 100.0, 0, 0, 0, 5.0)
-        samples = []
-        for now in (5.0, 6.0, 7.0):
-            _tick_first_peer_completion(watch, now)
-            samples.append(watch.latest_sample["sample"])
-
-    assert [sample["timestamp_unix"] for sample in samples] == [5.0, 6.0, 7.0]
-    assert all(sample["settled"] for sample in samples)
-    assert not watch.stop_event.is_set()
-
-
-def test_manager_leaves_debug_extended_watch_observing_after_completion(caplog) -> None:
-    watch = _first_peer_completion_watch(debug_logging=True)
-    manager = SyncthingWatchManager()
-    manager.watches[watch.watch_id] = watch
-
-    with caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"):
-        _confirm_first_peer(watch)
-
-    stop_result = manager.stop_watch(watch.watch_id)
-
-    assert stop_result == {"status": "observing", "watch_id": watch.watch_id}
-    assert not watch.stop_event.is_set()
-    assert watch._released_for_observation is True
-    assert watch.watch_id not in manager.watches
-    assert manager._observing_watches == {watch.watch_id: watch}
-
-
-def test_manager_stop_watch_then_stop_all_stops_debug_extended_watch(caplog) -> None:
-    watch = _first_peer_completion_watch(debug_logging=True)
-    manager = SyncthingWatchManager()
-    manager.watches[watch.watch_id] = watch
-
-    with caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"):
-        _confirm_first_peer(watch)
-
-    assert manager.stop_watch(watch.watch_id) == {
-        "status": "observing",
-        "watch_id": watch.watch_id,
-    }
-    assert manager.watches == {}
-    assert manager._observing_watches == {watch.watch_id: watch}
-
-    manager.stop_all()
-
-    assert watch.stop_event.is_set()
-    assert manager.watches == {}
-    assert manager._observing_watches == {}
-
-
-def test_manager_removes_self_terminated_debug_watch_from_observation_registry(caplog) -> None:
-    watch = _first_peer_completion_watch(debug_logging=True)
-    manager = SyncthingWatchManager()
-    manager.watches[watch.watch_id] = watch
-
-    with caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"):
-        _confirm_first_peer(watch)
-        assert manager.stop_watch(watch.watch_id) == {
-            "status": "observing",
-            "watch_id": watch.watch_id,
-        }
-        assert watch._released_for_observation is True
-
-        watch.peer_completions["DEV-B"] = PeerCompletion("DEV-B", 100.0, 0, 0, 0, 5.0)
-        _tick_first_peer_completion(watch, 5.0)
-
-    assert watch.stop_event.is_set()
-    assert manager._observing_watches == {}
-
-
-def test_manager_stops_normal_completed_watch(caplog) -> None:
-    watch = _first_peer_completion_watch()
-    manager = SyncthingWatchManager()
-    manager.watches[watch.watch_id] = watch
-
-    with caplog.at_level(logging.INFO, logger="sdh_ludusavi.syncthing.watcher"):
-        _confirm_first_peer(watch)
-
-    assert not watch.stop_event.is_set()
     with patch.object(watch, "stop", wraps=watch.stop) as mock_stop:
         stop_result = manager.stop_watch(watch.watch_id)
 
     assert stop_result == {"status": "stopped", "watch_id": watch.watch_id}
     mock_stop.assert_called_once_with()
     assert watch.stop_event.is_set()
-    assert watch.watch_id not in manager.watches
-
-
-def test_manager_stop_all_stops_debug_extended_and_normal_watches(caplog) -> None:
-    debug_watch = _first_peer_completion_watch(debug_logging=True)
-    debug_watch.watch_id = "debug-watch"
-    normal_watch = _first_peer_completion_watch()
-    normal_watch.watch_id = "normal-watch"
-    manager = SyncthingWatchManager()
-    manager.watches = {
-        debug_watch.watch_id: debug_watch,
-        normal_watch.watch_id: normal_watch,
-    }
-
-    with caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"):
-        _confirm_first_peer(debug_watch)
-
-    assert not debug_watch.stop_event.is_set()
-    assert manager.stop_watch(debug_watch.watch_id) == {
-        "status": "observing",
-        "watch_id": debug_watch.watch_id,
-    }
-    assert manager._observing_watches == {debug_watch.watch_id: debug_watch}
-    manager.stop_all()
-
-    assert debug_watch.stop_event.is_set()
-    assert normal_watch.stop_event.is_set()
     assert manager.watches == {}
-    assert manager._observing_watches == {}
-
-
-def test_post_game_debug_extended_observation_stops_at_existing_stall_boundary(caplog) -> None:
-    watch = _first_peer_completion_watch(debug_logging=True)
-
-    with caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"):
-        _confirm_first_peer(watch)
-        assert not watch.stop_event.is_set()
-        with patch("sdh_ludusavi.syncthing.watcher.OUTBOUND_STALL_WINDOW_SECONDS", 1.0):
-            _tick_first_peer_completion(watch, 6.0)
-
-    assert watch.latest_sample["reason"] == "post_game_upload_incomplete"
-    assert watch.stop_event.is_set()
-
-
-def test_released_debug_observation_stops_at_hard_ceiling_before_thread_ttl(caplog) -> None:
-    watch = _first_peer_completion_watch(debug_logging=True)
-    manager = SyncthingWatchManager()
-    manager.watches[watch.watch_id] = watch
-    watch.watch_started_monotonic = 0.0
-
-    with (
-        caplog.at_level(logging.DEBUG, logger="sdh_ludusavi.syncthing.watcher"),
-        patch("sdh_ludusavi.syncthing.watcher.POST_GAME_WATCH_HARD_CEILING_SECONDS", 5.0),
-    ):
-        _confirm_first_peer(watch)
-        assert manager.stop_watch(watch.watch_id) == {
-            "status": "observing",
-            "watch_id": watch.watch_id,
-        }
-
-        watch.peer_completions["DEV-B"] = PeerCompletion("DEV-B", 100.0, 0, 0, 27, 4.0)
-        assert not watch.stop_event.is_set()
-        _tick_first_peer_completion(watch, 4.0)
-        assert not watch.stop_event.is_set()
-        _tick_first_peer_completion(watch, 5.0)
-
-    assert watch.latest_sample["status"] == "activity"
-    assert "reason" not in watch.latest_sample
-    assert watch.stop_event.is_set()
-    assert manager._observing_watches == {}
 
 
 def test_newly_connected_peer_waits_for_a_fresh_completion_and_disconnects_stop_gating() -> None:
