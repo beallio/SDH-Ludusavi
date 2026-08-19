@@ -1,0 +1,51 @@
+{
+  "date": "2026-08-19",
+  "task_objective": "Verify the v0.4.6 fail-safe autosync work on a live Steam Deck from plugin logs, then cut and publish the v0.4.6 stable patch release.",
+  "files_modified": {
+    "documentation": [
+      "docs/releases/v0.4.6.md",
+      "README.md",
+      "docs/agent_conversations/2026-08-19_v0.4.6_stable_release.json"
+    ],
+    "metadata": [
+      "package.json",
+      "plugin.json"
+    ]
+  },
+  "tests_added": [],
+  "tdd_note": "No behavior-changing implementation code was written. Release notes, README cache buster, and version metadata only, so strict TDD did not apply.",
+  "device_verification": {
+    "device": "steamdeck",
+    "installed_build": "0.4.6-dev.g7c285d6",
+    "log": "/home/deck/homebrew/logs/SDH-Ludusavi/2026-08-19 10.53.05.log",
+    "findings": [
+      "Clean launch (local save current): SIGSTOP launch gate held 3.5s and released after the skip decision.",
+      "Conflict launch: gate held 17.0s spanning the conflict prompt and user-chosen restore, released only after the restore completed, confirming start-side mutations run under the backend-owned gate.",
+      "Status auto-hide now schedules at 210000ms, matching the three-minute operation cap plus margin; the previous value was 930000ms.",
+      "Post-game exit to SYNCTHING COMPLETE took 19.4s, consistent with the 18.4s baseline from v0.4.4.",
+      "No watchdog absolute resume, lease expiry, command timeout, or operation_running contention occurred.",
+      "The only ERROR lines were nine decky_loader WSRouter task teardowns during the install reload, which originate in Decky rather than this plugin."
+    ],
+    "untested_paths": [
+      "The three-minute give-up path and the retained-gate fallback when a stuck command cannot be confirmed stopped were not exercised on hardware."
+    ]
+  },
+  "design_decisions": [
+    "Released as v0.4.6 rather than bumping further: the repository already carried 0.4.6 and the latest stable tag was v0.4.5, so v0.4.6 is the next patch.",
+    "Release notes were authored in the user-facing voice required by CLAUDE.md section 13, stating the paused-launch fallback and the untested give-up path plainly rather than omitting them.",
+    "The README demo cache buster was incremented from 8 to 9 so the image refreshes for the new tag.",
+    "The session log was committed to dev rather than main to avoid re-diverging main immediately after the post-release sync."
+  ],
+  "results": {
+    "quality_gates": "ruff check, ruff format, ty check, 1041 pytest tests, 366 vitest tests, tsc, and pnpm supply-chain audits all passed.",
+    "release_commit": "fa3aba8",
+    "tag": "v0.4.6",
+    "workflow": "Build and Release Plugin run 32287656571 succeeded in 1m29s.",
+    "assets": [
+      "SDH-Ludusavi-v0.4.6.zip",
+      "SDH-Ludusavi-v0.4.6.zip.sha256",
+      "SDH-Ludusavi-v0.4.6.manifest.json"
+    ],
+    "post_release_sync": "main merged into dev and dev bumped to 0.4.7 (fd61f27)."
+  }
+}
