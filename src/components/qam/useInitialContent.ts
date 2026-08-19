@@ -1,5 +1,15 @@
 import { useEffect } from "react";
-import type { RpcResult, RpcStatus, Settings, RefreshResult, OperationStatus, GameStatus } from "../../types";
+import type { LudusaviLaunchCommand } from "../../ludusaviLauncher";
+import type {
+  GameOperationHistory,
+  GameStatus,
+  OperationStatus,
+  RefreshResult,
+  RpcResult,
+  RpcStatus,
+  Settings,
+  Versions,
+} from "../../types";
 import { log, logUiEvent } from "../../utils/logging";
 
 import { getInstalledAppIdsString } from "../../utils/steam";
@@ -14,25 +24,25 @@ export type InitialContentDependencies = {
   setInitPromise: (promise: Promise<OperationStatus> | null) => void;
   setMetadataPromise: (promise: Promise<void> | null) => void;
   getOperationStatus: () => Promise<OperationStatus>;
-  getVersions: () => Promise<any>;
-  getLudusaviCommandCall: () => Promise<any>;
+  getVersions: () => Promise<RpcResult<Versions>>;
+  getLudusaviCommandCall: () => Promise<RpcResult<LudusaviLaunchCommand | null>>;
   getSettings: () => Promise<RpcResult<Settings>>;
-  getGameHistoryCall: () => Promise<any>;
-  isGameCacheCurrentCall: (appIds: string) => Promise<any>;
+  getGameHistoryCall: () => Promise<RpcResult<Record<string, GameOperationHistory>>>;
+  isGameCacheCurrentCall: (appIds: string) => Promise<boolean>;
   refreshGamesCall: (force: boolean, appIds?: string) => Promise<RpcResult<RefreshResult>>;
   applySettings: (settings: Settings) => void;
   hydrateDisplayedGame: (gameName: string) => void;
-  setGameHistory: (history: any) => void;
-  setVersions: (versions: any) => void;
-  setLudusaviCommand: (command: any) => void;
+  setGameHistory: (history: Record<string, GameOperationHistory>) => void;
+  setVersions: (versions: Versions) => void;
+  setLudusaviCommand: (command: LudusaviLaunchCommand | null) => void;
   applyRefreshResult: (result: RpcResult<RefreshResult>, preferredGame?: string, allowSteamContextSelection?: boolean) => boolean;
   applyCachedRefreshResult: (preferredGame?: string, allowSteamContextSelection?: boolean) => boolean;
   setInstalledAppIds: (appIds: string | undefined) => void;
   setOperation: (status: OperationStatus) => void;
   setBackgroundRefreshBusy: (busy: boolean) => void;
   setBusyLabel: (label: string | null) => void;
-  isRpcStatus: <T>(result: RpcResult<T>) => boolean;
-  logRpcStatus: (result: any, operation: string) => void;
+  isRpcStatus: <T>(result: RpcResult<T>) => result is RpcStatus;
+  logRpcStatus: (result: RpcStatus, operation: string) => void;
   logError: (message: string) => void;
 };
 
@@ -102,8 +112,8 @@ export function useInitialContent(deps: InitialContentDependencies) {
     if (deps.isRpcStatus(loadedSettings)) {
       deps.logRpcStatus(loadedSettings, "settings");
     } else {
-      deps.applySettings(loadedSettings as Settings);
-      deps.hydrateDisplayedGame((loadedSettings as Settings).selected_game);
+      deps.applySettings(loadedSettings);
+      deps.hydrateDisplayedGame(loadedSettings.selected_game);
     }
 
     if (deps.isRpcStatus(loadedHistory)) {
@@ -125,8 +135,8 @@ export function useInitialContent(deps: InitialContentDependencies) {
         ? await deps.isGameCacheCurrentCall(installedAppIds || "")
         : false;
 
-    const cacheCurrent = !deps.isRpcStatus(cacheCurrentResult) && cacheCurrentResult === true;
-    const preferredGame = deps.isRpcStatus(loadedSettings) ? undefined : (loadedSettings as Settings).selected_game;
+    const cacheCurrent = cacheCurrentResult === true;
+    const preferredGame = deps.isRpcStatus(loadedSettings) ? undefined : loadedSettings.selected_game;
     logUiEvent("game_list_source_selected", {
       cache_current: cacheCurrent,
       installed_app_ids_changed: installedAppIdsChanged,
@@ -144,7 +154,7 @@ export function useInitialContent(deps: InitialContentDependencies) {
       if (deps.applyRefreshResult(refreshed, preferredGame, true)) {
         deps.setInstalledAppIds(installedAppIds);
         logUiEvent("game_list_refreshed", {
-          game_count: deps.isRpcStatus(refreshed) ? 0 : (refreshed as RefreshResult).games.length,
+          game_count: deps.isRpcStatus(refreshed) ? 0 : refreshed.games.length,
           reason: installedAppIdsChanged ? "installed_apps_changed" : "cache_stale_or_cold",
         }, "info");
       }

@@ -80,7 +80,6 @@ class SyncthingWatch:
         api: SyncthingAPI,
         initial_snapshot: ConnectionSnapshot | None = None,
         on_expired: Callable[[str], None] | None = None,
-        debug_logging: bool = False,
     ) -> None:
         self.watch_id = watch_id
         self.phase = phase
@@ -97,8 +96,6 @@ class SyncthingWatch:
         )
         self.deadline_monotonic = self.watch_started_monotonic + ttl_seconds
         self._on_expired = on_expired
-        self._on_observation_finished: Callable[[str], None] | None = None
-        self._released_for_observation = False
         self.stop_event = threading.Event()
         self.latest_sample: dict[str, Any] = {}
         self.thread: threading.Thread | None = None
@@ -119,17 +116,10 @@ class SyncthingWatch:
         self._last_outbound_need_decrease_monotonic: float | None = None
         self._outbound_peer_confirmation_streak = 0
         self._outbound_first_peer_completion_reached = False
-        self._debug_logging = debug_logging
-        self._debug_outbound_completion_observation = False
 
     @property
     def _peer_completion_tracking(self) -> bool:
         return self.phase == "post_game"
-
-    @property
-    def is_debug_extending_peer_completion(self) -> bool:
-        """Whether a debug watch continues after its first confirmed peer completes."""
-        return self._debug_outbound_completion_observation and not self.stop_event.is_set()
 
     def start(self) -> None:
         self.thread = threading.Thread(
@@ -141,18 +131,6 @@ class SyncthingWatch:
         self.stop_event.set()
         if self.thread and self.thread.ident is not None:
             self.thread.join(timeout=1.0)
-
-    def _deregister_finished_debug_observation(self) -> None:
-        if (
-            self._released_for_observation
-            and self._debug_outbound_completion_observation
-            and self._on_observation_finished
-        ):
-            self._on_observation_finished(self.watch_id)
-
-    def begin_released_observation(self, callback: Callable[[str], None]) -> None:
-        self._on_observation_finished = callback
-        self._released_for_observation = True
 
     def _run(self) -> None:
         try:
@@ -239,7 +217,6 @@ class SyncthingWatch:
                 "message": "All Syncthing devices configured for the backup folder are disconnected.",
             }
             self.stop_event.set()
-            self._deregister_finished_debug_observation()
             return
 
         # 3. Poll current folder status and detect sequence changes.
@@ -367,38 +344,11 @@ class SyncthingWatch:
 
         if not self._outbound_first_peer_completion_reached:
             self._outbound_first_peer_completion_reached = True
-            self._debug_outbound_completion_observation = self._debug_logging
             logger.info(
-                "Syncthing post-game peer-completion latch: phase=%s "
-                "debug_observation_selected=%s connected_relevant_peers=%d",
+                "Syncthing post-game peer-completion latch: phase=%s connected_relevant_peers=%d",
                 self.phase,
-                self._debug_outbound_completion_observation,
                 len(self._connected_relevant_device_ids()),
             )
-            return
-
-        if not (self._debug_outbound_completion_observation and self._released_for_observation):
-            return
-
-        diagnostics = summarize_peer_completions(
-            self.peer_completions,
-            self._connected_relevant_device_ids(),
-            self.local_activity.outbound_index_observed_monotonic,
-        )
-        # Content completion caused the frontend to release this watch, so incomplete_peers is
-        # zero by construction here. Pending deletes must keep debug observation alive.
-        if (
-            diagnostics.incomplete_peers == 0
-            and diagnostics.awaiting_fresh_completion == 0
-            and diagnostics.peers_pending_deletes == 0
-        ):
-            self.stop_event.set()
-            self._deregister_finished_debug_observation()
-            return
-
-        if time.monotonic() - self.watch_started_monotonic >= POST_GAME_WATCH_HARD_CEILING_SECONDS:
-            self.stop_event.set()
-            self._deregister_finished_debug_observation()
 
     def _log_peer_completion_transition(self) -> None:
         if not self._peer_completion_tracking:
@@ -496,7 +446,6 @@ class SyncthingWatch:
             "message": "Syncthing upload did not complete before monitoring ended.",
         }
         self.stop_event.set()
-        self._deregister_finished_debug_observation()
         return True
 
     def _tick_events(self) -> None:
@@ -543,7 +492,6 @@ class SyncthingWatchManager:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.watches: dict[str, SyncthingWatch] = {}
-        self._observing_watches: dict[str, SyncthingWatch] = {}
 
     def start_watch(
         self,
@@ -551,7 +499,6 @@ class SyncthingWatchManager:
         game_name: str | None,
         app_id: str | None,
         backup_path: str | None,
-        debug_logging: bool = False,
     ) -> dict[str, Any]:
         if not backup_path or backup_path == "unknown":
             return {
@@ -639,7 +586,6 @@ class SyncthingWatchManager:
             api,
             initial_snapshot=snapshot,
             on_expired=self._deregister_expired_watch,
-            debug_logging=debug_logging,
         )
 
         watches_to_stop = []
@@ -676,11 +622,6 @@ class SyncthingWatchManager:
         # out, stop_watch releases the lock, and pop is a harmless no-op.
         with self.lock:
             self.watches.pop(watch_id, None)
-            self._observing_watches.pop(watch_id, None)
-
-    def _deregister_finished_observation(self, watch_id: str) -> None:
-        with self.lock:
-            self._observing_watches.pop(watch_id, None)
 
     def poll_watch(self, watch_id: str) -> dict[str, Any]:
         import copy
@@ -697,21 +638,13 @@ class SyncthingWatchManager:
     def stop_watch(self, watch_id: str) -> dict[str, Any]:
         with self.lock:
             watch = self.watches.pop(watch_id, None)
-            if watch and watch.is_debug_extending_peer_completion:
-                watch.begin_released_observation(self._deregister_finished_observation)
-                self._observing_watches[watch_id] = watch
-                return {"status": "observing", "watch_id": watch_id}
         if watch:
             watch.stop()
         return {"status": "stopped", "watch_id": watch_id}
 
     def stop_all(self) -> None:
         with self.lock:
-            watches_to_stop = {
-                **self.watches,
-                **self._observing_watches,
-            }.values()
+            watches_to_stop = list(self.watches.values())
             self.watches.clear()
-            self._observing_watches.clear()
         for watch in watches_to_stop:
             watch.stop()

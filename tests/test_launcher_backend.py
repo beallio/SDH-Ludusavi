@@ -41,8 +41,8 @@ def test_launcher_shortcut_id_persistence(service, tmp_path):
     )
     assert reloaded.get_ludusavi_launcher_shortcut_id() == 12345
 
-    # Clear ID
-    assert service.clear_ludusavi_launcher_shortcut_id() is True
+    # -1 is the supported no-shortcut sentinel.
+    assert service.set_ludusavi_launcher_shortcut_id(-1) is True
     assert service.get_ludusavi_launcher_shortcut_id() == -1
 
     # Persistence check after clear

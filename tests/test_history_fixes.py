@@ -57,8 +57,9 @@ def test_auto_exit_records_history_even_if_refresh_fails(tmp_path: Path) -> None
     service.set_auto_sync_enabled(True)
     service.refresh_games()  # First refresh succeeds
 
-    # handle_game_exit calls _refresh_statuses_unlocked
-    result = service.handle_game_exit("Hades", app_id="123")
+    check = service.check_game_exit("Hades", app_id="123")
+    assert check == {"status": "needed", "operation": "backup", "game": "Hades"}
+    result = service.backup_game_on_exit(str(check["game"]), app_id="123")
     assert result["status"] == "backed_up"
 
     refresh = service.refresh_games()
@@ -122,7 +123,7 @@ def test_last_operation_field_is_newest(tmp_path: Path) -> None:
 
     time.sleep(1.1)  # Ensure timestamp changes (seconds)
     service.set_auto_sync_enabled(True)
-    service.handle_game_start("Hades", app_id="123")
+    service.check_game_start("Hades", app_id="123")
 
     history = service.refresh_games()["history"]["Hades"]
     t2 = history["last_skip"]["timestamp"]
@@ -173,18 +174,12 @@ def test_auto_exit_skips_record_history(tmp_path: Path, reason: str, status: str
                 "games": games_output,
             }  # Actually I need to check how service.py handles these.
 
-    # handle_game_exit uses _ludusavi().backup(game.name)
-    # If it returns ok=True but change=Same, it's a skip.
-
     adapter = SkipAdapter()
     service = service_with_state(tmp_path, adapter=adapter)
     service.set_auto_sync_enabled(True)
     service.refresh_games()
 
-    # For preview_failed, it's caught in handle_game_exit before _run_locked
-    # Wait, preview_failed is if backup(preview=True) fails.
-
-    result = service.handle_game_exit("Hades", app_id="123")
+    result = service.check_game_exit("Hades", app_id="123")
     assert result["status"] == status
     assert result["reason"] == reason
 

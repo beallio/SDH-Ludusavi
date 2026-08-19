@@ -38,7 +38,6 @@ describe("GameLifecycleController diagnostic logging", () => {
       shouldPublishAutoSyncStatusBeforeRpc: vi.fn().mockReturnValue(true),
       getSnapshot: vi.fn().mockReturnValue({
         settings: { auto_sync_enabled: true },
-        autoSyncNotificationsEnabled: true,
         trackedNames: new Set(["hades"]),
         trackedAppIDs: new Set(["1145300"]),
       }),
@@ -109,8 +108,7 @@ describe("GameLifecycleController diagnostic logging", () => {
     mockStore.shouldPublishAutoSyncStatusBeforeRpc.mockReturnValue(false);
     mockStore.isTracked.mockReturnValue(false);
     mockStore.getSnapshot.mockReturnValue({
-      settings: { auto_sync_enabled: true },
-      autoSyncNotificationsEnabled: false,
+      settings: { auto_sync_enabled: false },
       trackedNames: new Set(["hades"]),
       trackedAppIDs: new Set(["1145300"]),
     });

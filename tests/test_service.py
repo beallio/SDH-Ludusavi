@@ -232,6 +232,92 @@ def test_settings_do_not_initialize_ludusavi_adapter(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("patch", "expected"),
+    [
+        ({"kind": "auto_sync", "enabled": True}, {"auto_sync_enabled": True}),
+        (
+            {"kind": "game_sync", "game_name": "Hades", "enabled": False},
+            {"sync_disabled_games": ["Hades"]},
+        ),
+        ({"kind": "selected_game", "game_name": "Hades"}, {"selected_game": "Hades"}),
+        (
+            {
+                "kind": "notification",
+                "key": "auto_sync_progress",
+                "enabled": False,
+            },
+            {
+                "notifications": {
+                    **DEFAULT_NOTIFICATIONS,
+                    "auto_sync_progress": False,
+                }
+            },
+        ),
+        ({"kind": "update_channel", "channel": "development"}, {"update_channel": "development"}),
+        (
+            {"kind": "automatic_update_checks", "enabled": False},
+            {"automatic_update_checks": False},
+        ),
+        ({"kind": "debug_logging", "enabled": False}, {"debug_logging": False}),
+    ],
+)
+def test_update_settings_applies_each_typed_patch(
+    tmp_path: Path, patch: dict[str, object], expected: dict[str, object]
+) -> None:
+    service = service_with_state(tmp_path)
+
+    updated = service.update_settings(patch)
+
+    assert updated == expected_settings(**expected)
+    assert service_with_state(tmp_path).get_settings() == expected_settings(**expected)
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"kind": "unknown", "enabled": True},
+        {"kind": "auto_sync", "enabled": "yes"},
+        {"kind": "game_sync", "game_name": 123, "enabled": True},
+        {"kind": "notification", "key": "unknown", "enabled": False},
+        {"kind": "update_channel", "channel": "nightly"},
+        {"kind": "automatic_update_checks"},
+        {"kind": "debug_logging", "enabled": None},
+    ],
+)
+def test_update_settings_rejects_malformed_typed_patches(
+    tmp_path: Path, patch: dict[str, object]
+) -> None:
+    service = service_with_state(tmp_path)
+
+    with pytest.raises(ValueError, match="Settings|Unknown"):
+        service.update_settings(patch)
+
+
+def test_game_sync_patch_ignores_empty_sanitized_game_name(tmp_path: Path) -> None:
+    service = service_with_state(tmp_path)
+    service.update_settings({"kind": "game_sync", "game_name": "Hades", "enabled": False})
+    settings_path = tmp_path / "settings.json"
+    persisted_before = json.loads(settings_path.read_text(encoding="utf-8"))
+
+    result = service.update_settings({"kind": "game_sync", "game_name": "  ", "enabled": False})
+
+    assert result == expected_settings(sync_disabled_games=["Hades"])
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == persisted_before
+
+
+def test_typed_settings_patches_merge_across_service_instances(tmp_path: Path) -> None:
+    first = service_with_state(tmp_path)
+    second = service_with_state(tmp_path)
+
+    first.update_settings({"kind": "auto_sync", "enabled": True})
+    result = second.update_settings({"kind": "update_channel", "channel": "development"})
+
+    expected = expected_settings(auto_sync_enabled=True, update_channel="development")
+    assert result == expected
+    assert service_with_state(tmp_path).get_settings() == expected
+
+
 def test_notification_settings_default_to_enabled_and_persist(tmp_path: Path) -> None:
     service = service_with_state(tmp_path)
 
@@ -860,13 +946,15 @@ def test_start_matches_steam_and_non_steam_names_conservatively(tmp_path: Path) 
     service.set_auto_sync_enabled(True)
 
     paused = service.pause_game_process(4567)
-    steam_result = service.handle_game_start(
-        "hades",
+    check = service.check_game_start("hades", app_id="1145360")
+    assert check == {"status": "needed", "operation": "restore", "game": "Hades"}
+    steam_result = service.restore_game_on_start(
+        str(check["game"]),
         app_id="1145360",
         gate_pid=4567,
         gate_lease_id=str(paused["lease_id"]),
     )
-    non_steam_result = service.handle_game_start("Celeste")
+    non_steam_result = service.check_game_start("Celeste")
 
     assert steam_result["status"] == "restored"
     assert non_steam_result["status"] == "skipped"
@@ -1343,13 +1431,13 @@ def test_start_skips_disabled_unmatched_and_local_current(tmp_path: Path) -> Non
     service = service_with_state(tmp_path, adapter)
     service.refresh_games()
 
-    disabled = service.handle_game_start("Hades")
+    disabled = service.check_game_start("Hades")
     service.set_auto_sync_enabled(True)
-    unmatched = service.handle_game_start("Unknown Game")
+    unmatched = service.check_game_start("Unknown Game")
 
     # local_current requires preview logic mock if using real adapter,
     # but FakeAdapter is static here.
-    local_current = service.handle_game_start("Hades")
+    local_current = service.check_game_start("Hades")
 
     assert disabled["reason"] == "auto_sync_disabled"
     assert unmatched["reason"] == "unmatched_game"
@@ -1568,9 +1656,9 @@ def test_exit_backs_up_only_when_auto_sync_enabled_and_matched(tmp_path: Path) -
     service = service_with_state(tmp_path, adapter)
     service.refresh_games()
 
-    disabled = service.handle_game_exit("Hades")
+    disabled = service.check_game_exit("Hades")
     service.set_auto_sync_enabled(True)
-    unmatched = service.handle_game_exit("Unknown Game")
+    unmatched = service.check_game_exit("Unknown Game")
 
     # Mock backup preview to return "Same" for Hades first
     original_backup = adapter.backup
@@ -1583,7 +1671,7 @@ def test_exit_backs_up_only_when_auto_sync_enabled_and_matched(tmp_path: Path) -
         return original_backup(game_name)
 
     adapter.backup = backup_with_preview
-    local_current = service.handle_game_exit("Hades")
+    local_current = service.check_game_exit("Hades")
 
     # Now mock backup preview to return "Different"
     def backup_with_changes(game_name: str, preview: bool = False) -> dict[str, object]:
@@ -1596,7 +1684,9 @@ def test_exit_backs_up_only_when_auto_sync_enabled_and_matched(tmp_path: Path) -
         return original_backup(game_name)
 
     adapter.backup = backup_with_changes
-    backed_up = service.handle_game_exit("Hades")
+    check = service.check_game_exit("Hades")
+    assert check == {"status": "needed", "operation": "backup", "game": "Hades"}
+    backed_up = service.backup_game_on_exit(str(check["game"]))
 
     assert disabled["reason"] == "auto_sync_disabled"
     assert unmatched["reason"] == "unmatched_game"
@@ -1924,7 +2014,13 @@ def test_queued_start_revalidates_a_lost_gate_after_the_coordinator_wait(
 
     def run_start() -> None:
         try:
-            results.append(service.handle_game_start("Hades", "1145360", 4567, lease_id))
+            check = service.check_game_start("Hades", "1145360")
+            if check.get("status") == "needed":
+                results.append(
+                    service.restore_game_on_start(str(check["game"]), "1145360", 4567, lease_id)
+                )
+            else:
+                results.append(check)
         except BaseException as exc:  # pragma: no cover - asserted after synchronization.
             errors.append(exc)
         finally:
@@ -2548,12 +2644,11 @@ def test_service_syncthing_watch(tmp_path: Path) -> None:
     }
     service._syncthing_watch_manager.poll_watch.return_value = {"status": "activity"}
     service._syncthing_watch_manager.stop_watch.return_value = {"status": "stopped"}
-    service._debug_logging = False
 
     res = service.start_syncthing_activity_watch("pre_game", "Hades", "1145300")
     assert res["status"] == "watching"
     service._syncthing_watch_manager.start_watch.assert_called_once_with(
-        "pre_game", "Hades", "1145300", "/home/deck/Sync", debug_logging=False
+        "pre_game", "Hades", "1145300", "/home/deck/Sync"
     )
 
     poll_res = service.get_syncthing_activity("test-id")

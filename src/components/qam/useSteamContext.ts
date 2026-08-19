@@ -8,6 +8,10 @@ import {
   resetQuickAccessScroll
 } from "../../utils/steam";
 import { logUiEvent } from "../../utils/logging";
+import type {
+  QamOpenSelectionAction,
+  QamOpenSelectionInput,
+} from "./qamOpenSelection";
 
 export function selectCurrentSteamGameIfAvailable(
   currentGames: readonly GameStatus[],
@@ -46,7 +50,7 @@ export type UseSteamContextOptions = {
   operationInProgress: boolean;
   qamContentRef: React.RefObject<HTMLDivElement | null>;
   setDisplayedGame: (gameName: string) => void;
-  resolveQamOpenSelection: (args: any) => "wait" | "consume" | "select";
+  resolveQamOpenSelection: (args: QamOpenSelectionInput) => QamOpenSelectionAction;
   isExplicitSelectionPending: () => boolean;
   onExplicitSelectionConsumed: () => void;
 };
