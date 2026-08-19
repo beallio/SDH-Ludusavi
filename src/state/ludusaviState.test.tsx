@@ -85,6 +85,13 @@ describe("LudusaviStateStore", () => {
   });
 
   describe("Settings invariants", () => {
+    it("owns notification policy only in canonical settings", () => {
+      const snapshot = createLudusaviStateStore().getSnapshot();
+
+      expect(snapshot).not.toHaveProperty("autoSyncNotificationsEnabled");
+      expect(snapshot).not.toHaveProperty("notificationSettings");
+    });
+
     it("updates and hydrates displayed games without changing the persisted preference", () => {
       const store = createLudusaviStateStore();
       store.applySettings({
@@ -117,15 +124,17 @@ describe("LudusaviStateStore", () => {
       expect(coldStore.getSnapshot().selectedGame).toBe("Seeded");
     });
 
-    it("maintains consistency across snapshot and settings when fields are mutated", () => {
+    it("derives notification and pre-RPC policy from canonical settings", () => {
       const store = createLudusaviStateStore();
 
-      // Initial empty state has no settings but snapshot provides defaults for standalone fields
+      // Cold state preserves the defaults that previously lived in snapshot mirrors.
       expect(store.getSnapshot().settings).toBeNull();
+      expect(store.shouldShowNotification("refresh_status")).toBe(true);
+      expect(store.shouldPublishAutoSyncStatusBeforeRpc(false)).toBe(true);
       store.setDisplayedGame("Existing display");
 
-      // Applying settings populates persisted and derived settings without
-      // overwriting the ephemeral displayed game.
+      // Applying settings preserves the ephemeral displayed game while selectors
+      // derive notification policy from the normalized persisted document.
       store.applySettings({
         auto_sync_enabled: true,
         sync_disabled_games: [],
@@ -147,10 +156,11 @@ describe("LudusaviStateStore", () => {
       let snap = store.getSnapshot();
       expect(snap.selectedGame).toBe("Existing display");
       expect(snap.settings?.selected_game).toBe("Hades");
-      expect(snap.autoSyncNotificationsEnabled).toBe(true);
       expect(snap.settings?.auto_sync_enabled).toBe(true);
-      expect(snap.notificationSettings.auto_sync_progress).toBe(false);
       expect(snap.settings?.notifications.auto_sync_progress).toBe(false);
+      expect(store.shouldShowNotification("auto_sync_progress")).toBe(false);
+      expect(store.shouldShowNotification("auto_sync_results")).toBe(true);
+      expect(store.shouldPublishAutoSyncStatusBeforeRpc(false)).toBe(true);
 
       // Mutating the displayed game does not change the persisted preference.
       store.setDisplayedGame("Portal");
@@ -158,17 +168,25 @@ describe("LudusaviStateStore", () => {
       expect(snap.selectedGame).toBe("Portal");
       expect(snap.settings?.selected_game).toBe("Hades");
 
-      // Mutating auto sync updates both
+      // Optimistic auto-sync mutations immediately update the canonical document
+      // and its pre-RPC publication selector.
       store.setAutoSyncEnabled(false);
       snap = store.getSnapshot();
-      expect(snap.autoSyncNotificationsEnabled).toBe(false);
       expect(snap.settings?.auto_sync_enabled).toBe(false);
+      expect(store.shouldPublishAutoSyncStatusBeforeRpc(false)).toBe(false);
 
-      // Mutating notification settings updates both
-      store.setNotificationSettings({ ...snap.notificationSettings, refresh_status: true });
+      // Master and per-category notification policy remain derived from settings.
+      store.setNotificationSettings({
+        ...snap.settings!.notifications,
+        enabled: false,
+        refresh_status: true,
+      });
       snap = store.getSnapshot();
-      expect(snap.notificationSettings.refresh_status).toBe(true);
       expect(snap.settings?.notifications.refresh_status).toBe(true);
+      expect(store.shouldShowNotification("refresh_status")).toBe(false);
+
+      store.setNotificationSettings({ ...snap.settings!.notifications, enabled: true });
+      expect(store.shouldShowNotification("refresh_status")).toBe(true);
     });
 
     it("normalizes malformed disabled games and patches sorted unique membership", () => {
