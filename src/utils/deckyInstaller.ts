@@ -3,8 +3,8 @@ import { log } from "./logging";
 declare global {
   interface Window {
     DeckyBackend?: {
-      callable: (method: string) => (...args: any[]) => Promise<any>;
-      call?: (method: string, ...args: any[]) => Promise<any>;
+      callable: (method: string) => (...args: unknown[]) => Promise<unknown>;
+      call?: (method: string, ...args: unknown[]) => Promise<unknown>;
     };
   }
 }
@@ -29,7 +29,7 @@ export async function invokeDeckyInstaller(
   sha256: string,
   installType: typeof INSTALL_TYPE_UPDATE | typeof INSTALL_TYPE_DOWNGRADE,
   traceId?: string
-): Promise<any> {
+): Promise<unknown> {
   const start = performance.now();
   const backend = window.DeckyBackend;
   if (!backend) {

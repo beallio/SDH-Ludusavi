@@ -18,10 +18,10 @@ import {
   INSTALL_TYPE_DOWNGRADE,
   INSTALL_TYPE_UPDATE,
 } from "../utils/deckyInstaller";
-import { log } from "../utils/logging";
+import { log, type LogFields } from "../utils/logging";
 import { updateReducer, initialUpdateState } from "./pluginUpdateReducer";
 
-function logUpdate(traceId: string | null, stage: string, details?: any) {
+function logUpdate(traceId: string | null, stage: string, details?: LogFields) {
   const detailsStr = details
     ? Object.entries(details)
         .map(([k, v]) => `${k}=${v}`)
@@ -67,7 +67,7 @@ export function usePluginUpdateController({
   const [state, dispatch] = useReducer(updateReducer, initialUpdateState);
 
   const hasChecked = useRef(false);
-  const inFlightCheck = useRef<Promise<any> | null>(null);
+  const inFlightCheck = useRef<Promise<UpdateCheckResult> | null>(null);
   const hydratedPendingInstallVersion = useRef<string | null>(null);
 
   const activeCheckId = useRef(0);
@@ -110,7 +110,7 @@ export function usePluginUpdateController({
       activeCheckId.current += 1;
       const checkId = activeCheckId.current;
 
-      const promise = (async () => {
+      const promise: Promise<UpdateCheckResult> = (async () => {
         const checkStart = performance.now();
         dispatch({ type: "CHECK_START" });
         logUpdate(null, "check_start", { channel: updateChannel });

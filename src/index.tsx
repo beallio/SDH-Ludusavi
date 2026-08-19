@@ -1,6 +1,7 @@
 import { showModal } from "@decky/ui";
 import { definePlugin, toaster } from "@decky/api";
 import { FaExclamationTriangle } from "react-icons/fa";
+import type { ReactNode } from "react";
 
 import {
   backupGameOnExitCall,
@@ -113,7 +114,7 @@ function notify(
   category: NotificationCategory,
   title: string,
   body: string,
-  logo?: any
+  logo?: ReactNode
 ) {
   log("debug", `notify call: category=${category}, title=${title}, body=${body}`, "autosync_status");
   if (!store.shouldShowNotification(category)) {

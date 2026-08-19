@@ -10,15 +10,15 @@ import {
 } from "@decky/ui";
 import { formatBytes } from "../../formatting/bytes";
 import { formatTimestamp } from "../../formatting/dateTime";
-import type { BackupListResult } from "../../types";
+import type { BackupListResult, RpcResult, RpcStatus } from "../../types";
 import { listBackupsCall } from "../../api/ludusaviRpc";
 
 type BackupBrowserModalProps = {
   gameName: string;
   closeModal?: () => void;
   onRestoreSnapshot?: (backupId: string, whenLabel: string) => void;
-  isRpcStatus: (res: any) => boolean;
-  logRpcStatus: (res: any, op: string) => void;
+  isRpcStatus: <T>(res: RpcResult<T>) => res is RpcStatus;
+  logRpcStatus: (res: RpcStatus, op: string) => void;
 };
 
 export function BackupBrowserModal({
@@ -48,13 +48,13 @@ export function BackupBrowserModal({
         if (!mounted) return;
         if (isRpcStatus(res)) {
           logRpcStatus(res, "list_backups");
-          setError((res as any).message || "Failed to list backups");
+          setError(res.message || "Failed to list backups");
         } else {
-          setListResult(res as BackupListResult);
+          setListResult(res);
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!mounted) return;
-        setError(e.toString());
+        setError(e instanceof Error ? e.message : String(e));
       } finally {
         if (mounted) setLoading(false);
       }

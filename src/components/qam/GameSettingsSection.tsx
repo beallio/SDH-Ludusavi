@@ -66,7 +66,7 @@ export function GameSettingsSection({
             rgOptions={gamesDropdownOptions}
             selectedOption={selectedGame}
             onChange={onGameChange}
-            renderButtonValue={(value: any) => (
+            renderButtonValue={(value: ReactNode) => (
               <span className="sdh-ludusavi-game-dropdown-value">{value}</span>
             )}
           />
