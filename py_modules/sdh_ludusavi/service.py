@@ -325,13 +325,6 @@ class SDHLudusaviService:
         self.log("info", f"Saved Ludusavi launcher shortcut ID: {app_id}")
         return True
 
-    def clear_ludusavi_launcher_shortcut_id(self) -> bool:
-        """Remove the saved shortcut app ID from config."""
-        self._ludusavi_launcher_shortcut_id = -1
-        self._save_state()
-        self.log("info", "Cleared Ludusavi launcher shortcut ID")
-        return True
-
     def get_ludusavi_command(self) -> dict[str, object] | None:
         """Return the command path and args used by the plugin for GUI launching."""
         return self._gateway.get_ludusavi_command()
@@ -376,16 +369,6 @@ class SDHLudusaviService:
         """Restore a game's backup during launch after a check reports it is needed."""
         return self._lifecycle.restore_game_on_start(game_name, app_id, gate_pid, gate_lease_id)
 
-    def handle_game_start(
-        self,
-        game_name: str,
-        app_id: str | None = None,
-        gate_pid: int | None = None,
-        gate_lease_id: str | None = None,
-    ) -> dict[str, object]:
-        """Compatibility wrapper for the original one-call launch autosync flow."""
-        return self._lifecycle.handle_game_start(game_name, app_id, gate_pid, gate_lease_id)
-
     def check_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Check whether a game exit needs a backup without writing backup data."""
         return self._lifecycle.check_game_exit(game_name, app_id)
@@ -393,10 +376,6 @@ class SDHLudusaviService:
     def backup_game_on_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
         """Back up a game during exit after a check reports it is needed."""
         return self._lifecycle.backup_game_on_exit(game_name, app_id)
-
-    def handle_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:
-        """Compatibility wrapper for the original one-call exit autosync flow."""
-        return self._lifecycle.handle_game_exit(game_name, app_id)
 
     def force_backup(self, game_name: str) -> dict[str, object]:
         """Trigger a manual backup for the specified game."""

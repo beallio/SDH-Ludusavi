@@ -195,12 +195,6 @@ class Plugin:
             lambda: self._service().set_ludusavi_launcher_shortcut_id(app_id),
         )
 
-    async def clear_ludusavi_launcher_shortcut_id(self) -> bool:
-        return await self._call(
-            "clear_ludusavi_launcher_shortcut_id",
-            lambda: self._service().clear_ludusavi_launcher_shortcut_id(),
-        )
-
     async def get_ludusavi_command(self) -> dict[str, Any] | None:
         return await self._call(
             "get_ludusavi_command", lambda: self._service().get_ludusavi_command()
@@ -259,18 +253,6 @@ class Plugin:
         # boolean. False is the safe default: it triggers a refresh.
         return result if isinstance(result, bool) else False
 
-    async def handle_game_start(
-        self,
-        game_name: str,
-        app_id: str | None = None,
-        gate_pid: int | None = None,
-        gate_lease_id: str | None = None,
-    ) -> dict[str, object]:
-        return await self._call(
-            "handle_game_start",
-            lambda: self._service().handle_game_start(game_name, app_id, gate_pid, gate_lease_id),
-        )
-
     async def check_game_start(
         self, game_name: str, app_id: str | None = None
     ) -> dict[str, object]:
@@ -310,14 +292,6 @@ class Plugin:
                 gate_pid,
                 gate_lease_id,
             ),
-        )
-
-    async def handle_game_exit(
-        self, game_name: str, app_id: str | None = None
-    ) -> dict[str, object]:
-        return await self._call(
-            "handle_game_exit",
-            lambda: self._service().handle_game_exit(game_name, app_id),
         )
 
     async def check_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:

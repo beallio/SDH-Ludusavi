@@ -860,13 +860,15 @@ def test_start_matches_steam_and_non_steam_names_conservatively(tmp_path: Path) 
     service.set_auto_sync_enabled(True)
 
     paused = service.pause_game_process(4567)
-    steam_result = service.handle_game_start(
-        "hades",
+    check = service.check_game_start("hades", app_id="1145360")
+    assert check == {"status": "needed", "operation": "restore", "game": "Hades"}
+    steam_result = service.restore_game_on_start(
+        str(check["game"]),
         app_id="1145360",
         gate_pid=4567,
         gate_lease_id=str(paused["lease_id"]),
     )
-    non_steam_result = service.handle_game_start("Celeste")
+    non_steam_result = service.check_game_start("Celeste")
 
     assert steam_result["status"] == "restored"
     assert non_steam_result["status"] == "skipped"
@@ -1343,13 +1345,13 @@ def test_start_skips_disabled_unmatched_and_local_current(tmp_path: Path) -> Non
     service = service_with_state(tmp_path, adapter)
     service.refresh_games()
 
-    disabled = service.handle_game_start("Hades")
+    disabled = service.check_game_start("Hades")
     service.set_auto_sync_enabled(True)
-    unmatched = service.handle_game_start("Unknown Game")
+    unmatched = service.check_game_start("Unknown Game")
 
     # local_current requires preview logic mock if using real adapter,
     # but FakeAdapter is static here.
-    local_current = service.handle_game_start("Hades")
+    local_current = service.check_game_start("Hades")
 
     assert disabled["reason"] == "auto_sync_disabled"
     assert unmatched["reason"] == "unmatched_game"
@@ -1568,9 +1570,9 @@ def test_exit_backs_up_only_when_auto_sync_enabled_and_matched(tmp_path: Path) -
     service = service_with_state(tmp_path, adapter)
     service.refresh_games()
 
-    disabled = service.handle_game_exit("Hades")
+    disabled = service.check_game_exit("Hades")
     service.set_auto_sync_enabled(True)
-    unmatched = service.handle_game_exit("Unknown Game")
+    unmatched = service.check_game_exit("Unknown Game")
 
     # Mock backup preview to return "Same" for Hades first
     original_backup = adapter.backup
@@ -1583,7 +1585,7 @@ def test_exit_backs_up_only_when_auto_sync_enabled_and_matched(tmp_path: Path) -
         return original_backup(game_name)
 
     adapter.backup = backup_with_preview
-    local_current = service.handle_game_exit("Hades")
+    local_current = service.check_game_exit("Hades")
 
     # Now mock backup preview to return "Different"
     def backup_with_changes(game_name: str, preview: bool = False) -> dict[str, object]:
@@ -1596,7 +1598,9 @@ def test_exit_backs_up_only_when_auto_sync_enabled_and_matched(tmp_path: Path) -
         return original_backup(game_name)
 
     adapter.backup = backup_with_changes
-    backed_up = service.handle_game_exit("Hades")
+    check = service.check_game_exit("Hades")
+    assert check == {"status": "needed", "operation": "backup", "game": "Hades"}
+    backed_up = service.backup_game_on_exit(str(check["game"]))
 
     assert disabled["reason"] == "auto_sync_disabled"
     assert unmatched["reason"] == "unmatched_game"
@@ -1924,7 +1928,13 @@ def test_queued_start_revalidates_a_lost_gate_after_the_coordinator_wait(
 
     def run_start() -> None:
         try:
-            results.append(service.handle_game_start("Hades", "1145360", 4567, lease_id))
+            check = service.check_game_start("Hades", "1145360")
+            if check.get("status") == "needed":
+                results.append(
+                    service.restore_game_on_start(str(check["game"]), "1145360", 4567, lease_id)
+                )
+            else:
+                results.append(check)
         except BaseException as exc:  # pragma: no cover - asserted after synchronization.
             errors.append(exc)
         finally:
