@@ -52,14 +52,6 @@ class PluginUpdater:
         self._cache: dict[str, Any] = {}
         self._rate_limited_until: datetime.datetime | None = None
 
-    def load_state(
-        self,
-        settings: Mapping[str, object],
-        cache: Mapping[str, object],
-    ) -> None:
-        self._adopt_settings(settings)
-        self._adopt_cache(cache)
-
     def adopt_persisted_settings(self, settings: Mapping[str, object]) -> None:
         """Refresh updater preferences after an atomic settings mutation."""
         with self._state_lock:
@@ -116,18 +108,6 @@ class PluginUpdater:
         return {
             "update_check_cache": self._cache,
         }
-
-    def set_channel(self, channel: str) -> None:
-        if channel not in ("stable", "development"):
-            channel = "stable"
-        self._channel = channel
-        self._save_callback()
-        self._log("info", f"Update channel set to {channel}")
-
-    def set_automatic_checks(self, enabled: bool) -> None:
-        self._automatic_checks = bool(enabled)
-        self._save_callback()
-        self._log("info", f"Automatic update checks {'enabled' if enabled else 'disabled'}")
 
     def get_context(self) -> dict[str, object]:
         with self._state_lock:

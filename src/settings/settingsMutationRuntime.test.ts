@@ -243,6 +243,44 @@ describe("SettingsMutationRuntime", () => {
 
     expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(false);
   });
+
+  it("does not let a pre-dispose mutation apply after a same-key request", async () => {
+    const store = createLudusaviStateStore();
+    const runtime = createSettingsMutationRuntime();
+    const rpc = await import("../api/ludusaviRpc");
+    runtime.applySettings(store, { auto_sync_enabled: false } as any);
+    const firstController = runtime.createController({
+      ludusaviStore: store,
+      notifyFailure: vi.fn(),
+    });
+    const secondController = runtime.createController({
+      ludusaviStore: store,
+      notifyFailure: vi.fn(),
+    });
+
+    let resolveFirst: (settings: any) => void = () => {};
+    let resolveSecond: (settings: any) => void = () => {};
+    vi.mocked(rpc.updateSettingsCall)
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveFirst = resolve;
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveSecond = resolve;
+      }));
+
+    firstController.toggleAutoSync(true);
+    runtime.dispose();
+    secondController.toggleAutoSync(false);
+    expect(rpc.updateSettingsCall).toHaveBeenCalledTimes(2);
+
+    resolveFirst({ auto_sync_enabled: true } as any);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(store.getSnapshot().settings?.auto_sync_enabled).toBe(false);
+
+    resolveSecond({ auto_sync_enabled: false } as any);
+    await vi.advanceTimersByTimeAsync(1);
+  });
   it("superseded RPC result does not clobber newer value for update_channel", async () => {
     const store = createLudusaviStateStore();
     const runtime = createSettingsMutationRuntime();
