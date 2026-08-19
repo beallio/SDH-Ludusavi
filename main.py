@@ -78,43 +78,8 @@ class Plugin:
     async def get_game_history(self) -> dict[str, dict[str, Any]]:
         return await self._call("get_game_history", lambda: self._service().get_game_history())
 
-    async def set_auto_sync_enabled(self, enabled: bool) -> dict[str, Any]:
-        return await self._call(
-            "set_auto_sync_enabled", lambda: self._service().set_auto_sync_enabled(enabled)
-        )
-
-    async def set_game_sync_enabled(self, game_name: str, enabled: bool) -> dict[str, Any]:
-        return await self._call(
-            "set_game_sync_enabled",
-            lambda: self._service().set_game_sync_enabled(game_name, enabled),
-        )
-
-    async def set_selected_game(self, game_name: str) -> dict[str, Any]:
-        return await self._call(
-            "set_selected_game", lambda: self._service().set_selected_game(game_name)
-        )
-
-    async def set_notification_settings(self, settings: dict[str, object]) -> dict[str, Any]:
-        return await self._call(
-            "set_notification_settings",
-            lambda: self._service().set_notification_settings(settings),
-        )
-
-    async def set_debug_logging(self, enabled: bool) -> dict[str, Any]:
-        return await self._call(
-            "set_debug_logging", lambda: self._service().set_debug_logging(enabled)
-        )
-
-    async def set_update_channel(self, channel: str) -> dict[str, Any]:
-        return await self._call(
-            "set_update_channel", lambda: self._service().set_update_channel(channel)
-        )
-
-    async def set_automatic_update_checks(self, enabled: bool) -> dict[str, Any]:
-        return await self._call(
-            "set_automatic_update_checks",
-            lambda: self._service().set_automatic_update_checks(enabled),
-        )
+    async def update_settings(self, patch: dict[str, object]) -> dict[str, Any]:
+        return await self._call("update_settings", lambda: self._service().update_settings(patch))
 
     async def get_update_check_context(self) -> dict[str, Any]:
         return await self._call(
@@ -195,12 +160,6 @@ class Plugin:
             lambda: self._service().set_ludusavi_launcher_shortcut_id(app_id),
         )
 
-    async def clear_ludusavi_launcher_shortcut_id(self) -> bool:
-        return await self._call(
-            "clear_ludusavi_launcher_shortcut_id",
-            lambda: self._service().clear_ludusavi_launcher_shortcut_id(),
-        )
-
     async def get_ludusavi_command(self) -> dict[str, Any] | None:
         return await self._call(
             "get_ludusavi_command", lambda: self._service().get_ludusavi_command()
@@ -259,18 +218,6 @@ class Plugin:
         # boolean. False is the safe default: it triggers a refresh.
         return result if isinstance(result, bool) else False
 
-    async def handle_game_start(
-        self,
-        game_name: str,
-        app_id: str | None = None,
-        gate_pid: int | None = None,
-        gate_lease_id: str | None = None,
-    ) -> dict[str, object]:
-        return await self._call(
-            "handle_game_start",
-            lambda: self._service().handle_game_start(game_name, app_id, gate_pid, gate_lease_id),
-        )
-
     async def check_game_start(
         self, game_name: str, app_id: str | None = None
     ) -> dict[str, object]:
@@ -310,14 +257,6 @@ class Plugin:
                 gate_pid,
                 gate_lease_id,
             ),
-        )
-
-    async def handle_game_exit(
-        self, game_name: str, app_id: str | None = None
-    ) -> dict[str, object]:
-        return await self._call(
-            "handle_game_exit",
-            lambda: self._service().handle_game_exit(game_name, app_id),
         )
 
     async def check_game_exit(self, game_name: str, app_id: str | None = None) -> dict[str, object]:

@@ -65,7 +65,6 @@ def create_updater(
 
 def test_updater_service_settings_defaults() -> None:
     updater = create_updater()
-    updater.load_state({}, {})
     payload = updater.settings_payload()
     assert payload["update_channel"] == "stable"
     assert payload["automatic_update_checks"] is True
@@ -74,22 +73,21 @@ def test_updater_service_settings_defaults() -> None:
 
 def test_updater_service_channel_normalization() -> None:
     updater = create_updater()
-    updater.load_state({"update_channel": "invalid"}, {})
+    updater.adopt_persisted_settings({"update_channel": "invalid"})
     assert updater.settings_payload()["update_channel"] == "stable"
 
 
-def test_updater_service_set_methods() -> None:
+def test_updater_service_adopts_persisted_preferences() -> None:
     updater = create_updater()
-    updater.load_state({}, {})
-    updater.set_channel("development")
+    updater.adopt_persisted_settings(
+        {"update_channel": "development", "automatic_update_checks": False}
+    )
     assert updater.settings_payload()["update_channel"] == "development"
-    updater.set_automatic_checks(False)
     assert updater.settings_payload()["automatic_update_checks"] is False
 
 
 def test_pending_update_install_reconciliation() -> None:
     updater = create_updater()
-    updater.load_state({}, {})
 
     pending = {
         "version": "0.2.2-dev.g456",
@@ -115,19 +113,17 @@ def test_transient_rate_limit_properties() -> None:
     future_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
 
     updater1 = create_updater()
-    updater1.load_state({}, {})
     updater1._rate_limited_until = future_time
 
     payload = updater1.cache_payload()
 
     updater2 = create_updater()
-    updater2.load_state({}, payload)
+    updater2.adopt_persisted_cache(payload)
     assert updater2._rate_limited_until is None
 
 
 def test_record_update_install_requested_preserves_metadata() -> None:
     updater = create_updater(version="0.2.1")
-    updater.load_state({}, {})
 
     candidate = {
         "version": "0.2.2-dev.g456",
@@ -159,7 +155,6 @@ def test_record_update_install_requested_preserves_metadata() -> None:
 
 def test_update_context_uses_pending_install_as_effective_version() -> None:
     updater = create_updater(version="0.2.3")
-    updater.load_state({}, {})
 
     updater._cache["pending_update_install"] = {
         "version": "0.2.4",
@@ -177,7 +172,6 @@ def test_update_context_uses_pending_install_as_effective_version() -> None:
 
 def test_confirmed_pending_install_freshness_uses_confirmation_time() -> None:
     updater = create_updater(version="0.2.3")
-    updater.load_state({}, {})
 
     old_requested_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
     fresh_confirmed_at = datetime.datetime.now(datetime.timezone.utc)
@@ -199,7 +193,6 @@ def test_confirmed_pending_install_freshness_uses_confirmation_time() -> None:
 
 def test_unconfirmed_pending_install_becomes_effective_version() -> None:
     updater = create_updater(version="0.2.3")
-    updater.load_state({}, {})
     updater._cache["pending_update_install"] = {
         "version": "0.2.4",
         "tag": "v0.2.4",
@@ -214,7 +207,6 @@ def test_unconfirmed_pending_install_becomes_effective_version() -> None:
 
 def test_clear_pending_update_install_removes_failed_handoff_metadata() -> None:
     updater = create_updater()
-    updater.load_state({}, {})
     updater._cache["pending_update_install"] = {
         "version": "0.2.4",
         "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -225,7 +217,6 @@ def test_clear_pending_update_install_removes_failed_handoff_metadata() -> None:
 
 def test_fresh_confirmed_pending_update_install_survives_startup_mismatch() -> None:
     updater = create_updater()
-    updater.load_state({}, {})
     updater._cache["pending_update_install"] = {
         "version": "0.2.4",
         "tag": "v0.2.4",
@@ -248,7 +239,6 @@ def test_revalidate_plugin_update_respects_rate_limit() -> None:
         raise RuntimeError("Should not be called")
 
     updater = create_updater(client=MockClient(mock_fetch))
-    updater.load_state({}, {})
 
     future_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
     updater._rate_limited_until = future_time
@@ -277,7 +267,6 @@ def test_revalidate_plugin_update_records_rate_limit() -> None:
         )
 
     updater = create_updater(client=MockClient(mock_fetch))
-    updater.load_state({}, {})
 
     candidate = {
         "version": "0.2.1",
@@ -346,7 +335,6 @@ def test_revalidate_plugin_update_does_not_hold_lock_during_fetch() -> None:
 
     updater = create_updater(client=MockClient(mock_fetch))
     updater._state_lock = state_lock
-    updater.load_state({}, {})
 
     candidate = {
         "version": "0.2.1",
@@ -403,7 +391,6 @@ def test_updater_backend_logging_and_privacy() -> None:
         return JsonResponse(status=200, headers={}, body=releases[0])
 
     updater = create_updater(client=MockClient(mock_fetch), log_cb=mock_log)
-    updater.load_state({}, {})
 
     res = updater.check_for_update("0.2.0", force=True)
     assert res["status"] == "available"
@@ -420,7 +407,6 @@ def test_updater_backend_logging_and_privacy() -> None:
         return JsonResponse(status=200, headers={}, body={"draft": True})
 
     updater_fail = create_updater(client=MockClient(mock_fetch_draft), log_cb=mock_log)
-    updater_fail.load_state({}, {})
     candidate = {
         "version": "0.2.1",
         "tag": "v0.2.1",
@@ -439,7 +425,6 @@ def test_updater_backend_logging_and_privacy() -> None:
 
 def test_record_update_install_requested_returns_immediate_effective_version() -> None:
     updater = create_updater(version="0.2.2-dev.g123")
-    updater.load_state({}, {})
 
     candidate = {
         "version": "0.2.3",
@@ -456,7 +441,6 @@ def test_record_update_install_requested_returns_immediate_effective_version() -
 
 def test_unconfirmed_pending_install_ttl() -> None:
     updater = create_updater(version="0.2.2-dev.g123")
-    updater.load_state({}, {})
 
     candidate = {
         "version": "0.2.3",
@@ -479,7 +463,6 @@ def test_unconfirmed_pending_install_ttl() -> None:
 
 def test_reconcile_promotion_stable_equivalents() -> None:
     updater = create_updater()
-    updater.load_state({}, {})
 
     def set_pending():
         updater._cache["pending_update_install"] = {
@@ -509,7 +492,6 @@ def test_reconcile_promotion_stable_equivalents() -> None:
 
 def test_check_for_plugin_update_pending_fast_path() -> None:
     updater = create_updater(version="0.2.0")
-    updater.load_state({}, {})
 
     candidate = {
         "version": "0.2.1-dev.g123",

@@ -1,5 +1,6 @@
 import { vi, describe, it, expect } from "vitest";
 import { useGameRefresh } from "./useGameRefresh";
+import type { RpcResult, RpcStatus } from "../../types";
 
 vi.mock("react", () => ({
   useCallback: (fn: any) => fn,
@@ -27,7 +28,7 @@ describe("useGameRefresh", () => {
     const notifyFailure = vi.fn();
     const notifySuccess = vi.fn();
     const isMounted = vi.fn().mockReturnValue(true);
-    const isRpcStatus = vi.fn().mockReturnValue(false);
+    const isRpcStatus = <T>(_result: RpcResult<T>): _result is RpcStatus => false;
     const logRpcStatus = vi.fn();
 
     const { refreshGames } = useGameRefresh({
@@ -64,7 +65,7 @@ describe("useGameRefresh", () => {
     const refreshGamesCall = vi.fn().mockResolvedValue({ status: "error", message: "Oops" });
     const applyRefreshResult = vi.fn();
     const notifyFailure = vi.fn();
-    const isRpcStatus = vi.fn().mockReturnValue(true);
+    const isRpcStatus = <T>(_result: RpcResult<T>): _result is RpcStatus => true;
     const logRpcStatus = vi.fn();
     const setBusyLabel = vi.fn();
 
