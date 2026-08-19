@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import inspect
 from pathlib import Path
 import re
@@ -78,7 +79,6 @@ EXPECTED_METHODS: dict[str, list[str]] = {
     "stop_syncthing_activity_watch": ["watch_id"],
     "get_ludusavi_launcher_shortcut_id": [],
     "set_ludusavi_launcher_shortcut_id": ["app_id"],
-    "clear_ludusavi_launcher_shortcut_id": [],
     "get_ludusavi_command": [],
     "refresh_games": ["force", "installed_app_ids"],
     "is_game_cache_current": ["installed_app_ids"],
@@ -91,10 +91,8 @@ EXPECTED_METHODS: dict[str, list[str]] = {
         "gate_lease_id",
     ],
     "restore_game_on_start": ["game_name", "app_id", "gate_pid", "gate_lease_id"],
-    "handle_game_start": ["game_name", "app_id", "gate_pid", "gate_lease_id"],
     "check_game_exit": ["game_name", "app_id"],
     "backup_game_on_exit": ["game_name", "app_id"],
-    "handle_game_exit": ["game_name", "app_id"],
     "force_backup": ["game_name"],
     "force_restore": ["game_name"],
     "get_versions": [],
@@ -135,9 +133,7 @@ def test_start_mutation_contracts_propagate_pid_and_lease_id_across_every_bounda
 
     for method in (
         SDHLudusaviService.restore_game_on_start,
-        SDHLudusaviService.handle_game_start,
         GameLifecycleManager.restore_game_on_start,
-        GameLifecycleManager.handle_game_start,
     ):
         assert list(inspect.signature(method).parameters)[-2:] == ["gate_pid", "gate_lease_id"]
 
@@ -161,6 +157,36 @@ def test_start_mutation_contracts_propagate_pid_and_lease_id_across_every_bounda
     assert (
         "restoreGameOnStart(name, appID, guardHandle.pid, guardHandle.leaseId)" in controller_source
     )
+
+
+def test_bundled_frontend_does_not_depend_on_removed_compatibility_rpcs() -> None:
+    removed_rpc_names = {
+        "handle_game_start",
+        "handle_game_exit",
+        "clear_ludusavi_launcher_shortcut_id",
+    }
+    frontend_sources = [
+        path
+        for path in Path("src").rglob("*")
+        if path.suffix in {".ts", ".tsx"} and not path.name.endswith((".test.ts", ".test.tsx"))
+    ]
+
+    assert frontend_sources
+    for path in frontend_sources:
+        assert not (
+            removed_rpc_names & set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", path.read_text()))
+        )
+
+    main_source = Path("main.py").read_text(encoding="utf-8")
+    main_tree = ast.parse(main_source)
+    plugin_class = next(
+        node for node in main_tree.body if isinstance(node, ast.ClassDef) and node.name == "Plugin"
+    )
+    public_async_methods = {
+        node.name for node in plugin_class.body if isinstance(node, ast.AsyncFunctionDef)
+    }
+
+    assert public_async_methods.isdisjoint(removed_rpc_names)
 
 
 def test_sdh_ludusavi_service_facade_behavior(tmp_path: Path) -> None:

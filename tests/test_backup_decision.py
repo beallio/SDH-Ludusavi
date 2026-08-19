@@ -31,7 +31,7 @@ class FakeAdapter:
         return {}
 
 
-def test_handle_game_exit_respects_ignored_decision(tmp_path):
+def test_check_game_exit_respects_ignored_decision(tmp_path):
     adapter = FakeAdapter()
     service = SDHLudusaviService(
         adapter=adapter,
@@ -45,7 +45,7 @@ def test_handle_game_exit_respects_ignored_decision(tmp_path):
     adapter.preview_data = {
         "games": {"Hades": {"change": "Different", "decision": "Ignored", "files": {"a": {}}}}
     }
-    result = service.handle_game_exit("Hades")
+    result = service.check_game_exit("Hades")
     assert result["reason"] == "not_processed"
     assert "Hades" not in adapter.backups
 
@@ -53,7 +53,7 @@ def test_handle_game_exit_respects_ignored_decision(tmp_path):
     adapter.preview_data = {
         "games": {"Hades": {"change": "Different", "decision": "Cancelled", "files": {"a": {}}}}
     }
-    result = service.handle_game_exit("Hades")
+    result = service.check_game_exit("Hades")
     assert result["reason"] == "not_processed"
     assert "Hades" not in adapter.backups
 
@@ -61,6 +61,8 @@ def test_handle_game_exit_respects_ignored_decision(tmp_path):
     adapter.preview_data = {
         "games": {"Hades": {"change": "Different", "decision": "Processed", "files": {"a": {}}}}
     }
-    result = service.handle_game_exit("Hades")
+    check = service.check_game_exit("Hades")
+    assert check == {"status": "needed", "operation": "backup", "game": "Hades"}
+    result = service.backup_game_on_exit(str(check["game"]))
     assert result["status"] == "backed_up"
     assert "Hades" in adapter.backups
