@@ -33,13 +33,15 @@ export async function runOperationFinalize({
   isMounted,
   isRpcStatus
 }: OperationFinalizeOptions): Promise<void> {
-  const refreshed = await refreshGamesCall(false);
-  const operationStatus = await getOperationStatus();
-  const recentLogs = await getRecentLogs();
-  const refreshedHistory = await getGameHistoryCall();
+  const [refreshed, operationStatus, recentLogs, refreshedHistory] = await Promise.all([
+    refreshGamesCall(false),
+    getOperationStatus(),
+    getRecentLogs(),
+    getGameHistoryCall(),
+  ]);
 
   applyRefreshResult(refreshed, selectedGame || undefined);
-  
+
   if (isMounted()) {
     setOperation(operationStatus);
     setLogs(recentLogs);
