@@ -2644,12 +2644,11 @@ def test_service_syncthing_watch(tmp_path: Path) -> None:
     }
     service._syncthing_watch_manager.poll_watch.return_value = {"status": "activity"}
     service._syncthing_watch_manager.stop_watch.return_value = {"status": "stopped"}
-    service._debug_logging = False
 
     res = service.start_syncthing_activity_watch("pre_game", "Hades", "1145300")
     assert res["status"] == "watching"
     service._syncthing_watch_manager.start_watch.assert_called_once_with(
-        "pre_game", "Hades", "1145300", "/home/deck/Sync", debug_logging=False
+        "pre_game", "Hades", "1145300", "/home/deck/Sync"
     )
 
     poll_res = service.get_syncthing_activity("test-id")

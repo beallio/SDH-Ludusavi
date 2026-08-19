@@ -211,9 +211,7 @@ class SDHLudusaviService:
         backup_path = self._gateway.get_diagnostics().get("backupPath")
         if not isinstance(backup_path, str) or backup_path == "unknown" or not backup_path.strip():
             backup_path = None
-        return self._syncthing_watch_manager.start_watch(
-            phase, game_name, app_id, backup_path, debug_logging=self._debug_logging
-        )
+        return self._syncthing_watch_manager.start_watch(phase, game_name, app_id, backup_path)
 
     def get_syncthing_activity(self, watch_id: str) -> dict[str, Any]:
         return self._syncthing_watch_manager.poll_watch(watch_id)
