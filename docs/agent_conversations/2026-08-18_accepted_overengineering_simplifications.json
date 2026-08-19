@@ -1,0 +1,270 @@
+{
+  "date": "2026-08-18",
+  "task_objective": "Apply the nine accepted over-engineering simplifications on feat/accepted-overengineering-simplifications, retain the three rejected prototypes as exclusions, and reconcile the fully reviewed implementation against the actual dev base.",
+  "branch_and_base": {
+    "implementation_branch": "feat/accepted-overengineering-simplifications",
+    "dev_base": "b040e04d828e0f75e0fccdd74785d5b7ee610ecc",
+    "experiment_result": "077a1bac53b8e2586bf2a7d9e9ca545c96ed4157",
+    "plan": "docs/plans/2026-08-18_accepted-overengineering-simplifications.md"
+  },
+  "files_modified": {
+    "backend": [
+      "main.py",
+      "py_modules/sdh_ludusavi/lifecycle.py",
+      "py_modules/sdh_ludusavi/service.py",
+      "py_modules/sdh_ludusavi/syncthing/watcher.py",
+      "py_modules/sdh_ludusavi/updater.py"
+    ],
+    "frontend": [
+      "src/api/ludusaviRpc.ts",
+      "src/components/modals/BackupBrowserModal.tsx",
+      "src/components/qam/GameSettingsSection.tsx",
+      "src/components/qam/LudusaviContent.tsx",
+      "src/components/qam/manualOperationFinalize.ts",
+      "src/components/qam/useGameRefresh.ts",
+      "src/components/qam/useInitialContent.ts",
+      "src/components/qam/useSteamContext.ts",
+      "src/controllers/gameLifecycleController.tsx",
+      "src/controllers/pluginUpdateController.tsx",
+      "src/controllers/syncthingMonitor.ts",
+      "src/index.tsx",
+      "src/settings/settingsMutationRuntime.ts",
+      "src/state/ludusaviState.tsx",
+      "src/types/index.ts",
+      "src/utils/deckyInstaller.ts",
+      "src/utils/logging.ts",
+      "src/utils/steam.ts"
+    ],
+    "tests": [
+      "tests/test_architectural_constraints.py",
+      "tests/test_backup_decision.py",
+      "tests/test_compatibility.py",
+      "tests/test_history_fixes.py",
+      "tests/test_history_integration.py",
+      "tests/test_launcher_backend.py",
+      "tests/test_main.py",
+      "tests/test_module_size_budgets.py",
+      "tests/test_optimization_backend.py",
+      "tests/test_service.py",
+      "tests/test_updater.py",
+      "tests/test_updater_service.py",
+      "tests/test_watcher.py",
+      "src/components/qam/manualOperationFinalize.test.ts",
+      "src/components/qam/useGameRefresh.test.ts",
+      "src/controllers/gameLifecycleController.logging.test.ts",
+      "src/settings/settingsMutationRuntime.test.ts",
+      "src/state/ludusaviState.test.tsx",
+      "src/utils/steam.test.ts"
+    ],
+    "documentation": [
+      "docs/plans/2026-08-18_accepted-overengineering-simplifications.md",
+      "docs/agent_conversations/2026-08-18_accepted_overengineering_simplifications.json"
+    ],
+    "review_artifacts": "The nine accepted-overengineering-simplifications review notes are orchestrator-owned durable audit records; this round did not create, modify, or delete them."
+  },
+  "tests_added_or_strengthened": [
+    "A dynamic 1,000-line production-module ceiling with executable 1,000/1,001-line boundary helpers.",
+    "Deferred-promise eager-start and deterministic ten-iteration manual-finalization latency tests.",
+    "A frontend logging-RPC ownership scan requiring src/utils/logging.ts to be the sole owner.",
+    "Fake-timer bounded hidden-QAM capture and cancellation coverage.",
+    "Canonical notification-settings ownership coverage with cold-state and optimistic-update behavior retained.",
+    "Bundled-frontend versus public-backend compatibility contracts for the removed RPC aliases.",
+    "All seven typed settings-patch variants, invalid-patch rejection, persistence reload, and cross-service-instance merge coverage.",
+    "INFO/DEBUG-equivalent Syncthing stop semantics plus multi-watch stop_all coverage.",
+    "Scoped TypeScript-boundary coverage for real RpcStatus predicates and the eliminated any occurrences."
+  ],
+  "task_results": {
+    "task_1_broad_module_ceiling": {
+      "commit": "ce622c226ebf4534f648a8377e6f20b8e28d5c17",
+      "result": "Replaced 26 manually maintained size budgets with dynamic production discovery and one named 1,000-line last-resort ceiling; runtime code was unchanged."
+    },
+    "task_2_concurrent_manual_finalization": {
+      "commit": "c7c228c2c0a62d40857360c2a6a7fe01587df39f",
+      "result": "The refresh result, operation status, recent logs, and game history reads now start together through one typed Promise.all while publication order, history status handling, selected-game preference, and mounted guards remain unchanged."
+    },
+    "task_3_canonical_logging_transport": {
+      "commit": "47c06c3239e1e979a1feb64ead2cc4be171f2883",
+      "result": "Updater and installer logging use the canonical utility; direct Decky log-callable ownership falls from three production modules to one."
+    },
+    "task_4_bounded_hidden_qam_capture": {
+      "commit": "c91510a149e2a53f2ad5f024ee5a15048ea07112",
+      "result": "A hidden QAM captures immediately and then nine more times at 500 ms intervals, cancels on cleanup, and stops permanently after 4.5 seconds; opening QAM still performs an authoritative synchronous capture first."
+    },
+    "task_5_canonical_notification_policy": {
+      "commit": "742059723bac3be7c46a13ee29105f95e962f011",
+      "result": "The state snapshot no longer mirrors notification values beside settings; selectors retain cold-state defaults and derive policy from normalized settings."
+    },
+    "task_6_remove_unused_compatibility_rpcs": {
+      "commit": "82c1e5d2e23f29d7d8726a100ef46663d36ba22e",
+      "result": "Removed the unused handle_game_start, handle_game_exit, and clear_ludusavi_launcher_shortcut_id public aliases and wrappers. Supported check-then-operation flows and the -1 shortcut sentinel remain covered."
+    },
+    "task_7_typed_atomic_settings_patch": {
+      "commits": [
+        "01d708ed1aea3f9c2351c50db6733d703f4ce643",
+        "7c3c78cd5d07f3d9d306f08d9f71a0f85a729671"
+      ],
+      "result": "Seven frontend setting RPCs became update_settings; one keyed optimistic runtime applies only owned fields, while the backend validates patches and uses locked Persistence.mutate_settings read-modify-write against the latest settings document. The review cleanup removed unused updater/service persistence routes, restored the empty game-name guard, and kept mutation sequence numbers monotonic across dispose."
+    },
+    "task_8_debug_logging_observational": {
+      "commits": [
+        "3ec945a5bf93c8d7f2f31ce15826ee4c1d5f168b",
+        "c833a4d0710051102aa6876c1bbd964c08ae1979"
+      ],
+      "result": "Released watches stop and join from the sole registry at both INFO and DEBUG. The accepted tradeoff is recorded: delete-pruning is not observed after frontend release. stop_all snapshots all watches before clearing and now has explicit two-watch coverage."
+    },
+    "task_9_typescript_boundaries": {
+      "commit": "639f7623a515dec51565c1dd578a03c7cc4370b2",
+      "result": "Removed every production any from the eleven evaluated RPC, updater, QAM, modal, installer, and monitor boundaries; RpcStatus checks now narrow unions through real type predicates and runtime behavior is unchanged.",
+      "commit_body_exception": "The committed body contains literal \\n\\n characters where paragraph breaks were intended. It was intentionally not amended or rebased because the review note is already a durable record on top of it. This session record preserves the defect and its intended two-paragraph separation; all subsequent commit bodies in this round use real paragraph breaks."
+    },
+    "task_10_reconciliation": {
+      "result": "Reconciled actual dev-to-HEAD metrics, inspected README.md and DEVELOPMENT.md without changing them, confirmed the three rejected prototypes remain absent, ran required negative controls, and recorded the complete evidence here."
+    }
+  },
+  "red_evidence": {
+    "rounds_1_to_9": [
+      "The broad-budget helper accepts a synthetic 1,000-line module and raises an assertion containing 'exceeding broad ceiling' for 1,001 lines.",
+      "The pre-concurrency deferred test observed [1, 0, 0, 0] starts and a 400 ms ten-iteration virtual path rather than [1, 1, 1, 1] and 100 ms.",
+      "The logging ownership scan initially found three direct log callables.",
+      "The hidden-QAM capture test initially had no terminal bounded owner; the old interval continued without a stop condition.",
+      "The state ownership test initially found autoSyncNotificationsEnabled and notificationSettings mirrored outside canonical settings.",
+      "The frontend-contract test found no bundled consumer for the three aliases while main.py still exposed them.",
+      "Typed settings-patch tests initially lacked the patch RPC, patch validation, and cross-instance atomic merge behavior.",
+      "The pre-change DEBUG watch path returned observing while INFO returned stopped.",
+      "The evaluated TypeScript inventory found 32 scoped any occurrences, including two in pluginUpdateController.tsx."
+    ],
+    "task_9_target_correction": "The plan's scoped 31-to-zero target was corrected without weakening scope: dev actually had 32 occurrences because pluginUpdateController.tsx contained two, so the measured result is 32-to-zero."
+  },
+  "negative_controls": {
+    "manual_finalization": {
+      "temporary_mutation": "Replaced Promise.all with four sequential awaits in manualOperationFinalize.ts.",
+      "command": "./run.sh pnpm exec vitest run src/components/qam/manualOperationFinalize.test.ts",
+      "exit_code": 1,
+      "result": "2 failed, 2 passed: eager-start counts were [1, 0, 0, 0] and the controlled path was 400 ms instead of 100 ms.",
+      "restoration": "Restored the typed Promise.all before the positive suites."
+    },
+    "hidden_qam_capture": {
+      "temporary_mutation": "Raised STEAM_UI_CONTEXT_CAPTURE_SAMPLES from 10 to 11.",
+      "command": "./run.sh pnpm exec vitest run src/utils/steam.test.ts",
+      "exit_code": 1,
+      "result": "1 failed, 3 passed: 'stops scraping after ten samples during a minute hidden' observed 11 calls.",
+      "restoration": "Restored the 10-sample constant before the positive suites."
+    },
+    "settings_persistence": {
+      "temporary_mutation": "Based update_settings on self.get_settings() and save_settings() instead of Persistence.mutate_settings().",
+      "command": "./run.sh uv run pytest -o addopts='' tests/test_service.py -k test_typed_settings_patches_merge_across_service_instances",
+      "exit_code": 1,
+      "result": "1 failed, 140 deselected: the second service lost the first service's auto_sync_enabled=True write.",
+      "restoration": "Restored the locked Persistence.mutate_settings call before the positive suites."
+    },
+    "debug_watch_lifetime": {
+      "temporary_mutation": "Reintroduced a DEBUG-derived released-observation flag at first peer completion and returned observing from stop_watch only when that flag was set.",
+      "command": "./run.sh uv run pytest -o addopts='' tests/test_watcher.py -k test_debug_logging_does_not_change_watch_stop_semantics",
+      "exit_code": 1,
+      "result": "INFO passed while the named DEBUG case failed with {'status': 'observing'} != {'status': 'stopped'}.",
+      "restoration": "Removed the temporary flag and branch before the positive suites."
+    }
+  },
+  "final_metrics": {
+    "measurement_method": "Git-tree inventory counts main.py, non-test src TypeScript/TSX, py_modules/sdh_ludusavi Python, and vendored py_modules/pyludusavi Python as production modules; tests are tests/*.py plus src test/spec TypeScript/TSX. The same read-only helper measured dev, the experiment result, and HEAD.",
+    "production_files": {
+      "dev": 97,
+      "authored_target": 97,
+      "head": 97
+    },
+    "production_lines": {
+      "dev": 19814,
+      "authored_target": 19541,
+      "head": 19507,
+      "dev_to_head_delta": -307,
+      "target_drift": -34,
+      "file_level_explanation": "Relative to experiment commit 077a1ba, review-requested cleanup removed 9 net lines from service.py, 20 from updater.py, 4 from pluginUpdateController.tsx, and 1 from settingsMutationRuntime.ts. Those 34 lines make the final tree smaller than the earlier accepted experiment target."
+    },
+    "test_files": {
+      "dev": 123,
+      "authored_target": 123,
+      "head": 123
+    },
+    "test_lines": {
+      "dev": 30217,
+      "authored_target": 30251,
+      "head": 30431,
+      "dev_to_head_delta": 214,
+      "target_drift": 180,
+      "file_level_explanation": "Relative to experiment 077a1ba, stronger review coverage adds net lines in manualOperationFinalize.test.ts (+35), settingsMutationRuntime.test.ts (+60), ludusaviState.test.tsx (+14), steam.test.ts (+4), test_compatibility.py (+29), test_service.py (+32), and test_watcher.py (+29). It removes net lines in test_history_fixes.py (-2), test_updater.py (-3), and test_updater_service.py (-18), for the measured +180 beyond the authored target."
+    },
+    "public_async_rpcs": {
+      "dev": 44,
+      "target": 35,
+      "head": 35
+    },
+    "settings_mutation_runtime_lines": {
+      "dev": 535,
+      "target": 346,
+      "head": 345,
+      "explanation": "The one-line improvement beyond the approximate target is a review cleanup, not a scope expansion."
+    },
+    "frontend_logging_rpc_owners": {
+      "dev": 3,
+      "target": 1,
+      "head": 1,
+      "owner": "src/utils/logging.ts"
+    },
+    "production_any_occurrences": {
+      "dev": 86,
+      "target": 54,
+      "head": 54
+    },
+    "scoped_any_occurrences": {
+      "dev": 32,
+      "authored_target_before": 31,
+      "head": 0,
+      "explanation": "The authored baseline undercounted pluginUpdateController.tsx by one occurrence; the actual scope was measured and fully cleared rather than altered to match the stale target."
+    },
+    "hidden_qam_context_capture": {
+      "dev": "1 immediate capture plus 120 interval captures in a simulated minute (121 total)",
+      "target_and_head": "1 immediate capture plus 9 retries at 500 ms (10 total over 4.5 seconds), then no continuing work; cleanup cancels early."
+    },
+    "manual_finalization_virtual_latency_ms": {
+      "dev": 400,
+      "target": 100,
+      "head": 100,
+      "iterations": 10,
+      "read_latency_per_call_ms": 10
+    }
+  },
+  "rejected_prototype_audit": {
+    "nested_qam_callback_grouping": "Absent. useGameRefresh remains a flat dependency interface; its only branch diff is type-boundary tightening, not a nested callback bag.",
+    "lifecycle_typed_outcome_or_effect_wrapper": "Absent. Production source contains neither LifecycleOutcome nor LifecycleEffects.",
+    "backend_syncthing_lifecycle_machine": "Absent. syncthingMonitorMachine remains a frontend import in src/controllers/syncthingMonitor.ts; no matching backend port exists under py_modules."
+  },
+  "documentation_review": {
+    "README_md": "Inspected. It already accurately describes manual operations, updater controls, Syncthing status, and debug logging without promising internal polling or RPC topology.",
+    "DEVELOPMENT_md": "Inspected. Its cache, wrapper, package, updater, and Syncthing responsibility guidance remains accurate.",
+    "change": "None required: public behavior and developer workflow are preserved."
+  },
+  "positive_validation_before_session_commit": {
+    "focused_architecture": "19 passed",
+    "focused_compatibility_service_lifecycle": "222 passed",
+    "focused_activity_watcher": "158 passed",
+    "focused_qam_steam": "4 files, 20 passed",
+    "focused_state_settings_controller": "6 files, 45 passed",
+    "typescript": "passed",
+    "rollup_build": "passed",
+    "full_quality_gate": {
+      "frontend": "33 files, 366 tests passed; TypeScript and Rollup build passed.",
+      "backend": "1,041 tests passed at 90% coverage.",
+      "ruff": "check passed; format reported 143 files unchanged.",
+      "ty": "passed.",
+      "review_note_guard": "passed; no review notes were deleted."
+    },
+    "supply_chain": "pnpm verify passed: pre-install and post-install audits found no known vulnerabilities; frozen-lockfile install completed with scripts disabled. OSV and Socket scanners are not installed, so those optional scans were explicitly skipped.",
+    "package": "./run.sh uv run python scripts/package_plugin.py passed and rebuilt out/SDH-Ludusavi.zip."
+  },
+  "deferred_verification": [
+    "Do not run backup, restore, launch-gate, or Syncthing experiments against real saves or live device configuration in this implementation round.",
+    "On an explicitly authorized development install, observe a QAM hide/open transition across the current Steam client to verify private Steam UI capture still obtains an authoritative fresh selection and remains bounded while hidden.",
+    "On an explicitly authorized development install, observe an update installation, notification choice, and post-game Syncthing status; unit tests prove internal contracts but cannot guarantee private Steam/Decky runtime stability.",
+    "Out-of-tree callers of the removed undocumented aliases remain unsupported; the bundled frontend/backend pair is the compatibility boundary."
+  ]
+}
