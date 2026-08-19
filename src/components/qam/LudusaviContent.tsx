@@ -1,6 +1,6 @@
 import { showModal } from "@decky/ui";
 import { useQuickAccessVisible } from "@decky/api";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FaDownload, FaExclamationTriangle, FaSave } from "react-icons/fa";
 import { IoMdRefresh } from "react-icons/io";
 
@@ -66,7 +66,7 @@ type LudusaviContentProps = {
     category: NotificationCategory,
     title: string,
     body: string,
-    logo?: any
+    logo?: ReactNode
   ) => void;
   isRpcStatus: <T>(result: RpcResult<T>) => result is RpcStatus;
   logRpcStatus: (result: RpcStatus, operation: string) => void;
