@@ -33,3 +33,15 @@ def test_no_full_sha_logging() -> None:
                 assert (
                     "slice(" in line or "substring(" in line or "substr(" in line or "trunc" in line
                 ), f"Found full SHA logging in {ts_file}:{i + 1} : {line}"
+
+
+def test_frontend_has_one_logging_rpc_owner() -> None:
+    owners = []
+    for ts_file in Path("src").rglob("*.ts*"):
+        if ts_file.name.endswith((".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")):
+            continue
+        content = ts_file.read_text(encoding="utf-8")
+        if re.search(r'callable<[^;]+>\("log"\)', content, re.DOTALL):
+            owners.append(ts_file)
+
+    assert owners == [Path("src/utils/logging.ts")]

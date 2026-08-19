@@ -18,10 +18,8 @@ import {
   INSTALL_TYPE_DOWNGRADE,
   INSTALL_TYPE_UPDATE,
 } from "../utils/deckyInstaller";
-import { callable } from "@decky/api";
+import { log } from "../utils/logging";
 import { updateReducer, initialUpdateState } from "./pluginUpdateReducer";
-
-const logRpc = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
 
 function logUpdate(traceId: string | null, stage: string, details?: any) {
   const detailsStr = details
@@ -31,9 +29,7 @@ function logUpdate(traceId: string | null, stage: string, details?: any) {
     : "";
   const prefix = traceId ? `trace_id=${traceId}` : "trace_id=none";
   const message = `${stage}: ${prefix}${detailsStr ? ", " + detailsStr : ""}`;
-  try {
-    void logRpc("info", message, "update");
-  } catch (_) {}
+  log("info", message, "update");
 }
 
 function generateUpdateTraceId(): string {

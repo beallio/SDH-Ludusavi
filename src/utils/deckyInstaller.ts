@@ -1,6 +1,4 @@
-import { callable } from "@decky/api";
-
-const logCall = callable<[level: string, message: string, operation?: string, gameName?: string], void>("log");
+import { log } from "./logging";
 
 declare global {
   interface Window {
@@ -43,16 +41,20 @@ export async function invokeDeckyInstaller(
 
   if (typeof backend.callable === "function") {
     // installer_api: "callable"
-    try {
-      void logCall("info", `handoff_start: trace_id=${traceId || "none"}, version=${version}, sha256_prefix=${shaPrefix}, installer_api="callable", elapsed_ms=${elapsed}`, "update");
-    } catch (_) {}
+    log(
+      "info",
+      `handoff_start: trace_id=${traceId || "none"}, version=${version}, sha256_prefix=${shaPrefix}, installer_api="callable", elapsed_ms=${elapsed}`,
+      "update",
+    );
     const installFn = backend.callable("utilities/install_plugin");
     return await installFn(url, EXPECTED_PLUGIN_NAME, version, sha256, installType);
   } else if (typeof backend.call === "function") {
     // installer_api: "call"
-    try {
-      void logCall("info", `handoff_start: trace_id=${traceId || "none"}, version=${version}, sha256_prefix=${shaPrefix}, installer_api="call", elapsed_ms=${elapsed}`, "update");
-    } catch (_) {}
+    log(
+      "info",
+      `handoff_start: trace_id=${traceId || "none"}, version=${version}, sha256_prefix=${shaPrefix}, installer_api="call", elapsed_ms=${elapsed}`,
+      "update",
+    );
     return await backend.call("utilities/install_plugin", url, EXPECTED_PLUGIN_NAME, version, sha256, installType);
   } else {
     throw new Error("Decky Loader backend has no compatible RPC interface.");
