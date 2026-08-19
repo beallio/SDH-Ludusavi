@@ -1,5 +1,5 @@
-import { useCallback } from "react";
-import type { LogEntry, OperationStatus, RefreshResult, RpcResult } from "../../types";
+import { useCallback, type ReactNode } from "react";
+import type { LogEntry, OperationStatus, RefreshResult, RpcResult, RpcStatus } from "../../types";
 import { log, logUiEvent } from "../../utils/logging";
 
 export type UseGameRefreshOptions = {
@@ -13,12 +13,12 @@ export type UseGameRefreshOptions = {
   setOperation: (status: OperationStatus) => void;
   setLogs: (logs: LogEntry[]) => void;
   setBusyLabel: (label: string | null) => void;
-  notifyFailure: (title: string, body: string, icon: any) => void;
-  notifySuccess: (title: string, body: string, icon: any) => void;
+  notifyFailure: (title: string, body: string, icon: ReactNode) => void;
+  notifySuccess: (title: string, body: string, icon: ReactNode) => void;
   isMounted: () => boolean;
-  isRpcStatus: <T>(result: RpcResult<T>) => boolean;
-  logRpcStatus: (result: any, operation: string) => void;
-  icons: { refresh: any; warning: any };
+  isRpcStatus: <T>(result: RpcResult<T>) => result is RpcStatus;
+  logRpcStatus: (result: RpcStatus, operation: string) => void;
+  icons: { refresh: ReactNode; warning: ReactNode };
 };
 
 export function useGameRefresh({
@@ -50,7 +50,7 @@ export function useGameRefresh({
         logRpcStatus(result, "refresh");
         notifyFailure(
           "SDH-Ludusavi refresh failed",
-          (result as any).message || "Failed to refresh games",
+          result.message || "Failed to refresh games",
           icons.warning
         );
       } else if (applyRefreshResult(result)) {
@@ -70,7 +70,7 @@ export function useGameRefresh({
           "manual_refresh_completed",
           {
             elapsed_ms: Math.round(performance.now() - startedAt),
-            game_count: (result as any).games.length,
+            game_count: result.games.length,
             log_count: recentLogs.length,
           },
           "info",

@@ -119,7 +119,7 @@ def test_history_auto_start_skip_records_last_skip(tmp_path: Path) -> None:
     service.refresh_games()
 
     # recency is "local_current" for Hades by default in FakeAdapter
-    result = service.handle_game_start("Hades", app_id="123")
+    result = service.check_game_start("Hades", app_id="123")
     assert result.get("status") == "skipped"
 
     refresh = service.refresh_games()
@@ -137,7 +137,7 @@ def test_history_global_auto_sync_disabled_no_history(tmp_path: Path) -> None:
     service.set_auto_sync_enabled(False)
     service.refresh_games()
 
-    result = service.handle_game_start("Hades", app_id="123")
+    result = service.check_game_start("Hades", app_id="123")
     assert result.get("status") == "skipped"
 
     refresh = service.refresh_games()
