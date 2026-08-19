@@ -2024,6 +2024,28 @@ def test_stop_all_does_not_hold_lock_while_joining() -> None:
     assert acquirable is True
 
 
+def test_stop_all_stops_every_registered_watch_and_clears_registry() -> None:
+    manager = SyncthingWatchManager()
+    first_watch = _first_peer_completion_watch()
+    first_watch.watch_id = "first-watch"
+    second_watch = _first_peer_completion_watch()
+    second_watch.watch_id = "second-watch"
+    manager.watches = {
+        first_watch.watch_id: first_watch,
+        second_watch.watch_id: second_watch,
+    }
+
+    with (
+        patch.object(first_watch, "stop", wraps=first_watch.stop) as first_stop,
+        patch.object(second_watch, "stop", wraps=second_watch.stop) as second_stop,
+    ):
+        manager.stop_all()
+
+    first_stop.assert_called_once_with()
+    second_stop.assert_called_once_with()
+    assert manager.watches == {}
+
+
 def test_same_signature_replacement_leaves_exactly_one_registered() -> None:
     manager = SyncthingWatchManager()
 
