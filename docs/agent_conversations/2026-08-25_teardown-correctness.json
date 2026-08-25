@@ -1,0 +1,99 @@
+{
+  "date": "2026-08-25",
+  "task_objective": "Implement the teardown-correctness plan: make plugin load/unload cleanup reliable across the Ludusavi gateway, Syncthing watch admission, frontend dismount, BrowserView lifecycle, and the post-game watch gate.",
+  "files_modified": {
+    "backend": [
+      "py_modules/sdh_ludusavi/service.py",
+      "py_modules/sdh_ludusavi/gateway.py"
+    ],
+    "frontend": [
+      "src/index.tsx",
+      "src/surfaces/autoSyncStatusBrowserView.ts",
+      "src/controllers/gameLifecycleController.tsx"
+    ],
+    "tests": [
+      "tests/test_service.py",
+      "tests/test_gateway.py",
+      "src/index.dismount.test.ts",
+      "src/surfaces/autoSyncStatusBrowserView.test.ts",
+      "src/controllers/gameLifecycleController.test.ts"
+    ],
+    "documentation": [
+      "docs/agent_conversations/2026-08-25_teardown-correctness.json"
+    ]
+  },
+  "tests_added": {
+    "T1": [
+      "Gateway shutdown failure and watchdog shutdown failure both still stop all Syncthing watches."
+    ],
+    "T2": [
+      "Invalidate shuts down its outgoing adapter, retains a failed adapter for retry, and does not hold the adapter lock while reaping it."
+    ],
+    "T3": [
+      "A forced invalidation creates a replacement adapter without launching a second diagnostics probe."
+    ],
+    "T4": [
+      "Watch starts are admitted before stopping, rejected once stopping, and drained before stop_all takes its snapshot."
+    ],
+    "T5": [
+      "Plugin dismount defers runtime and stylesheet cleanup for lease release, handles resolution, rejection, timeout, and late resolution exactly once."
+    ],
+    "T6": [
+      "A fresh invisible status creates no BrowserView, while an existing BrowserView still hides, clears to about:blank, and reloads its next visible state."
+    ],
+    "T7": [
+      "The exit watch starts for tracked-ready and untracked-not-ready games, but not for ready-and-untracked games."
+    ]
+  },
+  "design_decisions": [
+    "Focused Python checks use --no-cov because the repository-wide coverage threshold makes any single-file pytest invocation fail after its tests pass; V1 retained the authoritative full-suite coverage gate.",
+    "Gateway invalidation clears the active adapter while locked, then reaps it after releasing the lock. An adapter whose shutdown is false or raises remains retained for gateway.shutdown to retry.",
+    "The service uses a condition-protected stop flag plus in-flight watch-start counter, so watch admission and stop_all have a strict happens-before relationship.",
+    "Decky does not await onDismount. The 2000 ms frontend timeout only sequences cleanup against lifecycleController.dispose; the backend drain in T4 is the correctness boundary.",
+    "T4 initially exceeded the service facade's line-span budget by one line. A behavior-neutral blank-line removal restored the required span without broadening scope.",
+    "T3 source control flow matched the plan: a replacement adapter still performs its own construction-time verification, while the once-per-process diagnostics probe no longer restarts."
+  ],
+  "results": {
+    "commits": [
+      "259ad1d fix(service): stop Syncthing watches even when shutdown is unconfirmed",
+      "c96368d fix(gateway): shut down the outgoing adapter on invalidate",
+      "b7d2332 fix(gateway): keep diagnostics logged once per process across invalidate",
+      "5e182ce fix(service): drain and reject Syncthing watch starts once stopping",
+      "3a35f40 fix(ui): await lease release before disposing plugin runtime",
+      "4e89e0c fix(ui): stop creating a BrowserView to hide an unshown status strip",
+      "a05f56d fix(lifecycle): gate the post-game Syncthing watch on tracking state"
+    ],
+    "baseline": {
+      "pytest": "1041 passed",
+      "vitest": "33 files, 366 tests passed"
+    },
+    "V1_full_quality_gates": {
+      "exit_code": 0,
+      "pytest": "1050 passed, 89.72% coverage",
+      "vitest": "34 files, 376 tests passed",
+      "typecheck_build_lint": "passed",
+      "review_note_integrity": "passed"
+    },
+    "V2_shared_function_regression": "tests/test_gateway.py plus tests/test_service.py: 154 passed using the focused no-coverage invocation.",
+    "V3_negative_control": {
+      "implementation_files_rolled_back": [
+        "py_modules/sdh_ludusavi/service.py",
+        "py_modules/sdh_ludusavi/gateway.py",
+        "src/index.tsx",
+        "src/surfaces/autoSyncStatusBrowserView.ts",
+        "src/controllers/gameLifecycleController.tsx"
+      ],
+      "python_exit": 1,
+      "frontend_exit": 1,
+      "expected_failures": "9 Python regression tests and 6 frontend regression tests named the new T1-T7 behavior; all five files were restored to HEAD and the working tree was clean afterward."
+    }
+  },
+  "deferred_and_not_verified": [
+    "No on-device verification was performed. The F10 race, F11 stranded-thread path, and F12 orphaned-adapter path are covered only by unit tests with injected fakes.",
+    "T5 is bounded best-effort rather than a teardown guarantee because Decky does not await onDismount; T4 is the actual F10 correctness boundary.",
+    "T3 does not eliminate adapter-construction subprocesses. Discovery verification still performs its own --version call on every adapter build; only the diagnostics probe is suppressed.",
+    "The F4 BrowserView change is verified only through the factory call in unit tests. Whether Steam reaps an already-created view remains unproven.",
+    "stop() remains unbounded in the strict sense because duration still scales with outstanding process records, leases, systemd scopes, and watches; T1 and T4 do not change that, and T4 adds a drain wait.",
+    "Retracted findings F1 and F3 were not implemented, and log-hygiene findings F6-F9 remain deferred to their separate plan."
+  ]
+}
