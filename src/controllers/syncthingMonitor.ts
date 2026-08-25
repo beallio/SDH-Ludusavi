@@ -211,7 +211,7 @@ export class SyncthingMonitor {
       return { status: "unavailable", reason: context.state.unavailableReason };
     }
 
-    let timeoutID: ReturnType<typeof window.setTimeout> | undefined;
+    let timeoutID: number | undefined;
     const timeoutPromise = new Promise<"timeout">((resolve) => {
       timeoutID = window.setTimeout(() => resolve("timeout"), confirmationTimeoutMs);
     });
