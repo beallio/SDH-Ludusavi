@@ -2705,6 +2705,127 @@ def test_service_syncthing_watch(tmp_path: Path) -> None:
     service._syncthing_watch_manager.stop_all.assert_called_once()
 
 
+def test_service_admits_syncthing_watch_start_before_stopping(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    service = service_with_state(tmp_path)
+    diagnostics = MagicMock(return_value={"backupPath": "/home/deck/Sync"})
+    service._gateway.get_diagnostics = diagnostics
+    syncthing_watch_manager = MagicMock()
+    syncthing_watch_manager.start_watch.return_value = {"status": "watching", "watch_id": "watch-1"}
+    service._syncthing_watch_manager = syncthing_watch_manager
+
+    result = service.start_syncthing_activity_watch("pre_game", "Hades", "1145300")
+
+    assert result == {"status": "watching", "watch_id": "watch-1"}
+    diagnostics.assert_called_once()
+    syncthing_watch_manager.start_watch.assert_called_once_with(
+        "pre_game", "Hades", "1145300", "/home/deck/Sync"
+    )
+
+
+def test_service_rejects_syncthing_watch_start_after_stopping(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    service = service_with_state(tmp_path)
+    diagnostics = MagicMock(return_value={"backupPath": "/home/deck/Sync"})
+    service._gateway.get_diagnostics = diagnostics
+    syncthing_watch_manager = MagicMock()
+    service._syncthing_watch_manager = syncthing_watch_manager
+
+    assert service.stop() == {"status": "stopped"}
+
+    assert service.start_syncthing_activity_watch("pre_game", "Hades", "1145300") == {
+        "status": "skipped",
+        "reason": "unloading",
+        "message": "Plugin unload is in progress.",
+    }
+    diagnostics.assert_not_called()
+    syncthing_watch_manager.start_watch.assert_not_called()
+
+
+def test_service_stop_drains_admitted_syncthing_watch_start_before_stopping_watches(
+    tmp_path: Path,
+) -> None:
+    from unittest.mock import MagicMock
+
+    service = service_with_state(tmp_path)
+    diagnostics_entered = threading.Event()
+    release_diagnostics = threading.Event()
+    watch_started = threading.Event()
+    stop_completed = threading.Event()
+    call_order: list[str] = []
+    registered_watches: set[str] = set()
+    start_results: list[dict[str, object]] = []
+    start_errors: list[BaseException] = []
+    stop_results: list[dict[str, object]] = []
+    stop_errors: list[BaseException] = []
+
+    def get_diagnostics() -> dict[str, str]:
+        diagnostics_entered.set()
+        assert release_diagnostics.wait(timeout=1)
+        return {"backupPath": "/home/deck/Sync"}
+
+    def start_watch(*args: object) -> dict[str, str]:
+        assert args == ("pre_game", "Hades", "1145300", "/home/deck/Sync")
+        registered_watches.add("watch-1")
+        call_order.append("start_watch")
+        watch_started.set()
+        return {"status": "watching", "watch_id": "watch-1"}
+
+    def stop_all() -> None:
+        call_order.append("stop_all")
+        registered_watches.clear()
+
+    service._gateway.get_diagnostics = get_diagnostics
+    syncthing_watch_manager = MagicMock()
+    syncthing_watch_manager.start_watch.side_effect = start_watch
+    syncthing_watch_manager.stop_all.side_effect = stop_all
+    service._syncthing_watch_manager = syncthing_watch_manager
+
+    def start_watch_worker() -> None:
+        try:
+            start_results.append(
+                service.start_syncthing_activity_watch("pre_game", "Hades", "1145300")
+            )
+        except BaseException as exc:  # pragma: no cover - asserted after bounded joins.
+            start_errors.append(exc)
+
+    def stop_worker() -> None:
+        try:
+            stop_results.append(service.stop())
+        except BaseException as exc:  # pragma: no cover - asserted after bounded joins.
+            stop_errors.append(exc)
+        finally:
+            stop_completed.set()
+
+    start_worker = threading.Thread(target=start_watch_worker, daemon=True)
+    stop_worker_thread = threading.Thread(target=stop_worker, daemon=True)
+    start_worker.start()
+    try:
+        assert diagnostics_entered.wait(timeout=1)
+        stop_worker_thread.start()
+        assert not stop_completed.wait(timeout=0.1)
+
+        release_diagnostics.set()
+        assert watch_started.wait(timeout=1)
+        start_worker.join(timeout=1)
+        stop_worker_thread.join(timeout=1)
+    finally:
+        release_diagnostics.set()
+        start_worker.join(timeout=1)
+        stop_worker_thread.join(timeout=1)
+
+    assert not start_worker.is_alive()
+    assert not stop_worker_thread.is_alive()
+    assert start_errors == []
+    assert stop_errors == []
+    assert start_results == [{"status": "watching", "watch_id": "watch-1"}]
+    assert stop_results == [{"status": "stopped"}]
+    assert call_order == ["start_watch", "stop_all"]
+    assert registered_watches == set()
+
+
 def test_apply_log_level(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
     from tests.test_main import fake_decky_module
