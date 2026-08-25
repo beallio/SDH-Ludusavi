@@ -190,6 +190,10 @@ describe("GameLifecycleController", () => {
 
   it("starts the buffered post-game watch when the frontend tracking cache is stale", async () => {
     mockStore.isTracked.mockReturnValue(false);
+    mockStore.getSnapshot.mockReturnValue({
+      settings: { auto_sync_enabled: true },
+      trackingReadiness: "failed",
+    });
     mockRpc.getSyncthingActivity.mockResolvedValue({
       status: "activity",
       watch_id: "w1",
@@ -219,6 +223,71 @@ describe("GameLifecycleController", () => {
     expect(mockStatusSurface.publish).toHaveBeenCalledWith(
       "syncthing_pending_upload",
       expect.objectContaining({ tracked: false }),
+    );
+  });
+
+  it("starts the post-game watch for a tracked game when tracking is ready", async () => {
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockRpc.startSyncthingActivityWatch).toHaveBeenCalledWith(
+      "post_game",
+      "Hades",
+      "1145300",
+    );
+  });
+
+  it("does not start the post-game watch for an untracked game when tracking is ready", async () => {
+    mockStore.isTracked.mockReturnValue(false);
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockRpc.startSyncthingActivityWatch).not.toHaveBeenCalled();
+  });
+
+  it("starts the post-game watch for an untracked game when tracking is not ready", async () => {
+    mockStore.isTracked.mockReturnValue(false);
+    mockStore.getSnapshot.mockReturnValue({
+      settings: { auto_sync_enabled: true },
+      trackingReadiness: "failed",
+    });
+    const controller = createGameLifecycleController({
+      store: mockStore,
+      rpc: mockRpc,
+      statusSurface: mockStatusSurface,
+      resolveConflict: mockResolveConflict,
+      notifyFailure: mockNotifyFailure,
+      syncGlobalHistory: mockSyncGlobalHistory,
+    });
+    controller.start();
+
+    triggerExit(1145300);
+    await vi.runAllTimersAsync();
+
+    expect(mockRpc.startSyncthingActivityWatch).toHaveBeenCalledWith(
+      "post_game",
+      "Hades",
+      "1145300",
     );
   });
 
