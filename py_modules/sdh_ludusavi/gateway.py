@@ -44,7 +44,6 @@ class LudusaviGateway:
             self._adapter = None
             self._versions = None
             self._ludusavi_command = None
-            self._diagnostics_logged = False
         if adapter is not None and not self._shutdown_adapter(
             adapter,
             level="warning",

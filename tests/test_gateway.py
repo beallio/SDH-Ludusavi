@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from unittest.mock import patch
 
 from sdh_ludusavi.gateway import LudusaviGateway
@@ -221,3 +222,40 @@ def test_gateway_invalidate_reaps_outgoing_adapter_without_holding_adapter_lock(
     assert not invalidate_worker.is_alive()
     assert not adapter_worker_started or not adapter_worker.is_alive()
     assert not invalidate_errors
+
+
+def test_gateway_invalidate_does_not_restart_diagnostics_probe() -> None:
+    diagnostics_called = threading.Event()
+    diagnostics_count = 0
+
+    class DiagnosticsAdapter(MockAdapter):
+        def get_diagnostics(self):
+            nonlocal diagnostics_count
+            diagnostics_count += 1
+            diagnostics_called.set()
+            return super().get_diagnostics()
+
+        def shutdown(self) -> bool:
+            return True
+
+    adapters: list[DiagnosticsAdapter] = []
+
+    def adapter_factory() -> DiagnosticsAdapter:
+        adapter = DiagnosticsAdapter()
+        adapters.append(adapter)
+        return adapter
+
+    gateway = LudusaviGateway(adapter_factory=adapter_factory)
+
+    gateway.get_adapter()
+    assert diagnostics_called.wait(timeout=1)
+
+    gateway.invalidate()
+    gateway.get_adapter()
+
+    deadline = time.monotonic() + 0.2
+    while time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert len(adapters) == 2
+    assert diagnostics_count == 1
