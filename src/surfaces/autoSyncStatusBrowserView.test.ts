@@ -23,12 +23,14 @@ describe("autoSyncStatusBrowserView", () => {
   let mockGetGamepadUIMainWindowInstance: any;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     mockGetSteamClient = vi.spyOn(steamRuntime, "getSteamClient");
     mockGetGamepadUIMainWindowInstance = vi.spyOn(steamRuntime, "getGamepadUIMainWindowInstance");
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("logs bounded missing methods when candidate is invalid without enumerating all properties", () => {
@@ -54,5 +56,52 @@ describe("autoSyncStatusBrowserView", () => {
       expect.stringContaining("BrowserView candidate m_browserView missing methods: SetBounds,SetVisible"),
       "autosync_status"
     );
+  });
+
+  it("does not create a BrowserView for an invisible status on a fresh surface", () => {
+    const createBrowserView = vi.fn();
+    mockGetGamepadUIMainWindowInstance.mockReturnValue({ CreateBrowserView: createBrowserView });
+    mockGetSteamClient.mockReturnValue({});
+
+    const api = createAutoSyncStatusBrowserView();
+    api.sync({ status: "has_backup", visible: false, source: "hide" });
+
+    expect(createBrowserView).not.toHaveBeenCalled();
+  });
+
+  it("keeps the existing BrowserView hide path and reloads a status after hiding", () => {
+    const loadURL = vi.fn();
+    const setVisible = vi.fn();
+    const setBounds = vi.fn();
+    const createBrowserView = vi.fn(() => ({
+      m_browserView: {
+        LoadURL: loadURL,
+        SetBounds: setBounds,
+        SetVisible: setVisible,
+      },
+    }));
+    mockGetGamepadUIMainWindowInstance.mockReturnValue({ CreateBrowserView: createBrowserView });
+    mockGetSteamClient.mockReturnValue({});
+
+    const api = createAutoSyncStatusBrowserView();
+    const visibleState = { status: "has_backup" as const, visible: true, source: "hide" as const };
+    api.sync(visibleState);
+
+    expect(createBrowserView).toHaveBeenCalledTimes(1);
+    setVisible.mockClear();
+    loadURL.mockClear();
+
+    api.sync({ ...visibleState, visible: false });
+
+    expect(createBrowserView).toHaveBeenCalledTimes(1);
+    expect(setVisible).toHaveBeenCalledWith(false);
+    expect(loadURL).toHaveBeenCalledWith("about:blank");
+
+    loadURL.mockClear();
+    api.sync(visibleState);
+
+    expect(loadURL).toHaveBeenCalledOnce();
+    expect(loadURL.mock.calls[0][0]).toMatch(/^data:text\/html/);
+    api.clearShowTimeout();
   });
 });
