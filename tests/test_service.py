@@ -1335,6 +1335,48 @@ def test_service_stop_returns_failure_without_thaw_when_cancellation_cannot_be_c
         service.resume_all_paused_processes()
 
 
+def test_service_stop_stops_syncthing_watches_when_gateway_shutdown_is_unconfirmed(
+    tmp_path: Path,
+) -> None:
+    from unittest.mock import MagicMock
+
+    class UnreapedShutdownAdapter(FakeAdapter):
+        def shutdown(self) -> bool:
+            return False
+
+    service = service_with_state(tmp_path, UnreapedShutdownAdapter())
+    syncthing_watch_manager = MagicMock()
+    service._syncthing_watch_manager = syncthing_watch_manager
+
+    assert service.stop() == {
+        "status": "failed",
+        "reason": "cancellation_unconfirmed",
+        "retained_gate": True,
+    }
+
+    syncthing_watch_manager.stop_all.assert_called_once()
+
+
+def test_service_stop_stops_syncthing_watches_when_watchdog_shutdown_is_unconfirmed(
+    tmp_path: Path,
+) -> None:
+    from unittest.mock import MagicMock
+
+    service = service_with_state(tmp_path)
+    service._gateway.shutdown = MagicMock(return_value=True)
+    service._watchdog.stop = MagicMock(return_value=False)
+    syncthing_watch_manager = MagicMock()
+    service._syncthing_watch_manager = syncthing_watch_manager
+
+    assert service.stop() == {
+        "status": "failed",
+        "reason": "cancellation_unconfirmed",
+        "retained_gate": True,
+    }
+
+    syncthing_watch_manager.stop_all.assert_called_once()
+
+
 def test_service_stop_retains_gate_when_guarded_callback_outlives_successful_adapter_shutdown(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1393,7 +1435,7 @@ def test_service_stop_retains_gate_when_guarded_callback_outlives_successful_ada
         assert adapter.shutdown_calls == 1
         assert service._watchdog._paused_pids[4567] is lease
         assert scope_controller.thaw_calls == []
-        syncthing_watch_manager.stop_all.assert_not_called()
+        syncthing_watch_manager.stop_all.assert_called_once()
     finally:
         adapter.allow_restore_return.set()
         worker.join(timeout=1)

@@ -179,31 +179,33 @@ class SDHLudusaviService:
 
     def stop(self) -> dict[str, object]:
         """Cancel managed work before any guarded launch scope can thaw."""
-        if not self._gateway.shutdown():
-            self.log(
-                "error",
-                "Managed Ludusavi shutdown could not confirm process exit; retaining launch gates",
-                "launch_gate",
-            )
-            return {
-                "status": "failed",
-                "reason": "cancellation_unconfirmed",
-                "retained_gate": True,
-            }
-        if not self._watchdog.stop():
-            self.log(
-                "error",
-                "Launch-gate shutdown could not confirm every guarded callback had finished; "
-                "retaining launch gates",
-                "launch_gate",
-            )
-            return {
-                "status": "failed",
-                "reason": "cancellation_unconfirmed",
-                "retained_gate": True,
-            }
-        self._syncthing_watch_manager.stop_all()
-        return {"status": "stopped"}
+        try:
+            if not self._gateway.shutdown():
+                self.log(
+                    "error",
+                    "Managed Ludusavi shutdown could not confirm process exit; retaining launch gates",
+                    "launch_gate",
+                )
+                return {
+                    "status": "failed",
+                    "reason": "cancellation_unconfirmed",
+                    "retained_gate": True,
+                }
+            if not self._watchdog.stop():
+                self.log(
+                    "error",
+                    "Launch-gate shutdown could not confirm every guarded callback had finished; "
+                    "retaining launch gates",
+                    "launch_gate",
+                )
+                return {
+                    "status": "failed",
+                    "reason": "cancellation_unconfirmed",
+                    "retained_gate": True,
+                }
+            return {"status": "stopped"}
+        finally:
+            self._syncthing_watch_manager.stop_all()
 
     def start_syncthing_activity_watch(
         self, phase: str, game_name: str | None, app_id: str | None
