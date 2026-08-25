@@ -286,16 +286,38 @@ export default definePlugin(() => {
     onDismount() {
       logUiEvent("plugin_dismounting", {}, "info");
       startupHydration.dispose();
-      void lifecycleController.dispose();
       updatePoller.dispose();
 
-      if (dropdownStyleEl.parentNode) {
-        dropdownStyleEl.parentNode.removeChild(dropdownStyleEl);
-      }
+      let cleanupComplete = false;
+      const finishCleanup = () => {
+        if (cleanupComplete) {
+          return;
+        }
+        cleanupComplete = true;
 
-      runtime.dispose();
+        if (dropdownStyleEl.parentNode) {
+          dropdownStyleEl.parentNode.removeChild(dropdownStyleEl);
+        }
 
-      logUiEvent("plugin_dismounted", {}, "info");
+        runtime.dispose();
+        logUiEvent("plugin_dismounted", {}, "info");
+      };
+      const timeout = globalThis.setTimeout(() => {
+        log("warning", "Timed out waiting 2000 ms for lifecycle lease release during plugin dismount.");
+        finishCleanup();
+      }, 2000);
+
+      void lifecycleController.dispose().then(
+        () => {
+          globalThis.clearTimeout(timeout);
+          finishCleanup();
+        },
+        (error) => {
+          globalThis.clearTimeout(timeout);
+          log("error", `Lifecycle lease release failed during plugin dismount: ${error}`);
+          finishCleanup();
+        },
+      );
     },
   };
 });

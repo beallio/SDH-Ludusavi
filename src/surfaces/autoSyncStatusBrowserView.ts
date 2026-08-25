@@ -179,6 +179,11 @@ export function createAutoSyncStatusBrowserView(): AutoSyncStatusBrowserViewApi 
     },
 
     sync(state: AutoSyncStatusState) {
+      if (!state.visible && !autoSyncStatusBrowserView) {
+        clearAutoSyncStatusShowTimeout();
+        loadedAutoSyncStatus = null;
+        return;
+      }
       const browserView = ensureAutoSyncStatusBrowserView();
       if (!browserView) {
         return;

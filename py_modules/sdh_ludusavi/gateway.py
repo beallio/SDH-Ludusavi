@@ -35,14 +35,23 @@ class LudusaviGateway:
         self._diagnostics_logged = False
         self._versions: dict[str, str] | None = None
         self._ludusavi_command: dict[str, object] | None = None
+        self._retired_adapters: list[LudusaviAdapter] = []
 
     def invalidate(self) -> None:
         """Drop cached adapter, versions, and command info."""
         with self._adapter_lock:
+            adapter = self._adapter
             self._adapter = None
             self._versions = None
             self._ludusavi_command = None
-            self._diagnostics_logged = False
+        if adapter is not None and not self._shutdown_adapter(
+            adapter,
+            level="warning",
+            operation="init",
+            message="Unable to stop outgoing Ludusavi adapter during refresh",
+        ):
+            with self._adapter_lock:
+                self._retired_adapters.append(adapter)
 
     def get_adapter(self) -> LudusaviAdapter:
         """Lazily initialize and return the Ludusavi adapter."""
@@ -125,17 +134,44 @@ class LudusaviGateway:
         """Reject new managed work and reap active adapter processes before thawing."""
         with self._adapter_lock:
             adapter = self._adapter
-        if adapter is None:
-            return True
-        shutdown = getattr(adapter, "shutdown", None)
-        if not callable(shutdown):
-            return True
+            retired_adapters = self._retired_adapters
+            self._retired_adapters = []
+
+        adapters = ([adapter] if adapter is not None else []) + retired_adapters
+        unreaped_adapters = [
+            candidate
+            for candidate in adapters
+            if not self._shutdown_adapter(
+                candidate,
+                level="error",
+                operation="launch_gate",
+                message="Unable to stop managed Ludusavi work",
+            )
+        ]
+        if unreaped_adapters:
+            with self._adapter_lock:
+                self._retired_adapters.extend(unreaped_adapters)
+        return not unreaped_adapters
+
+    def _shutdown_adapter(
+        self,
+        adapter: LudusaviAdapter,
+        *,
+        level: str,
+        operation: str,
+        message: str,
+    ) -> bool:
         try:
-            return bool(shutdown())
-        # Intentionally broad: a shutdown error must keep the launch gate frozen.
+            shutdown = getattr(adapter, "shutdown", None)
+            if not callable(shutdown):
+                return True
+            if shutdown():
+                return True
+            self._log(level, message, operation)
+        # Intentionally broad: a shutdown error must retain the adapter for a retry.
         except Exception as exc:
-            self._log("error", f"Unable to stop managed Ludusavi work: {exc}", "launch_gate")
-            return False
+            self._log(level, f"{message}: {exc}", operation)
+        return False
 
     def get_ludusavi_command(self) -> dict[str, object] | None:
         """Return the command path and args used by the plugin for GUI launching."""
