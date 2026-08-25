@@ -119,3 +119,105 @@ def test_ludusavi_gateway_factory_returns_none() -> None:
     assert "Ludusavi adapter factory returned None" in str(exc_info.value)
     assert not gateway._diagnostics_logged
     log_mock.assert_not_called()
+
+
+def test_gateway_invalidate_shuts_down_outgoing_adapter_and_clears_caches() -> None:
+    class ShutdownRecordingAdapter(MockAdapter):
+        def __init__(self) -> None:
+            self.shutdown_calls = 0
+
+        def shutdown(self) -> bool:
+            self.shutdown_calls += 1
+            return True
+
+    adapter = ShutdownRecordingAdapter()
+    gateway = LudusaviGateway(adapter=adapter)
+    gateway._versions = {"ludusavi": "0.31.0"}
+    gateway._ludusavi_command = {"commandPath": "/usr/bin/ludusavi"}
+
+    gateway.invalidate()
+
+    assert adapter.shutdown_calls == 1
+    assert gateway._adapter is None
+    assert gateway._versions is None
+    assert gateway._ludusavi_command is None
+
+
+def test_gateway_invalidate_retires_failed_adapter_for_later_shutdown_retry() -> None:
+    class RetryShutdownAdapter(MockAdapter):
+        def __init__(self) -> None:
+            self.shutdown_calls = 0
+
+        def shutdown(self) -> bool:
+            self.shutdown_calls += 1
+            if self.shutdown_calls == 1:
+                raise RuntimeError("shutdown failed")
+            return True
+
+    log_entries: list[tuple[object, ...]] = []
+    adapter = RetryShutdownAdapter()
+    gateway = LudusaviGateway(adapter=adapter, log_callback=lambda *args: log_entries.append(args))
+
+    gateway.invalidate()
+
+    assert adapter.shutdown_calls == 1
+    assert len(log_entries) == 1
+    assert log_entries[0][0] == "warning"
+    assert log_entries[0][2] == "init"
+    assert gateway.shutdown()
+    assert adapter.shutdown_calls == 2
+
+
+def test_gateway_invalidate_reaps_outgoing_adapter_without_holding_adapter_lock() -> None:
+    class BlockingShutdownAdapter(MockAdapter):
+        def __init__(self) -> None:
+            self.shutdown_entered = threading.Event()
+            self.release_shutdown = threading.Event()
+
+        def shutdown(self) -> bool:
+            self.shutdown_entered.set()
+            assert self.release_shutdown.wait(timeout=1)
+            return True
+
+    outgoing = BlockingShutdownAdapter()
+    replacement = MockAdapter()
+    gateway = LudusaviGateway(adapter=outgoing, adapter_factory=lambda: replacement)
+    invalidate_errors: list[BaseException] = []
+    adapter_results: list[MockAdapter] = []
+    adapter_errors: list[BaseException] = []
+    adapter_returned = threading.Event()
+
+    def invalidate() -> None:
+        try:
+            gateway.invalidate()
+        except BaseException as exc:  # pragma: no cover - asserted after bounded joins.
+            invalidate_errors.append(exc)
+
+    def get_adapter() -> None:
+        try:
+            adapter_results.append(gateway.get_adapter())
+        except BaseException as exc:  # pragma: no cover - asserted after bounded joins.
+            adapter_errors.append(exc)
+        finally:
+            adapter_returned.set()
+
+    invalidate_worker = threading.Thread(target=invalidate, daemon=True)
+    adapter_worker = threading.Thread(target=get_adapter, daemon=True)
+    adapter_worker_started = False
+    invalidate_worker.start()
+    try:
+        assert outgoing.shutdown_entered.wait(timeout=1)
+        adapter_worker.start()
+        adapter_worker_started = True
+        assert adapter_returned.wait(timeout=1)
+        assert adapter_results == [replacement]
+        assert not adapter_errors
+    finally:
+        outgoing.release_shutdown.set()
+        invalidate_worker.join(timeout=1)
+        if adapter_worker_started:
+            adapter_worker.join(timeout=1)
+
+    assert not invalidate_worker.is_alive()
+    assert not adapter_worker_started or not adapter_worker.is_alive()
+    assert not invalidate_errors
