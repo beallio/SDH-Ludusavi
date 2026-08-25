@@ -137,7 +137,9 @@ class SDHLudusaviService:
         from .syncthing import SyncthingWatchManager
 
         self._syncthing_watch_manager = SyncthingWatchManager()
-
+        self._syncthing_watch_start_condition = threading.Condition()
+        self._syncthing_watch_starts_in_flight = 0
+        self._stopping = False
         # Configure unified logging
         self._log_buffer.setup_logging()
         self.log("info", "SDH-ludusavi service initialized", "init")
@@ -179,6 +181,10 @@ class SDHLudusaviService:
 
     def stop(self) -> dict[str, object]:
         """Cancel managed work before any guarded launch scope can thaw."""
+        with self._syncthing_watch_start_condition:
+            self._stopping = True
+            while self._syncthing_watch_starts_in_flight:
+                self._syncthing_watch_start_condition.wait()
         try:
             if not self._gateway.shutdown():
                 self.log(
@@ -210,10 +216,27 @@ class SDHLudusaviService:
     def start_syncthing_activity_watch(
         self, phase: str, game_name: str | None, app_id: str | None
     ) -> dict[str, Any]:
-        backup_path = self._gateway.get_diagnostics().get("backupPath")
-        if not isinstance(backup_path, str) or backup_path == "unknown" or not backup_path.strip():
-            backup_path = None
-        return self._syncthing_watch_manager.start_watch(phase, game_name, app_id, backup_path)
+        with self._syncthing_watch_start_condition:
+            if self._stopping:
+                return {
+                    "status": "skipped",
+                    "reason": "unloading",
+                    "message": "Plugin unload is in progress.",
+                }
+            self._syncthing_watch_starts_in_flight += 1
+        try:
+            backup_path = self._gateway.get_diagnostics().get("backupPath")
+            if (
+                not isinstance(backup_path, str)
+                or backup_path == "unknown"
+                or not backup_path.strip()
+            ):
+                backup_path = None
+            return self._syncthing_watch_manager.start_watch(phase, game_name, app_id, backup_path)
+        finally:
+            with self._syncthing_watch_start_condition:
+                self._syncthing_watch_starts_in_flight -= 1
+                self._syncthing_watch_start_condition.notify_all()
 
     def get_syncthing_activity(self, watch_id: str) -> dict[str, Any]:
         return self._syncthing_watch_manager.poll_watch(watch_id)
