@@ -348,7 +348,7 @@ export function createGameLifecycleController(
       watchActive: false, handoffTransferred: false
     };
 
-    if (autoSyncEnabledExit && !gameSyncDisabledExit) {
+    if (autoSyncEnabledExit && !gameSyncDisabledExit && guardCandidate) {
       activeMonitorEpoch = epoch;
       postGameWatch = syncthingMonitor.start("post_game", name, appID);
       state.watchActive = true;
