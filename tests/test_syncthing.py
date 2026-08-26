@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
 import pytest
 import time
+
+import sdh_ludusavi.syncthing.config as syncthing_config
 
 from sdh_ludusavi.syncthing import (
     api_url_from_gui_address,
@@ -52,8 +55,6 @@ def test_parse_syncthing_config(tmp_path: Path) -> None:
 def test_parse_syncthing_config_fallback_regex(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import py_modules.sdh_ludusavi.syncthing.config as syncthing_config
-
     monkeypatch.setattr(syncthing_config, "HAS_XML_ETREE", False)
 
     config_xml = tmp_path / "config.xml"
@@ -74,6 +75,29 @@ def test_parse_syncthing_config_fallback_regex(
     assert cfg is not None
     assert cfg.api_key == "testkey"
     assert cfg.api_url == "https://127.0.0.1:8384"
+
+
+def test_parse_syncthing_config_logs_fallback_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(syncthing_config, "HAS_XML_ETREE", False)
+    monkeypatch.setattr(syncthing_config, "_FALLBACK_NOTICE_EMITTED", False, raising=False)
+    config_xml = tmp_path / "config.xml"
+    config_xml.write_text(
+        '<configuration><gui tls="true"><address>127.0.0.1:8384</address><apikey>testkey</apikey></gui></configuration>'
+    )
+    caplog.set_level(logging.INFO, logger="sdh_ludusavi.syncthing.config")
+
+    assert parse_syncthing_config(config_xml) is not None
+    assert parse_syncthing_config(config_xml) is not None
+
+    fallback_records = [
+        record
+        for record in caplog.records
+        if record.name == "sdh_ludusavi.syncthing.config"
+        and record.getMessage().startswith("Parsing Syncthing config using fallback regex")
+    ]
+    assert len(fallback_records) == 1
 
 
 class MockAPI:

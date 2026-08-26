@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 from typing import Iterable
 
@@ -25,9 +26,25 @@ from ._types import (
 
 logger = logging.getLogger(__name__)
 
+_FALLBACK_NOTICE_LOCK = threading.Lock()
+_FALLBACK_NOTICE_EMITTED = False
+
 
 class SyncthingNotConfiguredError(RuntimeError):
     """Raised when no explicit credentials or local Syncthing config exists."""
+
+
+def _log_fallback_parser_notice() -> None:
+    global _FALLBACK_NOTICE_EMITTED
+
+    with _FALLBACK_NOTICE_LOCK:
+        if _FALLBACK_NOTICE_EMITTED:
+            return
+        _FALLBACK_NOTICE_EMITTED = True
+        logger.info(
+            "Parsing Syncthing config using fallback regex XML parser (ElementTree available: %s)",
+            HAS_XML_ETREE,
+        )
 
 
 def has_syncthing_configuration(explicit_config: Path | None = None) -> bool:
@@ -201,10 +218,7 @@ def parse_syncthing_config(path: Path) -> SyncthingConfig | None:
                 exc,
             )
 
-    logger.info(
-        "Parsing Syncthing config using fallback regex XML parser (ElementTree available: %s)",
-        HAS_XML_ETREE,
-    )
+    _log_fallback_parser_notice()
     return _parse_syncthing_config_regex(path)
 
 
