@@ -133,7 +133,7 @@ export class SyncthingMonitor {
 
     const context = new WatchContext(gen, phase, gameName, appID);
     this.contexts.set(gen, context);
-    log("info", `Syncthing watch allocated: generation=${gen} watch_id=null game=${gameName} app_id=${appID}`);
+    log("info", `Syncthing watch requested: generation=${gen} watch_id=null game=${gameName} app_id=${appID}`);
 
     void this.allocateWatchBackground(context);
 

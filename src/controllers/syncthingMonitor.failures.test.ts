@@ -38,6 +38,27 @@ describe("SyncthingMonitor", () => {
     monitor = new SyncthingMonitor(mockRpc as unknown as SyncthingRpc, mockOnStatus);
     (log as any).mockClear();
   });
+
+  it("logs watch request before allocation and allocation only after the RPC resolves", async () => {
+    let resolveStartWatch: (result: any) => void;
+    mockRpc.startWatch.mockReturnValue(new Promise((resolve) => {
+      resolveStartWatch = resolve;
+    }));
+
+    monitor.start("post_game", "Hades", "1145300");
+
+    expect(log).toHaveBeenCalledWith("info", expect.stringContaining("Syncthing watch requested:"));
+    expect(log).not.toHaveBeenCalledWith("info", expect.stringContaining("Syncthing watch allocated:"));
+
+    resolveStartWatch!({ status: "watching", watch_id: "w1" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const allocatedRecords = (log as any).mock.calls.filter(([, message]: [string, string]) =>
+      message.startsWith("Syncthing watch allocated:"),
+    );
+    expect(allocatedRecords).toHaveLength(1);
+  });
+
   it("initialization failure resolves handoff unavailable", async () => {
     mockRpc.startWatch.mockResolvedValue({ status: "failed", reason: "watch_initialization_failed", message: "failed cursor" });
     
