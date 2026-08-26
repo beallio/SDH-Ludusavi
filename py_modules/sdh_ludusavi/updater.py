@@ -155,7 +155,7 @@ class PluginUpdater:
         current_version: str,
         force: bool = False,
     ) -> dict[str, object]:
-        self._log("info", f"Update check started (version={current_version}, force={force})")
+        self._log("debug", f"Update check started (version={current_version}, force={force})")
         t0 = self._monotonic()
 
         with self._state_lock:
@@ -207,7 +207,7 @@ class PluginUpdater:
                             if isinstance(last_result, dict):
                                 elapsed_ms = round((self._monotonic() - t0) * 1000)
                                 self._log(
-                                    "info",
+                                    "debug",
                                     f"Update check cache hit (within 24h, channel={last_checked_channel}, version={last_checked_version}), elapsed_ms={elapsed_ms}",
                                 )
                                 return last_result
