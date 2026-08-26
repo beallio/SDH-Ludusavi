@@ -25,6 +25,19 @@ def test_diagnostic_log_buffer_push_get() -> None:
     assert recent[1]["level"] == "error"
 
 
+def test_diagnostic_log_buffer_labels_unqualified_logs_as_backend() -> None:
+    buffer = DiagnosticLogBuffer()
+
+    with patch("sdh_ludusavi.log_buffer._decky_log_fallback") as mock_decky_log:
+        buffer.log("info", "direct backend message")
+        buffer.log("info", "explicit operation message", "refresh")
+
+    assert mock_decky_log.call_args_list == [
+        (("info", "backend: direct backend message"), {}),
+        (("info", "refresh: explicit operation message"), {}),
+    ]
+
+
 def test_decky_log_handler_emit() -> None:
     buf = DiagnosticLogBuffer()
     handler = DeckyLogHandler(buf)

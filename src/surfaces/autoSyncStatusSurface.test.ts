@@ -267,6 +267,15 @@ describe("AutoSyncStatusSurface Dwell Time", () => {
     );
   };
 
+  it("sets the hidden context once when hiding the surface", () => {
+    surface.hide();
+
+    expect(mockStatusView.setContext).toHaveBeenCalledTimes(1);
+    expect(mockStatusView.setContext).toHaveBeenCalledWith(
+      expect.objectContaining({ visible: false }),
+    );
+  });
+
   it("delays the post-game Syncthing handoff behind the backed-up dwell time", () => {
     completePostGameBackup();
     expect(mockStatusView.sync).toHaveBeenCalledWith(expect.objectContaining({ status: "has_backup" }));

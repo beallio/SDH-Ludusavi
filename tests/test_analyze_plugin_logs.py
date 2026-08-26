@@ -140,6 +140,37 @@ def test_analyze_absolute_ceiling_as_launch_gate_expiry(tmp_path: Path) -> None:
     assert "absolute ceiling" in findings[0].evidence
 
 
+def test_analyze_backend_and_frontend_labels_produce_the_same_findings(tmp_path: Path) -> None:
+    module = load_analyze_module()
+    log_template = (
+        "[2026-07-12 10:00:00,001][WARNING]: {label}: "
+        "Syncthing watch compatible-watch exceeded 180.0s TTL without stop_watch; terminating\n"
+    )
+    frontend_path = tmp_path / "frontend.log"
+    backend_path = tmp_path / "backend.log"
+    frontend_path.write_text(log_template.format(label="frontend"), encoding="utf-8")
+    backend_path.write_text(log_template.format(label="backend"), encoding="utf-8")
+
+    frontend_findings, frontend_stats = module.analyze_logs([frontend_path])
+    backend_findings, backend_stats = module.analyze_logs([backend_path])
+
+    def normalized(findings: list[object]) -> list[tuple[object, ...]]:
+        return [
+            (
+                finding.rule_id,
+                finding.severity,
+                finding.line_number,
+                finding.occurrences,
+            )
+            for finding in findings
+        ]
+
+    assert frontend_stats.parse_failures == 0
+    assert backend_stats.parse_failures == 0
+    assert normalized(frontend_findings)
+    assert normalized(frontend_findings) == normalized(backend_findings)
+
+
 def test_analyze_scope_freeze_and_thaw_watchdog_syntax(tmp_path: Path) -> None:
     log_path = tmp_path / "scope-freeze.log"
     log_path.write_text(

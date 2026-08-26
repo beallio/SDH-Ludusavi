@@ -200,7 +200,7 @@ class Plugin:
         if backend is None:
             decky.logger.info(f"[frontend:{level}] {operation or 'frontend'}: {message}")
             return
-        backend.log(level, message, operation, game_name)
+        backend.log(level, message, operation or "frontend", game_name)
 
     async def refresh_games(
         self, force: bool = False, installed_app_ids: str | None = None

@@ -78,6 +78,28 @@ def test_registry_coerce_malformed_statuses() -> None:
     assert "Bad Game" in registry._games
 
 
+def test_refresh_does_not_log_each_coerced_game_status() -> None:
+    gateway = MagicMock()
+    run_locked = MagicMock(side_effect=lambda _op, _game, callback: callback())
+    log = MagicMock()
+    save = MagicMock()
+    get_history = MagicMock(return_value={})
+    gateway.get_adapter().refresh_statuses.return_value = [
+        {"name": "Hades"},
+        {"name": "Portal"},
+        {"name": "Celeste"},
+    ]
+
+    registry = GameRegistry(gateway, run_locked, log, save, get_history)
+
+    registry.refresh_games(force=True)
+
+    coerce_records = [
+        call for call in log.call_args_list if call.args[1].startswith("Coercing status for")
+    ]
+    assert len(coerce_records) == 0
+
+
 def test_registry_config_mtime_refresh_gating() -> None:
     gateway = MagicMock()
     gateway.current_config_mtime_ns.return_value = 12345

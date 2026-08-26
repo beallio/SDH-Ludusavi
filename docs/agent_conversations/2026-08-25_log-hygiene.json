@@ -1,0 +1,80 @@
+{
+  "date": "2026-08-25",
+  "task_objective": "Implement the log-hygiene plan: remove low-value log noise, distinguish backend and frontend origins, document analyzer compatibility, and demote duplicate update-check prose without changing update behavior.",
+  "branch": "feat/log-hygiene",
+  "commits": [
+    "40c7a41 docs(plan): add log-hygiene implementation plan",
+    "1c83cf3 refactor(registry): drop per-game coerce logging",
+    "8429eef refactor(ui): drop dead setContext call in hide",
+    "d0acaca refactor(syncthing): distinguish watch requested from allocated",
+    "593d58d refactor(syncthing): log the XML parser fallback once per process",
+    "32e5cac fix(logging): label backend log lines backend, not frontend",
+    "9e5316e test(analyzer): cover backend and frontend log labels",
+    "32a2e00 refactor(updater): demote duplicated update-check prose to debug"
+  ],
+  "files_modified": [
+    "docs/plans/2026-08-25_log-hygiene.md",
+    "py_modules/sdh_ludusavi/log_buffer.py",
+    "py_modules/sdh_ludusavi/registry.py",
+    "py_modules/sdh_ludusavi/syncthing/config.py",
+    "py_modules/sdh_ludusavi/updater.py",
+    "main.py",
+    "scripts/analyze_plugin_logs.py",
+    "src/controllers/syncthingMonitor.ts",
+    "src/controllers/syncthingMonitor.failures.test.ts",
+    "src/surfaces/autoSyncStatusSurface.tsx",
+    "src/surfaces/autoSyncStatusSurface.test.ts",
+    "tests/test_analyze_plugin_logs.py",
+    "tests/test_log_buffer.py",
+    "tests/test_main_rpc.py",
+    "tests/test_registry.py",
+    "tests/test_syncthing.py",
+    "tests/test_updater_service.py"
+  ],
+  "tests_added": {
+    "T1": "test_refresh_does_not_log_each_coerced_game_status",
+    "T2": "sets the hidden context once when hiding the surface",
+    "T3": "logs watch request before allocation and allocation only after the RPC resolves",
+    "T4": "test_parse_syncthing_config_logs_fallback_once; also corrected the existing fallback test to patch the live module",
+    "T5": "test_diagnostic_log_buffer_labels_unqualified_logs_as_backend; test_log_rpc_forwards_frontend_origin_without_overwriting_explicit_operation",
+    "T6": "test_analyze_backend_and_frontend_labels_produce_the_same_findings",
+    "T7": "test_update_check_duplicate_prose_is_debug_while_unique_events_stay_info"
+  },
+  "design_decisions": {
+    "T1": "Deleted the mapper's per-game DEBUG call with no summary replacement.",
+    "T2": "Removed only the stale pre-reassignment setContext call in hide().",
+    "T3": "The request event is now 'Syncthing watch requested'; allocation keeps the existing message and real watch ID.",
+    "T4": "Implemented exactly-once fallback logging with a module-level boolean protected by a threading.Lock; the level and wording are unchanged.",
+    "T5": "DiagnosticLogBuffer defaults direct calls to backend, while the frontend Plugin.log RPC supplies frontend only when its caller did not provide an operation.",
+    "T6": "The analyzer remains behaviorally unchanged; its comment documents historical frontend-label ambiguity and the regression proves both labels produce the same normalized nonempty finding.",
+    "T7": "Only the duplicated 'Update check started' and 'Update check cache hit' records changed level to DEBUG. Fetch, pending-install, revalidate, install, and handoff logging remain at their previous levels."
+  },
+  "red_green_mutation_evidence": {
+    "T1": "RED counted 3 coercion records for the three-game fixture; the mutation gate reproduced that failure after reverting registry.py.",
+    "T2": "RED reported 2 setContext calls; the mutation gate reproduced the 2-call failure after reverting the surface file.",
+    "T3": "RED observed the premature allocated message; the mutation gate reproduced it after reverting the monitor file.",
+    "T4": "RED captured 2 fallback records; the mutation gate reproduced the two-record failure after reverting config.py.",
+    "T5": "Both named RED tests failed. T5a failed only the log-buffer boundary test and T5b failed only the Plugin.log forwarding test after their respective file reverts.",
+    "T6": "Characterization-only task: analyzer tests passed before and after the comment/test addition; no mutation gate applies.",
+    "T7": "RED showed the targeted update-check records at INFO instead of DEBUG; the mutation gate reproduced that mismatch after reverting updater.py."
+  },
+  "verification": {
+    "V1": "scripts/orchestration/run-quality-gates and check-review-notes-not-deleted passed: 1,056 Python tests passed at 90.07% coverage; 378 frontend tests passed; TypeScript typecheck, Rollup build, Ruff, ty, and supply-chain checks passed; the tree was clean.",
+    "V2": "The paired T5 suite passed: 18 tests passed. This reconfirmed both halves green; the two independent mutation gates establish that each half is required.",
+    "V3": "Temporarily reverting all eight implementation files produced 5 failing Python tests (backend label, frontend RPC origin, registry count, fallback once-only log, updater levels) and 2 failing frontend tests (watch-request distinction and hide call count). The prescribed restoration completed with a clean tree.",
+    "V4": "Deferred. This machine has no /home/deck/homebrew/logs/SDH-Ludusavi directory and no independently produced post-change Decky runtime log. No older log was substituted and no excerpts were fabricated.",
+    "preconstruction_log_assertion": "tests/test_main_rpc.py:257 remains the pre-construction assertion '[frontend:info] frontend: test message'; it was intentionally unchanged."
+  },
+  "plan_source_disagreements": [
+    "Every plan-listed focused Python pytest command reports its selected tests passing but exits non-zero because pyproject.toml enforces the repository-wide 83% coverage threshold. Focused RED, GREEN, V2, and mutation commands therefore used PYTEST_ADDOPTS=--no-cov so their behavior result could be evaluated. Full V1 quality gates retained coverage enforcement and passed at 90.07%.",
+    "No other source-versus-plan discrepancies were found."
+  ],
+  "deferred_and_not_verified": [
+    "No on-device Steam Deck verification was performed.",
+    "Historical frontend-labelled logs remain origin-ambiguous; T6 documents and characterizes tolerance but cannot recover their true origin.",
+    "V4 is deferred and is a human-readability judgment rather than an automated assertion.",
+    "T7 intentionally reduces default-level visibility of successful backend update checks. Their successful narration now relies on the frontend trace-id stream; without frontend logging, a successful backend check has no INFO-level prose record.",
+    "F1 and F3 remain retracted and were not implemented."
+  ],
+  "result": "All seven planned tasks, their required mutation gates, V1-V4 verification, and atomic commits are complete. The round awaits orchestrator review."
+}
