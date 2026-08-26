@@ -257,6 +257,32 @@ def test_log_rpc_before_service_construction(
     assert "[frontend:info] frontend: test message" in logger.infos
 
 
+def test_log_rpc_forwards_frontend_origin_without_overwriting_explicit_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decky, _logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+
+    class RecordingBackend:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, str, str | None]] = []
+
+        def log(self, level: str, message: str, operation: str, game_name: str | None) -> None:
+            self.calls.append((level, message, operation, game_name))
+
+    backend = RecordingBackend()
+    plugin = module.Plugin()
+    plugin._backend = backend
+
+    asyncio.run(plugin.log("info", "frontend message"))
+    asyncio.run(plugin.log("debug", "update message", "update", "Hades"))
+
+    assert backend.calls == [
+        ("info", "frontend message", "frontend", None),
+        ("debug", "update message", "update", "Hades"),
+    ]
+
+
 def test_plugin_renew_game_process_pause_calls_service(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

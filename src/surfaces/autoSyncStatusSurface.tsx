@@ -223,8 +223,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       currentHasBackupLifecycle = null;
       clearAutoSyncStatusSyncTimeout();
       clearAutoSyncStatusHideTimeout();
-      
-      statusView.setContext(currentAutoSyncStatusState);
+
       currentAutoSyncStatusState = {
         ...currentAutoSyncStatusState,
         visible: false,

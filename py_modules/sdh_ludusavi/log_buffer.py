@@ -92,7 +92,7 @@ class DiagnosticLogBuffer:
         game_name: str | None = None,
     ) -> None:
         """Add an entry to the internal diagnostic log buffer and decky logs."""
-        log_msg = f"{operation or 'frontend'}: {message}"
+        log_msg = f"{operation or 'backend'}: {message}"
         if game_name:
             log_msg = f"[{game_name}] {log_msg}"
 

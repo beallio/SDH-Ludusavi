@@ -10,6 +10,10 @@ from typing import Any
 
 
 LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+# Origin labels remain part of `message`. Downstream event regexes search rather
+# than anchor, so both `frontend:` and `backend:` parse identically. Historical
+# `frontend:` lines are origin-ambiguous: before the backend default changed,
+# unlabelled backend messages were also rendered `frontend:`.
 LOG_LINE_RE = re.compile(
     r"^\[(?P<timestamp>[^\]]+)\]\s*\[(?P<level>DEBUG|INFO|WARNING|ERROR|CRITICAL)\]\s*:\s*(?P<message>.*)$"
 )

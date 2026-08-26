@@ -423,6 +423,52 @@ def test_updater_backend_logging_and_privacy() -> None:
     )
 
 
+def test_update_check_duplicate_prose_is_debug_while_unique_events_stay_info() -> None:
+    logged: list[tuple[str, str]] = []
+    now = datetime.datetime(2026, 8, 25, tzinfo=datetime.timezone.utc)
+    updater = create_updater(
+        now=lambda: now, log_cb=lambda level, message: logged.append((level, message))
+    )
+    updater._monotonic = lambda: 1.0
+
+    assert updater.check_for_update("0.2.0", force=True)["status"] == "current"
+    assert updater.check_for_update("0.2.0", force=False)["status"] == "current"
+
+    duplicate_prose = [
+        record
+        for record in logged
+        if record[1].startswith("Update check started")
+        or record[1].startswith("Update check cache hit")
+    ]
+    assert duplicate_prose == [
+        ("debug", "Update check started (version=0.2.0, force=True)"),
+        ("debug", "Update check started (version=0.2.0, force=False)"),
+        (
+            "debug",
+            "Update check cache hit (within 24h, channel=stable, version=0.2.0), elapsed_ms=0",
+        ),
+    ]
+    assert ("info", "Fetching GitHub releases") in logged
+
+    logged.clear()
+    updater.record_install_requested(
+        {
+            "version": "0.2.1",
+            "tag": "v0.2.1",
+            "channel": "stable",
+            "published_at": now.isoformat(),
+            "action": "update",
+        }
+    )
+    logged.clear()
+
+    assert updater.check_for_update("0.2.1", force=False)["status"] == "current"
+    assert any(
+        level == "info" and message.startswith("Update check pending-install fast path")
+        for level, message in logged
+    )
+
+
 def test_record_update_install_requested_returns_immediate_effective_version() -> None:
     updater = create_updater(version="0.2.2-dev.g123")
 
