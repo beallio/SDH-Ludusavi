@@ -278,7 +278,6 @@ class GameRegistry:
         return games
 
     def _coerce_game_status(self, data: dict[str, object]) -> GameStatus:
-        self.log("debug", f"Coercing status for '{data.get('name')}'", "refresh")
         error = data.get("error")
         return GameStatus(
             name=str(data["name"]),
