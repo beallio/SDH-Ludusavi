@@ -18,10 +18,15 @@ import {
   INSTALL_TYPE_DOWNGRADE,
   INSTALL_TYPE_UPDATE,
 } from "../utils/deckyInstaller";
-import { log, type LogFields } from "../utils/logging";
+import { log, type LogFields, type LogLevel } from "../utils/logging";
 import { updateReducer, initialUpdateState } from "./pluginUpdateReducer";
 
-function logUpdate(traceId: string | null, stage: string, details?: LogFields) {
+function logUpdate(
+  traceId: string | null,
+  stage: string,
+  details?: LogFields,
+  level: LogLevel = "info",
+) {
   const detailsStr = details
     ? Object.entries(details)
         .map(([k, v]) => `${k}=${v}`)
@@ -29,7 +34,7 @@ function logUpdate(traceId: string | null, stage: string, details?: LogFields) {
     : "";
   const prefix = traceId ? `trace_id=${traceId}` : "trace_id=none";
   const message = `${stage}: ${prefix}${detailsStr ? ", " + detailsStr : ""}`;
-  log("info", message, "update");
+  log(level, message, "update");
 }
 
 function generateUpdateTraceId(): string {
@@ -99,7 +104,7 @@ export function usePluginUpdateController({
         return;
       }
       if (opts.source === "automatic" && (state.installedOverride || state.pendingInstallVersion)) {
-        logUpdate(null, "automatic_check_suppressed_pending_install");
+        logUpdate(null, "automatic_check_suppressed_pending_install", undefined, "debug");
         return;
       }
       if (inFlightCheck.current) {
@@ -291,7 +296,7 @@ export function usePluginUpdateController({
               !!ctx.pending_update_install &&
               ctx.effective_installed_version === ctx.pending_update_install.version;
             if (ctx.last_available_tag && !hasPending) {
-              void checkForUpdates({ force: false, notify: false, source: "automatic" });
+              void checkForUpdatesRef.current({ force: false, notify: false, source: "automatic" });
             }
           }
         } else {
@@ -307,7 +312,7 @@ export function usePluginUpdateController({
     return () => {
       active = false;
     };
-  }, [currentVersion, onInstallVersionConfirmed, updateChannel, checkForUpdates, clearCheckTimeout]);
+  }, [currentVersion, onInstallVersionConfirmed, updateChannel, clearCheckTimeout]);
 
   useEffect(() => {
     if (!isHydrated) {
@@ -351,8 +356,8 @@ export function usePluginUpdateController({
     if (!automaticUpdateChecks || !currentVersion || currentVersion === "Loading...") {
       return;
     }
-    void checkForUpdates({ force: false, notify: false, source: "automatic" });
-  }, [automaticUpdateChecks, currentVersion, isHydrated, checkForUpdates]);
+    void checkForUpdatesRef.current({ force: false, notify: false, source: "automatic" });
+  }, [automaticUpdateChecks, currentVersion, isHydrated]);
 
   const install = useCallback(async (targetCandidate: PluginUpdateCandidate) => {
     if (state.phase === "installing" || state.phase === "handoff_pending") return;
