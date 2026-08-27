@@ -1,0 +1,62 @@
+{
+  "date": "2026-08-26",
+  "task_objective": "Implement the update-check-suppression plan: make the pending-install automatic-check no-op debug-only and prevent install state transitions from re-running the hydration and automatic-check effects.",
+  "files_modified": [
+    "src/controllers/pluginUpdateController.tsx",
+    "src/controllers/pluginUpdateController.test.tsx",
+    "docs/agent_conversations/2026-08-26_update-check-suppression.json"
+  ],
+  "tests_added": {
+    "T1": [
+      "logs a suppressed automatic check at debug after an install"
+    ],
+    "T2": [
+      "does not re-run hydration or automatic update-check effects after an install"
+    ]
+  },
+  "design_decisions": [
+    "Added the shared ../utils/logging mock required by the plan and verified every pre-existing case in pluginUpdateController.test.tsx still passed.",
+    "Kept logUpdate defaulting to info and passed debug only for automatic_check_suppressed_pending_install; check_reuse remains info.",
+    "Kept checkForUpdates and its dependency array unchanged. The hydration and automatic-check effects now invoke checkForUpdatesRef.current and omit only checkForUpdates from their dependency arrays.",
+    "Preserved all five useEffect calls and their order. The test documents that hydration is index 2 and automatic checks is index 4.",
+    "The T2 test conditionally executes an effect when its dependency comparison changes, so the absent suppression log is load-bearing in the hand-rolled React mock rather than a consequence of the mock not scheduling effects."
+  ],
+  "tdd_and_mutation_evidence": {
+    "baseline": {
+      "vitest": "34 files passed, 379 tests passed",
+      "pytest": "1059 tests passed"
+    },
+    "T1_red": "The new logging test failed with info received where debug was expected for automatic_check_suppressed_pending_install; the completed-install fixture also produced check_start at info.",
+    "T1_green": "34 files passed, 380 tests passed.",
+    "T1_mutation_gate": "Reverting only pluginUpdateController.tsx made the T1 logging test fail with info received where debug was expected; mutation_exit=1.",
+    "T2_red": "The new install-transition test failed its hydration dependency identity comparison after INSTALL_SUCCESS; 1 failed and 380 passed.",
+    "T2_green": "34 files passed, 381 tests passed.",
+    "T2_mutation_gate": "Reverting only pluginUpdateController.tsx made the T2 hydration dependency identity comparison fail; mutation_exit=1."
+  },
+  "verification": {
+    "V1": {
+      "command": "scripts/orchestration/run-quality-gates",
+      "result": "exit 0; Vitest 34 files/381 tests passed, TypeScript typecheck and Rollup build passed, Ruff check/format and ty passed, Pytest 1059 passed, and review-note deletion protection passed.",
+      "baseline_comparison": "Vitest increased by exactly two tests; Pytest count remained 1059. The worktree was clean afterward."
+    },
+    "V2": {
+      "command": "./run.sh pnpm exec vitest run src/controllers/pluginUpdateController.test.tsx",
+      "result": "exit 0; 1 file and 11 tests passed. Verbose evidence named both 'dependency arrays for re-check effects do not change on check result' and 'does not re-run hydration or automatic update-check effects after an install'."
+    },
+    "V3": {
+      "command": "plan-specified reverted-controller negative control",
+      "result": "Passed: the reverted frontend suite exited 1 and named both T1 and T2 tests as failures. The controller was restored with a clean worktree."
+    }
+  },
+  "source_disagreements": [
+    "None. Before edits, the controller declared exactly five useEffect calls, with hydration at index 2 and automatic checks at index 4, and checkForUpdatesRef already existed and was refreshed during render as described by the plan."
+  ],
+  "deferred_verification": [
+    "No on-device verification was performed. After a dev release, install the build, enable debug logging, install a further QAM update, and inspect the newest /home/deck/homebrew/logs/SDH-Ludusavi/ log: it should have zero INFO automatic_check_suppressed_pending_install lines and at most one DEBUG line for the install.",
+    "The reduction in get_update_check_context backend RPCs is inferred from preventing the two effect re-runs; it was not measured across a real Deck install.",
+    "The assertions run against the hand-rolled React hook mock. It models dependency identity but not batching, StrictMode double invocation, or effect cleanup ordering.",
+    "check_reuse deliberately remains INFO.",
+    "The pending-install automatic-check guard decision is unchanged and was assumed correct by this plan."
+  ],
+  "results": "All planned implementation commits, required mutation gates, and V1-V3 verification completed successfully. Ready for orchestrated review."
+}
