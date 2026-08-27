@@ -10,6 +10,7 @@ from .constants import RECENCY_TIMESTAMP_MARGIN_SECONDS
 from .coordinator import OperationLockedError
 from .gateway import LudusaviGateway
 from .history import HistoryManager
+from .ludusavi_executor import LudusaviOperationCancelledError
 from .registry import GameRegistry
 from sdh_ludusavi.game_names import sanitize_game_name
 
@@ -162,6 +163,14 @@ class GameLifecycleManager:
                     )
         except _GateLostError:
             return self.dependencies.skip("start", game_name, "gate_lost")
+        except LudusaviOperationCancelledError:
+            self.dependencies.history.record_history(
+                game_name, operation, trigger, "skipped", reason="cancelled"
+            )
+            self.dependencies.log(
+                "info", f"{operation} cancelled for {game_name}", operation, game_name
+            )
+            return {"status": "skipped", "reason": "cancelled", "game": game_name}
         # Intentionally broad: record history and re-raise on adapter failure
         except Exception as exc:
             if skip_locked_history and isinstance(exc, OperationLockedError):

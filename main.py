@@ -11,6 +11,7 @@ from typing import Any
 
 import decky
 
+from sdh_ludusavi.ludusavi_executor import LudusaviOperationCancelledError
 from sdh_ludusavi.rpc_pool import DaemonThreadPool
 from sdh_ludusavi.singleton import enforce_single_instance
 from sdh_ludusavi.service import (
@@ -418,6 +419,9 @@ class Plugin:
         except OperationLockedError as exc:
             decky.logger.info("%s skipped: %s", operation, exc)
             return {"status": "skipped", "reason": "operation_running", "message": str(exc)}
+        except LudusaviOperationCancelledError as exc:
+            decky.logger.debug("%s cancelled: %s", operation, exc)
+            return {"status": "skipped", "reason": "cancelled", "message": str(exc)}
         except Exception as exc:
             decky.logger.exception("%s failed", operation)
             return {"status": "failed", "message": str(exc)}

@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from sdh_ludusavi.service import OperationLockedError
+from sdh_ludusavi.ludusavi_executor import LudusaviOperationCancelledError
 
 
 class FakeLogger:
@@ -251,6 +252,28 @@ def test_call_maps_generic_exception_from_worker_thread(
 
     assert result == {"status": "failed", "message": "boom"}
     assert logger.exceptions == ["refresh failed"]
+
+
+def test_call_maps_ludusavi_cancellation_to_a_visible_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decky, logger = fake_decky_module(tmp_path, settings_dir=tmp_path / "settings")
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+
+    def raise_cancelled() -> dict[str, object]:
+        raise LudusaviOperationCancelledError("Ludusavi operation was cancelled")
+
+    result = asyncio.run(plugin._call("refresh", raise_cancelled))
+
+    assert result == {
+        "status": "skipped",
+        "reason": "cancelled",
+        "message": "Ludusavi operation was cancelled",
+    }
+    assert logger.debugs == ["refresh cancelled: Ludusavi operation was cancelled"]
+    assert logger.exceptions == []
 
 
 def test_call_maps_base_exception_from_worker_thread(
