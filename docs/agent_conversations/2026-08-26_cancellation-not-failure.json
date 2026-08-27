@@ -1,0 +1,102 @@
+{
+  "date": "2026-08-26",
+  "task_objective": "Treat a Ludusavi cancellation as ordinary cancelled control flow rather than a failed operation across the coordinator, lifecycle, RPC boundary, and QAM history text.",
+  "branch": "feat/cancellation-not-failure",
+  "files_modified": [
+    "docs/plans/2026-08-26_cancellation-not-failure.md",
+    "py_modules/sdh_ludusavi/coordinator.py",
+    "py_modules/sdh_ludusavi/lifecycle.py",
+    "main.py",
+    "src/formatting/operationText.ts",
+    "tests/test_coordinator.py",
+    "tests/test_service.py",
+    "tests/test_main.py",
+    "src/formatting/operationText.test.ts",
+    "docs/agent_conversations/2026-08-26_cancellation-not-failure.json"
+  ],
+  "commits": [
+    "docs(plan): add cancellation-not-failure implementation plan",
+    "fix(coordinator): treat Ludusavi cancellation as cancelled, not failed",
+    "fix(lifecycle): record a cancelled operation as skipped, not failed",
+    "fix(rpc): return cancelled operations as skipped without a traceback",
+    "feat(ui): label a cancelled operation as cancelled in the QAM"
+  ],
+  "design_decisions": {
+    "coordinator": "LudusaviOperationCancelledError is re-raised after a debug log and updates in-memory operation status to last_result=cancelled and last_error=null; generic exceptions retain the existing error log and failed status.",
+    "lifecycle": "Cancellation is converted to a skipped result, records history directly with the in-scope operation and trigger as restore/auto_start, and does not call dependencies.skip so it cannot misidentify the automatic restore as a manual restore.",
+    "rpc": "Plugin._call catches only LudusaviOperationCancelledError before its generic Exception branch, logs at debug, and returns status=skipped and reason=cancelled without decky.logger.exception.",
+    "ui": "The existing skipped text formatter renders cancelled as cancelled before it finished. The reason deliberately remains outside SILENT_SKIPPED_REASONS."
+  },
+  "tests_added_or_rewritten": {
+    "T1": [
+      "test_operation_coordinator_records_cancellation_without_an_error_log",
+      "test_operation_coordinator_keeps_runtime_errors_as_failures"
+    ],
+    "T2": [
+      "Rewrote test_cancelled_guarded_restore_records_failure_and_releases_the_coordinator_lock as test_cancelled_guarded_restore_records_skip_and_releases_the_coordinator_lock."
+    ],
+    "T3": [
+      "test_call_maps_ludusavi_cancellation_to_a_visible_skip"
+    ],
+    "T4": [
+      "should format a cancelled restore correctly"
+    ]
+  },
+  "test_rewrite_rationale": "The old guarded-restore test documented the defect: a cancellation re-raised and persisted a failed history entry. The implementation plan explicitly authorized rewriting that expected value. Its lock-release assertion was retained and strengthened by requiring a following manual backup to complete rather than report operation_running.",
+  "tdd_evidence": {
+    "T1_red": "The completed RED control failed because the old coordinator recorded refresh failed: Ludusavi operation was cancelled at error level. A first harness-only attempt used list.append as a four-argument log callback and was corrected before evaluating behavior.",
+    "T1_mutation": "6 coordinator tests passed with the implementation; stashing only coordinator.py made the new cancellation test fail on the old error log.",
+    "T2_red": "The rewritten guarded-restore test failed with the uncaught LudusaviOperationCancelledError before the lifecycle conversion.",
+    "T2_mutation": "146 service tests passed with the implementation; stashing only lifecycle.py made the renamed cancellation test fail with the uncaught cancellation.",
+    "T3_red": "The RPC test received status=failed rather than status=skipped before the new exception boundary.",
+    "T3_mutation": "36 main tests passed with the implementation; stashing only main.py made the new RPC cancellation test receive status=failed.",
+    "T4_red": "The frontend test received Restore skipped — cancelled from the default branch before the explicit cancelled text case.",
+    "T4_mutation": "379 frontend tests passed with the implementation; stashing only operationText.ts made the frontend test receive the old default text."
+  },
+  "verification": {
+    "baseline": {
+      "python": "1056 passed in 45.01s",
+      "frontend": "34 test files, 378 tests passed"
+    },
+    "V1": {
+      "command": "scripts/orchestration/run-quality-gates",
+      "result": "exit 0; 1059 Python tests passed in 37.36s at 90.13% coverage; 34 frontend test files and 379 frontend tests passed; quality gates passed",
+      "review_note_check": "scripts/orchestration/check-review-notes-not-deleted reported no deleted review notes"
+    },
+    "V2": {
+      "boundary_suite": "188 selected coordinator, service, and main tests passed with --no-cov",
+      "generic_boundary_regression": "2 passed, 34 deselected: maps_generic_exception_from_worker_thread and maps_base_exception_from_worker_thread both remained unchanged"
+    },
+    "V3": {
+      "result": "The clean temporary worktree reverted all four implementation files and both suites failed as required, then restored cleanly.",
+      "python_failures": [
+        "test_operation_coordinator_records_cancellation_without_an_error_log",
+        "test_call_maps_ludusavi_cancellation_to_a_visible_skip",
+        "test_cancelled_guarded_restore_records_skip_and_releases_the_coordinator_lock"
+      ],
+      "frontend_failure": "src/formatting/operationText.test.ts > getLastOperationText > should format a cancelled restore correctly",
+      "exit_values": "python_exit=1, frontend_exit=1"
+    },
+    "V4": "Deferred: no automated command can prove Decky runtime behavior while a real Steam launch gate is held."
+  },
+  "fake_decky_module_debug_support": "Yes. FakeLogger records debug calls in logger.debugs, so T3 asserts the exact debug message and that logger.exceptions remains empty.",
+  "source_plan_disagreements": [
+    "pyproject.toml applies --cov-fail-under=83 globally. The plan's literal single-file T1-T3 commands and selected V2 command report every selected test as passed but exit nonzero solely because a partial selection cannot cover the whole package. The behavior and mutation checks therefore used the same commands with --no-cov; V1 retained the coverage-enforced full suite and passed at 90.13%.",
+    "The main checkout contained an unrelated, pre-existing untracked docs/plans/2026-08-26_update-check-suppression.md. It was preserved. Because V3 requires a clean worktree and its own git status check, V3 ran in a detached temporary worktree under /tmp/sdh_ludusavi instead of hiding, stashing, or changing the unrelated plan.",
+    "The temporary V3 worktree initially lacked node_modules, which created unrelated package-build and Vitest failures. That run was rejected as invalid evidence. Running ./run.sh pnpm install --frozen-lockfile --ignore-scripts in the temporary worktree used the existing lockfile without downloads; the repeated V3 run named only the expected four new tests."
+  ],
+  "deferred_on_device_recipe": [
+    "Install the dev build on a Deck and enable debug logging.",
+    "Launch a tracked game whose backup is newer than the local save, so the pre-game restore actually runs.",
+    "Press resume while the launch gate is still held.",
+    "In /home/deck/homebrew/logs/SDH-Ludusavi/, the newest log must contain no line matching start failed: Ludusavi operation was cancelled and no traceback for that operation, and must contain a Skipped start line whose reason is cancelled.",
+    "In the QAM, that game's history must show a skipped entry, not a failure, and the last-operation text must read Restore skipped — cancelled before it finished."
+  ],
+  "deferred_and_not_verified": [
+    "No on-device verification was performed; watchdog gate-expiry behavior is exercised only by unit tests.",
+    "Unload cancellation is not covered end to end. T1 and T3 make its direct path quiet, but a refresh cancellation swallowed by registry.refresh_games can still surface as Ludusavi refresh failed in the frontend while it remains alive; that path is intentionally out of scope.",
+    "Timing was not measured. The change adds one exception clause per layer and is not expected to affect latency.",
+    "last_result=cancelled is a new in-memory operation-status value. Consumers of get_operation_status were not audited for unknown-value rendering, and the value does not survive a plugin restart."
+  ],
+  "results": "All requested implementation, TDD mutation evidence, full quality gates, V2 boundary checks, and the valid V3 negative control completed. The unrelated untracked plan remains intentionally untouched in the main checkout."
+}

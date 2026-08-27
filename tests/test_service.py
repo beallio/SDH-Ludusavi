@@ -1240,7 +1240,7 @@ def test_start_mutations_run_once_through_the_exact_watchdog_guard(
     assert adapter.restores == expected_restores
 
 
-def test_cancelled_guarded_restore_records_failure_and_releases_the_coordinator_lock(
+def test_cancelled_guarded_restore_records_skip_and_releases_the_coordinator_lock(
     tmp_path: Path,
 ) -> None:
     from sdh_ludusavi.ludusavi_executor import LudusaviOperationCancelledError
@@ -1257,16 +1257,24 @@ def test_cancelled_guarded_restore_records_failure_and_releases_the_coordinator_
 
     adapter.restore = cancelled_restore
     try:
-        with pytest.raises(LudusaviOperationCancelledError):
-            service.restore_game_on_start("Hades", "1145360", 4567, str(paused["lease_id"]))
+        result = service.restore_game_on_start("Hades", "1145360", 4567, str(paused["lease_id"]))
     finally:
         service.resume_all_paused_processes()
 
+    assert result == {"status": "skipped", "reason": "cancelled", "game": "Hades"}
     history = service.get_game_history()["Hades"]
-    assert history["last_failure"]["operation"] == "restore"
-    assert history["last_failure"]["status"] == "failed"
+    assert history["last_failure"] is None
+    assert history["last_skip"] is not None
+    assert history["last_skip"] | {"timestamp": "ignored"} == {
+        "operation": "restore",
+        "trigger": "auto_start",
+        "status": "skipped",
+        "reason": "cancelled",
+        "message": None,
+        "timestamp": "ignored",
+    }
     assert history["last_restore"] is None
-    assert service.get_operation_status()["is_running"] is False
+    assert service.force_backup("Hades")["status"] == "backed_up"
 
 
 def test_service_stop_waits_for_adapter_cancellation_before_thawing_a_paused_game(
