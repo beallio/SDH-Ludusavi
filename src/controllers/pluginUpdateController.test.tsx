@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as ludusaviRpc from "../api/ludusaviRpc";
 import * as deckyInstaller from "../utils/deckyInstaller";
+import * as logging from "../utils/logging";
 
 
 let stateIdx = 0;
@@ -73,6 +74,8 @@ vi.mock("../utils/deckyInstaller", () => ({
   INSTALL_TYPE_UPDATE: "UPDATE",
   INSTALL_TYPE_DOWNGRADE: "DOWNGRADE",
 }));
+
+vi.mock("../utils/logging", () => ({ log: vi.fn() }));
 
 import { usePluginUpdateController } from "./pluginUpdateController";
 
@@ -281,6 +284,58 @@ describe("PluginUpdateController", () => {
 
     // If the fix is correct (using isHydrated instead of state.phase), the deps will be identical.
     expect(depsAfter).toEqual(depsBefore);
+  });
+
+  it("logs a suppressed automatic check at debug after an install", async () => {
+    usePluginUpdateController({
+      currentVersion: "0.1.0",
+      updateChannel: "stable",
+      automaticUpdateChecks: true,
+    });
+
+    const dispatch = setters[0];
+    dispatch({ type: "HYDRATION_COMPLETE", installedReleasePublishedAt: null });
+
+    stateIdx = 0;
+    activeEffects.length = 0;
+    usePluginUpdateController({
+      currentVersion: "0.1.0",
+      updateChannel: "stable",
+      automaticUpdateChecks: true,
+    });
+    activeEffects[4].cb();
+
+    dispatch({
+      type: "INSTALL_SUCCESS",
+      version: "0.2.0",
+      channel: "stable",
+      preInstallVersion: "0.1.0",
+    });
+
+    stateIdx = 0;
+    activeEffects.length = 0;
+    const installedController = usePluginUpdateController({
+      currentVersion: "0.1.0",
+      updateChannel: "stable",
+      automaticUpdateChecks: true,
+    });
+
+    expect(installedController.effectiveCurrentVersion).toBe("0.2.0");
+    expect(installedController.isInstalling).toBe(false);
+
+    activeEffects[4].cb();
+    await installedController.checkNow();
+
+    expect(logging.log).toHaveBeenCalledWith(
+      "debug",
+      expect.stringContaining("automatic_check_suppressed_pending_install"),
+      "update",
+    );
+    expect(logging.log).toHaveBeenCalledWith(
+      "info",
+      expect.stringContaining("check_start"),
+      "update",
+    );
   });
 });
 
