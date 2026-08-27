@@ -26,6 +26,10 @@ describe("getLastOperationText", () => {
     expect(getLastOperationText("skipped", "operation_running", null, "backup")).toBe("Backup skipped — another operation is running");
   });
 
+  it("should format a cancelled restore correctly", () => {
+    expect(getLastOperationText("skipped", "cancelled", null, "start")).toBe("Restore skipped — cancelled before it finished");
+  });
+
   it("should format backward compatible null operation correctly", () => {
     expect(getLastOperationText("skipped", "local_current", null, null)).toBe("Skipped — local save is already current");
   });
