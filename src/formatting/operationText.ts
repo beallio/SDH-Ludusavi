@@ -53,6 +53,9 @@ export function getLastOperationText(
           case "operation_running":
             detail = "another operation is running";
             break;
+          case "cancelled":
+            detail = "cancelled before it finished";
+            break;
           case "unmatched_game":
             detail = "could not match game name";
             break;
