@@ -5,6 +5,7 @@ import time
 import pytest
 
 from sdh_ludusavi.coordinator import OperationCoordinator, OperationLockedError, OperationState
+from sdh_ludusavi.ludusavi_executor import LudusaviOperationCancelledError
 
 
 class DummyService:
@@ -154,3 +155,45 @@ def test_operation_coordinator_timeout_preserves_active_operation_and_skips_queu
     finally:
         release_active.set()
         active.join(timeout=0.5)
+
+
+def test_operation_coordinator_records_cancellation_without_an_error_log() -> None:
+    coord = OperationCoordinator()
+    logs: list[tuple[str, str, str | None, str | None]] = []
+
+    def record_log(level: str, message: str, operation: str | None, game_name: str | None) -> None:
+        logs.append((level, message, operation, game_name))
+
+    def raise_cancelled() -> None:
+        raise LudusaviOperationCancelledError("Ludusavi operation was cancelled")
+
+    with pytest.raises(LudusaviOperationCancelledError):
+        coord.run_locked("refresh", "Hades", raise_cancelled, record_log)
+
+    assert [entry for entry in logs if entry[0] == "error"] == []
+    debug_entries = [entry for entry in logs if entry[0] == "debug"]
+    assert len(debug_entries) == 1
+    assert "refresh" in debug_entries[0][1]
+    assert coord.get_status()["last_result"] == "cancelled"
+    assert coord.get_status()["last_error"] is None
+    assert coord.run_locked("refresh", "Hades", lambda: "completed") == "completed"
+
+
+def test_operation_coordinator_keeps_runtime_errors_as_failures() -> None:
+    coord = OperationCoordinator()
+    logs: list[tuple[str, str, str | None, str | None]] = []
+
+    def record_log(level: str, message: str, operation: str | None, game_name: str | None) -> None:
+        logs.append((level, message, operation, game_name))
+
+    def raise_runtime_error() -> None:
+        raise RuntimeError("unexpected failure")
+
+    with pytest.raises(RuntimeError, match="unexpected failure"):
+        coord.run_locked("backup", "Hades", raise_runtime_error, record_log)
+
+    error_entries = [entry for entry in logs if entry[0] == "error"]
+    assert len(error_entries) == 1
+    assert "backup failed: unexpected failure" in error_entries[0][1]
+    assert coord.get_status()["last_result"] == "failed"
+    assert coord.get_status()["last_error"] == "unexpected failure"
