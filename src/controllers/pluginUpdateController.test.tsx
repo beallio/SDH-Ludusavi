@@ -337,6 +337,77 @@ describe("PluginUpdateController", () => {
       "update",
     );
   });
+
+  it("does not re-run hydration or automatic update-check effects after an install", async () => {
+    usePluginUpdateController({
+      currentVersion: "0.1.0",
+      updateChannel: "stable",
+      automaticUpdateChecks: true,
+    });
+
+    const dispatch = setters[0];
+    dispatch({ type: "HYDRATION_COMPLETE", installedReleasePublishedAt: null });
+
+    stateIdx = 0;
+    activeEffects.length = 0;
+    usePluginUpdateController({
+      currentVersion: "0.1.0",
+      updateChannel: "stable",
+      automaticUpdateChecks: true,
+    });
+
+    expect(activeEffects).toHaveLength(5);
+    activeEffects[4].cb();
+    const depsBefore = activeEffects.map((effect) => effect.deps);
+
+    dispatch({
+      type: "INSTALL_SUCCESS",
+      version: "0.2.0",
+      channel: "stable",
+      preInstallVersion: "0.1.0",
+    });
+
+    stateIdx = 0;
+    activeEffects.length = 0;
+    const installedController = usePluginUpdateController({
+      currentVersion: "0.1.0",
+      updateChannel: "stable",
+      automaticUpdateChecks: true,
+    });
+    const depsAfter = activeEffects.map((effect) => effect.deps);
+
+    // The controller declares five effects; hydration is index 2 and automatic checks is index 4.
+    const hydrationDepsChanged = depsAfter[2].some(
+      (dependency, index) => dependency !== depsBefore[2][index],
+    );
+    const automaticDepsChanged = depsAfter[4].some(
+      (dependency, index) => dependency !== depsBefore[4][index],
+    );
+    if (hydrationDepsChanged) {
+      activeEffects[2].cb();
+    }
+    if (automaticDepsChanged) {
+      activeEffects[4].cb();
+    }
+    await Promise.resolve();
+
+    expect(depsAfter[2]).toHaveLength(depsBefore[2].length);
+    depsAfter[2].forEach((dependency, index) => {
+      expect(dependency).toBe(depsBefore[2][index]);
+    });
+    expect(depsAfter[4]).toHaveLength(depsBefore[4].length);
+    depsAfter[4].forEach((dependency, index) => {
+      expect(dependency).toBe(depsBefore[4][index]);
+    });
+    expect(states[0].installedOverride).toMatchObject({ version: "0.2.0" });
+    expect(states[0].pendingInstallVersion).toBe("0.2.0");
+    expect(installedController.effectiveCurrentVersion).toBe("0.2.0");
+    expect(logging.log).not.toHaveBeenCalledWith(
+      "debug",
+      expect.stringContaining("automatic_check_suppressed_pending_install"),
+      "update",
+    );
+  });
 });
 
 import { updateReducer, initialUpdateState, UpdateState } from "./pluginUpdateReducer";

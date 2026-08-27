@@ -296,7 +296,7 @@ export function usePluginUpdateController({
               !!ctx.pending_update_install &&
               ctx.effective_installed_version === ctx.pending_update_install.version;
             if (ctx.last_available_tag && !hasPending) {
-              void checkForUpdates({ force: false, notify: false, source: "automatic" });
+              void checkForUpdatesRef.current({ force: false, notify: false, source: "automatic" });
             }
           }
         } else {
@@ -312,7 +312,7 @@ export function usePluginUpdateController({
     return () => {
       active = false;
     };
-  }, [currentVersion, onInstallVersionConfirmed, updateChannel, checkForUpdates, clearCheckTimeout]);
+  }, [currentVersion, onInstallVersionConfirmed, updateChannel, clearCheckTimeout]);
 
   useEffect(() => {
     if (!isHydrated) {
@@ -356,8 +356,8 @@ export function usePluginUpdateController({
     if (!automaticUpdateChecks || !currentVersion || currentVersion === "Loading...") {
       return;
     }
-    void checkForUpdates({ force: false, notify: false, source: "automatic" });
-  }, [automaticUpdateChecks, currentVersion, isHydrated, checkForUpdates]);
+    void checkForUpdatesRef.current({ force: false, notify: false, source: "automatic" });
+  }, [automaticUpdateChecks, currentVersion, isHydrated]);
 
   const install = useCallback(async (targetCandidate: PluginUpdateCandidate) => {
     if (state.phase === "installing" || state.phase === "handoff_pending") return;
