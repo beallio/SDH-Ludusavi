@@ -5,6 +5,8 @@ import threading
 from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
+from .ludusavi_executor import LudusaviOperationCancelledError
+
 LOGGER = logging.getLogger("sdh_ludusavi.service.coordinator")
 
 
@@ -69,6 +71,11 @@ class OperationCoordinator:
         self._operation.last_error = None
         try:
             result = callback()
+        except LudusaviOperationCancelledError:
+            self._operation.last_result = "cancelled"
+            self._operation.last_error = None
+            log("debug", f"{operation} cancelled")
+            raise
         # Intentionally broad: catch all exceptions to update operation status
         except Exception as exc:
             self._operation.last_error = str(exc)
