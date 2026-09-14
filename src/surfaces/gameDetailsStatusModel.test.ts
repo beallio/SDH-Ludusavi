@@ -214,4 +214,84 @@ describe("game details status selection", () => {
     expect(selected.kind).toBe("not_tracked");
     expect(selected.status).toBeNull();
   });
+
+  it("uses failed readiness, local terminal facts, and current inventory before older history", () => {
+    const failed = selectGameDetailsStatus({
+      snapshot: snapshot({ games: null, trackingReadiness: "failed" }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(failed.kind).toBe("unavailable");
+
+    const localFailure = selectGameDetailsStatus({
+      snapshot: snapshot({ autoSyncObservations: {
+        "100": {
+          appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", lifecycle: "lifecycle_start", generation: 3,
+          status: "error", activity: "settled", observedAt: 30, resultStatus: "failed",
+          localOperation: { status: "error", resultStatus: "failed", observedAt: 30, generation: 3 },
+          syncObservation: { status: "syncthing_complete", observedAt: 20, generation: 3 },
+        },
+      } }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(localFailure.kind).toBe("local_result");
+    expect(localFailure.status).toBe("error");
+
+    const backupNeeded = selectGameDetailsStatus({
+      snapshot: snapshot({
+        games: [{ name: "Fixture", steam_id: "100", configured: true, has_backup: false, needs_first_backup: true, error: null, status: "needs_first_backup" }],
+        gameHistory: { Fixture: { last_backup: null, last_restore: null, last_skip: null, last_failure: null, last_operation: { operation: "backup", trigger: "manual_backup", status: "backed_up", reason: null, message: null, timestamp: "2026-09-13 12:00:00" } } },
+      }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(backupNeeded.kind).toBe("needs_backup");
+  });
+
+  it("does not present canceled transfers as active and applies disabled settings after activity settles", () => {
+    const settled = snapshot({
+      settings: { ...settings, auto_sync_enabled: false },
+      autoSyncObservations: { "100": {
+        appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", lifecycle: "lifecycle_exit", generation: 4,
+        status: "syncthing_pending_upload", activity: "unverified", observedAt: 40,
+        localOperation: { status: "has_backup", observedAt: 20, generation: 4 },
+        syncObservation: { status: "syncthing_pending_upload", observedAt: 40, generation: 4 },
+      } },
+    });
+    const disabled = selectGameDetailsStatus({ snapshot: settled, appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible" });
+    expect(disabled.kind).toBe("auto_sync_disabled");
+    expect(disabled.active).toBe(false);
+
+    const settledObservation = (settled.autoSyncObservations as Record<string, any>)["100"];
+    const active = selectGameDetailsStatus({
+      snapshot: { ...settled, settings: { ...settings, auto_sync_enabled: false }, autoSyncObservations: { "100": { ...settledObservation, activity: "active" } } },
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(active.kind).toBe("active");
+  });
+
+  it("keeps local and remote wording tied to their own result and lifecycle", () => {
+    const start = selectGameDetailsStatus({
+      snapshot: snapshot({ autoSyncObservations: { "100": {
+        appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", lifecycle: "lifecycle_start", generation: 5,
+        status: "syncthing_complete", activity: "settled", observedAt: 20,
+        localOperation: { status: "has_backup", resultStatus: "skipped", observedAt: 10, generation: 5 },
+        syncObservation: { status: "syncthing_complete", observedAt: 20, generation: 5 },
+      } } }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(start.description).toContain("Local result: Local save already current.");
+    expect(start.description).toContain("Last remote observation: Incoming folder activity settled.");
+
+    const exit = selectGameDetailsStatus({
+      snapshot: snapshot({ autoSyncObservations: { "100": {
+        appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", lifecycle: "lifecycle_exit", generation: 6,
+        status: "syncthing_complete", activity: "settled", observedAt: 20,
+        localOperation: { status: "has_backup", resultStatus: "backed_up", observedAt: 10, generation: 6 },
+        syncObservation: { status: "syncthing_complete", observedAt: 20, generation: 6 },
+      } } }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(exit.description).toContain("Remote upload observed with a connected peer.");
+    expect(exit.description).not.toContain("Incoming folder activity settled.");
+  });
+
 });

@@ -310,4 +310,59 @@ describe("LudusaviStateStore", () => {
       expect(store.resolveCanonicalGameName("Doomer", "")).toBeNull();
     });
   });
+
+  describe("details status observations", () => {
+    const game = (name: string, appID: string) => ({ name, steam_id: appID, configured: true, has_backup: true, needs_first_backup: false, error: null, status: "has_backup" as const });
+    const operation = (trigger: "auto_exit" | "manual_backup", timestamp: string, status: "backed_up" | "failed" = "backed_up") => ({ operation: "backup" as const, trigger, status, reason: null, message: null, timestamp });
+    const history = (entry: ReturnType<typeof operation>) => ({ last_backup: entry, last_restore: null, last_skip: null, last_failure: entry.status === "failed" ? entry : null, last_operation: entry });
+
+    it("reconciles its own automatic history refresh but clears remote evidence for later manual work", () => {
+      const store = createLudusaviStateStore();
+      store.applyRefreshResult({ games: [game("Fixture", "100")], aliases: {}, history: { Fixture: history(operation("auto_exit", "2026-09-13 10:00:00")) }, dependency_error: null });
+      const options = { source: "lifecycle_exit" as const, lifecycle: "lifecycle_exit" as const, generation: 1, gameName: "Fixture", appID: "100" };
+      store.recordAutoSyncStatus("checking", options);
+      store.recordAutoSyncStatus("has_backup", { ...options, resultStatus: "backed_up" });
+      store.recordAutoSyncStatus("syncthing_folder_not_found", options);
+      store.setGameHistory({ Fixture: history(operation("auto_exit", "2026-09-13 11:00:00")) });
+      expect(store.getSnapshot().autoSyncObservations["100"].syncObservation?.status).toBe("syncthing_folder_not_found");
+      expect(store.getSnapshot().autoSyncObservations["100"].localOperation?.historyTimestamp).toBe("2026-09-13 11:00:00");
+
+      store.setGameHistory({ Fixture: history(operation("manual_backup", "2026-09-13 12:00:00", "failed")) });
+      expect(store.getSnapshot().autoSyncObservations["100"].syncObservation).toBeNull();
+      expect(store.getSnapshot().autoSyncObservations["100"].localOperation).toBeNull();
+    });
+
+    it("reconciles a first automatic operation before later manual history replaces it", () => {
+      const store = createLudusaviStateStore();
+      store.applyRefreshResult({ games: [game("Fixture", "100")], aliases: {}, history: {}, dependency_error: null });
+      const options = { source: "lifecycle_exit" as const, lifecycle: "lifecycle_exit" as const, generation: 1, gameName: "Fixture", appID: "100" };
+      store.recordAutoSyncStatus("checking", options);
+      store.recordAutoSyncStatus("has_backup", { ...options, resultStatus: "backed_up" });
+      store.recordAutoSyncStatus("syncthing_complete", options);
+
+      store.setGameHistory({ Fixture: history(operation("auto_exit", "2026-09-13 11:00:00")) });
+      expect(store.getSnapshot().autoSyncObservations["100"].syncObservation?.status).toBe("syncthing_complete");
+
+      store.setGameHistory({ Fixture: history(operation("manual_backup", "2026-09-13 12:00:00", "failed")) });
+      expect(store.getSnapshot().autoSyncObservations["100"].syncObservation).toBeNull();
+      expect(store.getSnapshot().autoSyncObservations["100"].localOperation).toBeNull();
+    });
+
+    it("rejects a late generation after an alias retarget and accepts a new lifecycle", () => {
+      const store = createLudusaviStateStore();
+      store.applyRefreshResult({ games: [game("A", "")], aliases: { Shortcut: "A" }, history: {}, dependency_error: null });
+      const old = { source: "lifecycle_exit" as const, lifecycle: "lifecycle_exit" as const, generation: 4, gameName: "Shortcut", appID: "200" };
+      store.recordAutoSyncStatus("checking", old);
+      store.applyRefreshResult({ games: [game("B", "")], aliases: { Shortcut: "B" }, history: {}, dependency_error: null });
+      store.recordAutoSyncStatus("syncthing_complete", old);
+      expect(store.getSnapshot().autoSyncObservations["200"]).toBeUndefined();
+      store.recordAutoSyncStatus("syncthing_complete", { ...old, generation: undefined });
+      expect(store.getSnapshot().autoSyncObservations["200"]).toBeUndefined();
+      const current = { ...old, generation: 5 };
+      store.recordAutoSyncStatus("checking", current);
+      store.recordAutoSyncStatus("syncthing_complete", current);
+      expect(store.getSnapshot().autoSyncObservations["200"].canonicalGameName).toBe("B");
+    });
+  });
+
 });

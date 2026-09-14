@@ -47,8 +47,9 @@ Lifecycle verification states also reset the BrowserView surface before publishi
 `VERIFYING GAME SAVE` so game start and game exit never reuse a surface that can
 retain stale result pixels.
 
-React global components, React DOM portals, diagnostic surface cycling, and SteamUI
-composition-hook fallback paths are not production surfaces for this feature.
+React DOM portals, diagnostic surface cycling, and SteamUI composition-hook fallback paths are
+not BrowserView-strip surfaces for this feature. The guarded details row is the one approved React
+route contribution: it uses Decky's public route hook, reads only native state, and adds no action.
 
 An external native overlay process, like OverLaid's backend-launched `DISPLAY=:0`
 overlay binary, remains a fallback architecture only. The autosync strip should stay
@@ -300,12 +301,21 @@ Validation commands:
 
 The row appears only after the selected library entry has loaded matching details with both
 Cloud enable flags. It is hidden when both flags are enabled, which is a display rule only and
-does not change backup or restore eligibility. Unknown details and unsupported native provider
-shapes leave Steam unchanged and keep the BrowserView strip available.
+does not change backup or restore eligibility. It reads the selected entry through the native
+app-details subscription and does not substitute a catalog match or mutate Steam Cloud data.
+Unknown details and unsupported native provider shapes leave Steam unchanged and keep the
+BrowserView strip available.
+
+The route contribution clones Decky's React route child and composes a stable header wrapper into
+an empty native Cloud-status slot. It declines the contribution when that slot is occupied, so it
+never creates a second status band or replaces native controls. The row releases ownership when
+it is hidden, clipped, offscreen, or covered. Its status icon and transfer animation are
+presentation only and it adds no controller focus stop.
 
 For exit work, a mounted, visible, layout-valid row for the same app suppresses duplicate
 BrowserView pixels without stopping timers, watches, or status production. Start-side checking,
-restore, and conflict work always use the strip. A row unmount or Cloud-state change restores an
-outstanding strip without extending its lifetime. Terminal observations remain in frontend state
-through the strip timeout, but the frontend discards active observations that time out or are
-superseded.
+restore, and conflict work always use the strip, and the row also yields when another app owns an
+outstanding strip. A row unmount or Cloud-state change restores an outstanding strip without
+extending its lifetime. Terminal observations remain in frontend state through the strip timeout,
+but the frontend marks interrupted or superseded activity as remote-unverified instead of showing
+an endless transfer. A local result and a remote observation remain distinct in the row text.

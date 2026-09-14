@@ -38,6 +38,8 @@ export interface AppStoreGlobal {
 }
 
 export interface SteamAppOverview {
+  appid?: number;
+  display_name?: string;
   m_gameid?: SteamGameId;
   m_unAppID: number;
   m_strDisplayName: string;
@@ -64,7 +66,7 @@ export interface SteamAppDetails {
 export interface AppDetailsStoreGlobal {
   GetAppDetails?(appId: number): SteamAppDetails | null | undefined;
   GetAppDetailsForAppID?(appId: number): SteamAppDetails | null | undefined;
-  RegisterForAppDetailsChanges?(
+  RegisterForAppData?(
     appId: number,
     callback: (details: SteamAppDetails | null | undefined) => void,
   ): { unregister?(): void; Unregister?(): void } | (() => void) | void;

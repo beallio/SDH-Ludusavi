@@ -1,13 +1,8 @@
-"""Behavioral tests for the orchestration helper scripts.
-
-These drive the real scripts under ``scripts/orchestration`` inside a throwaway
-git repository so the resume-loop hardening (implementer exits per round,
-committed-note trust, and a content-addressed round-complete marker) stays
-correct.
-"""
+"""Behavioral tests for the repository's private orchestration-run contract."""
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -22,14 +17,10 @@ pytestmark = pytest.mark.skipif(
 SLUG = "demo-feature"
 
 
-def _git(repo: Path, *args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True)
-    return result.stdout.strip()
-
-
 def _run(script: str, *args: str, repo: Path, env: dict[str, str] | None = None):
     full_env = dict(os.environ)
-    full_env["ORCH_TMP_ROOT"] = str(repo / ".orch_tmp")
+    full_env.pop("ORCH_TMP_ROOT", None)
+    full_env.pop("ORCH_STATE_ROOT", None)
     if env:
         full_env.update(env)
     return subprocess.run(
@@ -46,108 +37,75 @@ def repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "-b", "main", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.name", "Tester"], cwd=tmp_path, check=True)
-    (tmp_path / "docs" / "review").mkdir(parents=True)
-    (tmp_path / "docs" / "plans").mkdir(parents=True)
-    (tmp_path / ".orch_tmp").mkdir(parents=True)
     (tmp_path / "README.md").write_text("seed\n", encoding="utf-8")
-    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True)
     return tmp_path
 
 
-def _write_note(repo: Path, round_no: int, status: str) -> Path:
-    note = repo / "docs" / "review" / f"{SLUG}-review-{round_no:02d}.md"
-    note.write_text(f"# Review\n\nbody\n\nSTATUS: {status}\n", encoding="utf-8")
-    return note
+def _start_run(repo: Path) -> dict[str, object]:
+    created = _run("new-plan", SLUG, "Demo feature", repo=repo)
+    assert created.returncode == 0, created.stderr
+    state = _run("status", SLUG, "--json", repo=repo)
+    assert state.returncode == 0, state.stderr
+    run = json.loads(state.stdout)
+    subprocess.run(["git", "checkout", "-qb", f"feat/{SLUG}"], cwd=repo, check=True)
+    return run
 
 
-def _commit(repo: Path, path: Path, message: str) -> None:
-    subprocess.run(["git", "add", str(path.relative_to(repo))], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-qm", message], cwd=repo, check=True)
+def test_new_plan_is_private_and_status_exposes_its_identity(repo: Path) -> None:
+    run = _start_run(repo)
+    assert run["phase"] == "PLANNED"
+    assert run["round"] == 1
+    assert isinstance(run["run_id"], str) and len(run["run_id"]) == 32
+    assert str(run["plan"]).startswith(str(repo / ".git"))
+    assert not (repo / "docs" / "plans").exists()
 
 
-# --- #1: resume-driven loop (implementer exits per round) -------------------
-
-
-def test_implementer_prompts_are_resume_driven() -> None:
-    start = (ORCH / "start-implementer").read_text(encoding="utf-8")
-    cont = (ORCH / "continue-implementer").read_text(encoding="utf-8")
-
-    # The implementer must be told to exit after marking a round complete,
-    # not to linger and poll for review notes in-session.
-    assert "exit cleanly" in start
-    assert "exit cleanly" in cont
-    assert "remain active" not in start
-    assert "remains active" not in cont
-
-
-# --- #2: review-status trusts only committed notes --------------------------
-
-
-def test_review_status_ignores_uncommitted_note(repo: Path) -> None:
-    _write_note(repo, 1, "APPROVED")  # written but NOT committed
-    result = _run("review-status", SLUG, repo=repo)
-    assert result.returncode == 0
-    assert result.stdout.strip() == "NO_REVIEW"
-
-
-def test_review_status_reads_committed_note(repo: Path) -> None:
-    note = _write_note(repo, 1, "APPROVED")
-    _commit(repo, note, "review 01")
-    result = _run("review-status", SLUG, repo=repo)
-    assert result.stdout.strip() == "APPROVED"
-
-
-def test_review_status_uses_latest_committed_only(repo: Path) -> None:
-    note1 = _write_note(repo, 1, "CHANGES_REQUESTED")
-    _commit(repo, note1, "review 01")
-    # A newer note exists in the working tree but is not committed yet.
-    _write_note(repo, 2, "APPROVED")
-    result = _run("review-status", SLUG, repo=repo)
-    assert result.stdout.strip() == "CHANGES_REQUESTED"
-
-
-# --- #4: content-addressed round-complete marker ---------------------------
-
-
-def test_mark_finished_writes_head_sha(repo: Path) -> None:
-    result = _run("mark-finished", SLUG, repo=repo)
-    assert result.returncode == 0, result.stderr
-    marker = repo / ".orch_tmp" / f"{SLUG}_finished"
-    assert marker.exists()
-    # The marker carries repo provenance: line 1 is HEAD, line 2 pins the
-    # canonical repository root so a marker from a sibling checkout cannot be
-    # mistaken for this one.
-    lines = marker.read_text(encoding="utf-8").splitlines()
-    assert lines[0] == _git(repo, "rev-parse", "HEAD")
-    assert lines[1] == f"repo={repo.resolve()}"
-
-
-def test_wait_for_finished_since_blocks_on_stale_marker(repo: Path) -> None:
-    stale = _git(repo, "rev-parse", "HEAD")
-    _run("mark-finished", SLUG, repo=repo)  # marker now holds `stale`
-    # With ORCH_FINISHED_SINCE == stale, the marker is stale -> should time out.
+def test_mark_finished_requires_the_current_identity_and_records_reviewable_head(
+    repo: Path,
+) -> None:
+    run = _start_run(repo)
+    stale = _run("mark-finished", SLUG, "--run-id", "0" * 32, "--round", "1", repo=repo)
+    assert stale.returncode != 0
     result = _run(
+        "mark-finished",
+        SLUG,
+        "--run-id",
+        str(run["run_id"]),
+        "--round",
+        str(run["round"]),
+        repo=repo,
+    )
+    assert result.returncode == 0, result.stderr
+    status = json.loads(_run("status", SLUG, "--json", repo=repo).stdout)
+    assert status["phase"] == "AWAITING_REVIEW"
+    assert status["finished"]["valid"] is True
+    assert status["finished"]["sha"] == status["head"]
+
+
+def test_wait_for_finished_observes_the_private_state_transition(repo: Path) -> None:
+    run = _start_run(repo)
+    finished = _run(
+        "mark-finished",
+        SLUG,
+        "--run-id",
+        str(run["run_id"]),
+        "--round",
+        str(run["round"]),
+        repo=repo,
+    )
+    assert finished.returncode == 0, finished.stderr
+    waited = _run(
         "wait-for-finished",
         SLUG,
         "2",
+        "--run-id",
+        str(run["run_id"]),
+        "--round",
+        str(run["round"]),
         repo=repo,
-        env={"ORCH_FINISHED_SINCE": stale, "POLL_SECS": "1"},
+        env={"POLL_SECS": "1"},
     )
-    assert result.returncode != 0
-
-
-def test_wait_for_finished_since_returns_on_new_marker(repo: Path) -> None:
-    stale = _git(repo, "rev-parse", "HEAD")
-    # Advance HEAD so a fresh mark-finished records a different sha.
-    (repo / "README.md").write_text("seed\nmore\n", encoding="utf-8")
-    subprocess.run(["git", "commit", "-aqm", "advance"], cwd=repo, check=True)
-    _run("mark-finished", SLUG, repo=repo)
-    result = _run(
-        "wait-for-finished",
-        SLUG,
-        "5",
-        repo=repo,
-        env={"ORCH_FINISHED_SINCE": stale, "POLL_SECS": "1"},
-    )
-    assert result.returncode == 0
+    assert waited.returncode == 0, waited.stderr
+    assert waited.stdout.strip() == f"round ready: {SLUG}"
