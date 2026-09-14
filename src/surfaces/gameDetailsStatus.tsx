@@ -109,7 +109,8 @@ function NativeStatusSlot({ nativeStatus, row }: { nativeStatus: ReactElement; r
       setNativeVisible(occupied);
     };
     update();
-    const observer = typeof MutationObserver === "undefined" ? null : new MutationObserver(update);
+    const HostMutationObserver = getStatusHostWindow(slot)?.MutationObserver;
+    const observer = HostMutationObserver ? new HostMutationObserver(update) : null;
     observer?.observe(slot, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
     return () => observer?.disconnect();
   }, [slot, nativeStatus]);
@@ -154,30 +155,45 @@ export function isFullyIntersecting(entry: StatusIntersection | undefined): bool
     && entry.intersectionRect.height >= entry.boundingClientRect.height - 1);
 }
 
+type StatusHostWindow = Window & {
+  IntersectionObserver?: typeof IntersectionObserver;
+  ResizeObserver?: typeof ResizeObserver;
+  MutationObserver?: typeof MutationObserver;
+};
+
+function getStatusHostWindow(element: Element): StatusHostWindow | null {
+  return element.ownerDocument?.defaultView ?? null;
+}
+
 function useVisibleLayout(element: HTMLDivElement | null): boolean {
   const [visible, setVisible] = useState(false);
   useEffect(() => {
     if (!element) return;
-    let fullyIntersecting = typeof IntersectionObserver === "undefined";
+    const hostWindow = getStatusHostWindow(element);
+    if (!hostWindow) return;
+    const HostIntersectionObserver = hostWindow.IntersectionObserver;
+    let fullyIntersecting = HostIntersectionObserver === undefined;
     const update = () => setVisible(isVisibleStatusBand(element, fullyIntersecting));
-    const observer = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver((entries) => {
+    const observer = HostIntersectionObserver ? new HostIntersectionObserver((entries) => {
       const entry = entries.find((candidate) => candidate.target === element);
       fullyIntersecting = isFullyIntersecting(entry);
       update();
-    }, { threshold: DETAILS_STATUS_VISIBILITY_THRESHOLDS });
+    }, { threshold: DETAILS_STATUS_VISIBILITY_THRESHOLDS }) : null;
     observer?.observe(element);
-    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    const HostResizeObserver = hostWindow.ResizeObserver;
+    const resizeObserver = HostResizeObserver ? new HostResizeObserver(update) : null;
     resizeObserver?.observe(element);
-    const mutationObserver = typeof MutationObserver === "undefined" ? null : new MutationObserver(update);
+    const HostMutationObserver = hostWindow.MutationObserver;
+    const mutationObserver = HostMutationObserver ? new HostMutationObserver(update) : null;
     for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
       mutationObserver?.observe(ancestor, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
     }
-    window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
+    hostWindow.addEventListener("resize", update);
+    hostWindow.addEventListener("scroll", update, true);
     update();
     return () => {
       observer?.disconnect(); resizeObserver?.disconnect(); mutationObserver?.disconnect();
-      window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true);
+      hostWindow.removeEventListener("resize", update); hostWindow.removeEventListener("scroll", update, true);
     };
   }, [element]);
   return visible;
@@ -185,11 +201,15 @@ function useVisibleLayout(element: HTMLDivElement | null): boolean {
 
 export function isVisibleStatusBand(element: HTMLDivElement, intersecting: boolean): boolean {
   if (!intersecting) return false;
+  const ownerDocument = element.ownerDocument;
+  const hostDocument = ownerDocument ?? document;
+  const hostWindow = ownerDocument?.defaultView ?? (ownerDocument ? null : window);
+  if (!hostWindow) return false;
   const rect = element.getBoundingClientRect();
   if (rect.width <= 0 || rect.height < 20) return false;
   for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
     if (ancestor.hidden) return false;
-    const style = window.getComputedStyle?.(ancestor);
+    const style = hostWindow.getComputedStyle?.(ancestor);
     if (style?.display === "none" || style?.visibility === "hidden" || style?.visibility === "collapse") return false;
     if (ancestor !== element && typeof ancestor.getBoundingClientRect === "function") {
       const bounds = ancestor.getBoundingClientRect();
@@ -200,12 +220,11 @@ export function isVisibleStatusBand(element: HTMLDivElement, intersecting: boole
         || (clipsY && (rect.top < bounds.top || rect.bottom > bounds.bottom)))) return false;
     }
   }
-  const root = document.documentElement;
+  const root = hostDocument.documentElement;
   if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= root.clientHeight || rect.left >= root.clientWidth) return false;
-  if (typeof document.elementFromPoint === "function") {
-    const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  if (typeof hostDocument.elementFromPoint === "function") {
+    const top = hostDocument.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
     if (top && !element.contains(top)) return false;
-
   }
   return true;
 }

@@ -259,6 +259,11 @@ export type AutoSyncStatusFact = {
   trackingRevision?: number;
 };
 
+export type AutoSyncHistoryBaseline = {
+  timestamp: string | null;
+  operationSignature: string | null;
+};
+
 // Frontend-only observations preserve a live cycle's meaning. Durable history
 // remains the backend's latest local-operation summary.
 export type AutoSyncStatusObservation = {
@@ -271,6 +276,7 @@ export type AutoSyncStatusObservation = {
   activity: AutoSyncObservationActivity;
   observedAt: number;
   resultStatus?: OperationResult["status"] | LifecycleCheckResult["status"] | RpcStatus["status"];
+  historyBaseline: AutoSyncHistoryBaseline;
   localOperation: AutoSyncStatusFact | null;
   syncObservation: AutoSyncStatusFact | null;
 };

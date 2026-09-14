@@ -365,6 +365,9 @@ export class LudusaviStateStore {
       activity: retainActiveSync ? "active" : autoSyncObservationActivity(status),
       observedAt,
       resultStatus: options.resultStatus,
+      historyBaseline: startsNewCycle || !previous
+        ? historyBaselineFor(historyOperation)
+        : previous.historyBaseline,
       localOperation: startsNewCycle ? null : previous?.localOperation ?? null,
       syncObservation: startsNewCycle ? null : previous?.syncObservation ?? null,
     };
@@ -500,6 +503,7 @@ function reconcileObservationHistory(
   if (isSameAutomaticOperation(current, observation)) {
     return {
       ...observation,
+      historyBaseline: historyBaselineFor(current),
       localOperation: updateFactHistory(observation.localOperation, current),
       syncObservation: updateFactHistory(observation.syncObservation, current),
     };
@@ -517,21 +521,27 @@ function reconcileObservationHistory(
   return observation;
 }
 
+function historyBaselineFor(operation: GameOperationHistory["last_operation"]) {
+  return {
+    timestamp: operation?.timestamp ?? null,
+    operationSignature: historyOperationSignature(operation),
+  };
+}
+
 function historySupersedesObservation(
   history: GameOperationHistory | undefined,
   observation: AutoSyncStatusObservation,
 ): boolean {
   const current = history?.last_operation;
   if (!current) return false;
-  const baseline = observation.localOperation?.historyTimestamp
-    ?? observation.syncObservation?.historyTimestamp ?? null;
-  const baselineSignature = observation.localOperation?.historyOperationSignature
-    ?? observation.syncObservation?.historyOperationSignature;
+  const baseline = observation.historyBaseline.timestamp;
+  const baselineSignature = observation.historyBaseline.operationSignature;
   const currentSignature = historyOperationSignature(current);
   return !isSameAutomaticOperation(current, observation)
     && (baseline === null || current.timestamp > baseline || (
-      current.trigger.startsWith("manual_")
-      && baselineSignature !== undefined && baselineSignature !== currentSignature
+      current.timestamp === baseline
+      && current.trigger.startsWith("manual_")
+      && baselineSignature !== null && baselineSignature !== currentSignature
     ));
 }
 
@@ -540,8 +550,9 @@ function isSameAutomaticOperation(
   observation: AutoSyncStatusObservation,
 ): boolean {
   const expectedTrigger = observation.lifecycle === "lifecycle_start" ? "auto_start" : "auto_exit";
+  const baseline = observation.historyBaseline.timestamp;
   return current.trigger === expectedTrigger
-    && (observation.localOperation !== null || observation.syncObservation !== null);
+    && (baseline === null || current.timestamp >= baseline);
 }
 
 function historyOperationSignature(
