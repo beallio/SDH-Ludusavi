@@ -35,10 +35,30 @@ export type AutoSyncStatusCompleteOptions = Omit<
   lifecycle: "lifecycle_start" | "lifecycle_exit";
 };
 
+export type DetailsStatusOwner = Readonly<{
+  appID: string;
+  visible: boolean;
+  layoutValid: boolean;
+}>;
+
+export type DetailsStatusPresentationSurface = Readonly<{
+  subscribeDetailsPresentation(listener: () => void): () => void;
+  shouldDetailsRowYield(appID: string): boolean;
+  registerDetailsOwner(owner: DetailsStatusOwner): () => void;
+}>;
+
+export type AutoSyncStatusSurface = DetailsStatusPresentationSurface & Readonly<{
+  publish(status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions): void;
+  hide(options?: Partial<AutoSyncStatusPublishOptions>): void;
+  settleObservation(options: Pick<AutoSyncStatusPublishOptions, "appID" | "generation">): void;
+  complete(result: OperationResult | LifecycleCheckResult, options: AutoSyncStatusCompleteOptions): void;
+  dispose(): void;
+}>;
+
 export function createAutoSyncStatusSurface(
   statusView: AutoSyncStatusBrowserViewApi,
   observationStore?: Pick<LudusaviStateStore, "recordAutoSyncStatus" | "invalidateAutoSyncObservation">,
-) {
+): AutoSyncStatusSurface {
   let currentAutoSyncStatusState: AutoSyncStatusState = {
     status: "has_backup",
     visible: false,
@@ -51,7 +71,7 @@ export function createAutoSyncStatusSurface(
   let autoSyncStatusHideTimeoutID: number | null = null;
   let autoSyncStatusSyncTimeoutID: number | null = null;
   let currentHasBackupLifecycle: "lifecycle_start" | "lifecycle_exit" | null = null;
-  let detailsOwner: { token: number; appID: string; visible: boolean; layoutValid: boolean } | null = null;
+  let detailsOwner: (DetailsStatusOwner & { token: number }) | null = null;
   let nextDetailsOwnerToken = 0;
   const detailsPresentationListeners = new Set<() => void>();
 
@@ -59,20 +79,29 @@ export function createAutoSyncStatusSurface(
     detailsPresentationListeners.forEach((listener) => listener());
   }
 
+  function detailsOwnerClaimsExit(state: AutoSyncStatusState): boolean {
+    const owner = detailsOwner;
+    return owner !== null
+      && state.lifecycle === "lifecycle_exit"
+      && owner.appID === state.appID
+      && owner.visible
+      && owner.layoutValid;
+  }
+
   function shouldDetailsRowYield(appID: string): boolean {
     if (!currentAutoSyncStatusState.visible) return false;
     if (currentAutoSyncStatusState.lifecycle === "lifecycle_start") return true;
-    return Boolean(currentAutoSyncStatusState.appID && currentAutoSyncStatusState.appID !== appID);
+    if (currentAutoSyncStatusState.appID && currentAutoSyncStatusState.appID !== appID) return true;
+
+    // A same-game exit row must stay non-painting until it has measured a
+    // usable native band and registered ownership. This lets it recover when
+    // a footer or scroll clipping clears without competing with the strip.
+    return currentAutoSyncStatusState.lifecycle === "lifecycle_exit"
+      && !detailsOwnerClaimsExit(currentAutoSyncStatusState);
   }
 
   function shouldShowStatusStrip(state: AutoSyncStatusState): boolean {
-    const owner = detailsOwner;
-    const ownerClaimsExit = owner !== null &&
-      state.lifecycle === "lifecycle_exit" &&
-      owner.appID === state.appID &&
-      owner.visible &&
-      owner.layoutValid;
-    return state.visible && !ownerClaimsExit;
+    return state.visible && !detailsOwnerClaimsExit(state);
   }
 
   function syncStatusStrip(state: AutoSyncStatusState) {
@@ -331,7 +360,7 @@ export function createAutoSyncStatusSurface(
 
     shouldDetailsRowYield,
 
-    registerDetailsOwner(owner: { appID: string; visible: boolean; layoutValid: boolean }) {
+    registerDetailsOwner(owner: DetailsStatusOwner) {
       const token = ++nextDetailsOwnerToken;
       detailsOwner = { token, ...owner };
       syncStatusStrip(currentAutoSyncStatusState);

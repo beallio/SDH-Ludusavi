@@ -90,6 +90,34 @@ describe("details-row status ownership", () => {
     expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({ status: "backing_up", visible: true }));
   });
 
+  it("keeps only the strip readable while a same-game exit row is clipped, then hands off when it can own the band", () => {
+    const store = trackedStore();
+    const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
+    const surface = createAutoSyncStatusSurface(view, store);
+
+    surface.publish("backing_up", {
+      source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 8,
+      gameName: "Fixture", appID: "100", tracked: true,
+    });
+
+    // A clipped row cannot own the status area, so it must not paint beside
+    // the fallback strip for the same app.
+    expect(surface.shouldDetailsRowYield("100")).toBe(true);
+    expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({
+      appID: "100", status: "backing_up", visible: true,
+    }));
+
+    // The row may measure while hidden. Once its geometry is valid, it owns
+    // the area and the same status no longer has duplicate strip pixels.
+    const release = surface.registerDetailsOwner({ appID: "100", visible: true, layoutValid: true });
+    expect(surface.shouldDetailsRowYield("100")).toBe(false);
+    expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
+
+    release();
+    expect(surface.shouldDetailsRowYield("100")).toBe(true);
+    expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
+  });
+
   it("records a terminal local result even when the strip timed out", () => {
     const store = trackedStore();
     const surface = createAutoSyncStatusSurface({ setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() } as any, store);
@@ -108,7 +136,7 @@ describe("details-row status ownership", () => {
     expect(store.getSnapshot().autoSyncObservations["100"].activity).toBe("unverified");
     surface.publish("backing_up", { source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 7, gameName: "Other", appID: "101", tracked: true });
     expect(surface.shouldDetailsRowYield("100")).toBe(true);
-    expect(surface.shouldDetailsRowYield("101")).toBe(false);
+    expect(surface.shouldDetailsRowYield("101")).toBe(true);
   });
 
   it("keeps a stopped pre-launch transfer inactive and explicitly unverified", () => {
