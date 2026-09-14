@@ -1,6 +1,6 @@
-import { autoSyncStatusText, isLudusaviRunningStatus, isSyncthingActiveStatus } from "./autoSyncStatusRenderer";
+import { autoSyncStatusText } from "./autoSyncStatusRenderer";
 import type { LudusaviStateSnapshot } from "../state/ludusaviState";
-import type { AutoSyncStatusKind, SteamCloudEligibility } from "../types";
+import type { AutoSyncStatusFact, AutoSyncStatusKind, SteamCloudEligibility } from "../types";
 
 export type GameDetailsStatusKind =
   | "hidden" | "loading" | "unavailable" | "not_tracked"
@@ -14,6 +14,7 @@ export type GameDetailsStatusViewModel = {
   localStatus: AutoSyncStatusKind | null;
   syncStatus: AutoSyncStatusKind | null;
   syncVerification: "not_checked" | "unverified" | "observed";
+  lifecycle?: "lifecycle_start" | "lifecycle_exit";
   label: string;
   description: string;
   tone: "neutral" | "info" | "success" | "warning" | "error";
@@ -41,11 +42,11 @@ export function getSteamCloudEligibility(appID: string, details: unknown): Steam
 export function selectGameDetailsStatus(input: GameDetailsStatusSelectorInput): GameDetailsStatusViewModel {
   const { snapshot, appID, canonicalGameName, eligibility } = input;
   if (eligibility !== "eligible") return hidden(eligibility);
-  if (snapshot.trackingReadiness === "cold" || snapshot.settings === null || snapshot.games === null) {
-    return model(eligibility, "loading", null, "Loading save status", "Ludusavi is loading save status.");
-  }
   if (snapshot.trackingReadiness === "failed") {
     return model(eligibility, "unavailable", null, "Save status unavailable", "Ludusavi could not load tracking data.");
+  }
+  if (snapshot.trackingReadiness === "cold" || snapshot.settings === null || snapshot.games === null) {
+    return model(eligibility, "loading", null, "Loading save status", "Ludusavi is loading save status.");
   }
   if (!canonicalGameName) return model(eligibility, "not_tracked", null, "Not tracked", "Ludusavi does not track this game.");
   const game = snapshot.games.find((candidate) => candidate.name === canonicalGameName);
@@ -54,34 +55,72 @@ export function selectGameDetailsStatus(input: GameDetailsStatusSelectorInput): 
 
   const observation = snapshot.autoSyncObservations[appID]?.canonicalGameName === canonicalGameName
     ? snapshot.autoSyncObservations[appID] : null;
-  const durableOperation = snapshot.gameHistory[canonicalGameName]?.last_operation ?? null;
-  const replacedByHistory = Boolean(
-    observation?.localOperation?.historyTimestamp && durableOperation?.timestamp
-    && durableOperation.timestamp > observation.localOperation.historyTimestamp,
-  );
-  if (observation && !replacedByHistory && observation.activity === "active") {
-    return statusModel(eligibility, "active", observation.status, observation.localOperation?.status ?? null, observation.syncObservation?.status ?? null, true, "observed");
+  const local = observation?.localOperation ?? null;
+  const sync = observation?.syncObservation ?? null;
+  const syncVerification = sync
+    ? observation?.activity === "unverified" ? "unverified" : "observed"
+    : "not_checked";
+
+  // Accepted active work always remains visible, even when a setting changes.
+  if (observation?.activity === "active") {
+    return statusModel(
+      eligibility, "active", observation.status, local?.status ?? null, sync?.status ?? null,
+      true, syncVerification, observation.lifecycle, observation.resultStatus,
+    );
   }
-  if (observation && !replacedByHistory && observation.syncObservation) {
-    return statusModel(eligibility, "last_observed", observation.syncObservation.status, observation.localOperation?.status ?? null, observation.syncObservation.status, false, "observed");
-  }
+  // Once work is idle, current settings describe what can happen next. Retained
+  // observations remain available as secondary context rather than overriding it.
   if (snapshot.settings.auto_sync_enabled === false) {
-    return model(eligibility, "auto_sync_disabled", "game_sync_disabled", "Automatic sync is off", "Ludusavi automatic save sync is disabled.");
+    return model(eligibility, "auto_sync_disabled", "game_sync_disabled", "Automatic sync is off", "Ludusavi automatic save sync is disabled.", local?.status ?? null, sync?.status ?? null, syncVerification, observation?.lifecycle);
   }
   if (snapshot.settings.sync_disabled_games.includes(canonicalGameName)) {
-    return model(eligibility, "game_sync_disabled", "game_sync_disabled", "Sync disabled for this game", "Ludusavi automatic save sync is disabled for this game.");
+    return model(eligibility, "game_sync_disabled", "game_sync_disabled", "Sync disabled for this game", "Ludusavi automatic save sync is disabled for this game.", local?.status ?? null, sync?.status ?? null, syncVerification, observation?.lifecycle);
   }
-  if (durableOperation) {
-    const status = durableStatus(durableOperation.status);
-    return statusModel(eligibility, "local_result", status, status, null, false, "unverified", true);
+
+  const observedSync = observation?.activity === "settled" ? sync : null;
+  const primary = newerFact(local, observedSync);
+  if (primary) {
+    return statusModel(
+      eligibility,
+      primary === local ? "local_result" : "last_observed",
+      primary.status,
+      local?.status ?? null,
+      sync?.status ?? null,
+      false,
+      syncVerification,
+      observation?.lifecycle,
+      primary.resultStatus,
+      local?.resultStatus,
+      primary === observedSync,
+    );
   }
+  if (local) {
+    return statusModel(
+      eligibility, "local_result", local.status, local.status, sync?.status ?? null,
+      false, syncVerification, observation?.lifecycle, local.resultStatus, local.resultStatus,
+    );
+  }
+
+  // Inventory is authoritative for current backup presence. Durable history is
+  // useful after reload, but is not proof that the backup still exists.
   if (game.needs_first_backup || game.status === "needs_first_backup") {
     return model(eligibility, "needs_backup", "unknown", "Backup needed", "Ludusavi has not made the first backup for this game.");
+  }
+  const durableOperation = snapshot.gameHistory[canonicalGameName]?.last_operation ?? null;
+  if (durableOperation) {
+    const status = durableStatus(durableOperation.status);
+    return statusModel(eligibility, "local_result", status, status, null, false, "unverified", undefined, durableOperation.status, durableOperation.status);
   }
   if (game.has_backup || game.status === "has_backup") {
     return model(eligibility, "local_backup_available", "has_backup", "Local backup available", "Ludusavi reports a local backup for this game.");
   }
   return model(eligibility, "unavailable", "unknown", "Save status unavailable", "Ludusavi could not verify this save status.");
+}
+
+function newerFact(local: AutoSyncStatusFact | null, sync: AutoSyncStatusFact | null): AutoSyncStatusFact | null {
+  if (!local) return sync;
+  if (!sync) return local;
+  return local.observedAt >= sync.observedAt ? local : sync;
 }
 
 function durableStatus(status: "backed_up" | "restored" | "skipped" | "failed"): AutoSyncStatusKind {
@@ -93,14 +132,88 @@ function hidden(eligibility: SteamCloudEligibility): GameDetailsStatusViewModel 
   return { eligibility, kind: "hidden", status: null, localStatus: null, syncStatus: null, syncVerification: "not_checked", label: "", description: "", tone: "neutral", active: false, showRow: false, canOwnStatusArea: false };
 }
 
-function model(eligibility: SteamCloudEligibility, kind: GameDetailsStatusKind, status: AutoSyncStatusKind | null, label: string, description: string): GameDetailsStatusViewModel {
-  return { eligibility, kind, status, localStatus: null, syncStatus: null, syncVerification: "not_checked", label: `Ludusavi: ${label}`, description, tone: toneForStatus(status), active: false, showRow: true, canOwnStatusArea: true };
+function model(
+  eligibility: SteamCloudEligibility,
+  kind: GameDetailsStatusKind,
+  status: AutoSyncStatusKind | null,
+  label: string,
+  description: string,
+  localStatus: AutoSyncStatusKind | null = null,
+  syncStatus: AutoSyncStatusKind | null = null,
+  syncVerification: GameDetailsStatusViewModel["syncVerification"] = "not_checked",
+  lifecycle?: "lifecycle_start" | "lifecycle_exit",
+): GameDetailsStatusViewModel {
+  return { eligibility, kind, status, localStatus, syncStatus, syncVerification, lifecycle, label: `Ludusavi: ${label}`, description: `${description}${syncDetail(syncStatus, syncVerification, lifecycle)}`, tone: toneForStatus(status), active: false, showRow: true, canOwnStatusArea: true };
 }
 
-function statusModel(eligibility: SteamCloudEligibility, kind: GameDetailsStatusKind, status: AutoSyncStatusKind, localStatus: AutoSyncStatusKind | null, syncStatus: AutoSyncStatusKind | null, active: boolean, syncVerification: "unverified" | "observed", historic = false): GameDetailsStatusViewModel {
-  const prefix = historic ? "Last local result" : kind === "last_observed" ? "Last observed" : "Ludusavi";
-  const localDetail = localStatus && syncStatus ? ` Local result: ${autoSyncStatusText[localStatus]}.` : "";
-  return { eligibility, kind, status, localStatus, syncStatus, syncVerification, label: `${prefix}: ${autoSyncStatusText[status]}`, description: `${prefix}: ${autoSyncStatusText[status]}.${localDetail}`, tone: toneForStatus(status), active: active || isLudusaviRunningStatus(status) || isSyncthingActiveStatus(status), showRow: true, canOwnStatusArea: true };
+function statusModel(
+  eligibility: SteamCloudEligibility,
+  kind: GameDetailsStatusKind,
+  status: AutoSyncStatusKind,
+  localStatus: AutoSyncStatusKind | null,
+  syncStatus: AutoSyncStatusKind | null,
+  active: boolean,
+  syncVerification: "not_checked" | "unverified" | "observed",
+  lifecycle?: "lifecycle_start" | "lifecycle_exit",
+  resultStatus?: AutoSyncStatusFact["resultStatus"],
+  localResultStatus?: AutoSyncStatusFact["resultStatus"],
+  primaryIsSync = false,
+): GameDetailsStatusViewModel {
+  const prefix = kind === "last_observed" ? "Last remote observation" : active ? "Current activity" : "Local result";
+  const primary = statusPhrase(status, resultStatus, lifecycle);
+  const localDetail = localStatus && localStatus !== status ? ` Local result: ${statusPhrase(localStatus, localResultStatus, lifecycle)}.` : "";
+  const detail = `${prefix}: ${primary}.${localDetail}${primaryIsSync ? "" : syncDetail(syncStatus, syncVerification, lifecycle)}`;
+  return {
+    eligibility, kind, status, localStatus, syncStatus, syncVerification, lifecycle,
+    label: `Ludusavi: ${prefix}: ${primary}`,
+    description: detail,
+    tone: toneForStatus(status),
+    active,
+    showRow: true,
+    canOwnStatusArea: true,
+  };
+}
+
+function statusPhrase(
+  status: AutoSyncStatusKind,
+  resultStatus?: AutoSyncStatusFact["resultStatus"],
+  lifecycle?: "lifecycle_start" | "lifecycle_exit",
+): string {
+  if (status === "has_backup" && resultStatus === "skipped") return "Local save already current";
+  if (status === "unknown" && resultStatus === "skipped") return "Local operation skipped";
+  if (status === "syncthing_complete") return lifecycle === "lifecycle_exit"
+    ? "Remote upload observed with a connected peer"
+    : "Incoming folder activity settled";
+  const labels: Partial<Record<AutoSyncStatusKind, string>> = {
+    checking: "Checking local save",
+    backing_up: "Backing up local save",
+    restoring: "Restoring local save",
+    conflict: "Save conflict needs attention",
+    conflict_unresolved: "Save conflict was not resolved",
+    game_sync_disabled: "Automatic sync is disabled",
+    has_backup: "Local backup complete",
+    unknown: "Save result is unknown",
+    error: "Local save operation failed",
+    syncthing_pending_upload: "Preparing remote sync",
+    syncthing_downloading: "Receiving remote save data",
+    syncthing_uploading: "Uploading save data",
+    syncthing_upload_incomplete: "Remote upload is incomplete",
+    syncthing_unavailable: "Remote sync is unavailable",
+    syncthing_folder_not_found: "Remote folder was not found",
+    syncthing_no_peers: "No relevant remote peer is connected",
+  };
+  return labels[status] ?? autoSyncStatusText[status];
+}
+
+function syncDetail(
+  syncStatus: AutoSyncStatusKind | null,
+  verification: GameDetailsStatusViewModel["syncVerification"],
+  lifecycle?: "lifecycle_start" | "lifecycle_exit",
+): string {
+  if (syncStatus && verification === "observed") return ` Remote observation: ${statusPhrase(syncStatus, undefined, lifecycle)}.`;
+  if (syncStatus && verification === "unverified") return " Remote sync is unverified after interrupted activity.";
+  if (verification === "unverified") return " Remote sync was not checked after reload.";
+  return "";
 }
 
 function toneForStatus(status: AutoSyncStatusKind | null): GameDetailsStatusViewModel["tone"] {

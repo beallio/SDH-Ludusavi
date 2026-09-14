@@ -132,6 +132,10 @@ function buildTrackedAppIDs(games: GameStatus[]): Set<string> {
 export class LudusaviStateStore {
   private snapshot: LudusaviStateSnapshot = createInitialSnapshot();
   private listeners = new Set<() => void>();
+  // A remapped shortcut can still publish from a monitor that started before
+  // the refresh. Keep only its latest retired generation so that late work
+  // cannot be attributed to the shortcut's new canonical game.
+  private retiredAutoSyncAttributions = new Map<string, { canonicalGameName: string; generation: number }>();
 
   getSnapshot = () => this.snapshot;
 
@@ -313,9 +317,14 @@ export class LudusaviStateStore {
   ) {
     if (!options.appID || !options.gameName) return;
     const appID = String(options.appID);
+    const retired = this.retiredAutoSyncAttributions.get(appID);
+    if (retired) {
+      if (options.generation === undefined || options.generation <= retired.generation) return;
+      this.retiredAutoSyncAttributions.delete(appID);
+    }
+
     const canonicalGameName = this.resolveCanonicalGameName(options.gameName, appID);
     if (!canonicalGameName) return;
-
     const previous = this.snapshot.autoSyncObservations[appID];
     if (previous?.generation !== undefined && options.generation !== undefined && options.generation < previous.generation) {
       return;
@@ -333,14 +342,17 @@ export class LudusaviStateStore {
       generation: options.generation,
       historyTimestamp: this.snapshot.gameHistory[canonicalGameName]?.last_operation?.timestamp ?? null,
     };
+    const retainActiveSync = !startsNewCycle && !isSyncthingObservation(status)
+      && !isAutoSyncActivity(status) && previous?.activity === "active"
+      && previous.syncObservation !== null && isAutoSyncActivity(previous.syncObservation.status);
     const next: AutoSyncStatusObservation = {
       appID,
       gameName: options.gameName,
       canonicalGameName,
       lifecycle: options.lifecycle,
       generation: options.generation,
-      status,
-      activity: autoSyncObservationActivity(status),
+      status: retainActiveSync ? previous.status : status,
+      activity: retainActiveSync ? "active" : autoSyncObservationActivity(status),
       observedAt,
       resultStatus: options.resultStatus,
       localOperation: startsNewCycle ? null : previous?.localOperation ?? null,
@@ -353,6 +365,9 @@ export class LudusaviStateStore {
 
   invalidateAutoSyncObservationsBefore(generation: number) {
     let changed = false;
+    for (const [appID, retired] of this.retiredAutoSyncAttributions) {
+      if (retired.generation < generation) this.retiredAutoSyncAttributions.delete(appID);
+    }
     const observations = Object.fromEntries(Object.entries(this.snapshot.autoSyncObservations).map(([appID, observation]) => {
       if (observation.activity === "active" && (observation.generation ?? -1) < generation) {
         changed = true;
@@ -379,13 +394,19 @@ export class LudusaviStateStore {
     const retained: Record<string, AutoSyncStatusObservation> = {};
     for (const [appID, observation] of Object.entries(this.snapshot.autoSyncObservations)) {
       const canonical = resolveCanonicalGameName(games, aliases, observation.gameName, appID);
-      if (canonical !== observation.canonicalGameName) continue;
-      const newerHistory = hasNewerDurableOperation(history[canonical], observation.localOperation);
-      retained[appID] = {
-        ...observation,
-        localOperation: newerHistory ? null : observation.localOperation,
-        syncObservation: newerHistory ? null : observation.syncObservation,
-      };
+      if (canonical !== observation.canonicalGameName) {
+        if (observation.generation !== undefined) {
+          const retired = this.retiredAutoSyncAttributions.get(appID);
+          if (!retired || retired.generation <= observation.generation) {
+            this.retiredAutoSyncAttributions.set(appID, {
+              canonicalGameName: observation.canonicalGameName,
+              generation: observation.generation,
+            });
+          }
+        }
+        continue;
+      }
+      retained[appID] = reconcileObservationHistory(history[canonical], observation);
     }
     return retained;
   }
@@ -446,11 +467,45 @@ function autoSyncObservationActivity(status: AutoSyncStatusKind) {
   return isAutoSyncActivity(status) ? "active" as const : "settled" as const;
 }
 
-function hasNewerDurableOperation(
-  history: GameOperationHistory | undefined, observation: { historyTimestamp?: string | null } | null,
+function reconcileObservationHistory(
+  history: GameOperationHistory | undefined,
+  observation: AutoSyncStatusObservation,
+): AutoSyncStatusObservation {
+  const current = history?.last_operation;
+  if (!current) return observation;
+  const baseline = observation.localOperation?.historyTimestamp
+    ?? observation.syncObservation?.historyTimestamp ?? null;
+  if (isSameAutomaticOperation(current, observation)) {
+    return {
+      ...observation,
+      localOperation: updateFactHistoryTimestamp(observation.localOperation, current.timestamp),
+      syncObservation: updateFactHistoryTimestamp(observation.syncObservation, current.timestamp),
+    };
+  }
+  // A newly visible durable operation supersedes a live-cycle result even when
+  // the cycle began before history existed. This is how manual work clears an
+  // earlier remote observation after a first automatic backup.
+  if (baseline === null || current.timestamp > baseline) {
+    return { ...observation, localOperation: null, syncObservation: null };
+  }
+  return observation;
+}
+
+function isSameAutomaticOperation(
+  current: NonNullable<GameOperationHistory["last_operation"]>,
+  observation: AutoSyncStatusObservation,
 ): boolean {
-  const current = history?.last_operation?.timestamp;
-  return Boolean(current && observation?.historyTimestamp && current > observation.historyTimestamp);
+  const expectedTrigger = observation.lifecycle === "lifecycle_start" ? "auto_start" : "auto_exit";
+  const local = observation.localOperation;
+  return current.trigger === expectedTrigger && local !== null
+    && local.resultStatus === current.status;
+}
+
+function updateFactHistoryTimestamp(
+  fact: AutoSyncStatusObservation["localOperation"],
+  timestamp: string,
+) {
+  return fact === null ? null : { ...fact, historyTimestamp: timestamp };
 }
 
 export function createLudusaviStateStore() {

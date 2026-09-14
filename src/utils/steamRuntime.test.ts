@@ -98,16 +98,19 @@ describe("steamRuntime", () => {
     expect(getAppDetailsStore()).toBeDefined();
   });
 
-  it("reads only matching app detail accessors and unregisters a details subscription", () => {
+  it("uses native store receivers for details and the supported app-data subscription", () => {
     const details = { unAppID: 100, bCloudEnabledForApp: false, bCloudEnabledForAccount: true };
     const unregister = vi.fn();
-    (globalThis as any).appDetailsStore = {
-      GetAppDetails: vi.fn((appID: number) => appID === 100 ? details : null),
-      RegisterForAppDetailsChanges: vi.fn((_: number, callback: (value: unknown) => void) => {
-        callback(details);
+    const detailsStore = {
+      details,
+      GetAppDetails(this: any, appID: number) { return appID === this.details.unAppID ? this.details : null; },
+      RegisterForAppData(this: any, appID: number, callback: (value: unknown) => void) {
+        expect(this).toBe(detailsStore);
+        if (appID === this.details.unAppID) callback(this.details);
         return { unregister };
-      }),
+      },
     };
+    (globalThis as any).appDetailsStore = detailsStore;
     const callback = vi.fn();
 
     expect(getAppDetailsForAppID("100")).toBe(details);
@@ -117,11 +120,13 @@ describe("steamRuntime", () => {
     expect(unregister).toHaveBeenCalledOnce();
   });
 
-  it("does not substitute an overview for a different app ID", () => {
-    (globalThis as any).appStore = {
-      GetAppOverviewByAppID: vi.fn((appID: number) => appID === 100 ? { m_unAppID: 100 } : null),
+  it("keeps the native overview receiver and does not substitute another app", () => {
+    const appStore = {
+      entries: new Map([[100, { appid: 100, display_name: "Fixture" }]]),
+      GetAppOverviewByAppID(this: any, appID: number) { return this.entries.get(appID) ?? null; },
     };
-    expect(getAppOverviewForAppID("100")).toEqual({ m_unAppID: 100 });
+    (globalThis as any).appStore = appStore;
+    expect(getAppOverviewForAppID("100")).toEqual({ appid: 100, display_name: "Fixture" });
     expect(getAppOverviewForAppID("101")).toBeNull();
   });
 

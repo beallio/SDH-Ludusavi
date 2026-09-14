@@ -53,6 +53,17 @@ export function createAutoSyncStatusSurface(
   let currentHasBackupLifecycle: "lifecycle_start" | "lifecycle_exit" | null = null;
   let detailsOwner: { token: number; appID: string; visible: boolean; layoutValid: boolean } | null = null;
   let nextDetailsOwnerToken = 0;
+  const detailsPresentationListeners = new Set<() => void>();
+
+  function notifyDetailsPresentation() {
+    detailsPresentationListeners.forEach((listener) => listener());
+  }
+
+  function shouldDetailsRowYield(appID: string): boolean {
+    if (!currentAutoSyncStatusState.visible) return false;
+    if (currentAutoSyncStatusState.lifecycle === "lifecycle_start") return true;
+    return Boolean(currentAutoSyncStatusState.appID && currentAutoSyncStatusState.appID !== appID);
+  }
 
   function shouldShowStatusStrip(state: AutoSyncStatusState): boolean {
     const owner = detailsOwner;
@@ -66,6 +77,7 @@ export function createAutoSyncStatusSurface(
 
   function syncStatusStrip(state: AutoSyncStatusState) {
     statusView.sync({ ...state, visible: shouldShowStatusStrip(state) });
+    notifyDetailsPresentation();
   }
 
   function clearDeferredAutoSyncStatus() {
@@ -159,6 +171,30 @@ export function createAutoSyncStatusSurface(
     }, hideDelay);
   }
 
+  function recordTerminalResult(
+    result: OperationResult | LifecycleCheckResult,
+    options: AutoSyncStatusCompleteOptions,
+  ) {
+    let status: AutoSyncStatusKind | null = null;
+    if (result.status === "failed") status = "error";
+    else if (result.status === "conflict") status = "conflict";
+    else if (result.status === "backed_up" || result.status === "restored") status = "has_backup";
+    else if (result.status === "skipped") {
+      if (result.reason === "conflict_unresolved") status = "conflict_unresolved";
+      else if (result.reason === "game_sync_disabled") status = "game_sync_disabled";
+      else if (result.reason === "local_current") status = "has_backup";
+      else if (["ambiguous_recency", "game_error", "preview_failed", "operation_running"].includes(result.reason ?? "")) status = "error";
+      else status = "unknown";
+    }
+    if (status) {
+      observationStore?.recordAutoSyncStatus(status, {
+        ...options,
+        source: "rpc_result",
+        resultStatus: result.status,
+      });
+    }
+  }
+
   function syncAutoSyncStatusBrowserViewDeferred(state: AutoSyncStatusState) {
     clearAutoSyncStatusSyncTimeout();
     autoSyncStatusSyncTimeoutID = window.setTimeout(() => {
@@ -240,6 +276,7 @@ export function createAutoSyncStatusSurface(
       statusView.setContext(currentAutoSyncStatusState);
       logAutoSyncStatusChange(currentAutoSyncStatusState);
       if (shouldResetSurface) {
+        notifyDetailsPresentation();
         syncAutoSyncStatusBrowserViewDeferred(currentAutoSyncStatusState);
         return;
       }
@@ -256,6 +293,10 @@ export function createAutoSyncStatusSurface(
       clearAutoSyncStatusSyncTimeout();
       clearAutoSyncStatusHideTimeout();
 
+      observationStore?.invalidateAutoSyncObservation(
+        options.appID ?? currentAutoSyncStatusState.appID,
+        options.generation ?? currentAutoSyncStatusState.generation,
+      );
       currentAutoSyncStatusState = {
         ...currentAutoSyncStatusState,
         visible: false,
@@ -269,6 +310,13 @@ export function createAutoSyncStatusSurface(
       statusView.setContext(currentAutoSyncStatusState);
       syncStatusStrip(currentAutoSyncStatusState);
     },
+
+    subscribeDetailsPresentation(listener: () => void) {
+      detailsPresentationListeners.add(listener);
+      return () => detailsPresentationListeners.delete(listener);
+    },
+
+    shouldDetailsRowYield,
 
     registerDetailsOwner(owner: { appID: string; visible: boolean; layoutValid: boolean }) {
       const token = ++nextDetailsOwnerToken;
@@ -285,6 +333,7 @@ export function createAutoSyncStatusSurface(
       result: OperationResult | LifecycleCheckResult,
       options: AutoSyncStatusCompleteOptions
     ) {
+      recordTerminalResult(result, options);
       const isError = result.status === "failed" ||
         (result.status === "skipped" && result.reason === "operation_running");
       if (isError) {
@@ -406,7 +455,8 @@ export function createAutoSyncStatusSurface(
         visible: false,
         source: "hide"
       };
-      
+      notifyDetailsPresentation();
+
       clearAutoSyncStatusHideTimeout();
       clearAutoSyncStatusSyncTimeout();
       

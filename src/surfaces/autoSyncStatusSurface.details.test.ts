@@ -81,4 +81,26 @@ describe("details-row status ownership", () => {
     release();
     expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({ status: "backing_up", visible: true }));
   });
+
+  it("records a terminal local result even when the strip timed out", () => {
+    const store = trackedStore();
+    const surface = createAutoSyncStatusSurface({ setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() } as any, store);
+    surface.publish("checking", { source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 5, gameName: "Fixture", appID: "100", tracked: true });
+    vi.advanceTimersByTime(210_000);
+    surface.complete({ status: "backed_up", game: "Fixture" }, { lifecycle: "lifecycle_exit", generation: 5, gameName: "Fixture", appID: "100", tracked: true });
+    expect(store.getSnapshot().autoSyncObservations["100"].localOperation?.status).toBe("has_backup");
+  });
+
+  it("makes the row yield to protected or other-game strips and settles hidden active work", () => {
+    const store = trackedStore();
+    const surface = createAutoSyncStatusSurface({ setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() } as any, store);
+    surface.publish("checking", { source: "lifecycle_start", lifecycle: "lifecycle_start", generation: 6, gameName: "Fixture", appID: "100", tracked: true });
+    expect(surface.shouldDetailsRowYield("100")).toBe(true);
+    surface.hide({ source: "hide", appID: "100", generation: 6 });
+    expect(store.getSnapshot().autoSyncObservations["100"].activity).toBe("unverified");
+    surface.publish("backing_up", { source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 7, gameName: "Other", appID: "101", tracked: true });
+    expect(surface.shouldDetailsRowYield("100")).toBe(true);
+    expect(surface.shouldDetailsRowYield("101")).toBe(false);
+  });
+
 });

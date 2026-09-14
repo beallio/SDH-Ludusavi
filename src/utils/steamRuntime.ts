@@ -133,7 +133,7 @@ export function getAppOverviewForAppID(appID: string): Record<string, unknown> |
   try {
     const store = asRecord(getAppStore());
     const getOverview = store?.GetAppOverviewByAppID;
-    const overview = typeof getOverview === "function" ? getOverview(Number(appID)) : null;
+    const overview = typeof getOverview === "function" ? getOverview.call(store, Number(appID)) : null;
     return asRecord(overview);
   } catch {
     return null;
@@ -147,7 +147,7 @@ export function getAppDetailsForAppID(appID: string): unknown {
     for (const name of ["GetAppDetails", "GetAppDetailsForAppID", "getAppDetails"]) {
       const getter = store?.[name];
       if (typeof getter === "function") {
-        const details = getter(numericID);
+        const details = getter.call(store, numericID);
         if (details !== undefined && details !== null) return details;
       }
     }
@@ -162,14 +162,12 @@ export function subscribeToAppDetails(appID: string, callback: (details: unknown
   try {
     const store = asRecord(getAppDetailsStore());
     const numericID = Number(appID);
-    for (const name of ["RegisterForAppDetailsChanges", "SubscribeToAppDetails", "subscribeToAppDetails"]) {
-      const subscribe = store?.[name];
-      if (typeof subscribe !== "function") continue;
-      const registration = subscribe(numericID, callback);
-      if (typeof registration === "function") return registration;
-      const unregister = asRecord(registration)?.unregister ?? asRecord(registration)?.Unregister;
-      if (typeof unregister === "function") return unregister.bind(registration);
-    }
+    const subscribe = store?.RegisterForAppData;
+    if (typeof subscribe !== "function") return () => {};
+    const registration = subscribe.call(store, numericID, callback);
+    if (typeof registration === "function") return registration;
+    const unregister = asRecord(registration)?.unregister ?? asRecord(registration)?.Unregister;
+    if (typeof unregister === "function") return unregister.bind(registration);
   } catch {
     // A missing private details subscription is an unsupported native boundary.
   }
