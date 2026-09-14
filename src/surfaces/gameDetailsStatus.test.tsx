@@ -139,6 +139,35 @@ describe("game details route adapter", () => {
     vi.unstubAllGlobals();
   });
 
+  it("measures the row in its owning Gamepad document, not SharedJSContext", () => {
+    const element = {
+      hidden: false,
+      parentElement: null,
+      ownerDocument: undefined as unknown,
+      getBoundingClientRect: () => ({ width: 854, height: 30, top: 252, left: 0, right: 854, bottom: 282 }),
+      contains: (candidate: unknown) => candidate === element,
+    };
+    const gamepadWindow = {
+      getComputedStyle: () => ({ display: "flex", visibility: "visible", overflow: "visible" }),
+    };
+    const gamepadDocument = {
+      documentElement: { clientHeight: 534, clientWidth: 854 },
+      elementFromPoint: () => element,
+      defaultView: gamepadWindow,
+    };
+    element.ownerDocument = gamepadDocument;
+    vi.stubGlobal("window", {
+      getComputedStyle: () => ({ display: "none", visibility: "hidden", overflow: "hidden" }),
+    });
+    vi.stubGlobal("document", {
+      documentElement: { clientHeight: 1, clientWidth: 1 },
+      elementFromPoint: () => null,
+    });
+
+    expect(isVisibleStatusBand(element as unknown as HTMLDivElement, true)).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
   it("observes the partial-to-full threshold needed for details ownership", () => {
     const bounds = { width: 1280, height: 30 };
     expect(DETAILS_STATUS_VISIBILITY_THRESHOLDS).toEqual([0, 0.99, 1]);

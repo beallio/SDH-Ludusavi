@@ -313,6 +313,15 @@ export function createAutoSyncStatusSurface(
 
     settleObservation(options: Pick<AutoSyncStatusPublishOptions, "appID" | "generation">) {
       observationStore?.invalidateAutoSyncObservation(options.appID, options.generation);
+      const settlesVisibleSync = currentAutoSyncStatusState.visible
+        && options.appID !== undefined
+        && options.generation !== undefined
+        && isSyncthingActiveStatus(currentAutoSyncStatusState.status)
+        && currentAutoSyncStatusState.appID === options.appID
+        && currentAutoSyncStatusState.generation === options.generation;
+      if (settlesVisibleSync) {
+        api.hide({ source: "hide", appID: options.appID, generation: options.generation });
+      }
     },
 
     subscribeDetailsPresentation(listener: () => void) {

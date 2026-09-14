@@ -131,4 +131,21 @@ describe("details-row status ownership", () => {
     expect(model.description).toContain("Remote sync is unverified after interrupted activity.");
   });
 
+  it("retires a stopped pre-launch transfer from both presentations", () => {
+    const store = trackedStore();
+    const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
+    const surface = createAutoSyncStatusSurface(view, store);
+    surface.publish("syncthing_downloading", {
+      source: "lifecycle_start", lifecycle: "lifecycle_start", generation: 7,
+      gameName: "Fixture", appID: "100", tracked: true,
+    });
+
+    surface.settleObservation({ appID: "100", generation: 7 });
+
+    expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({
+      appID: "100", status: "syncthing_downloading", visible: false,
+    }));
+    expect(surface.shouldDetailsRowYield("100")).toBe(false);
+  });
+
 });

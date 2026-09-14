@@ -352,6 +352,36 @@ describe("LudusaviStateStore", () => {
       expect(store.getSnapshot().autoSyncObservations["100"].localOperation).toBeNull();
     });
 
+    it("keeps a checking cycle active through an unchanged history refresh", () => {
+      const store = createLudusaviStateStore();
+      const existing = history(operation("auto_exit", "2026-09-13 10:00:00"));
+      store.applyRefreshResult({ games: [game("Fixture", "100")], aliases: {}, history: { Fixture: existing }, dependency_error: null });
+      const options = { source: "lifecycle_exit" as const, lifecycle: "lifecycle_exit" as const, generation: 7, gameName: "Fixture", appID: "100" };
+
+      store.recordAutoSyncStatus("checking", options);
+      store.setGameHistory({ Fixture: existing });
+
+      expect(store.getSnapshot().autoSyncObservations["100"].activity).toBe("active");
+      expect(store.getSnapshot().autoSyncObservations["100"].status).toBe("checking");
+      store.recordAutoSyncStatus("has_backup", { ...options, resultStatus: "backed_up" });
+      expect(store.getSnapshot().autoSyncObservations["100"].localOperation?.status).toBe("has_backup");
+    });
+
+    it("keeps a reconciled automatic cycle when delayed manual history is older", () => {
+      const store = createLudusaviStateStore();
+      const earlierAutomatic = history(operation("auto_exit", "2026-09-13 10:00:00"));
+      store.applyRefreshResult({ games: [game("Fixture", "100")], aliases: {}, history: { Fixture: earlierAutomatic }, dependency_error: null });
+      const options = { source: "lifecycle_exit" as const, lifecycle: "lifecycle_exit" as const, generation: 8, gameName: "Fixture", appID: "100" };
+
+      store.recordAutoSyncStatus("checking", options);
+      store.setGameHistory({ Fixture: history(operation("auto_exit", "2026-09-13 11:00:00")) });
+      store.setGameHistory({ Fixture: history(operation("manual_backup", "2026-09-13 10:00:00")) });
+      store.recordAutoSyncStatus("syncthing_complete", options);
+
+      expect(store.getSnapshot().autoSyncObservations["100"].activity).toBe("settled");
+      expect(store.getSnapshot().autoSyncObservations["100"].syncObservation?.status).toBe("syncthing_complete");
+    });
+
     it("rejects a late generation after an alias retarget and accepts a new lifecycle", () => {
       const store = createLudusaviStateStore();
       store.applyRefreshResult({ games: [game("A", "")], aliases: { Shortcut: "A" }, history: {}, dependency_error: null });
