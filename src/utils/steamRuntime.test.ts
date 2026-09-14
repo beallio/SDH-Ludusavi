@@ -16,6 +16,9 @@ import {
   getSteamClientApps,
   getAppStore,
   getAppDetailsStore,
+  getAppOverviewForAppID,
+  getAppDetailsForAppID,
+  subscribeToAppDetails,
   getCollectionStoreApps,
   registerAppLifetimeNotification,
   createBrowserView
@@ -93,6 +96,33 @@ describe("steamRuntime", () => {
     expect(getAppDetailsStore()).toBeNull();
     (globalThis as any).appDetailsStore = {};
     expect(getAppDetailsStore()).toBeDefined();
+  });
+
+  it("reads only matching app detail accessors and unregisters a details subscription", () => {
+    const details = { unAppID: 100, bCloudEnabledForApp: false, bCloudEnabledForAccount: true };
+    const unregister = vi.fn();
+    (globalThis as any).appDetailsStore = {
+      GetAppDetails: vi.fn((appID: number) => appID === 100 ? details : null),
+      RegisterForAppDetailsChanges: vi.fn((_: number, callback: (value: unknown) => void) => {
+        callback(details);
+        return { unregister };
+      }),
+    };
+    const callback = vi.fn();
+
+    expect(getAppDetailsForAppID("100")).toBe(details);
+    const dispose = subscribeToAppDetails("100", callback);
+    expect(callback).toHaveBeenCalledWith(details);
+    dispose();
+    expect(unregister).toHaveBeenCalledOnce();
+  });
+
+  it("does not substitute an overview for a different app ID", () => {
+    (globalThis as any).appStore = {
+      GetAppOverviewByAppID: vi.fn((appID: number) => appID === 100 ? { m_unAppID: 100 } : null),
+    };
+    expect(getAppOverviewForAppID("100")).toEqual({ m_unAppID: 100 });
+    expect(getAppOverviewForAppID("101")).toBeNull();
   });
 
   it("getCollectionStoreApps validates forEach presence", () => {

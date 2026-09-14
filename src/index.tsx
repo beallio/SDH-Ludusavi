@@ -209,9 +209,8 @@ export default definePlugin(() => {
     logUiEvent("qam_styles_attached");
   }
 
-  const runtime = createPluginRuntime();
-
   const ludusaviStore = createLudusaviStateStore();
+  const runtime = createPluginRuntime(ludusaviStore);
   const startupHydration = createStartupHydration({
     fetchSettings: getSettings,
     fetchTracking: async () => {

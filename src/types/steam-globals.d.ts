@@ -55,7 +55,19 @@ export type LogoPositionForApp = {
   logoPosition: LogoPosition;
 };
 
+export interface SteamAppDetails {
+  unAppID: number;
+  bCloudEnabledForApp?: boolean;
+  bCloudEnabledForAccount?: boolean;
+}
+
 export interface AppDetailsStoreGlobal {
+  GetAppDetails?(appId: number): SteamAppDetails | null | undefined;
+  GetAppDetailsForAppID?(appId: number): SteamAppDetails | null | undefined;
+  RegisterForAppDetailsChanges?(
+    appId: number,
+    callback: (details: SteamAppDetails | null | undefined) => void,
+  ): { unregister?(): void; Unregister?(): void } | (() => void) | void;
   SaveCustomLogoPosition(
     appOverview: SteamAppOverview,
     position: LogoPosition
