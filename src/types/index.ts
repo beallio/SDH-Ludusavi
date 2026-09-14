@@ -253,6 +253,10 @@ export type AutoSyncStatusFact = {
   observedAt: number;
   generation?: number;
   historyTimestamp?: string | null;
+  historyOperationSignature?: string | null;
+  lifecycle?: AutoSyncStatusLifecycle;
+  publicationOrder?: number;
+  trackingRevision?: number;
 };
 
 // Frontend-only observations preserve a live cycle's meaning. Durable history

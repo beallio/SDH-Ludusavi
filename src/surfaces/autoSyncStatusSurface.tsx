@@ -311,6 +311,10 @@ export function createAutoSyncStatusSurface(
       syncStatusStrip(currentAutoSyncStatusState);
     },
 
+    settleObservation(options: Pick<AutoSyncStatusPublishOptions, "appID" | "generation">) {
+      observationStore?.invalidateAutoSyncObservation(options.appID, options.generation);
+    },
+
     subscribeDetailsPresentation(listener: () => void) {
       detailsPresentationListeners.add(listener);
       return () => detailsPresentationListeners.delete(listener);

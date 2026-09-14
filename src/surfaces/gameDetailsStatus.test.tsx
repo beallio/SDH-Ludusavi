@@ -18,6 +18,8 @@ import {
   composeInNativeStatusSlot,
   createGameDetailsStatusSurface,
   isVisibleStatusBand,
+  DETAILS_STATUS_VISIBILITY_THRESHOLDS,
+  isFullyIntersecting,
 } from "./gameDetailsStatus";
 
 describe("game details route adapter", () => {
@@ -47,18 +49,22 @@ describe("game details route adapter", () => {
     expect(routeMock.removePatch).toHaveBeenCalledWith("/library/app/:appid", patch);
   });
 
-  it("uses only an empty verified status slot and preserves an occupied native slot", () => {
+  it("composes through the deferred Cloud component in the real four-child header", () => {
     const play = createElement("play");
+    const cloud = createElement(() => null);
+    const feedback = createElement("feedback");
     const tabs = createElement("tabs");
-    const root = createElement("app-details-root", { marker: "native" }, [play, null, tabs]);
+    const root = createElement("app-details-root", { marker: "native" }, [play, cloud, feedback, tabs]);
     const row = createElement("ludusavi-status");
     const contributed = composeInNativeStatusSlot(root, row) as any;
     expect(contributed.props.marker).toBe("native");
-    expect(contributed.props.children).toEqual([play, row, tabs]);
-
-    const cloud = createElement("steam-cloud");
-    const occupied = createElement("app-details-root", null, [play, cloud, tabs]);
-    expect(composeInNativeStatusSlot(occupied, row)).toBe(occupied);
+    expect(contributed).not.toBe(root);
+    expect(contributed.props.children).toHaveLength(4);
+    expect(contributed.props.children[0]).toBe(play);
+    expect(contributed.props.children[1].props.nativeStatus).toBe(cloud);
+    expect(contributed.props.children[1].props.row).toBe(row);
+    expect(contributed.props.children[2]).toBe(feedback);
+    expect(contributed.props.children[3]).toBe(tabs);
   });
 
   it("releases ownership when an ancestor hides the otherwise measured row", () => {
@@ -96,7 +102,7 @@ describe("game details route adapter", () => {
       getBoundingClientRect: () => ({ width: 600, height: 30, top: 40, left: 30, right: 630, bottom: 70 }),
       contains: (candidate: unknown) => candidate === element,
     };
-    vi.stubGlobal("window", { getComputedStyle: () => ({ display: "block", visibility: "visible" }) });
+    vi.stubGlobal("window", { getComputedStyle: () => ({ display: "block", visibility: "visible", overflow: "hidden" }) });
     vi.stubGlobal("document", {
       documentElement: { clientHeight: 800, clientWidth: 1280 },
       elementFromPoint: () => element,
@@ -104,5 +110,49 @@ describe("game details route adapter", () => {
 
     expect(isVisibleStatusBand(element as unknown as HTMLDivElement, true)).toBe(false);
     vi.unstubAllGlobals();
+  });
+  it("keeps a fully visible row valid through a boxless display-contents ancestor", () => {
+    const ancestor = {
+      hidden: false,
+      parentElement: null,
+      getBoundingClientRect: () => ({ width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 }),
+    };
+    const element = {
+      hidden: false,
+      parentElement: ancestor,
+      getBoundingClientRect: () => ({ width: 1280, height: 30, top: 40, left: 0, right: 1280, bottom: 70 }),
+      contains: (candidate: unknown) => candidate === element,
+    };
+    vi.stubGlobal("window", {
+      getComputedStyle: (candidate: unknown) => ({
+        display: candidate === ancestor ? "contents" : "flex",
+        visibility: "visible",
+        overflow: "visible",
+      }),
+    });
+    vi.stubGlobal("document", {
+      documentElement: { clientHeight: 800, clientWidth: 1280 },
+      elementFromPoint: () => element,
+    });
+
+    expect(isVisibleStatusBand(element as unknown as HTMLDivElement, true)).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it("observes the partial-to-full threshold needed for details ownership", () => {
+    const bounds = { width: 1280, height: 30 };
+    expect(DETAILS_STATUS_VISIBILITY_THRESHOLDS).toEqual([0, 0.99, 1]);
+    expect(isFullyIntersecting({
+      isIntersecting: true,
+      intersectionRatio: 0.5,
+      intersectionRect: { width: 640, height: 30 },
+      boundingClientRect: bounds,
+    })).toBe(false);
+    expect(isFullyIntersecting({
+      isIntersecting: true,
+      intersectionRatio: 1,
+      intersectionRect: bounds,
+      boundingClientRect: bounds,
+    })).toBe(true);
   });
 });

@@ -439,4 +439,16 @@ describe("SyncthingMonitor", () => {
     expect(mockOnStatus).not.toHaveBeenCalledWith("syncthing_unavailable", expect.any(Object));
     expect(mockRpc.stopWatch).toHaveBeenCalledWith("w1");
   });
+
+  it("reports a terminal pre-game watch after published activity stops", async () => {
+    const onTerminal = vi.fn();
+    const observed = new SyncthingMonitor(mockRpc as unknown as SyncthingRpc, mockOnStatus, onTerminal);
+    mockRpc.startWatch.mockResolvedValue({ status: "watching", watch_id: "w1", folder_id: "f1", label: "Folder", path: "/path", detection_grace_ms: 30000 });
+    mockRpc.pollWatch.mockResolvedValueOnce({ status: "activity", watch_id: "w1", sample: { status: "ACTIVE_TRANSFER", folder_state: "syncing", downloading: true, uploading: false, update_in_progress: false, settled: false, timestamp_unix: 1 } }).mockResolvedValueOnce({ status: "failed", reason: "connection_lost", message: "lost" });
+    observed.start("pre_game", "Hades", "1145300");
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(mockOnStatus).toHaveBeenCalledWith("syncthing_downloading", expect.any(Object));
+    expect(onTerminal).toHaveBeenCalledWith({ phase: "pre_game", gameName: "Hades", appID: "1145300" });
+  });
 });
