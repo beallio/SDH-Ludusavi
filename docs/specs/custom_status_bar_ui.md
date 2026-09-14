@@ -10,8 +10,9 @@ backup-on-exit operations, while keeping native Decky toasts for failures only.
 
 ## Architecture Overview
 
-The status strip is frontend-owned and driven by the existing app lifetime flow in
-`src/index.tsx`.
+The status presentation is frontend-owned and driven by the existing app lifetime flow in
+`src/index.tsx`. It has two read-only presentations: the BrowserView strip for protected
+launch work, and a native details-page row for eligible non-Steam entries.
 
 - `SteamClient.GameSessions.RegisterForAppLifetimeNotifications` remains the primary
   app start/exit source.
@@ -270,8 +271,9 @@ Frontend static tests must verify:
   so the strip sits above the bottom menu bar across viewport sizes.
 - The icon plus text are centered as one group, normal/running/success icons use
   Steam Blue, `needs_backup` uses a warning/action color, and errors remain red.
-- Diagnostic buttons, diagnostic labels, alternate surface modes, React portal code,
-  global component registration, and composition-hook code are absent.
+- The BrowserView strip has no React portal or focus target. The details row uses the public
+  Decky route hook only at `/library/app/:appid`, composes the verified provider value, and
+  removes its exact patch on dismount. It never changes Steam Cloud data, controls, or classes.
 - Autosync lifecycle handlers publish strip states around existing RPC calls.
 - Autosync start/result success toasts are removed.
 - Autosync failure still routes through the `failures_errors` notification category.
@@ -293,3 +295,17 @@ Validation commands:
 ./run.sh uv run ty check py_modules/sdh_ludusavi/
 ./run.sh uv run pytest
 ```
+
+## Details-page status row
+
+The row appears only after the selected library entry has loaded matching details with both
+Cloud enable flags. It is hidden when both flags are enabled, which is a display rule only and
+does not change backup or restore eligibility. Unknown details and unsupported native provider
+shapes leave Steam unchanged and keep the BrowserView strip available.
+
+For exit work, a mounted, visible, layout-valid row for the same app suppresses duplicate
+BrowserView pixels without stopping timers, watches, or status production. Start-side checking,
+restore, and conflict work always use the strip. A row unmount or Cloud-state change restores an
+outstanding strip without extending its lifetime. Terminal observations remain in frontend state
+through the strip timeout, but the frontend discards active observations that time out or are
+superseded.

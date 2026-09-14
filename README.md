@@ -7,8 +7,8 @@ SDH-Ludusavi keeps your game saves protected without pulling you out of Game Mod
 ## Features
 
 - **Automatic Sync**: Restores your save if the backup is newer before a game starts, and automatically performs a backup after you exit. Each Ludusavi-managed game also has a **Sync This Game** toggle that defaults to on. Turning it off blocks both the launch restore and exit backup for that game; the preference remains editable but has no effect while global Automatic Sync is off. With global sync on, starting or exiting a disabled game briefly shows **SAVE SYNC DISABLED FOR THIS GAME**.
-- **SteamOS Integration**: Shows compact progress strips for background sync events, just like official Steam Cloud sync.
-- **Syncthing Activity**: Shows Syncthing sync status (downloading, uploading, or complete) on the autosync status strip when Syncthing is configured and running.
+- **SteamOS Integration**: Shows a read-only Ludusavi save-status row on eligible non-Steam game details pages. Steam Cloud-enabled entries keep their native Steam Cloud row unchanged. A separate compact strip remains on the launch screen for protected restore and conflict work.
+- **Syncthing Activity**: Shows observed Syncthing activity and outcomes. A successful local backup is not presented as proof that a remote device received it.
 - **Launch Gate**: Pauses game launch for save conflicts and observed incoming Syncthing activity, verifying stable backup files before deciding which save to use.
 - **Manual Control**: Force a backup for any Ludusavi-managed game at any time, and restore from any snapshot through the Backup Browser.
 - **Backup Browser**: View historical backup snapshots for a game directly in the plugin and selectively perform a point-in-time restore.
@@ -119,7 +119,10 @@ silently disappearing.
 Syncthing monitoring remains advisory and keeps its independent 120-second pre-game and
 300/900-second post-game observation limits: when a post-game boundary is reached, the plugin
 reports the resulting upload state rather than presenting an ordinary slow sync as an API
-failure.
+failure. On an eligible non-Steam game details page, the same information remains as a short
+Ludusavi status row after the temporary strip hides. The row can report a proven local result and
+a separate last-observed Syncthing limitation. After a plugin reload, it shows durable local
+history only; remote delivery is explicitly unverified until a new observation occurs.
 
 - **Backup ready**: Ludusavi has a valid backup for this game.
 - **Needs first backup**: Ludusavi recognizes the game, but no backup has been created yet.

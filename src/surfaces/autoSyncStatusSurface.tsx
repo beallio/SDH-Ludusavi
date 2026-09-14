@@ -9,6 +9,7 @@ import type {
 import { log } from "../utils/logging";
 import { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus, isLudusaviRunningStatus, isSyncthingStatus } from "./autoSyncStatusRenderer";
 import type { AutoSyncStatusBrowserViewApi } from "./autoSyncStatusBrowserView";
+import type { LudusaviStateStore } from "../state/ludusaviState";
 
 export { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus };
 
@@ -20,6 +21,7 @@ export const HAS_BACKUP_MIN_DWELL_MS = 900;
 export type AutoSyncStatusPublishOptions = {
   source: AutoSyncStatusSource;
   lifecycle?: "lifecycle_start" | "lifecycle_exit";
+  generation?: number;
   gameName?: string;
   appID?: string;
   tracked?: boolean;
@@ -33,7 +35,10 @@ export type AutoSyncStatusCompleteOptions = Omit<
   lifecycle: "lifecycle_start" | "lifecycle_exit";
 };
 
-export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserViewApi) {
+export function createAutoSyncStatusSurface(
+  statusView: AutoSyncStatusBrowserViewApi,
+  observationStore?: Pick<LudusaviStateStore, "recordAutoSyncStatus" | "invalidateAutoSyncObservation">,
+) {
   let currentAutoSyncStatusState: AutoSyncStatusState = {
     status: "has_backup",
     visible: false,
@@ -46,6 +51,22 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
   let autoSyncStatusHideTimeoutID: number | null = null;
   let autoSyncStatusSyncTimeoutID: number | null = null;
   let currentHasBackupLifecycle: "lifecycle_start" | "lifecycle_exit" | null = null;
+  let detailsOwner: { token: number; appID: string; visible: boolean; layoutValid: boolean } | null = null;
+  let nextDetailsOwnerToken = 0;
+
+  function shouldShowStatusStrip(state: AutoSyncStatusState): boolean {
+    const owner = detailsOwner;
+    const ownerClaimsExit = owner !== null &&
+      state.lifecycle === "lifecycle_exit" &&
+      owner.appID === state.appID &&
+      owner.visible &&
+      owner.layoutValid;
+    return state.visible && !ownerClaimsExit;
+  }
+
+  function syncStatusStrip(state: AutoSyncStatusState) {
+    statusView.sync({ ...state, visible: shouldShowStatusStrip(state) });
+  }
 
   function clearDeferredAutoSyncStatus() {
     if (deferredAutoSyncStatusTimeoutID !== null) {
@@ -122,6 +143,12 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
           currentAutoSyncStatusState.gameName
         );
       }
+      if (isRunning) {
+        observationStore?.invalidateAutoSyncObservation(
+          currentAutoSyncStatusState.appID,
+          currentAutoSyncStatusState.generation,
+        );
+      }
       api.hide({
         source: "timeout",
         gameName: currentAutoSyncStatusState.gameName,
@@ -139,7 +166,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       if (state !== currentAutoSyncStatusState || !state.visible) {
         return;
       }
-      statusView.sync(state);
+      syncStatusStrip(state);
       scheduleAutoSyncStatusHide(state);
       autoSyncStatusShownAt = Date.now();
     }, 0);
@@ -147,6 +174,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
 
   const api = {
     publish(status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions) {
+      observationStore?.recordAutoSyncStatus(status, options);
       if (
         isSyncthingStatus(status) &&
         options.source === "lifecycle_exit" &&
@@ -161,6 +189,8 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
           status,
           visible: true,
           source: options.source,
+          lifecycle: options.lifecycle,
+          generation: options.generation,
           gameName: options.gameName,
           appID: options.appID,
           tracked: options.tracked,
@@ -176,7 +206,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
             currentHasBackupLifecycle = null;
             statusView.setContext(currentAutoSyncStatusState);
             logAutoSyncStatusChange(currentAutoSyncStatusState);
-            statusView.sync(currentAutoSyncStatusState);
+            syncStatusStrip(currentAutoSyncStatusState);
             scheduleAutoSyncStatusHide(currentAutoSyncStatusState);
             autoSyncStatusShownAt = Date.now();
           }, remaining);
@@ -200,6 +230,8 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
         status,
         visible: true,
         source: options.source,
+        lifecycle: options.lifecycle,
+        generation: options.generation,
         gameName: options.gameName,
         appID: options.appID,
         tracked: options.tracked,
@@ -213,7 +245,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       }
       clearAutoSyncStatusSyncTimeout();
       statusView.setContext(currentAutoSyncStatusState);
-      statusView.sync(currentAutoSyncStatusState);
+      syncStatusStrip(currentAutoSyncStatusState);
       scheduleAutoSyncStatusHide(currentAutoSyncStatusState);
       autoSyncStatusShownAt = Date.now();
     },
@@ -235,7 +267,18 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       };
       logAutoSyncStatusChange(currentAutoSyncStatusState);
       statusView.setContext(currentAutoSyncStatusState);
-      statusView.sync(currentAutoSyncStatusState);
+      syncStatusStrip(currentAutoSyncStatusState);
+    },
+
+    registerDetailsOwner(owner: { appID: string; visible: boolean; layoutValid: boolean }) {
+      const token = ++nextDetailsOwnerToken;
+      detailsOwner = { token, ...owner };
+      syncStatusStrip(currentAutoSyncStatusState);
+      return () => {
+        if (detailsOwner?.token !== token) return;
+        detailsOwner = null;
+        syncStatusStrip(currentAutoSyncStatusState);
+      };
     },
 
     complete(
@@ -356,6 +399,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
     dispose() {
       clearDeferredAutoSyncStatus();
       currentHasBackupLifecycle = null;
+      detailsOwner = null;
       statusView.setContext(currentAutoSyncStatusState);
       currentAutoSyncStatusState = {
         status: "has_backup",

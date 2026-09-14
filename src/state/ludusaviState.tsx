@@ -14,7 +14,14 @@ import {
   Settings,
   Versions,
   UpdateChannel,
-  TrackingReadiness
+  TrackingReadiness,
+  AutoSyncStatusKind,
+  AutoSyncStatusObservation,
+  AutoSyncStatusLifecycle,
+  AutoSyncStatusSource,
+  OperationResult,
+  LifecycleCheckResult,
+  RpcStatus,
 } from "../types";
 import { LudusaviLaunchCommand } from "../ludusaviLauncher";
 import { normalize } from "../utils/steam";
@@ -80,6 +87,7 @@ export type LudusaviStateSnapshot = {
   trackedAppIDs: Set<string>;
   trackedNames: Set<string>;
   trackingReadiness: TrackingReadiness;
+  autoSyncObservations: Record<string, AutoSyncStatusObservation>;
 };
 
 function createInitialSnapshot(): LudusaviStateSnapshot {
@@ -94,7 +102,8 @@ function createInitialSnapshot(): LudusaviStateSnapshot {
     ludusaviCommand: null,
     trackedAppIDs: new Set<string>(),
     trackedNames: new Set<string>(),
-    trackingReadiness: "cold"
+    trackingReadiness: "cold",
+    autoSyncObservations: {},
   };
 }
 
@@ -187,7 +196,12 @@ export class LudusaviStateStore {
   }
 
   setGameHistory(history: Record<string, GameOperationHistory>) {
-    this.commit({ gameHistory: history });
+    this.commit({
+      gameHistory: history,
+      autoSyncObservations: this.pruneAutoSyncObservations(
+        this.snapshot.games ?? [], this.snapshot.gameAliases, history,
+      ),
+    });
   }
 
   applyRefreshResult(result: RefreshResult) {
@@ -198,7 +212,10 @@ export class LudusaviStateStore {
       gameHistory: result.history ?? {},
       trackedAppIDs: buildTrackedAppIDs(result.games),
       trackedNames: buildTrackedNames(result.games, aliases),
-      trackingReadiness: "ready"
+      trackingReadiness: "ready",
+      autoSyncObservations: this.pruneAutoSyncObservations(
+        result.games, aliases, result.history ?? {},
+      ),
     });
   }
 
@@ -260,42 +277,9 @@ export class LudusaviStateStore {
   }
 
   resolveCanonicalGameName(name: string, appID: string): string | null {
-    const games = this.snapshot.games ?? [];
-
-    const appIDMatch = games.find(
-      (game) => game.steam_id !== null
-        && game.steam_id !== undefined
-        && String(game.steam_id) === appID
+    return resolveCanonicalGameName(
+      this.snapshot.games ?? [], this.snapshot.gameAliases, name, appID,
     );
-    if (appIDMatch) {
-      return appIDMatch.name;
-    }
-
-    const aliasTarget = this.snapshot.gameAliases[name];
-    if (aliasTarget !== undefined) {
-      const aliasMatch = games.find((game) => game.name === aliasTarget);
-      if (aliasMatch) {
-        return aliasMatch.name;
-      }
-    }
-
-    const normalizedInput = normalize(name);
-    const exactMatch = games.find(
-      (game) => normalize(game.name) === normalizedInput
-    );
-    if (exactMatch) {
-      return exactMatch.name;
-    }
-
-    const candidates = games.filter((game) => {
-      const normalizedTarget = normalize(game.name);
-      const isSubstring = normalizedInput.includes(normalizedTarget)
-        || normalizedTarget.includes(normalizedInput);
-      return isSubstring
-        && fuzzyMatchAllowed(normalizedInput, normalizedTarget, game.configured);
-    });
-
-    return candidates.length === 1 ? candidates[0].name : null;
   }
 
   isGameSyncDisabled(name: string, appID: string): boolean {
@@ -313,6 +297,97 @@ export class LudusaviStateStore {
       (this.snapshot.settings === null || this.snapshot.settings.auto_sync_enabled) &&
       (tracked || trackingCacheEmpty)
     );
+  }
+
+  recordAutoSyncStatus(
+    status: AutoSyncStatusKind,
+    options: {
+      source: AutoSyncStatusSource;
+      lifecycle?: AutoSyncStatusLifecycle;
+      generation?: number;
+      gameName?: string;
+      appID?: string;
+      tracked?: boolean;
+      resultStatus?: OperationResult["status"] | LifecycleCheckResult["status"] | RpcStatus["status"];
+    },
+  ) {
+    if (!options.appID || !options.gameName) return;
+    const appID = String(options.appID);
+    const canonicalGameName = this.resolveCanonicalGameName(options.gameName, appID);
+    if (!canonicalGameName) return;
+
+    const previous = this.snapshot.autoSyncObservations[appID];
+    if (previous?.generation !== undefined && options.generation !== undefined && options.generation < previous.generation) {
+      return;
+    }
+    const startsNewCycle = status === "checking" && (
+      previous?.generation !== options.generation ||
+      previous?.lifecycle !== options.lifecycle ||
+      previous?.canonicalGameName !== canonicalGameName
+    );
+    const observedAt = Date.now();
+    const fact = {
+      status,
+      resultStatus: options.resultStatus,
+      observedAt,
+      generation: options.generation,
+      historyTimestamp: this.snapshot.gameHistory[canonicalGameName]?.last_operation?.timestamp ?? null,
+    };
+    const next: AutoSyncStatusObservation = {
+      appID,
+      gameName: options.gameName,
+      canonicalGameName,
+      lifecycle: options.lifecycle,
+      generation: options.generation,
+      status,
+      activity: autoSyncObservationActivity(status),
+      observedAt,
+      resultStatus: options.resultStatus,
+      localOperation: startsNewCycle ? null : previous?.localOperation ?? null,
+      syncObservation: startsNewCycle ? null : previous?.syncObservation ?? null,
+    };
+    if (isSyncthingObservation(status)) next.syncObservation = fact;
+    else if (!isAutoSyncActivity(status)) next.localOperation = fact;
+    this.commit({ autoSyncObservations: { ...this.snapshot.autoSyncObservations, [appID]: next } });
+  }
+
+  invalidateAutoSyncObservationsBefore(generation: number) {
+    let changed = false;
+    const observations = Object.fromEntries(Object.entries(this.snapshot.autoSyncObservations).map(([appID, observation]) => {
+      if (observation.activity === "active" && (observation.generation ?? -1) < generation) {
+        changed = true;
+        return [appID, { ...observation, activity: "unverified" as const }];
+      }
+      return [appID, observation];
+    }));
+    if (changed) this.commit({ autoSyncObservations: observations });
+  }
+
+  invalidateAutoSyncObservation(appID?: string, generation?: number) {
+    if (!appID) return;
+    const observation = this.snapshot.autoSyncObservations[String(appID)];
+    if (!observation || observation.activity !== "active" || (generation !== undefined && observation.generation !== generation)) return;
+    this.commit({ autoSyncObservations: {
+      ...this.snapshot.autoSyncObservations,
+      [String(appID)]: { ...observation, activity: "unverified" },
+    } });
+  }
+
+  private pruneAutoSyncObservations(
+    games: GameStatus[], aliases: Record<string, string>, history: Record<string, GameOperationHistory>,
+  ): Record<string, AutoSyncStatusObservation> {
+    const retained: Record<string, AutoSyncStatusObservation> = {};
+    for (const [appID, observation] of Object.entries(this.snapshot.autoSyncObservations)) {
+      const canonical = resolveCanonicalGameName(games, aliases, observation.gameName, appID);
+      if (canonical !== observation.canonicalGameName) continue;
+      const newerHistory = hasNewerDurableOperation(history[canonical], observation.localOperation);
+      retained[appID] = {
+        ...observation,
+        localOperation: newerHistory ? null : observation.localOperation,
+        syncObservation: newerHistory ? null : observation.syncObservation,
+      };
+    }
+    return retained;
   }
 
   private commit(patch: Partial<LudusaviStateSnapshot>) {
@@ -339,6 +414,43 @@ function fuzzyMatchAllowed(
     return true;
   }
   return [" ", ".", "-"].includes(normalizedInput[normalizedTarget.length]);
+}
+
+function resolveCanonicalGameName(
+  games: GameStatus[], aliases: Record<string, string>, name: string, appID: string,
+): string | null {
+  const appIDMatch = games.find((game) => game.steam_id !== null && game.steam_id !== undefined && String(game.steam_id) === appID);
+  if (appIDMatch) return appIDMatch.name;
+  const aliasTarget = aliases[name];
+  if (aliasTarget !== undefined && games.some((game) => game.name === aliasTarget)) return aliasTarget;
+  const normalizedInput = normalize(name);
+  const exactMatch = games.find((game) => normalize(game.name) === normalizedInput);
+  if (exactMatch) return exactMatch.name;
+  const candidates = games.filter((game) => {
+    const normalizedTarget = normalize(game.name);
+    return (normalizedInput.includes(normalizedTarget) || normalizedTarget.includes(normalizedInput))
+      && fuzzyMatchAllowed(normalizedInput, normalizedTarget, game.configured);
+  });
+  return candidates.length === 1 ? candidates[0].name : null;
+}
+
+function isAutoSyncActivity(status: AutoSyncStatusKind): boolean {
+  return ["checking", "backing_up", "restoring", "conflict", "syncthing_pending_upload", "syncthing_downloading", "syncthing_uploading"].includes(status);
+}
+
+function isSyncthingObservation(status: AutoSyncStatusKind): boolean {
+  return status.startsWith("syncthing_");
+}
+
+function autoSyncObservationActivity(status: AutoSyncStatusKind) {
+  return isAutoSyncActivity(status) ? "active" as const : "settled" as const;
+}
+
+function hasNewerDurableOperation(
+  history: GameOperationHistory | undefined, observation: { historyTimestamp?: string | null } | null,
+): boolean {
+  const current = history?.last_operation?.timestamp;
+  return Boolean(current && observation?.historyTimestamp && current > observation.historyTimestamp);
 }
 
 export function createLudusaviStateStore() {

@@ -4,10 +4,10 @@ import type {
   LifecycleCheckResult,
   OperationResult,
   RpcResult,
-  RpcStatus,
   AutoSyncStatusKind,
 } from "../types";
 import type { LudusaviStateStore } from "../state/ludusaviState";
+import type { AutoSyncStatusCompleteOptions, AutoSyncStatusPublishOptions } from "../surfaces/autoSyncStatusSurface";
 import { summarizeOperationResult } from "../formatting/operationText";
 import { summarizeLifecycleResult } from "../formatting/lifecycleLogSummary";
 import { createSteamLifecycleSource } from "./steamLifecycleSource";
@@ -35,19 +35,10 @@ import {
   type ExitState,
   type LifecycleCommand,
 } from "./gameLifecycleDecision";
-type StatusOptions = {
-  source: "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";
-  gameName?: string;
-  appID?: string;
-  tracked?: boolean;
-  resultStatus?: OperationResult["status"] | LifecycleCheckResult["status"] | RpcStatus["status"];
-};
 type AutoSyncStatusSurface = {
-  publish: (status: AutoSyncStatusKind, options: StatusOptions) => void;
-  hide: (options?: Partial<StatusOptions>) => void;
-  complete: (result: OperationResult | LifecycleCheckResult, options: Pick<
-    StatusOptions, "gameName" | "appID" | "tracked"
-  > & { lifecycle: "lifecycle_start" | "lifecycle_exit" }) => void;
+  publish: (status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions) => void;
+  hide: (options?: Partial<AutoSyncStatusPublishOptions>) => void;
+  complete: (result: OperationResult | LifecycleCheckResult, options: AutoSyncStatusCompleteOptions) => void;
 };
 type GameLifecycleControllerDependencies = {
   store: LudusaviStateStore;
@@ -61,6 +52,7 @@ type GameLifecycleControllerDependencies = {
 function createEpochGuardedSurface(
   surface: AutoSyncStatusSurface,
   epoch: number,
+  lifecycle: "lifecycle_start" | "lifecycle_exit",
   getCurrentEpoch: () => number,
 ): AutoSyncStatusSurface {
   const logStaleDrop = (kind: string, detail: string, gameName?: string) => {
@@ -69,21 +61,21 @@ function createEpochGuardedSurface(
   return {
     publish: (status, options) => {
       if (epoch === getCurrentEpoch()) {
-        surface.publish(status, options);
+        surface.publish(status, { ...options, lifecycle, generation: epoch });
       } else {
         logStaleDrop("publish", `status=${status}`, options.gameName);
       }
     },
     complete: (result, options) => {
       if (epoch === getCurrentEpoch()) {
-        surface.complete(result, options);
+        surface.complete(result, { ...options, lifecycle, generation: epoch });
       } else {
         logStaleDrop("complete", `result=${result.status}`, options.gameName);
       }
     },
     hide: (options) => {
       if (epoch === getCurrentEpoch()) {
-        surface.hide(options);
+        surface.hide({ ...options, lifecycle, generation: epoch });
       } else {
         logStaleDrop("hide", `source=${options?.source ?? "hide"}`, options?.gameName);
       }
@@ -108,6 +100,7 @@ export function createGameLifecycleController(
   const { publish: rawPublish } = statusSurface;
   let lifecycleEpoch = 0;
   let activeMonitorEpoch = 0;
+  let activeMonitorLifecycle: "lifecycle_start" | "lifecycle_exit" = "lifecycle_start";
   const activeLeases = new Set<PauseLeaseHandle>();
   const isStaleLifecycle = (epoch: number, phase: "start" | "exit", name: string) => {
     if (epoch === lifecycleEpoch) return false;
@@ -127,6 +120,8 @@ export function createGameLifecycleController(
         gameName: options.gameName,
         appID: options.appID,
         tracked: true,
+        lifecycle: activeMonitorLifecycle,
+        generation: activeMonitorEpoch,
       });
     }
   });
@@ -159,6 +154,7 @@ export function createGameLifecycleController(
   }
   const handleAppStart = async (name: string, appID: string, instanceID?: number) => {
     const epoch = ++lifecycleEpoch;
+    ludusaviStore.invalidateAutoSyncObservationsBefore(epoch);
     if (ludusaviStore.getSnapshot().trackingReadiness === "cold") {
       await ensureStateReady();
       if (isStaleLifecycle(epoch, "start", name)) return;
@@ -169,7 +165,7 @@ export function createGameLifecycleController(
       publish: publishAutoSyncStatus,
       complete: completeAutoSyncStatus,
       hide: hideAutoSyncStatus,
-    } = createEpochGuardedSurface(statusSurface, epoch, () => lifecycleEpoch);
+    } = createEpochGuardedSurface(statusSurface, epoch, "lifecycle_start", () => lifecycleEpoch);
     const trackingReadiness = ludusaviStore.getSnapshot().trackingReadiness;
     const isTrackingReady = trackingReadiness === "ready";
     const tracked = isTracked(name, appID);
@@ -204,6 +200,7 @@ export function createGameLifecycleController(
       }
       if (autoSyncEnabled && !gameSyncDisabled && guardCandidate) {
         activeMonitorEpoch = epoch;
+        activeMonitorLifecycle = "lifecycle_start";
         preGameWatch = syncthingMonitor.start("pre_game", name, appID);
         state.watchActive = true;
       }
@@ -275,6 +272,7 @@ export function createGameLifecycleController(
         if (resolution) {
           if (autoSyncEnabled && !ludusaviStore.isGameSyncDisabled(name, appID) && guardCandidate) {
             activeMonitorEpoch = epoch;
+            activeMonitorLifecycle = "lifecycle_start";
             preGameWatch = syncthingMonitor.start("pre_game", name, appID);
             state.watchActive = true;
           }
@@ -323,6 +321,7 @@ export function createGameLifecycleController(
 
   const handleAppExit = async (name: string, appID: string) => {
     const epoch = ++lifecycleEpoch;
+    ludusaviStore.invalidateAutoSyncObservationsBefore(epoch);
     if (ludusaviStore.getSnapshot().trackingReadiness === "cold") {
       await ensureStateReady();
       if (isStaleLifecycle(epoch, "exit", name)) return;
@@ -333,7 +332,7 @@ export function createGameLifecycleController(
       publish: publishAutoSyncStatus,
       complete: completeAutoSyncStatus,
       hide: hideAutoSyncStatus,
-    } = createEpochGuardedSurface(statusSurface, epoch, () => lifecycleEpoch);
+    } = createEpochGuardedSurface(statusSurface, epoch, "lifecycle_exit", () => lifecycleEpoch);
 
     const trackingReadiness = ludusaviStore.getSnapshot().trackingReadiness;
     const isTrackingReady = trackingReadiness === "ready";
@@ -350,6 +349,7 @@ export function createGameLifecycleController(
 
     if (autoSyncEnabledExit && !gameSyncDisabledExit && guardCandidate) {
       activeMonitorEpoch = epoch;
+      activeMonitorLifecycle = "lifecycle_exit";
       postGameWatch = syncthingMonitor.start("post_game", name, appID);
       state.watchActive = true;
     }
@@ -437,6 +437,7 @@ export function createGameLifecycleController(
 
   async function dispose(): Promise<void> {
     lifecycleEpoch++;
+    ludusaviStore.invalidateAutoSyncObservationsBefore(lifecycleEpoch);
     const releases = Array.from(activeLeases, (lease) => lease.release());
     activeLeases.clear();
     steamLifecycleSource.dispose();
