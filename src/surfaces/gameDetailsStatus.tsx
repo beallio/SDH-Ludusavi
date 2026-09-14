@@ -82,16 +82,41 @@ function GameDetailsStatusHeader({ appID, header, headerProps, store, statusSurf
   return composeInNativeStatusSlot(nativeHeader, createElement(GameDetailsStatusRow, { appID, model, statusSurface })) as any;
 }
 
-// The verified AppDetails header root has the play area, the Cloud-status band,
-// and the tabbed container as its three direct areas. We replace only an empty
-// middle slot; native content always wins over this optional contribution.
+// The AppDetails header exposes the deferred Cloud component as child one. It
+// can render null for an eligible shortcut, but it must remain mounted so Steam
+// retains ownership whenever it renders a real native status band.
 export function composeInNativeStatusSlot(nativeHeader: unknown, row: ReactElement): unknown {
   if (!isValidElement(nativeHeader)) return nativeHeader;
   const props = asRecord(nativeHeader.props);
   const children = props?.children;
-  if (!Array.isArray(children) || children.length !== 3) return nativeHeader;
-  if (children[1] !== null && children[1] !== false) return nativeHeader;
-  return cloneElement(nativeHeader as ReactElement<any>, { ...props, children: [children[0], row, children[2]] } as any);
+  if (!Array.isArray(children) || children.length < 4) return nativeHeader;
+  const nativeStatus = children[1];
+  if (!isValidElement(nativeStatus)) return nativeHeader;
+  const nextChildren = [...children];
+  nextChildren[1] = createElement(NativeStatusSlot, { nativeStatus, row });
+  return cloneElement(nativeHeader as ReactElement<any>, { ...props, children: nextChildren } as any);
+}
+
+function NativeStatusSlot({ nativeStatus, row }: { nativeStatus: ReactElement; row: ReactElement }) {
+  const [slot, setSlot] = useState<HTMLDivElement | null>(null);
+  const [nativeVisible, setNativeVisible] = useState(true);
+  useEffect(() => {
+    if (!slot) return;
+    const update = () => {
+      const occupied = Array.from(slot.children).some((child) =>
+        child.getAttribute("data-sdh-ludusavi-fallback") !== "true" && child.getClientRects().length > 0,
+      );
+      setNativeVisible(occupied);
+    };
+    update();
+    const observer = typeof MutationObserver === "undefined" ? null : new MutationObserver(update);
+    observer?.observe(slot, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
+    return () => observer?.disconnect();
+  }, [slot, nativeStatus]);
+  return createElement("div", { ref: setSlot, style: { display: "contents" } },
+    nativeStatus,
+    createElement("div", { "data-sdh-ludusavi-fallback": "true", style: { display: nativeVisible ? "none" : "contents" } }, row),
+  );
 }
 
 function GameDetailsStatusRow({ appID, model, statusSurface }: {
@@ -116,6 +141,19 @@ function GameDetailsStatusRow({ appID, model, statusSurface }: {
     }), createElement("span", { style: { overflow: "hidden", textOverflow: "ellipsis" } }, model.label)));
 }
 
+export const DETAILS_STATUS_VISIBILITY_THRESHOLDS = [0, 0.99, 1];
+
+type StatusIntersection = Pick<IntersectionObserverEntry, "isIntersecting" | "intersectionRatio"> & {
+  intersectionRect: Pick<DOMRectReadOnly, "width" | "height">;
+  boundingClientRect: Pick<DOMRectReadOnly, "width" | "height">;
+};
+
+export function isFullyIntersecting(entry: StatusIntersection | undefined): boolean {
+  return Boolean(entry && entry.isIntersecting && entry.intersectionRatio >= 0.99
+    && entry.intersectionRect.width >= entry.boundingClientRect.width - 1
+    && entry.intersectionRect.height >= entry.boundingClientRect.height - 1);
+}
+
 function useVisibleLayout(element: HTMLDivElement | null): boolean {
   const [visible, setVisible] = useState(false);
   useEffect(() => {
@@ -124,11 +162,9 @@ function useVisibleLayout(element: HTMLDivElement | null): boolean {
     const update = () => setVisible(isVisibleStatusBand(element, fullyIntersecting));
     const observer = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver((entries) => {
       const entry = entries.find((candidate) => candidate.target === element);
-      fullyIntersecting = Boolean(entry && entry.isIntersecting && entry.intersectionRatio >= 0.99
-        && entry.intersectionRect.width >= entry.boundingClientRect.width - 1
-        && entry.intersectionRect.height >= entry.boundingClientRect.height - 1);
+      fullyIntersecting = isFullyIntersecting(entry);
       update();
-    });
+    }, { threshold: DETAILS_STATUS_VISIBILITY_THRESHOLDS });
     observer?.observe(element);
     const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
     resizeObserver?.observe(element);
@@ -157,7 +193,11 @@ export function isVisibleStatusBand(element: HTMLDivElement, intersecting: boole
     if (style?.display === "none" || style?.visibility === "hidden" || style?.visibility === "collapse") return false;
     if (ancestor !== element && typeof ancestor.getBoundingClientRect === "function") {
       const bounds = ancestor.getBoundingClientRect();
-      if (rect.left < bounds.left || rect.top < bounds.top || rect.right > bounds.right || rect.bottom > bounds.bottom) return false;
+      const clipsX = clipsOverflow(style?.overflowX ?? style?.overflow);
+      const clipsY = clipsOverflow(style?.overflowY ?? style?.overflow);
+      const hasLayoutBox = bounds.width > 0 && bounds.height > 0;
+      if (hasLayoutBox && ((clipsX && (rect.left < bounds.left || rect.right > bounds.right))
+        || (clipsY && (rect.top < bounds.top || rect.bottom > bounds.bottom)))) return false;
     }
   }
   const root = document.documentElement;
@@ -165,8 +205,12 @@ export function isVisibleStatusBand(element: HTMLDivElement, intersecting: boole
   if (typeof document.elementFromPoint === "function") {
     const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
     if (top && !element.contains(top)) return false;
+
   }
   return true;
+}
+function clipsOverflow(value: string | undefined): boolean {
+  return ["hidden", "clip", "auto", "scroll"].includes(value ?? "visible");
 }
 
 function toneColor(tone: ReturnType<typeof selectGameDetailsStatus>["tone"]) {

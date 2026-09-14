@@ -294,4 +294,35 @@ describe("game details status selection", () => {
     expect(exit.description).not.toContain("Incoming folder activity settled.");
   });
 
+  it("labels a durable restored result as a restore instead of a completed backup", () => {
+    const restored = selectGameDetailsStatus({
+      snapshot: snapshot({ gameHistory: { Fixture: {
+        last_backup: null, last_restore: null, last_skip: null, last_failure: null,
+        last_operation: {
+          operation: "restore", trigger: "manual_restore", status: "restored", reason: null, message: null,
+          timestamp: "2026-09-13 12:00:00",
+        },
+      } } }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+
+    expect(restored.label).toContain("Local restore complete");
+    expect(restored.label).not.toContain("Local backup complete");
+  });
+
+  it("honors fresh missing-backup inventory unless a local result is newer", () => {
+    const inventory = { games: [{ name: "Fixture", steam_id: "100", configured: true, has_backup: false, needs_first_backup: true, error: null, status: "needs_first_backup" as const }], trackingRevision: 2 };
+    const live = (trackingRevision: number) => ({ "100": { appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", lifecycle: "lifecycle_exit" as const, generation: 4, status: "has_backup" as const, activity: "settled" as const, observedAt: 10, localOperation: { status: "has_backup" as const, resultStatus: "backed_up" as const, observedAt: 10, generation: 4, trackingRevision }, syncObservation: null } });
+    const stale = selectGameDetailsStatus({
+      snapshot: snapshot({ ...inventory, autoSyncObservations: live(1) }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(stale.kind).toBe("needs_backup");
+    const current = selectGameDetailsStatus({
+      snapshot: snapshot({ ...inventory, autoSyncObservations: live(2) }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(current.kind).toBe("local_result");
+  });
+
 });

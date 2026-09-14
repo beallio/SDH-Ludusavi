@@ -17,6 +17,7 @@ vi.mock("react/jsx-dev-runtime", () => ({
 }));
 
 import { createLudusaviStateStore } from "./ludusaviState";
+import { selectGameDetailsStatus } from "../surfaces/gameDetailsStatusModel";
 
 describe("LudusaviStateStore", () => {
   describe("isTracked", () => {
@@ -322,14 +323,17 @@ describe("LudusaviStateStore", () => {
       const options = { source: "lifecycle_exit" as const, lifecycle: "lifecycle_exit" as const, generation: 1, gameName: "Fixture", appID: "100" };
       store.recordAutoSyncStatus("checking", options);
       store.recordAutoSyncStatus("has_backup", { ...options, resultStatus: "backed_up" });
-      store.recordAutoSyncStatus("syncthing_folder_not_found", options);
+      store.recordAutoSyncStatus("syncthing_uploading", options);
       store.setGameHistory({ Fixture: history(operation("auto_exit", "2026-09-13 11:00:00")) });
-      expect(store.getSnapshot().autoSyncObservations["100"].syncObservation?.status).toBe("syncthing_folder_not_found");
+      expect(store.getSnapshot().autoSyncObservations["100"].syncObservation?.status).toBe("syncthing_uploading");
       expect(store.getSnapshot().autoSyncObservations["100"].localOperation?.historyTimestamp).toBe("2026-09-13 11:00:00");
 
       store.setGameHistory({ Fixture: history(operation("manual_backup", "2026-09-13 12:00:00", "failed")) });
       expect(store.getSnapshot().autoSyncObservations["100"].syncObservation).toBeNull();
       expect(store.getSnapshot().autoSyncObservations["100"].localOperation).toBeNull();
+      expect(store.getSnapshot().autoSyncObservations["100"].activity).toBe("unverified");
+      store.recordAutoSyncStatus("syncthing_complete", options);
+      expect(store.getSnapshot().autoSyncObservations["100"].syncObservation).toBeNull();
     });
 
     it("reconciles a first automatic operation before later manual history replaces it", () => {
@@ -363,6 +367,53 @@ describe("LudusaviStateStore", () => {
       store.recordAutoSyncStatus("syncthing_complete", current);
       expect(store.getSnapshot().autoSyncObservations["200"].canonicalGameName).toBe("B");
     });
+
+    it("clears pre-launch sync evidence when a later exit starts disabled", () => {
+      const store = createLudusaviStateStore();
+      store.applyRefreshResult({ games: [game("Fixture", "100")], aliases: {}, history: {}, dependency_error: null });
+      const start = { source: "lifecycle_start" as const, lifecycle: "lifecycle_start" as const, generation: 1, gameName: "Fixture", appID: "100" };
+      store.recordAutoSyncStatus("checking", start);
+      store.recordAutoSyncStatus("syncthing_complete", start);
+      store.recordAutoSyncStatus("game_sync_disabled", { source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 2, gameName: "Fixture", appID: "100", resultStatus: "skipped" });
+      const observation = store.getSnapshot().autoSyncObservations["100"];
+      expect(observation.syncObservation).toBeNull();
+      expect(observation.lifecycle).toBe("lifecycle_exit");
+    });
+
+    it("keeps a newer frontend error through matching automatic history cleanup", () => {
+      const store = createLudusaviStateStore();
+      store.applyRefreshResult({ games: [game("Fixture", "100")], aliases: {}, history: { Fixture: history({ operation: "backup", trigger: "auto_exit", status: "backed_up", reason: null, message: null, timestamp: "2026-09-13 10:00:00" }) }, dependency_error: null });
+      const start = { source: "lifecycle_start" as const, lifecycle: "lifecycle_start" as const, generation: 3, gameName: "Fixture", appID: "100" };
+      store.recordAutoSyncStatus("checking", start);
+      store.recordAutoSyncStatus("has_backup", { ...start, resultStatus: "skipped" });
+      store.recordAutoSyncStatus("error", { ...start, source: "rpc_result" });
+      store.setGameHistory({ Fixture: { last_backup: null, last_restore: null, last_skip: null, last_failure: null, last_operation: { operation: "start", trigger: "auto_start", status: "skipped", reason: "local_current", message: null, timestamp: "2026-09-13 11:00:00" } } });
+      expect(store.getSnapshot().autoSyncObservations["100"].localOperation?.status).toBe("error");
+    });
+    it("retires an active watch when a later manual operation shares its timestamp", () => {
+      const store = createLudusaviStateStore();
+      store.patchSettings({ auto_sync_enabled: true });
+      store.applyRefreshResult({ games: [game("Fixture", "100")], aliases: {}, history: { Fixture: history(operation("auto_exit", "2026-09-13 11:00:00")) }, dependency_error: null });
+      const options = { source: "lifecycle_exit" as const, lifecycle: "lifecycle_exit" as const, generation: 2, gameName: "Fixture", appID: "100" };
+      store.recordAutoSyncStatus("checking", options);
+      store.recordAutoSyncStatus("has_backup", { ...options, resultStatus: "backed_up" });
+      store.recordAutoSyncStatus("syncthing_uploading", options);
+
+      store.setGameHistory({ Fixture: history(operation("manual_backup", "2026-09-13 11:00:00")) });
+
+      expect(store.getSnapshot().autoSyncObservations["100"].activity).toBe("unverified");
+      expect(store.getSnapshot().autoSyncObservations["100"].localOperation).toBeNull();
+      expect(store.getSnapshot().autoSyncObservations["100"].syncObservation).toBeNull();
+      const model = selectGameDetailsStatus({
+        snapshot: store.getSnapshot(), appID: "100", gameName: "Fixture",
+        canonicalGameName: "Fixture", eligibility: "eligible",
+      });
+      expect(model.status).toBe("has_backup");
+      expect(model.syncVerification).toBe("unverified");
+      store.recordAutoSyncStatus("syncthing_complete", options);
+      expect(store.getSnapshot().autoSyncObservations["100"].syncObservation).toBeNull();
+    });
+
   });
 
 });

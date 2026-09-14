@@ -39,6 +39,7 @@ type AutoSyncStatusSurface = {
   publish: (status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions) => void;
   hide: (options?: Partial<AutoSyncStatusPublishOptions>) => void;
   complete: (result: OperationResult | LifecycleCheckResult, options: AutoSyncStatusCompleteOptions) => void;
+  settleObservation?: (options: Pick<AutoSyncStatusPublishOptions, "appID" | "generation">) => void;
 };
 type GameLifecycleControllerDependencies = {
   store: LudusaviStateStore;
@@ -123,6 +124,10 @@ export function createGameLifecycleController(
         lifecycle: activeMonitorLifecycle,
         generation: activeMonitorEpoch,
       });
+    }
+  }, ({ phase, appID }) => {
+    if (phase === "pre_game" && activeMonitorEpoch === lifecycleEpoch) {
+      statusSurface.settleObservation?.({ appID, generation: activeMonitorEpoch });
     }
   });
   const isTracked = (name: string, appID: string) => {

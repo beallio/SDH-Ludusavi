@@ -24,7 +24,7 @@ export type GameDetailsStatusViewModel = {
 };
 
 export type GameDetailsStatusSelectorInput = {
-  snapshot: Pick<LudusaviStateSnapshot, "settings" | "games" | "gameHistory" | "trackingReadiness" | "autoSyncObservations">;
+  snapshot: Pick<LudusaviStateSnapshot, "settings" | "games" | "gameHistory" | "trackingReadiness" | "autoSyncObservations"> & { trackingRevision?: number };
   appID: string;
   gameName: string;
   canonicalGameName: string | null;
@@ -57,9 +57,9 @@ export function selectGameDetailsStatus(input: GameDetailsStatusSelectorInput): 
     ? snapshot.autoSyncObservations[appID] : null;
   const local = observation?.localOperation ?? null;
   const sync = observation?.syncObservation ?? null;
-  const syncVerification = sync
-    ? observation?.activity === "unverified" ? "unverified" : "observed"
-    : "not_checked";
+  const syncVerification = observation?.activity === "unverified"
+    ? "unverified"
+    : sync ? "observed" : "not_checked";
 
   // Accepted active work always remains visible, even when a setting changes.
   if (observation?.activity === "active") {
@@ -75,6 +75,10 @@ export function selectGameDetailsStatus(input: GameDetailsStatusSelectorInput): 
   }
   if (snapshot.settings.sync_disabled_games.includes(canonicalGameName)) {
     return model(eligibility, "game_sync_disabled", "game_sync_disabled", "Sync disabled for this game", "Ludusavi automatic save sync is disabled for this game.", local?.status ?? null, sync?.status ?? null, syncVerification, observation?.lifecycle);
+  }
+  if ((game.needs_first_backup || game.status === "needs_first_backup")
+    && !isCurrentInventoryFact(local, snapshot.trackingRevision ?? 0)) {
+    return model(eligibility, "needs_backup", "unknown", "Backup needed", "Ludusavi has not made the first backup for this game.", local?.status ?? null, sync?.status ?? null, syncVerification, observation?.lifecycle);
   }
 
   const observedSync = observation?.activity === "settled" ? sync : null;
@@ -92,27 +96,32 @@ export function selectGameDetailsStatus(input: GameDetailsStatusSelectorInput): 
       primary.resultStatus,
       local?.resultStatus,
       primary === observedSync,
+      local?.lifecycle ?? observation?.lifecycle,
+      sync?.lifecycle ?? observation?.lifecycle,
     );
   }
   if (local) {
     return statusModel(
       eligibility, "local_result", local.status, local.status, sync?.status ?? null,
       false, syncVerification, observation?.lifecycle, local.resultStatus, local.resultStatus,
+      false,
+      local.lifecycle ?? observation?.lifecycle,
+      sync?.lifecycle ?? observation?.lifecycle,
     );
   }
 
   // Inventory is authoritative for current backup presence. Durable history is
   // useful after reload, but is not proof that the backup still exists.
   if (game.needs_first_backup || game.status === "needs_first_backup") {
-    return model(eligibility, "needs_backup", "unknown", "Backup needed", "Ludusavi has not made the first backup for this game.");
+    return model(eligibility, "needs_backup", "unknown", "Backup needed", "Ludusavi has not made the first backup for this game.", observation?.localOperation?.status ?? null, observation?.syncObservation?.status ?? null, syncVerification, observation?.lifecycle);
   }
   const durableOperation = snapshot.gameHistory[canonicalGameName]?.last_operation ?? null;
   if (durableOperation) {
     const status = durableStatus(durableOperation.status);
-    return statusModel(eligibility, "local_result", status, status, null, false, "unverified", undefined, durableOperation.status, durableOperation.status);
+    return statusModel(eligibility, "local_result", status, status, sync?.status ?? null, false, observation ? syncVerification : "unverified", observation?.lifecycle, durableOperation.status, durableOperation.status, false, undefined, sync?.lifecycle ?? observation?.lifecycle);
   }
   if (game.has_backup || game.status === "has_backup") {
-    return model(eligibility, "local_backup_available", "has_backup", "Local backup available", "Ludusavi reports a local backup for this game.");
+    return model(eligibility, "local_backup_available", "has_backup", "Local backup available", "Ludusavi reports a local backup for this game.", observation?.localOperation?.status ?? null, observation?.syncObservation?.status ?? null, syncVerification, observation?.lifecycle);
   }
   return model(eligibility, "unavailable", "unknown", "Save status unavailable", "Ludusavi could not verify this save status.");
 }
@@ -120,7 +129,12 @@ export function selectGameDetailsStatus(input: GameDetailsStatusSelectorInput): 
 function newerFact(local: AutoSyncStatusFact | null, sync: AutoSyncStatusFact | null): AutoSyncStatusFact | null {
   if (!local) return sync;
   if (!sync) return local;
-  return local.observedAt >= sync.observedAt ? local : sync;
+  if (local.observedAt !== sync.observedAt) return local.observedAt > sync.observedAt ? local : sync;
+  return (local.publicationOrder ?? 0) >= (sync.publicationOrder ?? 0) ? local : sync;
+}
+
+function isCurrentInventoryFact(fact: AutoSyncStatusFact | null, trackingRevision: number): boolean {
+  return fact?.trackingRevision !== undefined && fact.trackingRevision >= trackingRevision;
 }
 
 function durableStatus(status: "backed_up" | "restored" | "skipped" | "failed"): AutoSyncStatusKind {
@@ -158,11 +172,14 @@ function statusModel(
   resultStatus?: AutoSyncStatusFact["resultStatus"],
   localResultStatus?: AutoSyncStatusFact["resultStatus"],
   primaryIsSync = false,
+  localLifecycle = lifecycle,
+  syncLifecycle = lifecycle,
 ): GameDetailsStatusViewModel {
   const prefix = kind === "last_observed" ? "Last remote observation" : active ? "Current activity" : "Local result";
-  const primary = statusPhrase(status, resultStatus, lifecycle);
-  const localDetail = localStatus && localStatus !== status ? ` Local result: ${statusPhrase(localStatus, localResultStatus, lifecycle)}.` : "";
-  const detail = `${prefix}: ${primary}.${localDetail}${primaryIsSync ? "" : syncDetail(syncStatus, syncVerification, lifecycle)}`;
+  const primaryLifecycle = primaryIsSync ? syncLifecycle : localLifecycle;
+  const primary = statusPhrase(status, resultStatus, primaryLifecycle);
+  const localDetail = localStatus && localStatus !== status ? ` Local result: ${statusPhrase(localStatus, localResultStatus, localLifecycle)}.` : "";
+  const detail = `${prefix}: ${primary}.${localDetail}${primaryIsSync ? "" : syncDetail(syncStatus, syncVerification, syncLifecycle)}`;
   return {
     eligibility, kind, status, localStatus, syncStatus, syncVerification, lifecycle,
     label: `Ludusavi: ${prefix}: ${primary}`,
@@ -180,6 +197,7 @@ function statusPhrase(
   lifecycle?: "lifecycle_start" | "lifecycle_exit",
 ): string {
   if (status === "has_backup" && resultStatus === "skipped") return "Local save already current";
+  if (status === "has_backup" && resultStatus === "restored") return "Local restore complete";
   if (status === "unknown" && resultStatus === "skipped") return "Local operation skipped";
   if (status === "syncthing_complete") return lifecycle === "lifecycle_exit"
     ? "Remote upload observed with a connected peer"

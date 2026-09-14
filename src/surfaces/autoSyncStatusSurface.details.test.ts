@@ -14,8 +14,10 @@ vi.mock("../utils/logging", () => ({ log: vi.fn(), logUiEvent: vi.fn() }));
 import { createLudusaviStateStore } from "../state/ludusaviState";
 import { RESULT_HIDE_DELAY_MS, createAutoSyncStatusSurface } from "./autoSyncStatusSurface";
 
+import { selectGameDetailsStatus } from "./gameDetailsStatusModel";
 function trackedStore() {
   const store = createLudusaviStateStore();
+  store.patchSettings({ auto_sync_enabled: true });
   store.applyRefreshResult({
     games: [{
       name: "Fixture",
@@ -64,6 +66,12 @@ describe("details-row status ownership", () => {
     const observation = store.getSnapshot().autoSyncObservations["100"];
     expect(observation.localOperation?.status).toBe("has_backup");
     expect(observation.syncObservation?.status).toBe("syncthing_folder_not_found");
+    const model = selectGameDetailsStatus({
+      snapshot: store.getSnapshot(), appID: "100", gameName: "Fixture",
+      canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(model.status).toBe("syncthing_folder_not_found");
+    expect(model.label).toContain("Remote folder was not found");
   });
 
   it("suppresses only same-game exit pixels while a valid details row owns the area", () => {
@@ -101,6 +109,26 @@ describe("details-row status ownership", () => {
     surface.publish("backing_up", { source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 7, gameName: "Other", appID: "101", tracked: true });
     expect(surface.shouldDetailsRowYield("100")).toBe(true);
     expect(surface.shouldDetailsRowYield("101")).toBe(false);
+  });
+
+  it("keeps a stopped pre-launch transfer inactive and explicitly unverified", () => {
+    const store = trackedStore();
+    const surface = createAutoSyncStatusSurface({ setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() } as any, store);
+    surface.publish("syncthing_downloading", {
+      source: "lifecycle_start", lifecycle: "lifecycle_start", generation: 6,
+      gameName: "Fixture", appID: "100", tracked: true,
+    });
+
+    surface.settleObservation({ appID: "100", generation: 6 });
+
+    const model = selectGameDetailsStatus({
+      snapshot: store.getSnapshot(), appID: "100", gameName: "Fixture",
+      canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(model.active).toBe(false);
+    expect(model.syncStatus).toBe("syncthing_downloading");
+    expect(model.syncVerification).toBe("unverified");
+    expect(model.description).toContain("Remote sync is unverified after interrupted activity.");
   });
 
 });

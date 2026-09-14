@@ -306,10 +306,11 @@ app-details subscription and does not substitute a catalog match or mutate Steam
 Unknown details and unsupported native provider shapes leave Steam unchanged and keep the
 BrowserView strip available.
 
-The route contribution clones Decky's React route child and composes a stable header wrapper into
-an empty native Cloud-status slot. It declines the contribution when that slot is occupied, so it
-never creates a second status band or replaces native controls. The row releases ownership when
-it is hidden, clipped, offscreen, or covered. Its status icon and transfer animation are
+The route contribution clones Decky's React route child and composes at its deferred native
+Cloud-status component boundary. The Cloud component stays mounted. The row appears only when that
+component renders no native status band, so it never creates a second band or replaces native
+controls. The row releases ownership when it is hidden, clipped, offscreen, or covered. Its status
+icon and transfer animation are
 presentation only and it adds no controller focus stop.
 
 For exit work, a mounted, visible, layout-valid row for the same app suppresses duplicate
