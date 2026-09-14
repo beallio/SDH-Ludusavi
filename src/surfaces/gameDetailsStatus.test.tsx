@@ -1,4 +1,4 @@
-import { createContext, createElement } from "react";
+import { createContext, createElement, type ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 const routeMock = vi.hoisted(() => ({ addPatch: vi.fn((_: string, patch: unknown) => patch), removePatch: vi.fn() }));
@@ -17,6 +17,8 @@ import { createLudusaviStateStore } from "../state/ludusaviState";
 import {
   composeInNativeStatusSlot,
   createGameDetailsStatusSurface,
+  detailsRowPaintStyle,
+  type GameDetailsStatusContributionSource,
   isVisibleStatusBand,
   DETAILS_STATUS_VISIBILITY_THRESHOLDS,
   isFullyIntersecting,
@@ -47,6 +49,52 @@ describe("game details route adapter", () => {
     expect(patch(unsupported)).toBe(unsupported);
     surface.dispose();
     expect(routeMock.removePatch).toHaveBeenCalledWith("/library/app/:appid", patch);
+  });
+
+  it("moves a retained mounted route header to the replacement store after reload", () => {
+    const firstStore = createLudusaviStateStore();
+    const firstSurface = createGameDetailsStatusSurface(firstStore, {
+      registerDetailsOwner: vi.fn(), subscribeDetailsPresentation: vi.fn(() => () => {}), shouldDetailsRowYield: vi.fn(() => false),
+    } as any);
+    const firstPatch = routeMock.addPatch.mock.calls.at(-1)?.[1] as (route: any) => any;
+    const context = createContext<unknown>(null);
+    const nativeHeader = () => createElement("native-header");
+    const originalRender = vi.fn(() => createElement(context.Provider, { value: nativeHeader }, createElement("native-children")));
+    const child = createElement("native-route", { renderFunc: originalRender });
+    const patched = firstPatch({ path: "/library/app/:appid", children: child });
+    const rendered = patched.children.props.renderFunc({ params: { appid: "100" } });
+    const retainedHeader = rendered.props.value as (props: unknown) => ReactElement<{
+      store: unknown;
+      contributionSource: GameDetailsStatusContributionSource;
+    }>;
+    const retainedContributionSource = retainedHeader({}).props.contributionSource;
+    const notifyRetainedHeader = vi.fn();
+    const unsubscribe = retainedContributionSource.subscribe(notifyRetainedHeader);
+
+    expect(retainedHeader({}).props.store).toBe(firstStore);
+
+    firstSurface.dispose();
+    expect(retainedContributionSource.getSnapshot()).toBeNull();
+    const replacementStore = createLudusaviStateStore();
+    const replacementSurface = createGameDetailsStatusSurface(replacementStore, {
+      registerDetailsOwner: vi.fn(), subscribeDetailsPresentation: vi.fn(() => () => {}), shouldDetailsRowYield: vi.fn(() => false),
+    } as any);
+
+    // This is the original header function, as it remains mounted while
+    // Decky replaces the plugin. It must no longer use the disposed store.
+    expect(retainedHeader({}).props.store).toBe(replacementStore);
+    expect(retainedContributionSource.getSnapshot()?.store).toBe(replacementStore);
+    expect(notifyRetainedHeader).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    replacementSurface.dispose();
+  });
+
+  it("keeps a same-game fallback row measurable but non-painting", () => {
+    expect(detailsRowPaintStyle(true)).toEqual({
+      opacity: 0,
+      pointerEvents: "none",
+    });
+    expect(detailsRowPaintStyle(false)).toEqual({});
   });
 
   it("composes through the deferred Cloud component in the real four-child header", () => {

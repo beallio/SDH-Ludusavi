@@ -1,36 +1,93 @@
-import { routerHook } from "@decky/api";
-import { cloneElement, createElement, isValidElement, useEffect, useState, useSyncExternalStore, type ReactElement } from "react";
+import { routerHook, type RoutePatch } from "@decky/api";
+import { cloneElement, createElement, isValidElement, useEffect, useState, useSyncExternalStore, type CSSProperties, type ReactElement, type ReactNode } from "react";
 
 import type { LudusaviStateStore } from "../state/ludusaviState";
 import { sessionFromAppOverview } from "../utils/steam";
 import { getAppDetailsForAppID, getAppOverviewForAppID, subscribeToAppDetails } from "../utils/steamRuntime";
-import { selectGameDetailsStatus, getSteamCloudEligibility } from "./gameDetailsStatusModel";
+import { selectGameDetailsStatus, getSteamCloudEligibility, type GameDetailsStatusViewModel } from "./gameDetailsStatusModel";
 import { iconSvgForAutoSyncStatus } from "./autoSyncStatusRenderer";
-import type { createAutoSyncStatusSurface } from "./autoSyncStatusSurface";
+import type { DetailsStatusPresentationSurface } from "./autoSyncStatusSurface";
 
 const GAME_DETAILS_ROUTE = "/library/app/:appid";
-type DetailsStatusSurface = Pick<ReturnType<typeof createAutoSyncStatusSurface>, "registerDetailsOwner" | "subscribeDetailsPresentation" | "shouldDetailsRowYield">;
-type RouteRecord = Record<string, unknown>;
-type NativeHeader = (props: unknown) => unknown;
+export type GameDetailsStatusSurface = Readonly<{
+  dispose(): void;
+}>;
 
-export function createGameDetailsStatusSurface(store: LudusaviStateStore, statusSurface: DetailsStatusSurface) {
+export type GameDetailsStatusContribution = Readonly<{
+  token: number;
+  store: LudusaviStateStore;
+  statusSurface: DetailsStatusPresentationSurface;
+}>;
+
+export type GameDetailsStatusContributionSource = Readonly<{
+  getSnapshot(): GameDetailsStatusContribution | null;
+  subscribe(listener: () => void): () => void;
+}>;
+
+type RouteRecord = Record<string, unknown>;
+type GameDetailsStatusContributionRegistry = GameDetailsStatusContributionSource & Readonly<{
+  activate(store: LudusaviStateStore, statusSurface: DetailsStatusPresentationSurface): number;
+  retire(token: number): void;
+}>;
+
+type NativeHeader = (props: unknown) => ReactNode;
+type NativeRouteRenderFunction = (...args: unknown[]) => unknown;
+type NativeRouteChildProps = RouteRecord & { renderFunc: NativeRouteRenderFunction };
+type NativeProviderProps = RouteRecord & { value: unknown };
+type NativeHeaderElementProps = RouteRecord & { children?: unknown };
+declare global {
+  var __sdhLudusaviGameDetailsStatusRegistry: GameDetailsStatusContributionRegistry | undefined;
+}
+
+function getGameDetailsStatusContributionRegistry(): GameDetailsStatusContributionRegistry {
+  const existing = globalThis.__sdhLudusaviGameDetailsStatusRegistry;
+  if (existing) return existing;
+  let current: GameDetailsStatusContribution | null = null;
+  let nextToken = 0;
+  const listeners = new Set<() => void>();
+  const notify = () => listeners.forEach((listener) => listener());
+  const registry: GameDetailsStatusContributionRegistry = Object.freeze({
+    getSnapshot: () => current,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    activate(store: LudusaviStateStore, statusSurface: DetailsStatusPresentationSurface) {
+      const token = ++nextToken;
+      current = { token, store, statusSurface };
+      notify();
+      return token;
+    },
+    retire(token: number) {
+      if (current?.token !== token) return;
+      current = null;
+      notify();
+    },
+  });
+  globalThis.__sdhLudusaviGameDetailsStatusRegistry = registry;
+  return registry;
+}
+
+export function createGameDetailsStatusSurface(
+  store: LudusaviStateStore,
+  statusSurface: DetailsStatusPresentationSurface,
+): GameDetailsStatusSurface {
+  const contributionRegistry = getGameDetailsStatusContributionRegistry();
+  const contributionToken = contributionRegistry.activate(store, statusSurface);
   let disposed = false;
   const wrappedHeaders = new WeakMap<NativeHeader, Map<string, NativeHeader>>();
-  const patch = (route: unknown) => {
+  const patch: RoutePatch = (route) => {
     const record = asRecord(route);
-    const child = record?.children;
-    if (!record || !isValidElement(child)) return route as any;
-    const childProps = asRecord(child.props);
-    const renderFunc = childProps?.renderFunc;
-    if (typeof renderFunc !== "function") return route as any;
+    const child = asNativeRouteChild(record?.children);
+    if (!record || !child) return route;
+    const renderFunc = child.props.renderFunc;
     const wrappedRenderFunc = (...args: unknown[]) => {
       const rendered = renderFunc(...args);
-      if (!isValidElement(rendered) || disposed) return rendered;
-      const providerProps = asRecord(rendered.props);
-      const header = providerProps?.value;
+      const provider = asNativeProviderElement(rendered);
+      if (!provider || disposed) return rendered;
+      const nativeHeader = asNativeHeader(provider.props.value);
       const appID = routeAppID(args) ?? routeAppID([record]);
-      if (typeof header !== "function" || !appID) return rendered;
-      const nativeHeader = header as NativeHeader;
+      if (!nativeHeader || !appID) return rendered;
       let wrappersForHeader = wrappedHeaders.get(nativeHeader);
       if (!wrappersForHeader) {
         wrappersForHeader = new Map();
@@ -38,29 +95,81 @@ export function createGameDetailsStatusSurface(store: LudusaviStateStore, status
       }
       let wrappedHeader = wrappersForHeader.get(appID);
       if (!wrappedHeader) {
-        wrappedHeader = (headerProps: unknown) => createElement(
-          GameDetailsStatusHeader,
-          { appID, header: nativeHeader, headerProps, store, statusSurface },
-        );
+        wrappedHeader = (headerProps: unknown) => {
+          const contribution = contributionRegistry.getSnapshot();
+          return createElement(GameDetailsStatusHeader, {
+            appID,
+            header: nativeHeader,
+            headerProps,
+            contributionSource: contributionRegistry,
+            store: contribution?.store ?? null,
+            statusSurface: contribution?.statusSurface ?? null,
+          });
+        };
         wrappersForHeader.set(appID, wrappedHeader);
       }
-      return cloneElement(rendered as ReactElement<any>, { ...providerProps, value: wrappedHeader } as any);
+      return cloneElement(provider, { ...provider.props, value: wrappedHeader });
     };
     // Decky's dispatcher consumes the React child's props. Preserve every native
     // prop and replace only the route callback.
-    return { ...record, children: cloneElement(child as ReactElement<any>, { ...childProps, renderFunc: wrappedRenderFunc } as any) };
+    return { ...route, children: cloneElement(child, { ...child.props, renderFunc: wrappedRenderFunc }) };
   };
-  const installedPatch = routerHook.addPatch(GAME_DETAILS_ROUTE, patch as any);
-  return { dispose() {
-    if (disposed) return;
-    disposed = true;
-    routerHook.removePatch(GAME_DETAILS_ROUTE, installedPatch);
-  } };
+  const installedPatch = routerHook.addPatch(GAME_DETAILS_ROUTE, patch);
+  return Object.freeze({
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      contributionRegistry.retire(contributionToken);
+      routerHook.removePatch(GAME_DETAILS_ROUTE, installedPatch);
+    },
+  });
 }
 
-function GameDetailsStatusHeader({ appID, header, headerProps, store, statusSurface }: {
-  appID: string; header: NativeHeader; headerProps: unknown; store: LudusaviStateStore; statusSurface: DetailsStatusSurface;
-}) {
+type GameDetailsStatusHeaderProps = Readonly<{
+  appID: string;
+  header: NativeHeader;
+  headerProps: unknown;
+  contributionSource: GameDetailsStatusContributionSource;
+  store: LudusaviStateStore | null;
+  statusSurface: DetailsStatusPresentationSurface | null;
+}>;
+
+function GameDetailsStatusHeader({
+  appID,
+  header,
+  headerProps,
+  contributionSource,
+  store,
+  statusSurface,
+}: GameDetailsStatusHeaderProps): ReactNode {
+  const fallbackContribution = store && statusSurface
+    ? { token: 0, store, statusSurface }
+    : null;
+  const contribution = useSyncExternalStore(
+    contributionSource.subscribe,
+    contributionSource.getSnapshot,
+    () => fallbackContribution,
+  );
+  const nativeHeader = header(headerProps);
+  if (!contribution) return nativeHeader;
+  return createElement(ActiveGameDetailsStatusHeader, {
+    appID,
+    header,
+    headerProps,
+    store: contribution.store,
+    statusSurface: contribution.statusSurface,
+  });
+}
+
+type ActiveGameDetailsStatusHeaderProps = Pick<
+  GameDetailsStatusHeaderProps,
+  "appID" | "header" | "headerProps"
+> & Readonly<{
+  store: LudusaviStateStore;
+  statusSurface: DetailsStatusPresentationSurface;
+}>;
+
+function ActiveGameDetailsStatusHeader({ appID, header, headerProps, store, statusSurface }: ActiveGameDetailsStatusHeaderProps): ReactNode {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [details, setDetails] = useState<unknown>(() => getAppDetailsForAppID(appID));
   const rowYields = useSyncExternalStore(
@@ -78,26 +187,33 @@ function GameDetailsStatusHeader({ appID, header, headerProps, store, statusSurf
   const eligibility = getSteamCloudEligibility(appID, details);
   const model = selectGameDetailsStatus({ snapshot, appID, gameName, canonicalGameName: gameName ? store.resolveCanonicalGameName(gameName, appID) : null, eligibility });
   const nativeHeader = header(headerProps);
-  if (!model.showRow || rowYields) return nativeHeader as any;
-  return composeInNativeStatusSlot(nativeHeader, createElement(GameDetailsStatusRow, { appID, model, statusSurface })) as any;
+  if (!model.showRow) return nativeHeader;
+  return composeInNativeStatusSlot(nativeHeader, createElement(GameDetailsStatusRow, {
+    appID,
+    model,
+    statusSurface,
+    suppressed: rowYields,
+  }));
 }
 
 // The AppDetails header exposes the deferred Cloud component as child one. It
 // can render null for an eligible shortcut, but it must remain mounted so Steam
 // retains ownership whenever it renders a real native status band.
-export function composeInNativeStatusSlot(nativeHeader: unknown, row: ReactElement): unknown {
-  if (!isValidElement(nativeHeader)) return nativeHeader;
-  const props = asRecord(nativeHeader.props);
-  const children = props?.children;
+export function composeInNativeStatusSlot(nativeHeader: ReactNode, row: ReactElement): ReactNode {
+  const header = asNativeHeaderElement(nativeHeader);
+  if (!header) return nativeHeader;
+  const children = header.props.children;
   if (!Array.isArray(children) || children.length < 4) return nativeHeader;
   const nativeStatus = children[1];
   if (!isValidElement(nativeStatus)) return nativeHeader;
-  const nextChildren = [...children];
+  const nextChildren: unknown[] = [...children];
   nextChildren[1] = createElement(NativeStatusSlot, { nativeStatus, row });
-  return cloneElement(nativeHeader as ReactElement<any>, { ...props, children: nextChildren } as any);
+  return cloneElement(header, { ...header.props, children: nextChildren });
 }
 
-function NativeStatusSlot({ nativeStatus, row }: { nativeStatus: ReactElement; row: ReactElement }) {
+type NativeStatusSlotProps = Readonly<{ nativeStatus: ReactElement; row: ReactElement }>;
+
+function NativeStatusSlot({ nativeStatus, row }: NativeStatusSlotProps): ReactNode {
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
   const [nativeVisible, setNativeVisible] = useState(true);
   useEffect(() => {
@@ -120,9 +236,18 @@ function NativeStatusSlot({ nativeStatus, row }: { nativeStatus: ReactElement; r
   );
 }
 
-function GameDetailsStatusRow({ appID, model, statusSurface }: {
-  appID: string; model: ReturnType<typeof selectGameDetailsStatus>; statusSurface: DetailsStatusSurface;
-}) {
+type GameDetailsStatusRowProps = Readonly<{
+  appID: string;
+  model: GameDetailsStatusViewModel;
+  statusSurface: DetailsStatusPresentationSurface;
+  suppressed: boolean;
+}>;
+
+export function detailsRowPaintStyle(suppressed: boolean): Pick<CSSProperties, "opacity" | "pointerEvents"> {
+  return suppressed ? { opacity: 0, pointerEvents: "none" } : {};
+}
+
+function GameDetailsStatusRow({ appID, model, statusSurface, suppressed }: GameDetailsStatusRowProps): ReactNode {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
   const visible = useVisibleLayout(element);
   useEffect(() => {
@@ -133,8 +258,8 @@ function GameDetailsStatusRow({ appID, model, statusSurface }: {
   return createElement("div", { style: { display: "contents" } },
     createElement("style", null, "@keyframes sdh-ludusavi-status-spin { to { transform: rotate(360deg); } }"),
     createElement("div", {
-      ref: setElement, role: "status", "aria-label": model.description,
-      style: { width: "100%", minHeight: 30, boxSizing: "border-box", display: "flex", alignItems: "center", gap: 8, padding: "4px 12px", color: toneColor(model.tone), background: "rgba(0, 0, 0, 0.18)", fontFamily: "Motiva Sans, Arial, sans-serif", fontSize: 13, fontWeight: 700, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+      ref: setElement, role: suppressed ? undefined : "status", "aria-hidden": suppressed || undefined, "aria-label": suppressed ? undefined : model.description,
+      style: { width: "100%", minHeight: 30, boxSizing: "border-box", display: "flex", alignItems: "center", gap: 8, padding: "4px 12px", color: toneColor(model.tone), background: "rgba(0, 0, 0, 0.18)", fontFamily: "Motiva Sans, Arial, sans-serif", fontSize: 13, fontWeight: 700, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", ...detailsRowPaintStyle(suppressed) },
     }, createElement("span", {
       "aria-hidden": true,
       style: { width: 18, height: 18, flex: "0 0 18px", display: "inline-flex", alignItems: "center", justifyContent: "center", animation: model.active ? "sdh-ludusavi-status-spin 1s linear infinite" : undefined },
@@ -232,13 +357,13 @@ function clipsOverflow(value: string | undefined): boolean {
   return ["hidden", "clip", "auto", "scroll"].includes(value ?? "visible");
 }
 
-function toneColor(tone: ReturnType<typeof selectGameDetailsStatus>["tone"]) {
+function toneColor(tone: GameDetailsStatusViewModel["tone"]): string {
   if (tone === "error") return "#ef4444";
   if (tone === "warning") return "#f59e0b";
   if (tone === "success") return "#1a9fff";
   return "#d6e6f5";
 }
-function routeAppID(values: unknown[]): string | null {
+function routeAppID(values: readonly unknown[]): string | null {
   for (const value of values) {
     const record = asRecord(value); const params = asRecord(record?.params); const candidate = params?.appid ?? record?.appid;
     if (typeof candidate === "string" || typeof candidate === "number") return String(candidate);
@@ -246,3 +371,28 @@ function routeAppID(values: unknown[]): string | null {
   return null;
 }
 function asRecord(value: unknown): RouteRecord | null { return typeof value === "object" && value !== null ? value as RouteRecord : null; }
+
+function asNativeRouteChild(value: unknown): ReactElement<NativeRouteChildProps> | null {
+  if (!isValidElement(value)) return null;
+  const props = asRecord(value.props);
+  if (!props || typeof props.renderFunc !== "function") return null;
+  return value as ReactElement<NativeRouteChildProps>;
+}
+
+function asNativeProviderElement(value: unknown): ReactElement<NativeProviderProps> | null {
+  if (!isValidElement(value)) return null;
+  const props = asRecord(value.props);
+  if (!props || !("value" in props)) return null;
+  return value as ReactElement<NativeProviderProps>;
+}
+
+function asNativeHeader(value: unknown): NativeHeader | null {
+  return typeof value === "function" ? value as NativeHeader : null;
+}
+
+function asNativeHeaderElement(value: unknown): ReactElement<NativeHeaderElementProps> | null {
+  if (!isValidElement(value)) return null;
+  const props = asRecord(value.props);
+  if (!props) return null;
+  return value as ReactElement<NativeHeaderElementProps>;
+}
