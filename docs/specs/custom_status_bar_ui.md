@@ -10,8 +10,9 @@ backup-on-exit operations, while keeping native Decky toasts for failures only.
 
 ## Architecture Overview
 
-The status strip is frontend-owned and driven by the existing app lifetime flow in
-`src/index.tsx`.
+The status presentation is frontend-owned and driven by the existing app lifetime flow in
+`src/index.tsx`. It has two read-only presentations: the BrowserView strip for protected
+launch work, and a native details-page row for eligible non-Steam entries.
 
 - `SteamClient.GameSessions.RegisterForAppLifetimeNotifications` remains the primary
   app start/exit source.
@@ -46,8 +47,9 @@ Lifecycle verification states also reset the BrowserView surface before publishi
 `VERIFYING GAME SAVE` so game start and game exit never reuse a surface that can
 retain stale result pixels.
 
-React global components, React DOM portals, diagnostic surface cycling, and SteamUI
-composition-hook fallback paths are not production surfaces for this feature.
+React DOM portals, diagnostic surface cycling, and SteamUI composition-hook fallback paths are
+not BrowserView-strip surfaces for this feature. The guarded details row is the one approved React
+route contribution: it uses Decky's public route hook, reads only native state, and adds no action.
 
 An external native overlay process, like OverLaid's backend-launched `DISPLAY=:0`
 overlay binary, remains a fallback architecture only. The autosync strip should stay
@@ -270,8 +272,11 @@ Frontend static tests must verify:
   so the strip sits above the bottom menu bar across viewport sizes.
 - The icon plus text are centered as one group, normal/running/success icons use
   Steam Blue, `needs_backup` uses a warning/action color, and errors remain red.
-- Diagnostic buttons, diagnostic labels, alternate surface modes, React portal code,
-  global component registration, and composition-hook code are absent.
+- The BrowserView strip has no React portal or focus target. The details row uses the public
+  Decky route hook only at `/library/app/:appid` and composes the verified provider value. Its
+  inert wrapper survives the bounded reload handoff so an already-mounted page can receive the
+  replacement store; if no replacement attaches, it removes the exact installed patch. It never
+  changes Steam Cloud data, controls, or classes.
 - Autosync lifecycle handlers publish strip states around existing RPC calls.
 - Autosync start/result success toasts are removed.
 - Autosync failure still routes through the `failures_errors` notification category.
@@ -293,3 +298,45 @@ Validation commands:
 ./run.sh uv run ty check py_modules/sdh_ludusavi/
 ./run.sh uv run pytest
 ```
+
+## Details-page status row
+
+The row appears only after the selected library entry has loaded matching details with both
+Cloud enable flags. It is hidden when both flags are enabled, which is a display rule only and
+does not change backup or restore eligibility. It reads the selected entry through the native
+app-details subscription and does not substitute a catalog match or mutate Steam Cloud data.
+Unknown details and unsupported native provider shapes leave Steam unchanged and keep the
+BrowserView strip available.
+
+The route contribution clones Decky's React route child and composes at its deferred native
+Cloud-status component boundary. The Cloud component stays mounted. The row appears only when that
+component renders no native status band, so it never creates a second band or replaces native
+controls. The row releases ownership when it is hidden, clipped, offscreen, or covered. Its status
+icon and transfer animation are
+presentation only and it adds no controller focus stop.
+
+The row follows Steam's native Cloud status presentation. It is 30 pixels high, centers the icon
+and label as one group, and uses 12-pixel bold uppercase Motiva Sans text with 0.5-pixel letter
+spacing and 22-pixel line height. Normal rows are transparent with equal dividers on both sides.
+Warning and error rows use Steam's translucent problem background and omit the dividers. Active
+icons pulse over 1.5 seconds instead of rotating, and active status text uses Steam blue.
+
+Visible row text uses short Steam-style states: `Checking...`, `Backing up...`, `Restoring...`,
+`Uploading...`, `Downloading...`, `Up to date`, `Out of sync`, `File conflict`, `Disabled`,
+`Unable to sync`, and `Unknown`. The accessible description keeps the precise local-result and
+remote-observation wording. A short visible label must not imply remote delivery that was not
+observed.
+
+Live terminal results and durable `last_operation` entries use the same status classification.
+In particular, `skipped/local_current` maps to `has_backup`, so it remains `Up to date` after a
+frontend reload while its accessible description remains `Local save already current`. Durable
+classification consumes both the recorded status and reason. `Unknown` uses the normal
+transparent row with dividers; it is not a warning/problem presentation.
+
+For exit work, a mounted, visible, layout-valid row for the same app suppresses duplicate
+BrowserView pixels without stopping timers, watches, or status production. Start-side checking,
+restore, and conflict work always use the strip, and the row also yields when another app owns an
+outstanding strip. A row unmount or Cloud-state change restores an outstanding strip without
+extending its lifetime. Terminal observations remain in frontend state through the strip timeout,
+but the frontend marks interrupted or superseded activity as remote-unverified instead of showing
+an endless transfer. A local result and a remote observation remain distinct in the row text.

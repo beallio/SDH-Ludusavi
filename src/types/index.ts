@@ -241,10 +241,52 @@ export type SyncthingPollResult =
 
 export type AutoSyncStatusSource = "lifecycle_start" | "lifecycle_exit" | "rpc_result" | "timeout" | "hide";
 
+export type AutoSyncStatusLifecycle = "lifecycle_start" | "lifecycle_exit";
+
+export type SteamCloudEligibility = "unknown" | "blocked" | "eligible";
+
+export type AutoSyncObservationActivity = "active" | "settled" | "unverified";
+
+export type AutoSyncStatusFact = {
+  status: AutoSyncStatusKind;
+  resultStatus?: OperationResult["status"] | LifecycleCheckResult["status"] | RpcStatus["status"];
+  observedAt: number;
+  generation?: number;
+  historyTimestamp?: string | null;
+  historyOperationSignature?: string | null;
+  lifecycle?: AutoSyncStatusLifecycle;
+  publicationOrder?: number;
+  trackingRevision?: number;
+};
+
+export type AutoSyncHistoryBaseline = {
+  timestamp: string | null;
+  operationSignature: string | null;
+};
+
+// Frontend-only observations preserve a live cycle's meaning. Durable history
+// remains the backend's latest local-operation summary.
+export type AutoSyncStatusObservation = {
+  appID: string;
+  gameName: string;
+  canonicalGameName: string;
+  lifecycle?: AutoSyncStatusLifecycle;
+  generation?: number;
+  status: AutoSyncStatusKind;
+  activity: AutoSyncObservationActivity;
+  observedAt: number;
+  resultStatus?: OperationResult["status"] | LifecycleCheckResult["status"] | RpcStatus["status"];
+  historyBaseline: AutoSyncHistoryBaseline;
+  localOperation: AutoSyncStatusFact | null;
+  syncObservation: AutoSyncStatusFact | null;
+};
+
 export type AutoSyncStatusState = {
   status: AutoSyncStatusKind;
   visible: boolean;
   source: AutoSyncStatusSource;
+  lifecycle?: AutoSyncStatusLifecycle;
+  generation?: number;
   gameName?: string;
   appID?: string;
   tracked?: boolean;
