@@ -183,27 +183,21 @@ describe("game details status selection", () => {
   });
 
   it("keeps a skipped local-current result up to date after reload", () => {
+    const operation = {
+      operation: "backup",
+      trigger: "manual_backup",
+      status: "skipped",
+      reason: "local_current",
+      message: null,
+      timestamp: "2026-09-13 12:00:00",
+    } as const;
     const selected = selectGameDetailsStatus({
       snapshot: snapshot({ gameHistory: { Fixture: {
         last_backup: null,
         last_restore: null,
-        last_skip: {
-          operation: "backup",
-          trigger: "manual_backup",
-          status: "skipped",
-          reason: "local_current",
-          message: null,
-          timestamp: "2026-09-13 12:00:00",
-        },
+        last_skip: operation,
         last_failure: null,
-        last_operation: {
-          operation: "backup",
-          trigger: "manual_backup",
-          status: "skipped",
-          reason: "local_current",
-          message: null,
-          timestamp: "2026-09-13 12:00:00",
-        },
+        last_operation: operation,
       } } }),
       appID: "100",
       gameName: "Fixture",
@@ -218,27 +212,21 @@ describe("game details status selection", () => {
   });
 
   it("uses the normal native row treatment for an unknown durable result", () => {
+    const operation = {
+      operation: "restore",
+      trigger: "manual_restore",
+      status: "skipped",
+      reason: "no_backup",
+      message: null,
+      timestamp: "2026-09-13 12:00:00",
+    } as const;
     const selected = selectGameDetailsStatus({
       snapshot: snapshot({ gameHistory: { Fixture: {
         last_backup: null,
         last_restore: null,
-        last_skip: {
-          operation: "restore",
-          trigger: "manual_restore",
-          status: "skipped",
-          reason: "no_backup",
-          message: null,
-          timestamp: "2026-09-13 12:00:00",
-        },
+        last_skip: operation,
         last_failure: null,
-        last_operation: {
-          operation: "restore",
-          trigger: "manual_restore",
-          status: "skipped",
-          reason: "no_backup",
-          message: null,
-          timestamp: "2026-09-13 12:00:00",
-        },
+        last_operation: operation,
       } } }),
       appID: "100",
       gameName: "Fixture",

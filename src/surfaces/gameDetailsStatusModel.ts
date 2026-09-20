@@ -180,7 +180,7 @@ function statusModel(
   const detail = `${prefix}: ${primary}.${localDetail}${primaryIsSync ? "" : syncDetail(syncStatus, syncVerification, syncLifecycle)}`;
   return {
     eligibility, kind, status, localStatus, syncStatus, syncVerification, lifecycle,
-    label: `Ludusavi: ${visibleStatusPhrase(status)}`,
+    label: `Ludusavi: ${VISIBLE_STATUS_PHRASES[status]}`,
     description: detail,
     tone: toneForStatus(status),
     active,
@@ -221,28 +221,25 @@ function statusPhrase(
   return labels[status] ?? autoSyncStatusText[status];
 }
 
-function visibleStatusPhrase(status: AutoSyncStatusKind): string {
-  const labels: Record<AutoSyncStatusKind, string> = {
-    checking: "Checking...",
-    backing_up: "Backing up...",
-    restoring: "Restoring...",
-    conflict: "File conflict",
-    conflict_unresolved: "File conflict",
-    game_sync_disabled: "Disabled",
-    has_backup: "Up to date",
-    unknown: "Unknown",
-    error: "Unable to sync",
-    syncthing_pending_upload: "Uploading...",
-    syncthing_downloading: "Downloading...",
-    syncthing_uploading: "Uploading...",
-    syncthing_complete: "Up to date",
-    syncthing_upload_incomplete: "Unable to sync",
-    syncthing_unavailable: "Unable to sync",
-    syncthing_folder_not_found: "Unable to sync",
-    syncthing_no_peers: "Unable to sync",
-  };
-  return labels[status];
-}
+const VISIBLE_STATUS_PHRASES: Readonly<Record<AutoSyncStatusKind, string>> = {
+  checking: "Checking...",
+  backing_up: "Backing up...",
+  restoring: "Restoring...",
+  conflict: "File conflict",
+  conflict_unresolved: "File conflict",
+  game_sync_disabled: "Disabled",
+  has_backup: "Up to date",
+  unknown: "Unknown",
+  error: "Unable to sync",
+  syncthing_pending_upload: "Uploading...",
+  syncthing_downloading: "Downloading...",
+  syncthing_uploading: "Uploading...",
+  syncthing_complete: "Up to date",
+  syncthing_upload_incomplete: "Unable to sync",
+  syncthing_unavailable: "Unable to sync",
+  syncthing_folder_not_found: "Unable to sync",
+  syncthing_no_peers: "Unable to sync",
+};
 
 function syncDetail(
   syncStatus: AutoSyncStatusKind | null,

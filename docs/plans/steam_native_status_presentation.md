@@ -100,3 +100,10 @@ Measured Steam reference values from the live Deck:
 5. Run the complete project quality gates.
 6. Install a local development ZIP on the Deck and verify the result remains `Up to date` after a
    clean plugin reload.
+
+## Simplification Follow-up
+
+The presentation implementation will select the row, divider, icon, and value styles directly in
+the row component instead of constructing four repeated presentation bundles. Model tests will
+reuse each durable operation fixture, and the fixed visible-label mapping will be a module constant.
+These changes preserve the visible and accessible contracts above.

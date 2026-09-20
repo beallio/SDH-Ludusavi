@@ -287,14 +287,6 @@ export function detailsRowPaintStyle(suppressed: boolean): Pick<CSSProperties, "
   return suppressed ? { opacity: 0 } : {};
 }
 
-type DetailsRowPresentation = Readonly<{
-  row: CSSProperties;
-  divider: CSSProperties | null;
-  content: CSSProperties;
-  icon: CSSProperties;
-  label: CSSProperties;
-  value: CSSProperties;
-}>;
 
 const DETAILS_ROW_BASE_STYLE: CSSProperties = {
   width: "100%",
@@ -357,48 +349,6 @@ const DETAILS_LABEL_STYLE: CSSProperties = {
 const DETAILS_VALUE_STYLE: CSSProperties = { color: "rgba(255, 255, 255, 0.7)" };
 const DETAILS_ACTIVE_VALUE_STYLE: CSSProperties = { color: "#1a9fff" };
 
-const DETAILS_ROW_PRESENTATIONS: Readonly<Record<"active" | "idle" | "activeProblem" | "idleProblem", DetailsRowPresentation>> = {
-  active: {
-    row: DETAILS_ROW_STYLE,
-    divider: DETAILS_DIVIDER_STYLE,
-    content: DETAILS_CONTENT_STYLE,
-    icon: DETAILS_ACTIVE_ICON_STYLE,
-    label: DETAILS_LABEL_STYLE,
-    value: DETAILS_ACTIVE_VALUE_STYLE,
-  },
-  idle: {
-    row: DETAILS_ROW_STYLE,
-    divider: DETAILS_DIVIDER_STYLE,
-    content: DETAILS_CONTENT_STYLE,
-    icon: DETAILS_ICON_STYLE,
-    label: DETAILS_LABEL_STYLE,
-    value: DETAILS_VALUE_STYLE,
-  },
-  activeProblem: {
-    row: DETAILS_ROW_PROBLEM_STYLE,
-    divider: null,
-    content: DETAILS_CONTENT_STYLE,
-    icon: DETAILS_ACTIVE_ICON_STYLE,
-    label: DETAILS_LABEL_STYLE,
-    value: DETAILS_VALUE_STYLE,
-  },
-  idleProblem: {
-    row: DETAILS_ROW_PROBLEM_STYLE,
-    divider: null,
-    content: DETAILS_CONTENT_STYLE,
-    icon: DETAILS_ICON_STYLE,
-    label: DETAILS_LABEL_STYLE,
-    value: DETAILS_VALUE_STYLE,
-  },
-};
-
-export function detailsRowPresentation(
-  model: Pick<GameDetailsStatusViewModel, "active" | "tone">,
-): DetailsRowPresentation {
-  const problem = model.tone === "warning" || model.tone === "error";
-  if (problem) return DETAILS_ROW_PRESENTATIONS[model.active ? "activeProblem" : "idleProblem"];
-  return DETAILS_ROW_PRESENTATIONS[model.active ? "active" : "idle"];
-}
 
 function GameDetailsStatusRow({ appID, model, statusSurface, suppressed }: GameDetailsStatusRowProps): ReactNode {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
@@ -408,10 +358,14 @@ function GameDetailsStatusRow({ appID, model, statusSurface, suppressed }: GameD
     return statusSurface.registerDetailsOwner({ appID, visible: true, layoutValid: true });
   }, [appID, model.canOwnStatusArea, statusSurface, visible]);
   const status = model.status ?? "unknown";
-  const presentation = detailsRowPresentation(model);
   const value = model.label.startsWith("Ludusavi: ") ? model.label.slice("Ludusavi: ".length) : model.label;
-  const divider = presentation.divider
-    ? createElement("span", { "aria-hidden": true, style: presentation.divider })
+  const problem = model.tone === "warning" || model.tone === "error";
+  const rowStyle = problem ? DETAILS_ROW_PROBLEM_STYLE : DETAILS_ROW_STYLE;
+  const dividerStyle = problem ? null : DETAILS_DIVIDER_STYLE;
+  const iconStyle = model.active ? DETAILS_ACTIVE_ICON_STYLE : DETAILS_ICON_STYLE;
+  const valueStyle = model.active && !problem ? DETAILS_ACTIVE_VALUE_STYLE : DETAILS_VALUE_STYLE;
+  const divider = dividerStyle
+    ? createElement("span", { "aria-hidden": true, style: dividerStyle })
     : null;
   return createElement("div", { style: { display: "contents" } },
     createElement("style", null,
@@ -424,22 +378,22 @@ function GameDetailsStatusRow({ appID, model, statusSurface, suppressed }: GameD
       "aria-hidden": suppressed || undefined,
       "aria-label": suppressed ? undefined : `${model.label}. ${model.description}`,
       "data-sdh-ludusavi-status-row": "true",
-      style: { ...presentation.row, ...detailsRowPaintStyle(suppressed) },
+      style: { ...rowStyle, ...detailsRowPaintStyle(suppressed) },
     },
     divider,
-    createElement("span", { style: presentation.content },
+    createElement("span", { style: DETAILS_CONTENT_STYLE },
       createElement("span", {
         "aria-hidden": true,
         "data-sdh-ludusavi-status-icon": "true",
-        style: presentation.icon,
+        style: iconStyle,
         dangerouslySetInnerHTML: { __html: iconSvgForAutoSyncStatus(status) },
       }),
-      createElement("span", { style: presentation.label },
+      createElement("span", { style: DETAILS_LABEL_STYLE },
         "Ludusavi: ",
-        createElement("span", { style: presentation.value }, value),
+        createElement("span", { style: valueStyle }, value),
       ),
     ),
-    divider ? createElement("span", { "aria-hidden": true, style: presentation.divider }) : null,
+    dividerStyle ? createElement("span", { "aria-hidden": true, style: dividerStyle }) : null,
     ),
   );
 }
