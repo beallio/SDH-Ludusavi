@@ -315,7 +315,7 @@ const DETAILS_ROW_PROBLEM_STYLE: CSSProperties = {
   background: "rgba(255, 255, 255, 0.16)",
 };
 const DETAILS_DIVIDER_STYLE: CSSProperties = {
-  flex: "1 1 40%",
+  flex: "1 1 0",
   minWidth: 0,
   height: 2,
   marginInline: 12,

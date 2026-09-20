@@ -142,6 +142,7 @@ describe("game details route adapter", () => {
     expect(active.divider).toMatchObject({
       backgroundColor: "rgba(61, 68, 80, 0.54)",
       height: 2,
+      flex: "1 1 0",
     });
 
     const problem = detailsRowPresentation({ active: false, tone: "warning" });
