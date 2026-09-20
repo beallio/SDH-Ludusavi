@@ -2,9 +2,9 @@
 
 SDH-Ludusavi keeps your game saves protected without pulling you out of Game Mode. It brings Ludusavi's backup and restore tools into Decky Loader, checks for newer saves before launch, and backs up your progress when you quit.
 
-![SDH-Ludusavi demo](assets/demo.webp?cacheBuster=10)
+![SDH-Ludusavi demo](assets/demo.webp?cacheBuster=11)
 
-![Ludusavi showing Up to date on a non-Steam game details page](assets/native-status-row.webp?cacheBuster=10)
+![Ludusavi showing Up to date on a non-Steam game details page](assets/native-status-row.webp?cacheBuster=11)
 
 The read-only Ludusavi row keeps the latest save result visible without opening the Decky menu.
 
