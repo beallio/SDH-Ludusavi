@@ -2,7 +2,7 @@
 
 SDH-Ludusavi keeps your game saves protected without pulling you out of Game Mode. It brings Ludusavi's backup and restore tools into Decky Loader, checks for newer saves before launch, and backs up your progress when you quit.
 
-![SDH-Ludusavi demo](assets/demo.webp?cacheBuster=9)
+![SDH-Ludusavi demo](assets/demo.webp?cacheBuster=10)
 
 ## Features
 
@@ -129,6 +129,11 @@ local and remote status.
 When **Last Operation** says that a backup was skipped because the local save is already current,
 the details row remains **UP TO DATE**, including after a plugin reload. **UNKNOWN** uses the same
 standard divided row as other non-problem states.
+
+![Ludusavi showing Up to date on a non-Steam game details page](assets/native-status-row.webp?cacheBuster=10)
+
+The read-only Ludusavi row uses Steam's native status area and keeps the save result visible without
+opening the Decky menu.
 
 - **Backup ready**: Ludusavi has a valid backup for this game.
 - **Needs first backup**: Ludusavi recognizes the game, but no backup has been created yet.
