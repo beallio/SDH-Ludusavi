@@ -16,6 +16,9 @@ import {
   getSteamClientApps,
   getAppStore,
   getAppDetailsStore,
+  getAppOverviewForAppID,
+  getAppDetailsForAppID,
+  subscribeToAppDetails,
   getCollectionStoreApps,
   registerAppLifetimeNotification,
   createBrowserView
@@ -93,6 +96,38 @@ describe("steamRuntime", () => {
     expect(getAppDetailsStore()).toBeNull();
     (globalThis as any).appDetailsStore = {};
     expect(getAppDetailsStore()).toBeDefined();
+  });
+
+  it("uses native store receivers for details and the supported app-data subscription", () => {
+    const details = { unAppID: 100, bCloudEnabledForApp: false, bCloudEnabledForAccount: true };
+    const unregister = vi.fn();
+    const detailsStore = {
+      details,
+      GetAppDetails(this: any, appID: number) { return appID === this.details.unAppID ? this.details : null; },
+      RegisterForAppData(this: any, appID: number, callback: (value: unknown) => void) {
+        expect(this).toBe(detailsStore);
+        if (appID === this.details.unAppID) callback(this.details);
+        return { unregister };
+      },
+    };
+    (globalThis as any).appDetailsStore = detailsStore;
+    const callback = vi.fn();
+
+    expect(getAppDetailsForAppID("100")).toBe(details);
+    const dispose = subscribeToAppDetails("100", callback);
+    expect(callback).toHaveBeenCalledWith(details);
+    dispose();
+    expect(unregister).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the native overview receiver and does not substitute another app", () => {
+    const appStore = {
+      entries: new Map([[100, { appid: 100, display_name: "Fixture" }]]),
+      GetAppOverviewByAppID(this: any, appID: number) { return this.entries.get(appID) ?? null; },
+    };
+    (globalThis as any).appStore = appStore;
+    expect(getAppOverviewForAppID("100")).toEqual({ appid: 100, display_name: "Fixture" });
+    expect(getAppOverviewForAppID("101")).toBeNull();
   });
 
   it("getCollectionStoreApps validates forEach presence", () => {

@@ -36,6 +36,7 @@ describe("GameLifecycleController diagnostic logging", () => {
       isTracked: vi.fn().mockReturnValue(true),
       isGameSyncDisabled: vi.fn().mockReturnValue(false),
       shouldPublishAutoSyncStatusBeforeRpc: vi.fn().mockReturnValue(true),
+      invalidateAutoSyncObservationsBefore: vi.fn(),
       getSnapshot: vi.fn().mockReturnValue({
         settings: { auto_sync_enabled: true },
         trackedNames: new Set(["hades"]),

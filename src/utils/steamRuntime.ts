@@ -129,6 +129,51 @@ export function registerAppLifetimeNotification(callback: (app: unknown) => void
   return null;
 }
 
+export function getAppOverviewForAppID(appID: string): Record<string, unknown> | null {
+  try {
+    const store = asRecord(getAppStore());
+    const getOverview = store?.GetAppOverviewByAppID;
+    const overview = typeof getOverview === "function" ? getOverview.call(store, Number(appID)) : null;
+    return asRecord(overview);
+  } catch {
+    return null;
+  }
+}
+
+export function getAppDetailsForAppID(appID: string): unknown {
+  try {
+    const store = asRecord(getAppDetailsStore());
+    const numericID = Number(appID);
+    for (const name of ["GetAppDetails", "GetAppDetailsForAppID", "getAppDetails"]) {
+      const getter = store?.[name];
+      if (typeof getter === "function") {
+        const details = getter.call(store, numericID);
+        if (details !== undefined && details !== null) return details;
+      }
+    }
+    const detailsByApp = asRecord(store?.m_mapAppDetails);
+    return detailsByApp?.[appID] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function subscribeToAppDetails(appID: string, callback: (details: unknown) => void): () => void {
+  try {
+    const store = asRecord(getAppDetailsStore());
+    const numericID = Number(appID);
+    const subscribe = store?.RegisterForAppData;
+    if (typeof subscribe !== "function") return () => {};
+    const registration = subscribe.call(store, numericID, callback);
+    if (typeof registration === "function") return registration;
+    const unregister = asRecord(registration)?.unregister ?? asRecord(registration)?.Unregister;
+    if (typeof unregister === "function") return unregister.bind(registration);
+  } catch {
+    // A missing private details subscription is an unsupported native boundary.
+  }
+  return () => {};
+}
+
 export function createBrowserView(): unknown {
   try {
     const client = (globalThis as any).SteamClient ?? (window as any).SteamClient;
