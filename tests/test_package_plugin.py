@@ -80,8 +80,6 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
     assert "SDH-Ludusavi/README.md" not in names
     assert "src/index.tsx" not in names
     assert "SDH-Ludusavi/src/index.tsx" not in names
-    assert "docs/plans/sdh_ludusavi.md" not in names
-    assert "SDH-Ludusavi/docs/plans/sdh_ludusavi.md" not in names
     assert "node_modules/.modules.yaml" not in names
     assert "SDH-Ludusavi/node_modules/.modules.yaml" not in names
 

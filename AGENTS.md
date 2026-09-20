@@ -106,10 +106,7 @@ py_modules/{package}/
 src/
 tests/
 scripts/check_tdd.sh
-docs/plans/
 docs/specs/
-docs/review/
-docs/agent_conversations/
 .github/workflows/
 ```
 
@@ -119,10 +116,7 @@ Directory purposes:
 - `src/`: TypeScript frontend source.
 - `tests/`: automated tests.
 - `scripts/`: local enforcement and maintenance scripts.
-- `docs/plans/`: implementation plans created before code changes.
 - `docs/specs/`: durable behavior or interface specifications.
-- `docs/review/`: review notes and findings.
-- `docs/agent_conversations/`: session summaries.
 - `.github/workflows/`: CI workflow definitions when present.
 
 `AGENTS.md` is the only generated agent instruction file. Do not create
@@ -214,7 +208,7 @@ DOCUMENT
 
 Requirements:
 
-- Planning documents live in `docs/plans/`.
+- Keep plans in task state or private local orchestration state, not tracked process files.
 - Tests must exist before implementation.
 - Caches and virtual environments must be redirected to `/tmp/{project_dir}`.
 - Commits must follow the Conventional Commits specification.
@@ -226,11 +220,9 @@ For review-only tasks that do not modify files or execute project tooling, the h
 
 # 8. Planning Requirement
 
-Before writing implementation code, create or update:
-
-```
-docs/plans/{feature_name}.md
-```
+Define the plan in task state before implementation. For an orchestration run, edit
+the private path returned by `scripts/orchestration/new-plan <slug> <title>` and run
+`scripts/orchestration/validate-plan <slug>`. Do not create tracked plan files.
 
 The plan must include:
 
@@ -387,10 +379,7 @@ Every project must include:
 README.md
 DEVELOPMENT.md
 docs/
-docs/plans/
 docs/specs/
-docs/review/
-docs/agent_conversations/
 ```
 
 README must contain:
@@ -420,8 +409,8 @@ for someone who plays games on a Steam Deck and has never seen the source.
   devices. Internal measurements are not.
 - State weakened guarantees and unproven areas plainly rather than omitting them. Honesty
   about limits is part of the voice, not an exception to it.
-- Technical detail belongs in `docs/specs/`, `docs/review/`, and the commit history, all of
-  which are already thorough. Do not duplicate it here.
+- Technical detail belongs in maintained specifications and commit history. Do not
+  duplicate it in user-facing release notes.
 
 The published GitHub release body is generated from this file, so a rewrite after publishing
 must also update the release on GitHub or the two will disagree.
@@ -448,30 +437,12 @@ Development Releases:
 
 ---
 
-# 15. Agent Session Logging
+# 15. Progress Reporting
 
-For implementation tasks, record a session summary in:
-
-```
-docs/agent_conversations/
-```
-
-Each session log must include:
-
-```
-date
-task objective
-files modified
-tests added
-design decisions
-results
-```
-
-Example file:
-
-```
-docs/agent_conversations/2026-05-07_update_agent_protocol.json
-```
+Report concise progress, decisions, and verification in chat. Do not create or commit
+process plans, review files, conversation exports, session logs, or verification reports.
+Keep active plans, findings, and recovery data in private local orchestration state.
+Preserve maintained product documentation, fixtures, and unique research.
 
 ---
 
@@ -487,7 +458,7 @@ A modifying task is complete only if:
 [ ] README updated when behavior or usage changed
 [ ] dependencies documented when dependencies changed
 [ ] caches redirected to /tmp
-[ ] session log recorded
+[ ] progress and verification reported in chat
 ```
 
 ---

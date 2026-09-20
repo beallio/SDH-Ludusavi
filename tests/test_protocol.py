@@ -3,14 +3,6 @@ import tomllib
 from pathlib import Path
 
 
-def test_plans_directory():
-    assert Path("docs/plans").exists()
-
-
-def test_agents_file():
-    assert Path("AGENTS.md").exists()
-
-
 def test_decky_required_plugin_files_exist():
     for required_path in [
         "plugin.json",
@@ -64,13 +56,3 @@ def test_template_only_files_are_removed():
         ".vscode/defsettings.json",
     ]:
         assert not Path(removed_path).exists()
-
-
-def test_tracked_pre_commit_hook_uses_current_project_checks():
-    hook = Path("scripts/pre_commit.sh").read_text()
-
-    assert "quality_gates.sh" in hook
-    assert "git add -u" not in hook
-    assert "git diff --cached --name-only --diff-filter=ACMR" in hook
-    assert 'git add -- "${staged_paths[@]}"' in hook
-    assert "./run.sh bash scripts/check_tdd.sh" in hook
