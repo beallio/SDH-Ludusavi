@@ -1,10 +1,11 @@
 {
   "date": "2026-09-19",
-  "task_objective": "Match the native Ludusavi game-details status row to Steam Cloud typography, colors, concise status messages, and centered layout, then install and verify the development build on the Steam Deck.",
+  "task_objective": "Match the native Ludusavi game-details status row to Steam Cloud presentation, keep durable terminal-result messages consistent across reloads, and use normal presentation for Unknown.",
   "branch": "feat/steam-native-status-styling",
   "commits": [
     "50aac2e feat(status): match Steam native presentation",
-    "bbf99ae fix(status): preserve full centered label"
+    "bbf99ae fix(status): preserve full centered label",
+    "20582b7 fix(status): keep durable results consistent"
   ],
   "files_modified": [
     "README.md",
@@ -13,6 +14,8 @@
     "package.json",
     "pnpm-lock.yaml",
     "src/surfaces/autoSyncStatusSurface.details.test.ts",
+    "src/surfaces/autoSyncStatusRenderer.tsx",
+    "src/surfaces/autoSyncStatusSurface.tsx",
     "src/surfaces/gameDetailsStatus.test.tsx",
     "src/surfaces/gameDetailsStatus.tsx",
     "src/surfaces/gameDetailsStatusModel.test.ts",
@@ -22,26 +25,34 @@
     "Game-details status selection now verifies compact Steam-style visible messages while detailed local and remote facts remain in the accessible description.",
     "Native-row presentation now verifies Steam typography, base and active colors, problem background behavior, centered layout, balanced dividers, and the 1.5-second icon pulse.",
     "The divider contract now verifies zero flex basis so the centered status label keeps its intrinsic width instead of truncating at the default Deck viewport.",
-    "The retained Syncthing-limitation test now verifies the compact visible message and the precise remote limitation in the detailed description."
+    "The retained Syncthing-limitation test now verifies the compact visible message and the precise remote limitation in the detailed description.",
+    "A reload regression proves that durable skipped/local_current history remains Up to date with the detailed Local save already current description.",
+    "An Unknown regression proves that an unclassified durable result uses the normal informational row instead of warning/problem presentation."
   ],
   "design_decisions": [
     "Measured the live native Steam Cloud row before implementation: 30-pixel centered row; 12-pixel, weight-700, uppercase Motiva Sans; 22-pixel line height; 0.5-pixel letter spacing; 70-percent white label; Steam-blue active value; 1.5-second icon pulse.",
     "Visible messages use short Steam-style states, but the model description retains accurate local-result and remote-observation wording so the row does not claim unobserved remote delivery.",
     "Normal rows use equal flexible dividers and a transparent background. Warning and error rows use Steam's translucent problem background and no dividers.",
     "The native row remains read-only, adds no focus stop, and keeps the existing ownership, geometry, Steam Cloud exclusion, save-operation, and BrowserView fallback behavior unchanged.",
-    "The pre-commit supply-chain audit found the current Vitest path-traversal advisory. The development-only dependency was patched from 4.1.8 to 4.1.11; no runtime dependency changed."
+    "The pre-commit supply-chain audit found the current Vitest path-traversal advisory. The development-only dependency was patched from 4.1.8 to 4.1.11; no runtime dependency changed.",
+    "One pure terminal-result classifier now serves both live status publication and durable history selection, so reloads cannot reinterpret the same status and reason.",
+    "Unknown is informational, not a Steam problem state. It keeps the transparent background and balanced dividers."
   ],
   "red_green_evidence": [
     "The first focused RED run failed three expected contracts: the presentation helper was absent, the remote limitation still used verbose visible text, and the restored result still used a category-prefixed label. The focused GREEN run passed 21 tests.",
-    "Live Deck verification exposed truncation of 'LUDUSAVI: UP TO DATE' because each divider used a 40-percent flex basis. A new assertion failed with the old value, then passed after the dividers changed to equal zero-basis flex items."
+    "Live Deck verification exposed truncation of 'LUDUSAVI: UP TO DATE' because each divider used a 40-percent flex basis. A new assertion failed with the old value, then passed after the dividers changed to equal zero-basis flex items.",
+    "The durable local-current RED regression received status unknown instead of has_backup. After sharing terminal-result classification, it passed with Up to date and the correct detailed description.",
+    "The Unknown RED regression received warning tone instead of info. After removing Unknown from problem tones, it passed with the normal row treatment."
   ],
   "verification": {
-    "quality_gates": "Pre-commit gates passed after the final correction: Ruff check and format passed; ty passed; 1,052 Python tests passed and 3 skipped at 90.11 percent coverage; 421 frontend tests passed; TypeScript typecheck passed; Rollup build passed; frontend supply-chain audits reported no known vulnerabilities.",
-    "installed_build": "Decky Loader installed SDH-Ludusavi 0.4.7+bbf99ae. The installed plugin manifest reports that version. The local and installed dist/index.js SHA-256 values both equal 3094f9e42ddcc508542f21d4849a65c03a194ab6c19d35f9b1175ce2080e2582.",
+    "quality_gates": "Pre-commit gates passed after the consistency correction: Ruff check and format passed; ty passed; 1,052 Python tests passed and 3 skipped at 90.11 percent coverage; 423 frontend tests passed; TypeScript typecheck passed; Rollup build passed; frontend supply-chain audits reported no known vulnerabilities.",
+    "installed_build": "Decky Loader installed SDH-Ludusavi 0.4.7+20582b7. The installed plugin manifest reports that version. The local and installed dist/index.js SHA-256 values both equal 90c9f6650002b629b4f3c9bb1905f09e60a6a301a7643a26056332e0e17ea62d.",
     "idle_row": "On the live Deadpool details page, the installed row measured 854 by 30 pixels at the default scroll position. Its content center matched the row center exactly, both dividers measured 314.40625 pixels, the full text was 'Ludusavi: Up to date', and the computed font, weight, line height, letter spacing, case transform, and color matched the measured Steam Cloud values.",
     "active_row": "A frontend-only backing-up publication produced 'Ludusavi: Backing up...' with Steam blue value text, a 1.5-second infinite icon pulse, and a measured center offset of 0.0053 pixels when the row was above the Steam footer. No save, backup, restore, or configuration operation ran.",
     "native_exclusion": "On Brotato, the native 'Steam Cloud: Up to date' row remained present with its original computed typography and the Ludusavi row was absent.",
-    "cleanup": "The temporary active observation was removed by a clean Decky reinstall of the same verified build. The final loaded runtime was ready, contained no Deadpool autosync observation, and showed the idle centered row on the mounted Deadpool page."
+    "durable_reload": "Before the update, the real X-Men Origins Wolverine exit history status skipped with reason local_current rendered Ludusavi: Unknown, a problem background, no dividers, and a generic Local operation skipped description. After installation and clean reload, that same persisted history rendered Ludusavi: Up to date with Local save already current, a transparent background, and two equal 314.40625-pixel dividers.",
+    "unknown_row": "A frontend-only Unknown publication rendered with opacity 1, a transparent background, two equal 317.0625-pixel dividers, and zero center offset. This confirmed Unknown now uses the normal native presentation.",
+    "cleanup": "A clean reinstall of the verified build removed the temporary Unknown observation. The final loaded runtime was ready, contained no X-Men autosync observation, retained the real skipped/local_current history, and showed Ludusavi: Up to date."
   },
-  "result": "The Steam-style native row presentation is implemented, committed, validated, and installed on the Deck. The feature branch remains separate from dev and has not been pushed."
+  "result": "The Steam-style native row, durable result consistency, and normal Unknown presentation are implemented, committed, validated, and installed on the Deck. The feature branch remains separate from dev and has not been pushed."
 }
