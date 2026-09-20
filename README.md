@@ -2,13 +2,17 @@
 
 SDH-Ludusavi keeps your game saves protected without pulling you out of Game Mode. It brings Ludusavi's backup and restore tools into Decky Loader, checks for newer saves before launch, and backs up your progress when you quit.
 
-![SDH-Ludusavi demo](assets/demo.webp?cacheBuster=9)
+![SDH-Ludusavi demo](assets/demo.webp?cacheBuster=10)
+
+![Ludusavi showing Up to date on a non-Steam game details page](assets/native-status-row.webp?cacheBuster=10)
+
+The read-only Ludusavi row keeps the latest save result visible without opening the Decky menu.
 
 ## Features
 
 - **Automatic Sync**: Restores your save if the backup is newer before a game starts, and automatically performs a backup after you exit. Each Ludusavi-managed game also has a **Sync This Game** toggle that defaults to on. Turning it off blocks both the launch restore and exit backup for that game; the preference remains editable but has no effect while global Automatic Sync is off. With global sync on, starting or exiting a disabled game briefly shows **SAVE SYNC DISABLED FOR THIS GAME**.
-- **SteamOS Integration**: Shows compact progress strips for background sync events, just like official Steam Cloud sync.
-- **Syncthing Activity**: Shows Syncthing sync status (downloading, uploading, or complete) on the autosync status strip when Syncthing is configured and running.
+- **SteamOS Integration**: Shows one read-only Ludusavi save-status row in the native status band on eligible non-Steam game details pages. Steam Cloud-enabled entries keep their native Steam Cloud row unchanged; this display rule does not change backup or restore eligibility. The row identifies local results separately from observed remote Syncthing results. A separate compact strip remains on the launch screen for protected checking, restore, and conflict work.
+- **Syncthing Activity**: Shows observed Syncthing activity and outcomes. A successful local backup is not presented as proof that a remote device received it.
 - **Launch Gate**: Pauses game launch for save conflicts and observed incoming Syncthing activity, verifying stable backup files before deciding which save to use.
 - **Manual Control**: Force a backup for any Ludusavi-managed game at any time, and restore from any snapshot through the Backup Browser.
 - **Backup Browser**: View historical backup snapshots for a game directly in the plugin and selectively perform a point-in-time restore.
@@ -108,43 +112,19 @@ Using Syncthing allows for near-instant local backups that sync in the backgroun
 
 ## Understanding Status Messages
 
-Every Ludusavi backup, restore, snapshot restore, and preview/status check has a three-minute
-limit. If one exceeds that limit — for example, because cloud or filesystem work has stalled —
-the operation is reported as failed instead of hanging. The running status strip has a separate
-210-second cleanup boundary, and the backend launch gate has a four-minute emergency boundary.
-If an automatic check overlaps another Ludusavi task, it can wait for up to 30 seconds before it
-reports that it could not safely sync. Save-copy actions do not wait behind another task, so they
-cannot act on stale save information; an overlap is shown as a failed/skipped autosync instead of
-silently disappearing.
-Syncthing monitoring remains advisory and keeps its independent 120-second pre-game and
-300/900-second post-game observation limits: when a post-game boundary is reached, the plugin
-reports the resulting upload state rather than presenting an ordinary slow sync as an API
-failure.
+The Game Details row gives you a quick save status:
 
-- **Backup ready**: Ludusavi has a valid backup for this game.
-- **Needs first backup**: Ludusavi recognizes the game, but no backup has been created yet.
-- **Skipped — local save is already current**: The plugin detected that your local save matches or is newer than the backup, so no restore was performed.
-- **Skipped — recency is ambiguous**: The plugin couldn't determine which save is newer and will prompt you to choose. This also occurs when your local save and the backup have both changed (for example, after playing in Desktop Mode); the plugin only restores automatically when the backup is clearly newer, and otherwise pauses the launch so you can choose.
-- **Sync Skipped — Conflict Unresolved**: You dismissed the conflict prompt without choosing a save, so the plugin deliberately made no save changes and resumed the game.
-- **Syncthing Downloading**: Syncthing is downloading/applying backup folder data.
-- **Syncthing Uploading**: After a backup, a currently connected device that shares the watched backup folder is still catching up, or has not yet reported that it caught up after the Deck changed the folder's index.
-- **Syncthing Complete**: After a backup, the watched folder has settled on the Steam Deck and at least one currently connected device that shares it has reported the backup as received in three consecutive checks. Other connected devices may still be catching up when this status appears; the plugin does **not** wait for them to finish deleting older snapshots. This also does **not** guarantee the save has reached a configured device that is disconnected or offline.
-- **Local Backup Saved - Syncthing Upload Incomplete**: The local backup succeeded, but
-  monitoring ended before a connected peer finished catching up or freshly confirmed that
-  it had done so. This is an upload outcome, not a Syncthing API failure; Syncthing can
-  continue propagating the backup after monitoring stops.
-- **Local Backup Saved - Syncthing Unavailable**: The backup succeeded, but configured Syncthing API access failed.
-- **Local Backup Saved - Path Not Shared**: The backup succeeded, but its directory is not in a Syncthing shared folder, or the shared folder has no configured remote devices.
-- **Local Backup Saved - No Syncthing Peers Online**: The backup succeeded, but none of the devices that share the backup folder are currently connected, so remote propagation was not observed. Syncthing will sync later once a peer reconnects.
+- **Checking, Backing up, Restoring, Uploading, or Downloading**: Save work is in progress.
+- **Up to date**: The latest save check finished successfully.
+- **Out of sync**: This game needs its first backup.
+- **File conflict**: Choose which save to keep.
+- **Unable to sync**: The last save or remote sync check did not finish.
+- **Disabled**: Automatic sync is off for this game.
+- **Unknown**: No clear recent result is available.
 
-When Syncthing is not configured, the plugin silently reports the normal local-backup result without a Syncthing warning. Peer connectivity, not internet connectivity, controls these warnings: Syncthing monitoring runs whenever at least one device sharing the backup folder is connected (including over LAN without internet), and is skipped when none are.
-
-Syncthing activity statuses reflect only the Syncthing folder that contains Ludusavi's configured backup path. Traffic in other Syncthing folders is excluded, even when those folders are shared with the same remote peer. At game launch, settlement retains its existing local/incoming meaning: remote devices catching up to the Deck do not delay the launch gate.
-
-If incoming activity is already visible during a launch check, the game remains paused
-until that folder settles. The plugin then verifies the save again and uses only the
-fresh result; it does not restore from a preview captured while Syncthing was changing
-the backup folder.
+Local backups and remote sync are reported separately. **Up to date** does not mean that an
+offline device has received the save. If save work stalls or overlaps another task, the plugin
+stops safely and reports the problem instead of guessing.
 
 ## License
 

@@ -218,6 +218,18 @@ Display priority:
 If the selected game has no history, the UI shows no additional empty history
 block. Dropdown labels remain game names only.
 
+## Details-page status row
+
+The Game Mode details row can use only `last_operation` as its latest local result after reload;
+it does not revive an older `last_failure` that a newer operation replaced. It does not change QAM
+history priority or persistence. Syncthing observations are frontend-only: a reload reports remote
+delivery as unverified until a new monitor observation. A later manual or automatic local operation
+clears a prior remote observation instead of inheriting its completion claim. When current tracking
+is missing, unresolved, reports an error, or reports backup-needed, the row does not use old history
+to claim a backup exists. In particular, the known missing-local-save refresh behavior can remove a
+tracked entry while backup files remain; this feature reports the entry as untracked rather than
+repairing or reinterpreting that separate condition.
+
 ## Known Stale States
 
 History records what SDH-ludusavi last did; it is not a live assertion that the

@@ -37,6 +37,12 @@ export type StatusCallback = (
     appID: string;
   },
 ) => void;
+
+export type TerminalCallback = (context: {
+  phase: "pre_game" | "post_game";
+  gameName: string;
+  appID: string;
+}) => void;
 export type SyncthingMonitorGeneration = number;
 export type SyncthingWatchSession = Readonly<{
   phase: "pre_game" | "post_game";
@@ -109,12 +115,14 @@ export class SyncthingMonitor {
   private rpc: SyncthingRpc;
   private onStatus: StatusCallback;
   private currentGeneration: SyncthingMonitorGeneration = 0;
+  private onTerminal?: TerminalCallback;
   private contexts = new Map<SyncthingMonitorGeneration, WatchContext>();
   private activePollTimeout: number | null = null;
   private pendingTimeoutID: number | null = null;
-  constructor(rpc: SyncthingRpc, onStatus: StatusCallback) {
+  constructor(rpc: SyncthingRpc, onStatus: StatusCallback, onTerminal?: TerminalCallback) {
     this.rpc = rpc;
     this.onStatus = onStatus;
+    this.onTerminal = onTerminal;
   }
 
   start(
@@ -542,6 +550,9 @@ export class SyncthingMonitor {
 
     const wID = context.watchID;
     const effects = this.dispatch(context, { type: "poll_failed", reason }, { releaseWatchID: true });
+    if (context.phase === "pre_game" && context.generation === this.currentGeneration) {
+      this.onTerminal?.({ phase: context.phase, gameName: context.gameName, appID: context.appID });
+    }
     if (effects.stopWatch && wID !== null) {
       void this.stopWatchSafe(wID);
     }

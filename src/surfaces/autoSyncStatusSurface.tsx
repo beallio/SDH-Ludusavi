@@ -7,8 +7,9 @@ import type {
   RpcStatus
 } from "../types";
 import { log } from "../utils/logging";
-import { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus, isLudusaviRunningStatus, isSyncthingStatus } from "./autoSyncStatusRenderer";
+import { autoSyncStatusForTerminalResult, autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus, isLudusaviRunningStatus, isSyncthingStatus } from "./autoSyncStatusRenderer";
 import type { AutoSyncStatusBrowserViewApi } from "./autoSyncStatusBrowserView";
+import type { LudusaviStateStore } from "../state/ludusaviState";
 
 export { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus };
 
@@ -20,6 +21,7 @@ export const HAS_BACKUP_MIN_DWELL_MS = 900;
 export type AutoSyncStatusPublishOptions = {
   source: AutoSyncStatusSource;
   lifecycle?: "lifecycle_start" | "lifecycle_exit";
+  generation?: number;
   gameName?: string;
   appID?: string;
   tracked?: boolean;
@@ -33,7 +35,30 @@ export type AutoSyncStatusCompleteOptions = Omit<
   lifecycle: "lifecycle_start" | "lifecycle_exit";
 };
 
-export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserViewApi) {
+export type DetailsStatusOwner = Readonly<{
+  appID: string;
+  visible: boolean;
+  layoutValid: boolean;
+}>;
+
+export type DetailsStatusPresentationSurface = Readonly<{
+  subscribeDetailsPresentation(listener: () => void): () => void;
+  shouldDetailsRowYield(appID: string): boolean;
+  registerDetailsOwner(owner: DetailsStatusOwner): () => void;
+}>;
+
+export type AutoSyncStatusSurface = DetailsStatusPresentationSurface & Readonly<{
+  publish(status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions): void;
+  hide(options?: Partial<AutoSyncStatusPublishOptions>): void;
+  settleObservation(options: Pick<AutoSyncStatusPublishOptions, "appID" | "generation">): void;
+  complete(result: OperationResult | LifecycleCheckResult, options: AutoSyncStatusCompleteOptions): void;
+  dispose(): void;
+}>;
+
+export function createAutoSyncStatusSurface(
+  statusView: AutoSyncStatusBrowserViewApi,
+  observationStore?: Pick<LudusaviStateStore, "recordAutoSyncStatus" | "invalidateAutoSyncObservation">,
+): AutoSyncStatusSurface {
   let currentAutoSyncStatusState: AutoSyncStatusState = {
     status: "has_backup",
     visible: false,
@@ -46,6 +71,43 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
   let autoSyncStatusHideTimeoutID: number | null = null;
   let autoSyncStatusSyncTimeoutID: number | null = null;
   let currentHasBackupLifecycle: "lifecycle_start" | "lifecycle_exit" | null = null;
+  let detailsOwner: (DetailsStatusOwner & { token: number }) | null = null;
+  let nextDetailsOwnerToken = 0;
+  const detailsPresentationListeners = new Set<() => void>();
+
+  function notifyDetailsPresentation() {
+    detailsPresentationListeners.forEach((listener) => listener());
+  }
+
+  function detailsOwnerClaimsExit(state: AutoSyncStatusState): boolean {
+    const owner = detailsOwner;
+    return owner !== null
+      && state.lifecycle === "lifecycle_exit"
+      && owner.appID === state.appID
+      && owner.visible
+      && owner.layoutValid;
+  }
+
+  function shouldDetailsRowYield(appID: string): boolean {
+    if (!currentAutoSyncStatusState.visible) return false;
+    if (currentAutoSyncStatusState.lifecycle === "lifecycle_start") return true;
+    if (currentAutoSyncStatusState.appID && currentAutoSyncStatusState.appID !== appID) return true;
+
+    // A same-game exit row must stay non-painting until it has measured a
+    // usable native band and registered ownership. This lets it recover when
+    // a footer or scroll clipping clears without competing with the strip.
+    return currentAutoSyncStatusState.lifecycle === "lifecycle_exit"
+      && !detailsOwnerClaimsExit(currentAutoSyncStatusState);
+  }
+
+  function shouldShowStatusStrip(state: AutoSyncStatusState): boolean {
+    return state.visible && !detailsOwnerClaimsExit(state);
+  }
+
+  function syncStatusStrip(state: AutoSyncStatusState) {
+    statusView.sync({ ...state, visible: shouldShowStatusStrip(state) });
+    notifyDetailsPresentation();
+  }
 
   function clearDeferredAutoSyncStatus() {
     if (deferredAutoSyncStatusTimeoutID !== null) {
@@ -122,6 +184,12 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
           currentAutoSyncStatusState.gameName
         );
       }
+      if (isRunning) {
+        observationStore?.invalidateAutoSyncObservation(
+          currentAutoSyncStatusState.appID,
+          currentAutoSyncStatusState.generation,
+        );
+      }
       api.hide({
         source: "timeout",
         gameName: currentAutoSyncStatusState.gameName,
@@ -132,6 +200,30 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
     }, hideDelay);
   }
 
+  function recordTerminalResult(
+    result: OperationResult | LifecycleCheckResult,
+    options: AutoSyncStatusCompleteOptions,
+  ) {
+    let status: AutoSyncStatusKind | null = null;
+    if (result.status === "failed") status = "error";
+    else if (result.status === "conflict") status = "conflict";
+    else if (result.status === "backed_up" || result.status === "restored") status = "has_backup";
+    else if (result.status === "skipped") {
+      if (result.reason === "conflict_unresolved") status = "conflict_unresolved";
+      else if (result.reason === "game_sync_disabled") status = "game_sync_disabled";
+      else if (result.reason === "local_current") status = "has_backup";
+      else if (["ambiguous_recency", "game_error", "preview_failed", "operation_running"].includes(result.reason ?? "")) status = "error";
+      else status = "unknown";
+    }
+    if (status) {
+      observationStore?.recordAutoSyncStatus(status, {
+        ...options,
+        source: "rpc_result",
+        resultStatus: result.status,
+      });
+    }
+  }
+
   function syncAutoSyncStatusBrowserViewDeferred(state: AutoSyncStatusState) {
     clearAutoSyncStatusSyncTimeout();
     autoSyncStatusSyncTimeoutID = window.setTimeout(() => {
@@ -139,7 +231,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       if (state !== currentAutoSyncStatusState || !state.visible) {
         return;
       }
-      statusView.sync(state);
+      syncStatusStrip(state);
       scheduleAutoSyncStatusHide(state);
       autoSyncStatusShownAt = Date.now();
     }, 0);
@@ -147,6 +239,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
 
   const api = {
     publish(status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions) {
+      observationStore?.recordAutoSyncStatus(status, options);
       if (
         isSyncthingStatus(status) &&
         options.source === "lifecycle_exit" &&
@@ -161,6 +254,8 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
           status,
           visible: true,
           source: options.source,
+          lifecycle: options.lifecycle,
+          generation: options.generation,
           gameName: options.gameName,
           appID: options.appID,
           tracked: options.tracked,
@@ -176,7 +271,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
             currentHasBackupLifecycle = null;
             statusView.setContext(currentAutoSyncStatusState);
             logAutoSyncStatusChange(currentAutoSyncStatusState);
-            statusView.sync(currentAutoSyncStatusState);
+            syncStatusStrip(currentAutoSyncStatusState);
             scheduleAutoSyncStatusHide(currentAutoSyncStatusState);
             autoSyncStatusShownAt = Date.now();
           }, remaining);
@@ -200,6 +295,8 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
         status,
         visible: true,
         source: options.source,
+        lifecycle: options.lifecycle,
+        generation: options.generation,
         gameName: options.gameName,
         appID: options.appID,
         tracked: options.tracked,
@@ -208,12 +305,13 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       statusView.setContext(currentAutoSyncStatusState);
       logAutoSyncStatusChange(currentAutoSyncStatusState);
       if (shouldResetSurface) {
+        notifyDetailsPresentation();
         syncAutoSyncStatusBrowserViewDeferred(currentAutoSyncStatusState);
         return;
       }
       clearAutoSyncStatusSyncTimeout();
       statusView.setContext(currentAutoSyncStatusState);
-      statusView.sync(currentAutoSyncStatusState);
+      syncStatusStrip(currentAutoSyncStatusState);
       scheduleAutoSyncStatusHide(currentAutoSyncStatusState);
       autoSyncStatusShownAt = Date.now();
     },
@@ -224,6 +322,10 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       clearAutoSyncStatusSyncTimeout();
       clearAutoSyncStatusHideTimeout();
 
+      observationStore?.invalidateAutoSyncObservation(
+        options.appID ?? currentAutoSyncStatusState.appID,
+        options.generation ?? currentAutoSyncStatusState.generation,
+      );
       currentAutoSyncStatusState = {
         ...currentAutoSyncStatusState,
         visible: false,
@@ -235,16 +337,49 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
       };
       logAutoSyncStatusChange(currentAutoSyncStatusState);
       statusView.setContext(currentAutoSyncStatusState);
-      statusView.sync(currentAutoSyncStatusState);
+      syncStatusStrip(currentAutoSyncStatusState);
+    },
+
+    settleObservation(options: Pick<AutoSyncStatusPublishOptions, "appID" | "generation">) {
+      observationStore?.invalidateAutoSyncObservation(options.appID, options.generation);
+      const settlesVisibleSync = currentAutoSyncStatusState.visible
+        && options.appID !== undefined
+        && options.generation !== undefined
+        && isSyncthingActiveStatus(currentAutoSyncStatusState.status)
+        && currentAutoSyncStatusState.appID === options.appID
+        && currentAutoSyncStatusState.generation === options.generation;
+      if (settlesVisibleSync) {
+        api.hide({ source: "hide", appID: options.appID, generation: options.generation });
+      }
+    },
+
+    subscribeDetailsPresentation(listener: () => void) {
+      detailsPresentationListeners.add(listener);
+      return () => detailsPresentationListeners.delete(listener);
+    },
+
+    shouldDetailsRowYield,
+
+    registerDetailsOwner(owner: DetailsStatusOwner) {
+      const token = ++nextDetailsOwnerToken;
+      detailsOwner = { token, ...owner };
+      syncStatusStrip(currentAutoSyncStatusState);
+      return () => {
+        if (detailsOwner?.token !== token) return;
+        detailsOwner = null;
+        syncStatusStrip(currentAutoSyncStatusState);
+      };
     },
 
     complete(
       result: OperationResult | LifecycleCheckResult,
       options: AutoSyncStatusCompleteOptions
     ) {
-      const isError = result.status === "failed" ||
-        (result.status === "skipped" && result.reason === "operation_running");
-      if (isError) {
+      recordTerminalResult(result, options);
+      const terminalStatus = autoSyncStatusForTerminalResult(result);
+      const isImmediateError = terminalStatus === "error"
+        && (result.status === "failed" || result.reason === "operation_running");
+      if (isImmediateError) {
         api.publish("error", {
           ...options,
           source: "rpc_result",
@@ -253,7 +388,7 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
         return;
       }
 
-      if (result.status === "conflict") {
+      if (terminalStatus === "conflict") {
         api.publish("conflict", {
           ...options,
           source: "rpc_result",
@@ -289,58 +424,11 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
         return;
       }
 
-      if (result.status === "backed_up" || result.status === "restored") {
-        api.publish("has_backup", {
+      if (terminalStatus !== null) {
+        api.publish(terminalStatus, {
           ...options,
           source: "rpc_result",
-          resultStatus: result.status
-        });
-        return;
-      }
-
-      if (result.status === "skipped") {
-        if (result.reason === "conflict_unresolved") {
-          api.publish("conflict_unresolved", {
-            ...options,
-            source: "rpc_result",
-            resultStatus: result.status,
-          });
-          return;
-        }
-        if (result.reason === "game_sync_disabled") {
-          // Published on both start and exit: the exit notice confirms no
-          // backup ran. The exit handler suppresses the pre-check "checking"
-          // publish for disabled games, so this replaces that flash rather
-          // than following it.
-          api.publish("game_sync_disabled", {
-            ...options,
-            source: "rpc_result",
-            resultStatus: result.status,
-          });
-          return;
-        }
-        if (result.reason === "local_current") {
-          api.publish("has_backup", {
-            ...options,
-            source: "rpc_result",
-            resultStatus: result.status
-          });
-          return;
-        }
-
-        if (["ambiguous_recency", "game_error", "preview_failed"].includes(result.reason ?? "")) {
-          api.publish("error", {
-            ...options,
-            source: "rpc_result",
-            resultStatus: result.status
-          });
-          return;
-        }
-
-        api.publish("unknown", {
-          ...options,
-          source: "rpc_result",
-          resultStatus: result.status
+          resultStatus: result.status,
         });
         return;
       }
@@ -356,13 +444,15 @@ export function createAutoSyncStatusSurface(statusView: AutoSyncStatusBrowserVie
     dispose() {
       clearDeferredAutoSyncStatus();
       currentHasBackupLifecycle = null;
+      detailsOwner = null;
       statusView.setContext(currentAutoSyncStatusState);
       currentAutoSyncStatusState = {
         status: "has_backup",
         visible: false,
         source: "hide"
       };
-      
+      notifyDetailsPresentation();
+
       clearAutoSyncStatusHideTimeout();
       clearAutoSyncStatusSyncTimeout();
       
