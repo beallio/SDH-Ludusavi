@@ -126,6 +126,9 @@ history only; remote delivery is explicitly unverified until a new observation o
 The row uses Steam's centered Cloud-style text, colors, and short labels such as **CHECKING...**,
 **UP TO DATE**, **OUT OF SYNC**, and **UNABLE TO SYNC**. Screen readers still receive the full
 local and remote status.
+When **Last Operation** says that a backup was skipped because the local save is already current,
+the details row remains **UP TO DATE**, including after a plugin reload. **UNKNOWN** uses the same
+standard divided row as other non-problem states.
 
 - **Backup ready**: Ludusavi has a valid backup for this game.
 - **Needs first backup**: Ludusavi recognizes the game, but no backup has been created yet.

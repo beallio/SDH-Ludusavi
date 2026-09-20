@@ -7,7 +7,7 @@ import type {
   RpcStatus
 } from "../types";
 import { log } from "../utils/logging";
-import { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus, isLudusaviRunningStatus, isSyncthingStatus } from "./autoSyncStatusRenderer";
+import { autoSyncStatusForTerminalResult, autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus, isLudusaviRunningStatus, isSyncthingStatus } from "./autoSyncStatusRenderer";
 import type { AutoSyncStatusBrowserViewApi } from "./autoSyncStatusBrowserView";
 import type { LudusaviStateStore } from "../state/ludusaviState";
 
@@ -376,9 +376,10 @@ export function createAutoSyncStatusSurface(
       options: AutoSyncStatusCompleteOptions
     ) {
       recordTerminalResult(result, options);
-      const isError = result.status === "failed" ||
-        (result.status === "skipped" && result.reason === "operation_running");
-      if (isError) {
+      const terminalStatus = autoSyncStatusForTerminalResult(result);
+      const isImmediateError = terminalStatus === "error"
+        && (result.status === "failed" || result.reason === "operation_running");
+      if (isImmediateError) {
         api.publish("error", {
           ...options,
           source: "rpc_result",
@@ -387,7 +388,7 @@ export function createAutoSyncStatusSurface(
         return;
       }
 
-      if (result.status === "conflict") {
+      if (terminalStatus === "conflict") {
         api.publish("conflict", {
           ...options,
           source: "rpc_result",
@@ -423,58 +424,11 @@ export function createAutoSyncStatusSurface(
         return;
       }
 
-      if (result.status === "backed_up" || result.status === "restored") {
-        api.publish("has_backup", {
+      if (terminalStatus !== null) {
+        api.publish(terminalStatus, {
           ...options,
           source: "rpc_result",
-          resultStatus: result.status
-        });
-        return;
-      }
-
-      if (result.status === "skipped") {
-        if (result.reason === "conflict_unresolved") {
-          api.publish("conflict_unresolved", {
-            ...options,
-            source: "rpc_result",
-            resultStatus: result.status,
-          });
-          return;
-        }
-        if (result.reason === "game_sync_disabled") {
-          // Published on both start and exit: the exit notice confirms no
-          // backup ran. The exit handler suppresses the pre-check "checking"
-          // publish for disabled games, so this replaces that flash rather
-          // than following it.
-          api.publish("game_sync_disabled", {
-            ...options,
-            source: "rpc_result",
-            resultStatus: result.status,
-          });
-          return;
-        }
-        if (result.reason === "local_current") {
-          api.publish("has_backup", {
-            ...options,
-            source: "rpc_result",
-            resultStatus: result.status
-          });
-          return;
-        }
-
-        if (["ambiguous_recency", "game_error", "preview_failed"].includes(result.reason ?? "")) {
-          api.publish("error", {
-            ...options,
-            source: "rpc_result",
-            resultStatus: result.status
-          });
-          return;
-        }
-
-        api.publish("unknown", {
-          ...options,
-          source: "rpc_result",
-          resultStatus: result.status
+          resultStatus: result.status,
         });
         return;
       }

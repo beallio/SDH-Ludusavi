@@ -1,4 +1,10 @@
-import type { AutoSyncStatusKind, AutoSyncStatusState } from "../types";
+import type {
+  AutoSyncStatusKind,
+  AutoSyncStatusState,
+  GameOperationHistoryEntry,
+  LifecycleCheckResult,
+  OperationResult,
+} from "../types";
 
 export const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
   checking: "VERIFYING GAME SAVE",
@@ -19,6 +25,28 @@ export const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
   syncthing_folder_not_found: "LOCAL BACKUP SAVED - PATH NOT SHARED",
   syncthing_no_peers: "LOCAL BACKUP SAVED - NO SYNCTHING PEERS ONLINE"
 };
+
+type TerminalOperationResult =
+  | Pick<GameOperationHistoryEntry, "status" | "reason">
+  | Pick<LifecycleCheckResult, "status" | "reason">
+  | Pick<OperationResult, "status" | "reason">;
+
+export function autoSyncStatusForTerminalResult(
+  result: TerminalOperationResult,
+): AutoSyncStatusKind | null {
+  if (result.status === "failed") return "error";
+  if (result.status === "conflict") return "conflict";
+  if (result.status === "backed_up" || result.status === "restored") return "has_backup";
+  if (result.status !== "skipped") return null;
+  if (result.reason === "operation_running"
+    || ["ambiguous_recency", "game_error", "preview_failed"].includes(result.reason ?? "")) {
+    return "error";
+  }
+  if (result.reason === "conflict_unresolved") return "conflict_unresolved";
+  if (result.reason === "game_sync_disabled") return "game_sync_disabled";
+  if (result.reason === "local_current") return "has_backup";
+  return "unknown";
+}
 export function isLudusaviRunningStatus(status: AutoSyncStatusKind): boolean {
   return status === "checking" || status === "backing_up" || status === "restoring";
 }

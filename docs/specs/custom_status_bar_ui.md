@@ -327,6 +327,12 @@ Visible row text uses short Steam-style states: `Checking...`, `Backing up...`, 
 remote-observation wording. A short visible label must not imply remote delivery that was not
 observed.
 
+Live terminal results and durable `last_operation` entries use the same status classification.
+In particular, `skipped/local_current` maps to `has_backup`, so it remains `Up to date` after a
+frontend reload while its accessible description remains `Local save already current`. Durable
+classification consumes both the recorded status and reason. `Unknown` uses the normal
+transparent row with dividers; it is not a warning/problem presentation.
+
 For exit work, a mounted, visible, layout-valid row for the same app suppresses duplicate
 BrowserView pixels without stopping timers, watches, or status production. Start-side checking,
 restore, and conflict work always use the strip, and the row also yields when another app owns an

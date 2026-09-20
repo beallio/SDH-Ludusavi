@@ -1,4 +1,4 @@
-import { autoSyncStatusText } from "./autoSyncStatusRenderer";
+import { autoSyncStatusForTerminalResult, autoSyncStatusText } from "./autoSyncStatusRenderer";
 import type { LudusaviStateSnapshot } from "../state/ludusaviState";
 import type { AutoSyncStatusFact, AutoSyncStatusKind, SteamCloudEligibility } from "../types";
 
@@ -117,8 +117,10 @@ export function selectGameDetailsStatus(input: GameDetailsStatusSelectorInput): 
   }
   const durableOperation = snapshot.gameHistory[canonicalGameName]?.last_operation ?? null;
   if (durableOperation) {
-    const status = durableStatus(durableOperation.status);
-    return statusModel(eligibility, "local_result", status, status, sync?.status ?? null, false, observation ? syncVerification : "unverified", observation?.lifecycle, durableOperation.status, durableOperation.status, false, undefined, sync?.lifecycle ?? observation?.lifecycle);
+    const status = autoSyncStatusForTerminalResult(durableOperation);
+    if (status) {
+      return statusModel(eligibility, "local_result", status, status, sync?.status ?? null, false, observation ? syncVerification : "unverified", observation?.lifecycle, durableOperation.status, durableOperation.status, false, undefined, sync?.lifecycle ?? observation?.lifecycle);
+    }
   }
   if (game.has_backup || game.status === "has_backup") {
     return model(eligibility, "local_backup_available", "has_backup", "Up to date", "Ludusavi reports a local backup for this game.", observation?.localOperation?.status ?? null, observation?.syncObservation?.status ?? null, syncVerification, observation?.lifecycle);
@@ -137,10 +139,6 @@ function isCurrentInventoryFact(fact: AutoSyncStatusFact | null, trackingRevisio
   return fact?.trackingRevision !== undefined && fact.trackingRevision >= trackingRevision;
 }
 
-function durableStatus(status: "backed_up" | "restored" | "skipped" | "failed"): AutoSyncStatusKind {
-  if (status === "backed_up" || status === "restored") return "has_backup";
-  return status === "failed" ? "error" : "unknown";
-}
 
 function hidden(eligibility: SteamCloudEligibility): GameDetailsStatusViewModel {
   return { eligibility, kind: "hidden", status: null, localStatus: null, syncStatus: null, syncVerification: "not_checked", label: "", description: "", tone: "neutral", active: false, showRow: false, canOwnStatusArea: false };
@@ -259,7 +257,7 @@ function syncDetail(
 
 function toneForStatus(status: AutoSyncStatusKind | null): GameDetailsStatusViewModel["tone"] {
   if (status === "error") return "error";
-  if (["unknown", "conflict", "conflict_unresolved", "game_sync_disabled", "syncthing_upload_incomplete", "syncthing_unavailable", "syncthing_folder_not_found", "syncthing_no_peers"].includes(status ?? "")) return "warning";
+  if (["conflict", "conflict_unresolved", "game_sync_disabled", "syncthing_upload_incomplete", "syncthing_unavailable", "syncthing_folder_not_found", "syncthing_no_peers"].includes(status ?? "")) return "warning";
   if (status === "has_backup" || status === "syncthing_complete") return "success";
   return "info";
 }
