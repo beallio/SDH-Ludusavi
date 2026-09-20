@@ -71,7 +71,8 @@ describe("details-row status ownership", () => {
       canonicalGameName: "Fixture", eligibility: "eligible",
     });
     expect(model.status).toBe("syncthing_folder_not_found");
-    expect(model.label).toContain("Remote folder was not found");
+    expect(model.label).toBe("Ludusavi: Unable to sync");
+    expect(model.description).toContain("Remote folder was not found");
   });
 
   it("suppresses only same-game exit pixels while a valid details row owns the area", () => {
