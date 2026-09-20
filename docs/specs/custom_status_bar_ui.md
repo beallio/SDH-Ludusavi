@@ -273,8 +273,10 @@ Frontend static tests must verify:
 - The icon plus text are centered as one group, normal/running/success icons use
   Steam Blue, `needs_backup` uses a warning/action color, and errors remain red.
 - The BrowserView strip has no React portal or focus target. The details row uses the public
-  Decky route hook only at `/library/app/:appid`, composes the verified provider value, and
-  removes its exact patch on dismount. It never changes Steam Cloud data, controls, or classes.
+  Decky route hook only at `/library/app/:appid` and composes the verified provider value. Its
+  inert wrapper survives the bounded reload handoff so an already-mounted page can receive the
+  replacement store; if no replacement attaches, it removes the exact installed patch. It never
+  changes Steam Cloud data, controls, or classes.
 - Autosync lifecycle handlers publish strip states around existing RPC calls.
 - Autosync start/result success toasts are removed.
 - Autosync failure still routes through the `failures_errors` notification category.
