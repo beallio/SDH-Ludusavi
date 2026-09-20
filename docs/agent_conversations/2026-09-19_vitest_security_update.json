@@ -1,0 +1,18 @@
+{
+  "date": "2026-09-19",
+  "task_objective": "Resolve the open GitHub Dependabot alerts for the Vitest mock redirect path-traversal vulnerability.",
+  "branch": "fix/vitest-mocker-advisory",
+  "files_modified": [
+    "package.json",
+    "pnpm-lock.yaml"
+  ],
+  "tests_added": [],
+  "design_decisions": [
+    "Updated the development-only Vitest dependency from 4.1.8 to the first patched release, 4.1.11.",
+    "The lockfile now resolves both Vitest and @vitest/mocker to 4.1.11. No runtime dependency changed."
+  ],
+  "results": [
+    "The frontend supply-chain audit reported no known vulnerabilities before and after the frozen-lockfile install.",
+    "Ruff check and format, ty, 1,052 Python tests with 7 skips at 90.11 percent coverage, 381 frontend tests, TypeScript typecheck, and Rollup build passed."
+  ]
+}
