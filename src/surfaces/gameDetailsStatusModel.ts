@@ -43,15 +43,15 @@ export function selectGameDetailsStatus(input: GameDetailsStatusSelectorInput): 
   const { snapshot, appID, canonicalGameName, eligibility } = input;
   if (eligibility !== "eligible") return hidden(eligibility);
   if (snapshot.trackingReadiness === "failed") {
-    return model(eligibility, "unavailable", null, "Save status unavailable", "Ludusavi could not load tracking data.");
+    return model(eligibility, "unavailable", null, "Unable to sync", "Ludusavi could not load tracking data.");
   }
   if (snapshot.trackingReadiness === "cold" || snapshot.settings === null || snapshot.games === null) {
-    return model(eligibility, "loading", null, "Loading save status", "Ludusavi is loading save status.");
+    return model(eligibility, "loading", null, "Checking...", "Ludusavi is loading save status.");
   }
   if (!canonicalGameName) return model(eligibility, "not_tracked", null, "Not tracked", "Ludusavi does not track this game.");
   const game = snapshot.games.find((candidate) => candidate.name === canonicalGameName);
   if (!game) return model(eligibility, "not_tracked", null, "Not tracked", "Ludusavi does not track this game.");
-  if (game.error) return model(eligibility, "error", "error", "Save status error", game.error);
+  if (game.error) return model(eligibility, "error", "error", "Unable to sync", game.error);
 
   const observation = snapshot.autoSyncObservations[appID]?.canonicalGameName === canonicalGameName
     ? snapshot.autoSyncObservations[appID] : null;
@@ -71,14 +71,14 @@ export function selectGameDetailsStatus(input: GameDetailsStatusSelectorInput): 
   // Once work is idle, current settings describe what can happen next. Retained
   // observations remain available as secondary context rather than overriding it.
   if (snapshot.settings.auto_sync_enabled === false) {
-    return model(eligibility, "auto_sync_disabled", "game_sync_disabled", "Automatic sync is off", "Ludusavi automatic save sync is disabled.", local?.status ?? null, sync?.status ?? null, syncVerification, observation?.lifecycle);
+    return model(eligibility, "auto_sync_disabled", "game_sync_disabled", "Disabled", "Ludusavi automatic save sync is disabled.", local?.status ?? null, sync?.status ?? null, syncVerification, observation?.lifecycle);
   }
   if (snapshot.settings.sync_disabled_games.includes(canonicalGameName)) {
-    return model(eligibility, "game_sync_disabled", "game_sync_disabled", "Sync disabled for this game", "Ludusavi automatic save sync is disabled for this game.", local?.status ?? null, sync?.status ?? null, syncVerification, observation?.lifecycle);
+    return model(eligibility, "game_sync_disabled", "game_sync_disabled", "Disabled", "Ludusavi automatic save sync is disabled for this game.", local?.status ?? null, sync?.status ?? null, syncVerification, observation?.lifecycle);
   }
   if ((game.needs_first_backup || game.status === "needs_first_backup")
     && !isCurrentInventoryFact(local, snapshot.trackingRevision ?? 0)) {
-    return model(eligibility, "needs_backup", "unknown", "Backup needed", "Ludusavi has not made the first backup for this game.", local?.status ?? null, sync?.status ?? null, syncVerification, observation?.lifecycle);
+    return model(eligibility, "needs_backup", "unknown", "Out of sync", "Ludusavi has not made the first backup for this game.", local?.status ?? null, sync?.status ?? null, syncVerification, observation?.lifecycle);
   }
 
   const observedSync = observation?.activity === "settled" ? sync : null;
@@ -113,7 +113,7 @@ export function selectGameDetailsStatus(input: GameDetailsStatusSelectorInput): 
   // Inventory is authoritative for current backup presence. Durable history is
   // useful after reload, but is not proof that the backup still exists.
   if (game.needs_first_backup || game.status === "needs_first_backup") {
-    return model(eligibility, "needs_backup", "unknown", "Backup needed", "Ludusavi has not made the first backup for this game.", observation?.localOperation?.status ?? null, observation?.syncObservation?.status ?? null, syncVerification, observation?.lifecycle);
+    return model(eligibility, "needs_backup", "unknown", "Out of sync", "Ludusavi has not made the first backup for this game.", observation?.localOperation?.status ?? null, observation?.syncObservation?.status ?? null, syncVerification, observation?.lifecycle);
   }
   const durableOperation = snapshot.gameHistory[canonicalGameName]?.last_operation ?? null;
   if (durableOperation) {
@@ -121,9 +121,9 @@ export function selectGameDetailsStatus(input: GameDetailsStatusSelectorInput): 
     return statusModel(eligibility, "local_result", status, status, sync?.status ?? null, false, observation ? syncVerification : "unverified", observation?.lifecycle, durableOperation.status, durableOperation.status, false, undefined, sync?.lifecycle ?? observation?.lifecycle);
   }
   if (game.has_backup || game.status === "has_backup") {
-    return model(eligibility, "local_backup_available", "has_backup", "Local backup available", "Ludusavi reports a local backup for this game.", observation?.localOperation?.status ?? null, observation?.syncObservation?.status ?? null, syncVerification, observation?.lifecycle);
+    return model(eligibility, "local_backup_available", "has_backup", "Up to date", "Ludusavi reports a local backup for this game.", observation?.localOperation?.status ?? null, observation?.syncObservation?.status ?? null, syncVerification, observation?.lifecycle);
   }
-  return model(eligibility, "unavailable", "unknown", "Save status unavailable", "Ludusavi could not verify this save status.");
+  return model(eligibility, "unavailable", "unknown", "Unknown", "Ludusavi could not verify this save status.");
 }
 
 function newerFact(local: AutoSyncStatusFact | null, sync: AutoSyncStatusFact | null): AutoSyncStatusFact | null {
@@ -182,7 +182,7 @@ function statusModel(
   const detail = `${prefix}: ${primary}.${localDetail}${primaryIsSync ? "" : syncDetail(syncStatus, syncVerification, syncLifecycle)}`;
   return {
     eligibility, kind, status, localStatus, syncStatus, syncVerification, lifecycle,
-    label: `Ludusavi: ${prefix}: ${primary}`,
+    label: `Ludusavi: ${visibleStatusPhrase(status)}`,
     description: detail,
     tone: toneForStatus(status),
     active,
@@ -221,6 +221,29 @@ function statusPhrase(
     syncthing_no_peers: "No relevant remote peer is connected",
   };
   return labels[status] ?? autoSyncStatusText[status];
+}
+
+function visibleStatusPhrase(status: AutoSyncStatusKind): string {
+  const labels: Record<AutoSyncStatusKind, string> = {
+    checking: "Checking...",
+    backing_up: "Backing up...",
+    restoring: "Restoring...",
+    conflict: "File conflict",
+    conflict_unresolved: "File conflict",
+    game_sync_disabled: "Disabled",
+    has_backup: "Up to date",
+    unknown: "Unknown",
+    error: "Unable to sync",
+    syncthing_pending_upload: "Uploading...",
+    syncthing_downloading: "Downloading...",
+    syncthing_uploading: "Uploading...",
+    syncthing_complete: "Up to date",
+    syncthing_upload_incomplete: "Unable to sync",
+    syncthing_unavailable: "Unable to sync",
+    syncthing_folder_not_found: "Unable to sync",
+    syncthing_no_peers: "Unable to sync",
+  };
+  return labels[status];
 }
 
 function syncDetail(

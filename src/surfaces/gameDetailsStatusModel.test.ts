@@ -122,6 +122,7 @@ describe("game details status selection", () => {
     expect(selected.localStatus).toBe("has_backup");
     expect(selected.syncStatus).toBe("syncthing_folder_not_found");
     expect(selected.canOwnStatusArea).toBe(true);
+    expect(selected.label).toBe("Ludusavi: Unable to sync");
 
     const otherGame = selectGameDetailsStatus({
       snapshot: state,
@@ -294,7 +295,7 @@ describe("game details status selection", () => {
     expect(exit.description).not.toContain("Incoming folder activity settled.");
   });
 
-  it("labels a durable restored result as a restore instead of a completed backup", () => {
+  it("uses Steam-style visible statuses while retaining detailed local meaning", () => {
     const restored = selectGameDetailsStatus({
       snapshot: snapshot({ gameHistory: { Fixture: {
         last_backup: null, last_restore: null, last_skip: null, last_failure: null,
@@ -305,9 +306,26 @@ describe("game details status selection", () => {
       } } }),
       appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
     });
+    expect(restored.label).toBe("Ludusavi: Up to date");
+    expect(restored.description).toContain("Local restore complete");
 
-    expect(restored.label).toContain("Local restore complete");
-    expect(restored.label).not.toContain("Local backup complete");
+    const active = selectGameDetailsStatus({
+      snapshot: snapshot({ autoSyncObservations: { "100": {
+        appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", lifecycle: "lifecycle_exit", generation: 8,
+        status: "backing_up", activity: "active", observedAt: 30,
+        localOperation: { status: "backing_up", observedAt: 30, generation: 8 },
+        syncObservation: null,
+      } } }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(active.label).toBe("Ludusavi: Backing up...");
+    expect(active.description).toContain("Current activity: Backing up local save.");
+
+    const disabled = selectGameDetailsStatus({
+      snapshot: snapshot({ settings: { ...settings, auto_sync_enabled: false } }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(disabled.label).toBe("Ludusavi: Disabled");
   });
 
   it("honors fresh missing-backup inventory unless a local result is newer", () => {

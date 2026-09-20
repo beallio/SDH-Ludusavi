@@ -287,6 +287,119 @@ export function detailsRowPaintStyle(suppressed: boolean): Pick<CSSProperties, "
   return suppressed ? { opacity: 0 } : {};
 }
 
+type DetailsRowPresentation = Readonly<{
+  row: CSSProperties;
+  divider: CSSProperties | null;
+  content: CSSProperties;
+  icon: CSSProperties;
+  label: CSSProperties;
+  value: CSSProperties;
+}>;
+
+const DETAILS_ROW_BASE_STYLE: CSSProperties = {
+  width: "100%",
+  height: 30,
+  minHeight: 30,
+  boxSizing: "border-box",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "4px 0",
+  textAlign: "center",
+  overflow: "hidden",
+  whiteSpace: "nowrap",
+};
+const DETAILS_ROW_STYLE: CSSProperties = { ...DETAILS_ROW_BASE_STYLE, background: "transparent" };
+const DETAILS_ROW_PROBLEM_STYLE: CSSProperties = {
+  ...DETAILS_ROW_BASE_STYLE,
+  background: "rgba(255, 255, 255, 0.16)",
+};
+const DETAILS_DIVIDER_STYLE: CSSProperties = {
+  flex: "1 1 40%",
+  minWidth: 0,
+  height: 2,
+  marginInline: 12,
+  backgroundColor: "rgba(61, 68, 80, 0.54)",
+};
+const DETAILS_CONTENT_STYLE: CSSProperties = {
+  minWidth: 0,
+  flex: "0 1 auto",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+const DETAILS_ICON_STYLE: CSSProperties = {
+  width: 16,
+  height: 16,
+  flex: "0 0 16px",
+  marginInline: 8,
+  color: "#dcdedf",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+const DETAILS_ACTIVE_ICON_STYLE: CSSProperties = {
+  ...DETAILS_ICON_STYLE,
+  animation: "sdh-ludusavi-status-pulse 1.5s infinite",
+};
+const DETAILS_LABEL_STYLE: CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  fontFamily: "\"Motiva Sans\", Helvetica, sans-serif",
+  fontSize: 12,
+  fontWeight: 700,
+  lineHeight: "22px",
+  letterSpacing: "0.5px",
+  textTransform: "uppercase",
+  color: "rgba(255, 255, 255, 0.7)",
+};
+const DETAILS_VALUE_STYLE: CSSProperties = { color: "rgba(255, 255, 255, 0.7)" };
+const DETAILS_ACTIVE_VALUE_STYLE: CSSProperties = { color: "#1a9fff" };
+
+const DETAILS_ROW_PRESENTATIONS: Readonly<Record<"active" | "idle" | "activeProblem" | "idleProblem", DetailsRowPresentation>> = {
+  active: {
+    row: DETAILS_ROW_STYLE,
+    divider: DETAILS_DIVIDER_STYLE,
+    content: DETAILS_CONTENT_STYLE,
+    icon: DETAILS_ACTIVE_ICON_STYLE,
+    label: DETAILS_LABEL_STYLE,
+    value: DETAILS_ACTIVE_VALUE_STYLE,
+  },
+  idle: {
+    row: DETAILS_ROW_STYLE,
+    divider: DETAILS_DIVIDER_STYLE,
+    content: DETAILS_CONTENT_STYLE,
+    icon: DETAILS_ICON_STYLE,
+    label: DETAILS_LABEL_STYLE,
+    value: DETAILS_VALUE_STYLE,
+  },
+  activeProblem: {
+    row: DETAILS_ROW_PROBLEM_STYLE,
+    divider: null,
+    content: DETAILS_CONTENT_STYLE,
+    icon: DETAILS_ACTIVE_ICON_STYLE,
+    label: DETAILS_LABEL_STYLE,
+    value: DETAILS_VALUE_STYLE,
+  },
+  idleProblem: {
+    row: DETAILS_ROW_PROBLEM_STYLE,
+    divider: null,
+    content: DETAILS_CONTENT_STYLE,
+    icon: DETAILS_ICON_STYLE,
+    label: DETAILS_LABEL_STYLE,
+    value: DETAILS_VALUE_STYLE,
+  },
+};
+
+export function detailsRowPresentation(
+  model: Pick<GameDetailsStatusViewModel, "active" | "tone">,
+): DetailsRowPresentation {
+  const problem = model.tone === "warning" || model.tone === "error";
+  if (problem) return DETAILS_ROW_PRESENTATIONS[model.active ? "activeProblem" : "idleProblem"];
+  return DETAILS_ROW_PRESENTATIONS[model.active ? "active" : "idle"];
+}
+
 function GameDetailsStatusRow({ appID, model, statusSurface, suppressed }: GameDetailsStatusRowProps): ReactNode {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
   const visible = useVisibleLayout(element);
@@ -295,16 +408,40 @@ function GameDetailsStatusRow({ appID, model, statusSurface, suppressed }: GameD
     return statusSurface.registerDetailsOwner({ appID, visible: true, layoutValid: true });
   }, [appID, model.canOwnStatusArea, statusSurface, visible]);
   const status = model.status ?? "unknown";
+  const presentation = detailsRowPresentation(model);
+  const value = model.label.startsWith("Ludusavi: ") ? model.label.slice("Ludusavi: ".length) : model.label;
+  const divider = presentation.divider
+    ? createElement("span", { "aria-hidden": true, style: presentation.divider })
+    : null;
   return createElement("div", { style: { display: "contents" } },
-    createElement("style", null, "@keyframes sdh-ludusavi-status-spin { to { transform: rotate(360deg); } }"),
+    createElement("style", null,
+      "@keyframes sdh-ludusavi-status-pulse { 0%, 100% { color: #dcdedf; } 50% { color: #3d4450; } } "
+      + "[data-sdh-ludusavi-status-icon=\"true\"] svg { display: block; width: 16px; height: 16px; }",
+    ),
     createElement("div", {
-      ref: setElement, role: suppressed ? undefined : "status", "aria-hidden": suppressed || undefined, "aria-label": suppressed ? undefined : model.description,
-      style: { width: "100%", minHeight: 30, boxSizing: "border-box", display: "flex", alignItems: "center", gap: 8, padding: "4px 12px", color: toneColor(model.tone), background: "rgba(0, 0, 0, 0.18)", fontFamily: "Motiva Sans, Arial, sans-serif", fontSize: 13, fontWeight: 700, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", ...detailsRowPaintStyle(suppressed) },
-    }, createElement("span", {
-      "aria-hidden": true,
-      style: { width: 18, height: 18, flex: "0 0 18px", display: "inline-flex", alignItems: "center", justifyContent: "center", animation: model.active ? "sdh-ludusavi-status-spin 1s linear infinite" : undefined },
-      dangerouslySetInnerHTML: { __html: iconSvgForAutoSyncStatus(status) },
-    }), createElement("span", { style: { overflow: "hidden", textOverflow: "ellipsis" } }, model.label)));
+      ref: setElement,
+      role: suppressed ? undefined : "status",
+      "aria-hidden": suppressed || undefined,
+      "aria-label": suppressed ? undefined : `${model.label}. ${model.description}`,
+      "data-sdh-ludusavi-status-row": "true",
+      style: { ...presentation.row, ...detailsRowPaintStyle(suppressed) },
+    },
+    divider,
+    createElement("span", { style: presentation.content },
+      createElement("span", {
+        "aria-hidden": true,
+        "data-sdh-ludusavi-status-icon": "true",
+        style: presentation.icon,
+        dangerouslySetInnerHTML: { __html: iconSvgForAutoSyncStatus(status) },
+      }),
+      createElement("span", { style: presentation.label },
+        "Ludusavi: ",
+        createElement("span", { style: presentation.value }, value),
+      ),
+    ),
+    divider ? createElement("span", { "aria-hidden": true, style: presentation.divider }) : null,
+    ),
+  );
 }
 
 export const DETAILS_STATUS_VISIBILITY_THRESHOLDS = [0, 0.99, 1];
@@ -397,12 +534,6 @@ function clipsOverflow(value: string | undefined): boolean {
   return ["hidden", "clip", "auto", "scroll"].includes(value ?? "visible");
 }
 
-function toneColor(tone: GameDetailsStatusViewModel["tone"]): string {
-  if (tone === "error") return "#ef4444";
-  if (tone === "warning") return "#f59e0b";
-  if (tone === "success") return "#1a9fff";
-  return "#d6e6f5";
-}
 function routeAppID(values: readonly unknown[]): string | null {
   for (const value of values) {
     const record = asRecord(value); const params = asRecord(record?.params); const candidate = params?.appid ?? record?.appid;

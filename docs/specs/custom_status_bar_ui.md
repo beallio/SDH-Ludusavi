@@ -315,6 +315,18 @@ controls. The row releases ownership when it is hidden, clipped, offscreen, or c
 icon and transfer animation are
 presentation only and it adds no controller focus stop.
 
+The row follows Steam's native Cloud status presentation. It is 30 pixels high, centers the icon
+and label as one group, and uses 12-pixel bold uppercase Motiva Sans text with 0.5-pixel letter
+spacing and 22-pixel line height. Normal rows are transparent with equal dividers on both sides.
+Warning and error rows use Steam's translucent problem background and omit the dividers. Active
+icons pulse over 1.5 seconds instead of rotating, and active status text uses Steam blue.
+
+Visible row text uses short Steam-style states: `Checking...`, `Backing up...`, `Restoring...`,
+`Uploading...`, `Downloading...`, `Up to date`, `Out of sync`, `File conflict`, `Disabled`,
+`Unable to sync`, and `Unknown`. The accessible description keeps the precise local-result and
+remote-observation wording. A short visible label must not imply remote delivery that was not
+observed.
+
 For exit work, a mounted, visible, layout-valid row for the same app suppresses duplicate
 BrowserView pixels without stopping timers, watches, or status production. Start-side checking,
 restore, and conflict work always use the strip, and the row also yields when another app owns an

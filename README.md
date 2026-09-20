@@ -123,6 +123,9 @@ failure. On an eligible non-Steam game details page, the same information remain
 Ludusavi status row after the temporary strip hides. The row can report a proven local result and
 a separate last-observed Syncthing limitation. After a plugin reload, it shows durable local
 history only; remote delivery is explicitly unverified until a new observation occurs.
+The row uses Steam's centered Cloud-style text, colors, and short labels such as **CHECKING...**,
+**UP TO DATE**, **OUT OF SYNC**, and **UNABLE TO SYNC**. Screen readers still receive the full
+local and remote status.
 
 - **Backup ready**: Ludusavi has a valid backup for this game.
 - **Needs first backup**: Ludusavi recognizes the game, but no backup has been created yet.

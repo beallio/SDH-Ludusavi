@@ -20,6 +20,7 @@ import {
   composeInNativeStatusSlot,
   createGameDetailsStatusSurface,
   detailsRowPaintStyle,
+  detailsRowPresentation,
   type GameDetailsStatusContributionSource,
   isVisibleStatusBand,
   DETAILS_STATUS_VISIBILITY_THRESHOLDS,
@@ -113,6 +114,40 @@ describe("game details route adapter", () => {
       opacity: 0,
     });
     expect(detailsRowPaintStyle(false)).toEqual({});
+  });
+
+  it("matches Steam's centered native status typography and colors", () => {
+    const active = detailsRowPresentation({ active: true, tone: "info" });
+    expect(active.row).toMatchObject({
+      height: 30,
+      justifyContent: "center",
+      padding: "4px 0",
+      textAlign: "center",
+      background: "transparent",
+    });
+    expect(active.label).toMatchObject({
+      fontFamily: "\"Motiva Sans\", Helvetica, sans-serif",
+      fontSize: 12,
+      fontWeight: 700,
+      lineHeight: "22px",
+      letterSpacing: "0.5px",
+      textTransform: "uppercase",
+      color: "rgba(255, 255, 255, 0.7)",
+    });
+    expect(active.value).toEqual({ color: "#1a9fff" });
+    expect(active.icon).toMatchObject({
+      color: "#dcdedf",
+      animation: "sdh-ludusavi-status-pulse 1.5s infinite",
+    });
+    expect(active.divider).toMatchObject({
+      backgroundColor: "rgba(61, 68, 80, 0.54)",
+      height: 2,
+    });
+
+    const problem = detailsRowPresentation({ active: false, tone: "warning" });
+    expect(problem.row.background).toBe("rgba(255, 255, 255, 0.16)");
+    expect(problem.divider).toBeNull();
+    expect(problem.value).toEqual({ color: "rgba(255, 255, 255, 0.7)" });
   });
 
   it("hands a recovered native band from the fallback strip to one row, then restores the strip", () => {
