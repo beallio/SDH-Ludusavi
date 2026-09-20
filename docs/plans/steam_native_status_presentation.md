@@ -6,9 +6,22 @@ The Ludusavi Game Details row uses heavier text, left-aligned content, a dark ba
 
 The Ludusavi row must use Steam's presentation language without claiming that a local backup proves remote synchronization. Detailed local and remote guarantees remain in the accessible description.
 
+The persisted operation history already retains a skipped operation's reason, but the native row
+currently discards that reason after reload. As a result, a live `local_current` skip appears as
+`Up to date`, while the same durable last operation appears as `Unknown`. The live and durable
+paths must classify the same terminal result consistently.
+
+`Unknown` also currently inherits warning styling, which removes the normal dividers and adds the
+translucent problem background. Steam does not present its unknown Cloud state as a problem state,
+so the Ludusavi row must use the normal transparent, divided treatment for `Unknown`.
+
 ## Architecture Overview
 
-Only the native Game Details row changes. The protected BrowserView launch strip, lifecycle operations, ownership arbitration, timers, native Steam Cloud exclusion, and state selection remain unchanged.
+The native presentation stays unchanged. Terminal operation-result classification is shared by
+the live status surface and the durable Game Details selector so a reload cannot change the
+meaning of the same result. The protected BrowserView launch strip, lifecycle operations,
+ownership arbitration, timers, native Steam Cloud exclusion, and selection precedence remain
+unchanged.
 
 The row will:
 
@@ -40,6 +53,19 @@ Visible status mappings:
 
 The accessible description continues to distinguish local backup state from observed or unverified remote state.
 
+`Unknown` uses the normal informational tone. It does not use warning/problem presentation.
+
+Terminal result classification:
+
+- `backed_up`, `restored`, or `skipped/local_current`: `has_backup` → `Up to date`;
+- `conflict` or `skipped/conflict_unresolved`: conflict state → `File conflict`;
+- disabled skip reasons: `game_sync_disabled` → `Disabled`;
+- failures and error-class skip reasons: error state → `Unable to sync`;
+- other skipped results: unknown state → `Unknown`.
+
+The durable selector consumes the recorded `last_operation.reason`; it does not reduce a persisted
+operation from `status` alone.
+
 ## Public Interfaces
 
 No backend, RPC, event, persistence, or Steam API interface changes.
@@ -66,9 +92,11 @@ Measured Steam reference values from the live Deck:
 
 ## Testing Strategy
 
-1. Add failing model tests for compact Steam-style visible messages while retaining detailed local/remote descriptions.
-2. Add a failing native-row presentation test for centered layout, measured typography, Steam colors, divider behavior, and active icon pulse.
-3. Implement the smallest model and row changes that pass those tests.
+1. Add a failing reload regression proving that durable `skipped/local_current` stays `Up to date`
+   and retains the detailed `Local save already current` description.
+2. Add a failing model regression proving that `Unknown` uses the normal informational tone.
+3. Route both live and durable terminal results through one pure classification function.
 4. Run the focused frontend tests, TypeScript check, and production build through `./run.sh`.
 5. Run the complete project quality gates.
-6. Install a local development ZIP on the Deck and visually confirm the centered row, font, colors, status wording, native Cloud exclusion, and clean reload behavior.
+6. Install a local development ZIP on the Deck and verify the result remains `Up to date` after a
+   clean plugin reload.

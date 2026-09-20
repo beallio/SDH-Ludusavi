@@ -182,6 +182,75 @@ describe("game details status selection", () => {
     expect(selected.syncVerification).toBe("unverified");
   });
 
+  it("keeps a skipped local-current result up to date after reload", () => {
+    const selected = selectGameDetailsStatus({
+      snapshot: snapshot({ gameHistory: { Fixture: {
+        last_backup: null,
+        last_restore: null,
+        last_skip: {
+          operation: "backup",
+          trigger: "manual_backup",
+          status: "skipped",
+          reason: "local_current",
+          message: null,
+          timestamp: "2026-09-13 12:00:00",
+        },
+        last_failure: null,
+        last_operation: {
+          operation: "backup",
+          trigger: "manual_backup",
+          status: "skipped",
+          reason: "local_current",
+          message: null,
+          timestamp: "2026-09-13 12:00:00",
+        },
+      } } }),
+      appID: "100",
+      gameName: "Fixture",
+      canonicalGameName: "Fixture",
+      eligibility: "eligible",
+    });
+
+    expect(selected.status).toBe("has_backup");
+    expect(selected.label).toBe("Ludusavi: Up to date");
+    expect(selected.description).toContain("Local save already current");
+    expect(selected.description).toContain("Remote sync was not checked after reload");
+  });
+
+  it("uses the normal native row treatment for an unknown durable result", () => {
+    const selected = selectGameDetailsStatus({
+      snapshot: snapshot({ gameHistory: { Fixture: {
+        last_backup: null,
+        last_restore: null,
+        last_skip: {
+          operation: "restore",
+          trigger: "manual_restore",
+          status: "skipped",
+          reason: "no_backup",
+          message: null,
+          timestamp: "2026-09-13 12:00:00",
+        },
+        last_failure: null,
+        last_operation: {
+          operation: "restore",
+          trigger: "manual_restore",
+          status: "skipped",
+          reason: "no_backup",
+          message: null,
+          timestamp: "2026-09-13 12:00:00",
+        },
+      } } }),
+      appID: "100",
+      gameName: "Fixture",
+      canonicalGameName: "Fixture",
+      eligibility: "eligible",
+    });
+
+    expect(selected.status).toBe("unknown");
+    expect(selected.label).toBe("Ludusavi: Unknown");
+    expect(selected.tone).toBe("info");
+  });
+
   it("does not use retained history as proof for an untracked or missing entry", () => {
     const state = snapshot({
       games: [],
