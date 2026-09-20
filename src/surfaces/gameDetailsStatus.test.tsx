@@ -1,10 +1,11 @@
 import { createContext, createElement, type ReactElement } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const routeMock = vi.hoisted(() => ({ addPatch: vi.fn((_: string, patch: unknown) => patch), removePatch: vi.fn() }));
 vi.mock("@decky/api", () => ({ routerHook: routeMock }));
 vi.mock("@decky/ui", () => ({}));
 vi.mock("../ludusaviLauncher", () => ({}));
+vi.mock("../utils/logging", () => ({ log: vi.fn() }));
 vi.mock("../utils/steam", () => ({
   normalize: (name: string) => name.toLowerCase(),
   sessionFromAppOverview: (app: any) => app?.display_name ? { name: app.display_name, appID: String(app.appid) } : null,
@@ -14,6 +15,7 @@ vi.mock("../utils/steamRuntime", () => ({
 }));
 
 import { createLudusaviStateStore } from "../state/ludusaviState";
+import { createAutoSyncStatusSurface } from "./autoSyncStatusSurface";
 import {
   composeInNativeStatusSlot,
   createGameDetailsStatusSurface,
@@ -25,6 +27,17 @@ import {
 } from "./gameDetailsStatus";
 
 describe("game details route adapter", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
   it("clones the supported React route child, keeps its props, and reuses the native header wrapper", () => {
     const surface = createGameDetailsStatusSurface(createLudusaviStateStore(), {
       registerDetailsOwner: vi.fn(), subscribeDetailsPresentation: vi.fn(() => () => {}), shouldDetailsRowYield: vi.fn(() => false),
@@ -48,10 +61,12 @@ describe("game details route adapter", () => {
     const unsupported = { children: {} };
     expect(patch(unsupported)).toBe(unsupported);
     surface.dispose();
+    expect(routeMock.removePatch).not.toHaveBeenCalled();
+    vi.runOnlyPendingTimers();
     expect(routeMock.removePatch).toHaveBeenCalledWith("/library/app/:appid", patch);
   });
 
-  it("moves a retained mounted route header to the replacement store after reload", () => {
+  it("keeps the mounted route contribution alive through a dispose and replacement without adding another patch", () => {
     const firstStore = createLudusaviStateStore();
     const firstSurface = createGameDetailsStatusSurface(firstStore, {
       registerDetailsOwner: vi.fn(), subscribeDetailsPresentation: vi.fn(() => () => {}), shouldDetailsRowYield: vi.fn(() => false),
@@ -75,26 +90,81 @@ describe("game details route adapter", () => {
 
     firstSurface.dispose();
     expect(retainedContributionSource.getSnapshot()).toBeNull();
+    expect(routeMock.removePatch).not.toHaveBeenCalled();
     const replacementStore = createLudusaviStateStore();
     const replacementSurface = createGameDetailsStatusSurface(replacementStore, {
       registerDetailsOwner: vi.fn(), subscribeDetailsPresentation: vi.fn(() => () => {}), shouldDetailsRowYield: vi.fn(() => false),
     } as any);
 
-    // This is the original header function, as it remains mounted while
-    // Decky replaces the plugin. It must no longer use the disposed store.
+    // This is the original mounted route contribution. It must update to the
+    // current runtime rather than requiring Steam to navigate or rerender it.
     expect(retainedHeader({}).props.store).toBe(replacementStore);
     expect(retainedContributionSource.getSnapshot()?.store).toBe(replacementStore);
     expect(notifyRetainedHeader).toHaveBeenCalledTimes(2);
+    expect(routeMock.addPatch).toHaveBeenCalledTimes(1);
     unsubscribe();
     replacementSurface.dispose();
+    vi.runOnlyPendingTimers();
+    expect(routeMock.removePatch).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a same-game fallback row measurable but non-painting", () => {
     expect(detailsRowPaintStyle(true)).toEqual({
       opacity: 0,
-      pointerEvents: "none",
     });
     expect(detailsRowPaintStyle(false)).toEqual({});
+  });
+
+  it("hands a recovered native band from the fallback strip to one row, then restores the strip", () => {
+    vi.stubGlobal("window", globalThis);
+    const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
+    const surface = createAutoSyncStatusSurface(view, createLudusaviStateStore());
+    surface.publish("backing_up", {
+      source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 9,
+      gameName: "Fixture", appID: "100", tracked: true,
+    });
+
+    let clipped = true;
+    const nativeContainer = {
+      hidden: false,
+      parentElement: null,
+      getBoundingClientRect: () => clipped
+        ? { width: 854, height: 15, top: 252, left: 0, right: 854, bottom: 267 }
+        : { width: 854, height: 30, top: 252, left: 0, right: 854, bottom: 282 },
+    };
+    const row = {
+      hidden: false,
+      parentElement: nativeContainer,
+      getBoundingClientRect: () => ({ width: 854, height: 30, top: 252, left: 0, right: 854, bottom: 282 }),
+      contains: (candidate: unknown) => candidate === row,
+      ownerDocument: undefined as unknown,
+    };
+    const fallbackObstruction = {};
+    const gamepadWindow = {
+      getComputedStyle: () => ({ display: "flex", visibility: "visible", overflow: "hidden" }),
+    };
+    const gamepadDocument = {
+      documentElement: { clientHeight: 534, clientWidth: 854 },
+      defaultView: gamepadWindow,
+      elementFromPoint: () => detailsRowPaintStyle(surface.shouldDetailsRowYield("100")).pointerEvents === "none"
+        ? fallbackObstruction
+        : row,
+    };
+    row.ownerDocument = gamepadDocument;
+
+    expect(surface.shouldDetailsRowYield("100")).toBe(true);
+    expect(isVisibleStatusBand(row as unknown as HTMLDivElement, true)).toBe(false);
+
+    clipped = false;
+    expect(isVisibleStatusBand(row as unknown as HTMLDivElement, true)).toBe(true);
+    const release = surface.registerDetailsOwner({ appID: "100", visible: true, layoutValid: true });
+    expect(surface.shouldDetailsRowYield("100")).toBe(false);
+    expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
+
+    release();
+    expect(surface.shouldDetailsRowYield("100")).toBe(true);
+    expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
+    surface.dispose();
   });
 
   it("composes through the deferred Cloud component in the real four-child header", () => {

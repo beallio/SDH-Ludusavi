@@ -9,6 +9,10 @@ import { iconSvgForAutoSyncStatus } from "./autoSyncStatusRenderer";
 import type { DetailsStatusPresentationSurface } from "./autoSyncStatusSurface";
 
 const GAME_DETAILS_ROUTE = "/library/app/:appid";
+// Runtime disposal can follow the launch-lease cleanup ceiling. Retain only
+// the inert route wrapper through that handoff so a replacement plugin can
+// update an already-mounted details page without a navigation.
+const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
 export type GameDetailsStatusSurface = Readonly<{
   dispose(): void;
 }>;
@@ -35,8 +39,14 @@ type NativeRouteRenderFunction = (...args: unknown[]) => unknown;
 type NativeRouteChildProps = RouteRecord & { renderFunc: NativeRouteRenderFunction };
 type NativeProviderProps = RouteRecord & { value: unknown };
 type NativeHeaderElementProps = RouteRecord & { children?: unknown };
+type ManagedGameDetailsRoutePatch = {
+  patch: RoutePatch;
+  installedPatch: RoutePatch;
+  removalTimer: ReturnType<typeof globalThis.setTimeout> | null;
+};
 declare global {
   var __sdhLudusaviGameDetailsStatusRegistry: GameDetailsStatusContributionRegistry | undefined;
+  var __sdhLudusaviGameDetailsStatusRoutePatch: ManagedGameDetailsRoutePatch | undefined;
 }
 
 function getGameDetailsStatusContributionRegistry(): GameDetailsStatusContributionRegistry {
@@ -74,7 +84,28 @@ export function createGameDetailsStatusSurface(
 ): GameDetailsStatusSurface {
   const contributionRegistry = getGameDetailsStatusContributionRegistry();
   const contributionToken = contributionRegistry.activate(store, statusSurface);
+  retainGameDetailsRoutePatch(contributionRegistry);
   let disposed = false;
+  return Object.freeze({
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      contributionRegistry.retire(contributionToken);
+      releaseGameDetailsRoutePatchWhenIdle(contributionRegistry);
+    },
+  });
+}
+
+function retainGameDetailsRoutePatch(contributionRegistry: GameDetailsStatusContributionRegistry): void {
+  const retainedPatch = globalThis.__sdhLudusaviGameDetailsStatusRoutePatch;
+  if (retainedPatch) {
+    if (retainedPatch.removalTimer !== null) {
+      globalThis.clearTimeout(retainedPatch.removalTimer);
+      retainedPatch.removalTimer = null;
+    }
+    return;
+  }
+
   const wrappedHeaders = new WeakMap<NativeHeader, Map<string, NativeHeader>>();
   const patch: RoutePatch = (route) => {
     const record = asRecord(route);
@@ -84,7 +115,7 @@ export function createGameDetailsStatusSurface(
     const wrappedRenderFunc = (...args: unknown[]) => {
       const rendered = renderFunc(...args);
       const provider = asNativeProviderElement(rendered);
-      if (!provider || disposed) return rendered;
+      if (!provider) return rendered;
       const nativeHeader = asNativeHeader(provider.props.value);
       const appID = routeAppID(args) ?? routeAppID([record]);
       if (!nativeHeader || !appID) return rendered;
@@ -115,14 +146,18 @@ export function createGameDetailsStatusSurface(
     return { ...route, children: cloneElement(child, { ...child.props, renderFunc: wrappedRenderFunc }) };
   };
   const installedPatch = routerHook.addPatch(GAME_DETAILS_ROUTE, patch);
-  return Object.freeze({
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      contributionRegistry.retire(contributionToken);
-      routerHook.removePatch(GAME_DETAILS_ROUTE, installedPatch);
-    },
-  });
+  globalThis.__sdhLudusaviGameDetailsStatusRoutePatch = { patch, installedPatch, removalTimer: null };
+}
+
+function releaseGameDetailsRoutePatchWhenIdle(contributionRegistry: GameDetailsStatusContributionRegistry): void {
+  const retainedPatch = globalThis.__sdhLudusaviGameDetailsStatusRoutePatch;
+  if (!retainedPatch || contributionRegistry.getSnapshot() !== null || retainedPatch.removalTimer !== null) return;
+  retainedPatch.removalTimer = globalThis.setTimeout(() => {
+    if (globalThis.__sdhLudusaviGameDetailsStatusRoutePatch !== retainedPatch
+      || contributionRegistry.getSnapshot() !== null) return;
+    routerHook.removePatch(GAME_DETAILS_ROUTE, retainedPatch.installedPatch);
+    globalThis.__sdhLudusaviGameDetailsStatusRoutePatch = undefined;
+  }, GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS);
 }
 
 type GameDetailsStatusHeaderProps = Readonly<{
@@ -244,7 +279,12 @@ type GameDetailsStatusRowProps = Readonly<{
 }>;
 
 export function detailsRowPaintStyle(suppressed: boolean): Pick<CSSProperties, "opacity" | "pointerEvents"> {
-  return suppressed ? { opacity: 0, pointerEvents: "none" } : {};
+  // The hidden row must still receive the host document's hit test. That is
+  // how it detects that a previously clipped native band became usable and
+  // can replace the fallback strip. It has no handlers or focus stop, and is
+  // aria-hidden while suppressed, so retaining pointer participation exposes
+  // no interactive surface.
+  return suppressed ? { opacity: 0 } : {};
 }
 
 function GameDetailsStatusRow({ appID, model, statusSurface, suppressed }: GameDetailsStatusRowProps): ReactNode {
