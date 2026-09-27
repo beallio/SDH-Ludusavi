@@ -111,6 +111,29 @@ describe("game details route adapter", () => {
     expect(routeMock.removePatch).toHaveBeenCalledTimes(1);
   });
 
+  it("replaces only an older retained route patch when the plugin UI changes", () => {
+    const statusSurface = {
+      subscribeDetailsPresentation: vi.fn(() => () => {}),
+      shouldDetailsRowYield: vi.fn(() => false),
+      registerDetailsOwner: vi.fn(() => () => {}),
+    } satisfies DetailsStatusPresentationSurface;
+    const original = createGameDetailsStatusSurface(createLudusaviStateStore(), statusSurface);
+    const oldPatch = globalThis.__sdhLudusaviGameDetailsStatusRoutePatch;
+    expect(oldPatch).toBeDefined();
+    if (!oldPatch) throw new Error("The original patch was not installed");
+    Reflect.deleteProperty(oldPatch, "version");
+    original.dispose();
+
+    const replacement = createGameDetailsStatusSurface(createLudusaviStateStore(), statusSurface);
+
+    expect(routeMock.removePatch).toHaveBeenCalledWith("/library/app/:appid", oldPatch.installedPatch);
+    expect(routeMock.addPatch).toHaveBeenCalledTimes(2);
+    expect(globalThis.__sdhLudusaviGameDetailsStatusRoutePatch).not.toBe(oldPatch);
+    replacement.dispose();
+    vi.runOnlyPendingTimers();
+    expect(routeMock.removePatch).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps a same-game fallback row measurable but non-painting", () => {
     expect(detailsRowPaintStyle(true)).toEqual({
       opacity: 0,

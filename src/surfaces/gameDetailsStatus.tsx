@@ -13,6 +13,8 @@ const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // the inert route wrapper through that handoff so a replacement plugin can
 // update an already-mounted details page without a navigation.
 const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
+// Bump when an existing route wrapper cannot render the newest status-row contract.
+const GAME_DETAILS_ROUTE_RENDER_VERSION = 2;
 export type GameDetailsStatusSurface = Readonly<{
   dispose(): void;
 }>;
@@ -40,6 +42,7 @@ type NativeRouteChildProps = RouteRecord & { renderFunc: NativeRouteRenderFuncti
 type NativeProviderProps = RouteRecord & { value: unknown };
 type NativeHeaderElementProps = RouteRecord & { children?: unknown };
 type ManagedGameDetailsRoutePatch = {
+  version?: number;
   patch: RoutePatch;
   installedPatch: RoutePatch;
   removalTimer: ReturnType<typeof globalThis.setTimeout> | null;
@@ -103,7 +106,12 @@ function retainGameDetailsRoutePatch(contributionRegistry: GameDetailsStatusCont
       globalThis.clearTimeout(retainedPatch.removalTimer);
       retainedPatch.removalTimer = null;
     }
-    return;
+    if (retainedPatch.version === GAME_DETAILS_ROUTE_RENDER_VERSION) return;
+    // An older wrapper closes over older row JSX. Keep the shared contribution
+    // registry, but replace only our patch so subsequent native route renders
+    // use the current row without removing other plugins' route patches.
+    routerHook.removePatch(GAME_DETAILS_ROUTE, retainedPatch.installedPatch);
+    globalThis.__sdhLudusaviGameDetailsStatusRoutePatch = undefined;
   }
 
   const wrappedHeaders = new WeakMap<NativeHeader, Map<string, NativeHeader>>();
@@ -146,7 +154,12 @@ function retainGameDetailsRoutePatch(contributionRegistry: GameDetailsStatusCont
     return { ...route, children: cloneElement(child, { ...child.props, renderFunc: wrappedRenderFunc }) };
   };
   const installedPatch = routerHook.addPatch(GAME_DETAILS_ROUTE, patch);
-  globalThis.__sdhLudusaviGameDetailsStatusRoutePatch = { patch, installedPatch, removalTimer: null };
+  globalThis.__sdhLudusaviGameDetailsStatusRoutePatch = {
+    version: GAME_DETAILS_ROUTE_RENDER_VERSION,
+    patch,
+    installedPatch,
+    removalTimer: null,
+  };
 }
 
 function releaseGameDetailsRoutePatchWhenIdle(contributionRegistry: GameDetailsStatusContributionRegistry): void {
