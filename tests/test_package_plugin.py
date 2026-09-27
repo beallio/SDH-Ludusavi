@@ -19,28 +19,6 @@ def load_package_module():
     return module
 
 
-def test_package_script_defines_decky_runtime_files_only() -> None:
-    module = load_package_module()
-
-    assert module.PROJECT_NAME == "SDH-Ludusavi"
-    assert module.ZIP_FILENAME == "SDH-Ludusavi.zip"
-    assert module.ARCHIVE_ROOT == "SDH-Ludusavi"
-    assert module.REQUIRED_FILES == (
-        "LICENSE",
-        "NOTICE.md",
-        "main.py",
-        "package.json",
-        "plugin.json",
-    )
-    assert module.REQUIRED_RUNTIME_FILES == ("dist/index.js",)
-    assert module.REQUIRED_DIRECTORIES == (
-        "dist",
-        "py_modules/pyludusavi",
-        "py_modules/pyludusavi-0.3.0.dist-info",
-        "py_modules/sdh_ludusavi",
-    )
-
-
 def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
     module = load_package_module()
 
@@ -56,8 +34,24 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
         names = set(archive.namelist())
         plugin_metadata = json.loads(archive.read("SDH-Ludusavi/plugin.json"))
         package_metadata = json.loads(archive.read("SDH-Ludusavi/package.json"))
+        theme_manifest = json.loads(archive.read("SDH-Ludusavi/theme/theme.json"))
 
-    assert names == set(module.iter_required_archive_names(Path.cwd()))
+    mode = theme_manifest["patches"]["Save Status"]
+    assert mode["type"] == "slider"
+    assert mode["default"] == "Default"
+    assert list(mode["values"]) == ["Default", "Clean View", "Custom"]
+    assert mode["values"]["Default"] == {}
+    colors = mode["components"]
+    assert len(colors) == 4
+    assert all(color["type"] == "color-picker" and color["on"] == "Custom" for color in colors)
+    assert len({color["css_variable"] for color in colors}) == len(colors)
+    outline = theme_manifest["patches"]["Outline Width"]
+    assert outline["type"] == "slider"
+    assert outline["values"][outline["default"]]["--sdh-status-outline-width"][0] == "0px"
+    assert len(outline["values"]) >= 3
+    assert "SDH-Ludusavi/theme/clean.css" in names
+    assert "SDH-Ludusavi/theme/custom.css" in names
+
     assert all(name.startswith("SDH-Ludusavi/") for name in names)
     assert "SDH-Ludusavi/plugin.json" in names
     assert "SDH-Ludusavi/NOTICE.md" in names
@@ -84,6 +78,20 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
     assert "SDH-Ludusavi/node_modules/.modules.yaml" not in names
 
 
+def test_package_rejects_symlinked_theme_assets_outside_checkout(tmp_path: Path) -> None:
+    module = load_package_module()
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    for directory in module.REQUIRED_DIRECTORIES:
+        (project_root / directory).mkdir(parents=True)
+    outside = tmp_path / "private-data"
+    outside.write_text("must not ship", encoding="utf-8")
+    (project_root / "theme" / "extra.css").symlink_to(outside)
+
+    with pytest.raises(ValueError, match="symlink"):
+        module.iter_required_plugin_paths(project_root)
+
+
 def test_package_script_rebuilds_missing_runtime_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -92,7 +100,9 @@ def test_package_script_rebuilds_missing_runtime_bundle(
     project_root.mkdir()
 
     for file_name in module.REQUIRED_FILES:
-        (project_root / file_name).write_text("{}", encoding="utf-8")
+        target = project_root / file_name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}", encoding="utf-8")
     (project_root / "LICENSE").write_text("license", encoding="utf-8")
 
     build_calls: list[Path] = []

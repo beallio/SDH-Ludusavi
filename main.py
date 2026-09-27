@@ -14,6 +14,11 @@ import decky
 from sdh_ludusavi.ludusavi_executor import LudusaviOperationCancelledError
 from sdh_ludusavi.rpc_pool import DaemonThreadPool
 from sdh_ludusavi.singleton import enforce_single_instance
+from sdh_ludusavi.status_theme import (
+    ThemeOwnershipError,
+    install_status_theme,
+    uninstall_status_theme,
+)
 from sdh_ludusavi.service import (
     DEFAULT_NOTIFICATION_SETTINGS,
     OperationLockedError,
@@ -323,6 +328,19 @@ class Plugin:
         # cleans up strictly-older siblings before touching shared state.
         await self._call("enforce_single_instance", lambda: enforce_single_instance(decky.logger))
 
+        theme_result = await self._call(
+            "install_status_theme",
+            lambda: install_status_theme(
+                Path(decky.DECKY_PLUGIN_DIR) / "theme",
+                Path(decky.DECKY_HOME),
+                Path(decky.DECKY_PLUGIN_RUNTIME_DIR),
+            ),
+        )
+        if isinstance(theme_result, dict) and theme_result.get("status") == "failed":
+            decky.logger.warning(
+                "CSS Loader theme could not be installed: %s", theme_result.get("message")
+            )
+
         init_result = await self._call("startup_init", self._service)
         if isinstance(init_result, dict) and init_result.get("status") == "failed":
             decky.logger.error(
@@ -396,6 +414,10 @@ class Plugin:
             decky.logger.info("SDH-ludusavi backend unloaded")
 
     async def _uninstall(self) -> None:
+        try:
+            uninstall_status_theme(Path(decky.DECKY_HOME), Path(decky.DECKY_PLUGIN_RUNTIME_DIR))
+        except (OSError, ThemeOwnershipError) as exc:
+            decky.logger.warning("CSS Loader theme was retained during uninstall: %s", exc)
         decky.logger.info("SDH-ludusavi backend uninstalled")
 
     async def _migration(self) -> None:

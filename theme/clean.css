@@ -1,0 +1,6 @@
+/* Match Clean Gameview's translucent play-section surface without moving either status row. */
+.appdetailsplaysection_CloudStatusRow_QvHky:not(.appdetailsplaysection_CloudSyncProblem_2bzio),
+[data-sdh-ludusavi-status-row="true"]:not([data-sdh-ludusavi-tone="warning"]):not([data-sdh-ludusavi-tone="error"]) {
+  background: rgba(14, 20, 27, 0.33) !important;
+  box-shadow: inset 0 1px rgba(220, 222, 223, 0.18) !important;
+}

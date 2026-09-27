@@ -350,7 +350,7 @@ const DETAILS_VALUE_STYLE: CSSProperties = { color: "rgba(255, 255, 255, 0.7)" }
 const DETAILS_ACTIVE_VALUE_STYLE: CSSProperties = { color: "#1a9fff" };
 
 
-function GameDetailsStatusRow({ appID, model, statusSurface, suppressed }: GameDetailsStatusRowProps): ReactNode {
+export function GameDetailsStatusRow({ appID, model, statusSurface, suppressed }: GameDetailsStatusRowProps): ReactNode {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
   const visible = useVisibleLayout(element);
   useEffect(() => {
@@ -378,6 +378,8 @@ function GameDetailsStatusRow({ appID, model, statusSurface, suppressed }: GameD
       "aria-hidden": suppressed || undefined,
       "aria-label": suppressed ? undefined : `${model.label}. ${model.description}`,
       "data-sdh-ludusavi-status-row": "true",
+      "data-sdh-ludusavi-tone": model.tone,
+      "data-sdh-ludusavi-active": String(model.active),
       style: { ...rowStyle, ...detailsRowPaintStyle(suppressed) },
     },
     divider,
@@ -388,7 +390,7 @@ function GameDetailsStatusRow({ appID, model, statusSurface, suppressed }: GameD
         style: iconStyle,
         dangerouslySetInnerHTML: { __html: iconSvgForAutoSyncStatus(status) },
       }),
-      createElement("span", { style: DETAILS_LABEL_STYLE },
+      createElement("span", { "data-sdh-ludusavi-status-label": "true", style: DETAILS_LABEL_STYLE },
         "Ludusavi: ",
         createElement("span", { style: valueStyle }, value),
       ),

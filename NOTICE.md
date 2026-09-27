@@ -39,6 +39,13 @@ notices are in [LICENSE](LICENSE).
 - **Code use:** Conceptual attribution only; no SDH-GameSync code is bundled or
   claimed to have been copied.
 
+### [suchmememanyskill/Steam-Deck-Themes: Clean Gameview](https://github.com/suchmememanyskill/Steam-Deck-Themes/tree/main/Clean%20Gameview)
+
+- **Role:** Inspiration for the optional translucent Clean View status-bar
+  appearance. The top-right icon relocation and full-page layout are not
+  included.
+- **Code use:** Original status-bar CSS; no upstream stylesheet is bundled.
+
 ## Vendored source
 
 ### [beallio/pyludusavi 0.3.0](https://github.com/beallio/pyludusavi)
@@ -79,7 +86,18 @@ notices are in [LICENSE](LICENSE).
   package.
 - **License:** BSD-3-Clause
 
+### [facebook/react: react-dom 18.3.1](https://github.com/facebook/react)
+
+- **Role:** Development-only renderer for native status-row behavior tests; not
+  bundled in the Decky plugin.
+- **License:** MIT
+
 ## Runtime and API integrations
+
+### [DeckThemes/SDH-CssLoader](https://github.com/DeckThemes/SDH-CssLoader)
+
+- **Role:** Optional external CSS theme loader; not bundled or required for
+  save operations.
 
 ### [SteamDeckHomebrew/decky-loader](https://github.com/SteamDeckHomebrew/decky-loader)
 

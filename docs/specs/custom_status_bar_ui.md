@@ -340,3 +340,43 @@ outstanding strip. A row unmount or Cloud-state change restores an outstanding s
 extending its lifetime. Terminal observations remain in frontend state through the strip timeout,
 but the frontend marks interrupted or superseded activity as remote-unverified instead of showing
 an endless transfer. A local result and a remote observation remain distinct in the row text.
+
+### Optional CSS Loader theme
+
+The plugin ZIP includes `theme/theme.json`, `theme/clean.css`, and `theme/custom.css`.
+On backend startup, `status_theme.install_status_theme` copies those managed files into
+`DECKY_HOME/themes/SDH-Ludusavi Status`. A marker identifies the owned directory. The first
+install enables the theme with its no-op `Default` selection. Later startups replace only
+managed theme files and preserve CSS Loader's choices. CSS Loader need not be installed for
+the assets to be deployed: without it, no theme CSS is injected. CSS Loader's Refresh
+control discovers a new theme when it was already running and did not observe directory
+creation.
+
+`Save Status` is a three-notch CSS Loader slider: `Default` injects no stylesheet,
+`Clean View` injects only a translucent play-section-style surface, and `Custom` injects
+the user-selected background, text, icon, and inset outline colors. The four color
+pickers are visible only when Custom is selected and their alpha channels control
+transparency. A separate `Outline Width` slider provides Off, Thin, Medium, and Thick;
+CSS Loader shows it in all three modes, but only Custom reads its CSS variable. Active
+Ludusavi text/icon styling, native Steam Cloud transfer colors/pulse, and both
+implementations' problem rows retain their own visual state. The status labels and
+accessible descriptions remain unchanged.
+
+The theme targets Steam's Cloud-status CSS module selectors, translated by CSS Loader
+for the current Steam client, plus stable `data-sdh-ludusavi-*` attributes on the
+plugin's row, label, and icon. The row also exposes tone and active state to keep
+problem and running states distinct. The theme never changes row dimensions,
+placement, visibility, focus, or hit testing: those properties participate in
+details-row ownership and BrowserView-strip fallback. It does not style the separate
+launch BrowserView document. Clean Gameview's optional top-right icon relocation is
+not part of this theme.
+
+Decky invokes `_uninstall` for both plugin updates and actual removals. Before removing
+its owned theme, the hook stores CSS Loader's `config_USER.json`, `config_ROOT.json`, and
+optional `PRIORITY` under `DECKY_PLUGIN_RUNTIME_DIR`. Startup restores them when the
+new theme is installed. On a true removal, only the preference backup remains for a
+later reinstall; no theme files remain for CSS Loader to load. If the directory is
+unowned, symlinked, or contains additional user files, the backend leaves it intact
+and logs a warning instead of deleting another theme or user work. CSS Loader can
+keep an already-injected stylesheet until its next Refresh or Steam restart; the
+uninstall hook does not call private cross-plugin reload APIs.

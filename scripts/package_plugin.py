@@ -17,6 +17,9 @@ REQUIRED_FILES = (
     "main.py",
     "package.json",
     "plugin.json",
+    "theme/theme.json",
+    "theme/clean.css",
+    "theme/custom.css",
 )
 REQUIRED_RUNTIME_FILES = ("dist/index.js",)
 REQUIRED_DIRECTORIES = (
@@ -24,16 +27,28 @@ REQUIRED_DIRECTORIES = (
     "py_modules/pyludusavi",
     "py_modules/pyludusavi-0.3.0.dist-info",
     "py_modules/sdh_ludusavi",
+    "theme",
 )
 EXCLUDED_PARTS = {"__pycache__"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo"}
 
 
+def _reject_symlink_parts(project_root: Path, relative: Path) -> None:
+    path = project_root
+    for part in relative.parts:
+        path = path / part
+        if path.is_symlink():
+            raise ValueError(f"Plugin package path is a symlink: {path}")
+
+
 def iter_required_plugin_paths(project_root: Path) -> tuple[str, ...]:
     plugin_paths = set(REQUIRED_FILES)
+    for file_name in REQUIRED_FILES:
+        _reject_symlink_parts(project_root, Path(file_name))
 
     for directory_name in REQUIRED_DIRECTORIES:
         directory = project_root / directory_name
+        _reject_symlink_parts(project_root, Path(directory_name))
         if not directory.is_dir():
             raise FileNotFoundError(f"Required plugin directory is missing: {directory_name}")
 
@@ -41,6 +56,7 @@ def iter_required_plugin_paths(project_root: Path) -> tuple[str, ...]:
             if not path.is_file():
                 continue
             relative = path.relative_to(project_root)
+            _reject_symlink_parts(project_root, relative)
             if EXCLUDED_PARTS.intersection(relative.parts):
                 continue
             if path.suffix in EXCLUDED_SUFFIXES:
@@ -59,6 +75,7 @@ def iter_required_archive_names(project_root: Path) -> tuple[str, ...]:
 def validate_required_files(project_root: Path) -> None:
     for file_name in REQUIRED_FILES + REQUIRED_RUNTIME_FILES:
         path = project_root / file_name
+        _reject_symlink_parts(project_root, Path(file_name))
         if not path.is_file():
             raise FileNotFoundError(f"Required plugin file is missing: {file_name}")
 
@@ -66,6 +83,7 @@ def validate_required_files(project_root: Path) -> None:
 def validate_static_files(project_root: Path) -> None:
     for file_name in REQUIRED_FILES:
         path = project_root / file_name
+        _reject_symlink_parts(project_root, Path(file_name))
         if not path.is_file():
             raise FileNotFoundError(f"Required plugin file is missing: {file_name}")
 

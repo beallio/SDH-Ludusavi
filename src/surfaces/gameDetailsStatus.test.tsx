@@ -1,4 +1,5 @@
 import { createContext, createElement, type ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const routeMock = vi.hoisted(() => ({ addPatch: vi.fn((_: string, patch: unknown) => patch), removePatch: vi.fn() }));
@@ -15,9 +16,11 @@ vi.mock("../utils/steamRuntime", () => ({
 }));
 
 import { createLudusaviStateStore } from "../state/ludusaviState";
-import { createAutoSyncStatusSurface } from "./autoSyncStatusSurface";
+import type { GameDetailsStatusViewModel } from "./gameDetailsStatusModel";
+import { createAutoSyncStatusSurface, type DetailsStatusPresentationSurface } from "./autoSyncStatusSurface";
 import {
   composeInNativeStatusSlot,
+  GameDetailsStatusRow,
   createGameDetailsStatusSurface,
   detailsRowPaintStyle,
   type GameDetailsStatusContributionSource,
@@ -113,6 +116,42 @@ describe("game details route adapter", () => {
       opacity: 0,
     });
     expect(detailsRowPaintStyle(false)).toEqual({});
+  });
+  it("exposes a stable visual state to external status themes without hiding the accessible label", () => {
+    const warning: GameDetailsStatusViewModel = {
+      eligibility: "eligible",
+      kind: "needs_backup",
+      status: "unknown",
+      localStatus: null,
+      syncStatus: null,
+      syncVerification: "not_checked",
+      label: "Ludusavi: Out of sync",
+      description: "A local backup is needed.",
+      tone: "warning",
+      active: false,
+      showRow: true,
+      canOwnStatusArea: true,
+    };
+    const statusSurface = {
+      subscribeDetailsPresentation: vi.fn(() => () => {}),
+      shouldDetailsRowYield: vi.fn(() => false),
+      registerDetailsOwner: vi.fn(() => () => {}),
+    } satisfies DetailsStatusPresentationSurface;
+    const warningHtml = renderToStaticMarkup(createElement(GameDetailsStatusRow, {
+      appID: "100", model: warning, statusSurface, suppressed: false,
+    }));
+    const activeHtml = renderToStaticMarkup(createElement(GameDetailsStatusRow, {
+      appID: "100", model: { ...warning, kind: "active", tone: "info", active: true },
+      statusSurface, suppressed: false,
+    }));
+
+    expect(warningHtml).toContain('data-sdh-ludusavi-tone="warning"');
+    expect(warningHtml).toContain('data-sdh-ludusavi-active="false"');
+    expect(warningHtml).toContain('data-sdh-ludusavi-status-label="true"');
+    expect(warningHtml).toContain('role="status"');
+    expect(warningHtml).toContain("A local backup is needed.");
+    expect(activeHtml).toContain('data-sdh-ludusavi-tone="info"');
+    expect(activeHtml).toContain('data-sdh-ludusavi-active="true"');
   });
 
 

@@ -12,6 +12,7 @@ The read-only Ludusavi row keeps the latest save result visible without opening 
 
 - **Automatic Sync**: Restores your save if the backup is newer before a game starts, and automatically performs a backup after you exit. Each Ludusavi-managed game also has a **Sync This Game** toggle that defaults to on. Turning it off blocks both the launch restore and exit backup for that game; the preference remains editable but has no effect while global Automatic Sync is off. With global sync on, starting or exiting a disabled game briefly shows **SAVE SYNC DISABLED FOR THIS GAME**.
 - **SteamOS Integration**: Shows one read-only Ludusavi save-status row in the native status band on eligible non-Steam game details pages. Steam Cloud-enabled entries keep their native Steam Cloud row unchanged; this display rule does not change backup or restore eligibility. The row identifies local results separately from observed remote Syncthing results. A separate compact strip remains on the launch screen for protected checking, restore, and conflict work.
+- **Optional status-bar themes**: If you use CSS Loader, choose Default, Clean View, or Custom for both the Steam Cloud and Ludusavi bars on game details pages. The separate strip shown during game launch is unchanged.
 - **Syncthing Activity**: Shows observed Syncthing activity and outcomes. A successful local backup is not presented as proof that a remote device received it.
 - **Launch Gate**: Pauses game launch for save conflicts and observed incoming Syncthing activity, verifying stable backup files before deciding which save to use.
 - **Manual Control**: Force a backup for any Ludusavi-managed game at any time, and restore from any snapshot through the Backup Browser.
@@ -67,6 +68,18 @@ You have two options for manual installation through the Decky Loader's Develope
   2. In the Decky Settings, go to the **Developer** tab.
   3. Select **Install from Local ZIP**.
   4. Navigate to and select the downloaded `.zip` file.
+
+## Save-status appearance with CSS Loader
+
+SDH-Ludusavi installs an **SDH-Ludusavi Status** theme with the plugin. The theme only changes the bars if [CSS Loader](https://docs.deckthemes.com/CSSLoader/) is installed and the theme is enabled there. In CSS Loader, open the theme and move **Save Status** to:
+
+- **Default**: Keep the Steam Cloud and Ludusavi bars as they are.
+- **Clean View**: Give both bars a subtle dark background while keeping them at the bottom of the game details page.
+- **Custom**: Pick background, text, icon, and outline colors. The color pickers also let you change transparency.
+
+The **Outline Width** slider has Off, Thin, Medium, and Thick settings. It only changes the bars in Custom mode, though it remains visible in CSS Loader in the other modes. Warning and error appearances stay unchanged so they remain easy to recognize. The theme does not move the bars or offer an icon-only mode.
+
+If the theme is missing after installation, open CSS Loader and select **Refresh**. Your mode and color choices stay in place when you update SDH-Ludusavi. Removing SDH-Ludusavi normally removes its theme but keeps your choices for a later reinstall. If you added your own files inside the theme folder, the plugin leaves that folder alone. If the old appearance stays on screen after removal, refresh CSS Loader or restart Steam. CSS Loader and your other themes are not removed.
 
 ## In-Plugin Updates
 

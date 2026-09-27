@@ -1,0 +1,36 @@
+{
+  "name": "SDH-Ludusavi Status",
+  "author": "SDH-Ludusavi",
+  "version": "v1.0",
+  "description": "Optional appearance for Steam Cloud and Ludusavi save status rows.",
+  "target": "Library",
+  "manifest_version": 5,
+  "inject": {},
+  "patches": {
+    "Save Status": {
+      "type": "slider",
+      "default": "Default",
+      "values": {
+        "Default": {},
+        "Clean View": { "clean.css": ["SP"] },
+        "Custom": { "custom.css": ["SP"] }
+      },
+      "components": [
+        { "name": "Bar Background", "type": "color-picker", "on": "Custom", "default": "#0e141b66", "css_variable": "--sdh-status-background", "tabs": ["SP"] },
+        { "name": "Text Color", "type": "color-picker", "on": "Custom", "default": "#dcdedf", "css_variable": "--sdh-status-text", "tabs": ["SP"] },
+        { "name": "Icon Color", "type": "color-picker", "on": "Custom", "default": "#dcdedf", "css_variable": "--sdh-status-icon", "tabs": ["SP"] },
+        { "name": "Outline Color", "type": "color-picker", "on": "Custom", "default": "#66c0f4", "css_variable": "--sdh-status-outline", "tabs": ["SP"] }
+      ]
+    },
+    "Outline Width": {
+      "type": "slider",
+      "default": "Off",
+      "values": {
+        "Off": { "--sdh-status-outline-width": ["0px", "SP"] },
+        "Thin": { "--sdh-status-outline-width": ["1px", "SP"] },
+        "Medium": { "--sdh-status-outline-width": ["2px", "SP"] },
+        "Thick": { "--sdh-status-outline-width": ["3px", "SP"] }
+      }
+    }
+  }
+}

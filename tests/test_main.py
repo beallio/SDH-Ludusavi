@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import ast
 import importlib.util
+import json
 import sys
 import threading
 import time
@@ -59,6 +60,7 @@ def fake_decky_module(
     decky = types.SimpleNamespace(
         DECKY_USER_HOME=str(tmp_path / "decky-home"),
         DECKY_HOME=str(tmp_path / "decky"),
+        DECKY_PLUGIN_DIR=str(Path.cwd()),
         logger=logger,
         migrate_logs=lambda *args: None,
         migrate_settings=lambda *args: None,
@@ -816,6 +818,32 @@ def test_plugin_main_triggers_reconciliation(tmp_path: Path, monkeypatch) -> Non
     asyncio.run(plugin._main())
 
     assert reconciled_version is not None
+
+
+def test_backend_start_installs_theme_and_uninstall_cleans_its_own_theme(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decky, _ = fake_decky_module(tmp_path)
+    decky.DECKY_PLUGIN_DIR = str(Path.cwd())
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+
+    asyncio.run(plugin._main())
+
+    theme = Path(decky.DECKY_HOME) / "themes" / "SDH-Ludusavi Status"
+    assert (theme / "theme.json").exists()
+    choices = {"active": False, "Save Status": {"value": "Custom"}}
+    (theme / "config_USER.json").write_text(json.dumps(choices), encoding="utf-8")
+
+    asyncio.run(plugin._main())
+    assert json.loads((theme / "config_USER.json").read_text(encoding="utf-8")) == choices
+
+    asyncio.run(plugin._uninstall())
+    assert not theme.exists()
+    assert (Path(decky.DECKY_PLUGIN_RUNTIME_DIR) / "status-theme-choices.json").exists()
+
+    asyncio.run(module.Plugin()._main())
+    assert json.loads((theme / "config_USER.json").read_text(encoding="utf-8")) == choices
 
 
 def test_plugin_syncthing_rpc(tmp_path: Path, monkeypatch) -> None:

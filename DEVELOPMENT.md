@@ -24,6 +24,7 @@ The installable Decky plugin is built from these required files:
 - `src/index.tsx`: TypeScript frontend source.
 - `assets/steamgrid/ludusavi/`: bundled local artwork source files for the plugin-managed Ludusavi launcher shortcut.
 - `dist/`: generated frontend bundle, source map, and built frontend assets from `pnpm run build`, including hashed artwork files emitted from the local assets.
+- `theme/`: CSS Loader manifest and status-row styles copied to `DECKY_HOME/themes/SDH-Ludusavi Status` when the plugin backend starts.
 - `LICENSE`: redistributable license text.
 - `NOTICE.md`: source lineage, third-party licenses, API integrations, and artwork provenance.
 
@@ -36,6 +37,8 @@ Install frontend dependencies when needed:
 ```
 
 The repository uses `pnpm-lock.yaml` as the canonical frontend lockfile. Do not use `npm install` or add `package-lock.json`. The pnpm store and heavy virtual store are configured under `/tmp/sdh_ludusavi`; the local `node_modules/` directory is ignored and contains only pnpm links/bin shims needed by package scripts.
+
+`react-dom` 18.3.1 is a development-only dependency used to render the native status row in frontend behavior tests alongside the project's pinned React 18. It is not bundled as a Decky runtime dependency.
 
 ## Build & Packaging
 
@@ -64,6 +67,8 @@ The repository uses `pnpm-lock.yaml` as the canonical frontend lockfile. Do not 
 ```
 
 The package is written to `out/SDH-Ludusavi.zip` and contains a top-level `SDH-Ludusavi/` plugin directory. `LICENSE` and `NOTICE.md` are required package files. The local post-commit hook runs `scripts/post_commit.sh`, which rebuilds `dist/` and recreates that zip after each commit.
+
+The ZIP also includes `theme/`. Startup deploys only the managed theme files into Decky's themes directory. Decky runs the same uninstall hook for updates and removal, so the hook keeps a small backup of CSS Loader's choices in the plugin runtime-data directory and restores it on the next install. CSS Loader may need its **Refresh** control after a first install because creating a new theme directory does not necessarily trigger its optional file watcher.
 
 ## Licensing and Provenance
 

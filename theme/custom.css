@@ -1,0 +1,24 @@
+/* Keep warning/error surfaces and active status colors under their original owners. */
+.appdetailsplaysection_CloudStatusRow_QvHky:not(.appdetailsplaysection_CloudSyncProblem_2bzio),
+[data-sdh-ludusavi-status-row="true"]:not([data-sdh-ludusavi-tone="warning"]):not([data-sdh-ludusavi-tone="error"]) {
+  background: var(--sdh-status-background, rgba(14, 20, 27, 0.4)) !important;
+  box-shadow: inset 0 0 0 var(--sdh-status-outline-width, 0px) var(--sdh-status-outline, #66c0f4) !important;
+}
+
+.appdetailsplaysection_CloudStatusRow_QvHky:not(.appdetailsplaysection_CloudSyncProblem_2bzio)
+  .appdetailsplaysection_CloudStatusLabel_fUTbl,
+[data-sdh-ludusavi-status-row="true"]:not([data-sdh-ludusavi-tone="warning"]):not([data-sdh-ludusavi-tone="error"]):not([data-sdh-ludusavi-active="true"])
+  [data-sdh-ludusavi-status-label="true"],
+[data-sdh-ludusavi-status-row="true"]:not([data-sdh-ludusavi-tone="warning"]):not([data-sdh-ludusavi-tone="error"]):not([data-sdh-ludusavi-active="true"])
+  [data-sdh-ludusavi-status-label="true"] span {
+  color: var(--sdh-status-text, #dcdedf) !important;
+}
+
+.appdetailsplaysection_CloudStatusRow_QvHky:not(.appdetailsplaysection_CloudSyncProblem_2bzio)
+  .appdetailsplaysection_CloudStatusIcon_1Prjv:not(.appdetailsplaysection_CloudSynching_1swfo):not([class*="_1swfo"]),
+.appdetailsplaysection_CloudStatusRow_QvHky:not(.appdetailsplaysection_CloudSyncProblem_2bzio)
+  .appdetailsplaysection_CloudStatusIcon_1Prjv:not(.appdetailsplaysection_CloudSynching_1swfo):not([class*="_1swfo"]) svg,
+[data-sdh-ludusavi-status-row="true"]:not([data-sdh-ludusavi-tone="warning"]):not([data-sdh-ludusavi-tone="error"]):not([data-sdh-ludusavi-active="true"])
+  [data-sdh-ludusavi-status-icon="true"] {
+  color: var(--sdh-status-icon, #dcdedf) !important;
+}
