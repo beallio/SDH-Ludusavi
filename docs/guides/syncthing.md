@@ -23,6 +23,8 @@ Install [SyncThingy](https://flathub.org/apps/com.github.zocker_160.SyncThingy) 
 
 For sync to continue in Gaming Mode, set up the background service once: right-click SyncThingy's tray icon, open **Settings**, select **install as system service**, copy the command it gives you, paste it into Konsole, and restart your Deck. See [SyncThingy's own background-service instructions](https://github.com/zocker-160/SyncThingy#install-background-service) if you need the full steps. The Deck used for the example has this service enabled and running.
 
+The optional **Syncthing** plugin from the Decky Store is useful for checking and managing Syncthing in Gaming Mode, without switching back to Desktop Mode. It gives you a big-screen control panel; SyncThingy's background service still keeps the syncing process running in this example.
+
 ## 3. Share the backup folder
 
 1. Open Syncthing through SyncThingy and select **Add Folder**.
