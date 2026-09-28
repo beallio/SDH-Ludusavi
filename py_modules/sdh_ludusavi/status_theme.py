@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 THEME_NAME = "SDH-Ludusavi Status"
-_THEME_FILES = ("theme.json", "clean.css", "custom.css")
+_THEME_FILES = ("theme.json", "clean.css", "custom.css", "layout.css")
 _MARKER = ".sdh-ludusavi-status-theme"
 _MARKER_VALUE = "sdh-ludusavi-status-theme-1\n"
 _PREFERENCE_BACKUPS = {

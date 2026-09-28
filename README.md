@@ -83,6 +83,8 @@ If you use [CSS Loader](https://docs.deckthemes.com/CSSLoader/), SDH-Ludusavi ad
 
 The theme changes how the bars look on game pages, not how saves work. Warning and error colors stay the same. The separate message on the game launch screen does not change. If the theme does not appear after installation, choose **Refresh** in CSS Loader. Your choices stay in place when you update SDH-Ludusavi.
 
+On game pages without a save-status bar, the theme leaves a blank row below the play controls before Activity. Clean View and Custom give this space the same background as their status bars; Custom also uses your outline choice. It does not show a save result. On an uninstalled Steam game, you may need to scroll down to see Activity.
+
 ## Updates and help
 
 Open **Updates** in SDH-Ludusavi to check for a new release or enable automatic checks. The plugin offers stable releases by default. **Receive development releases** is optional; those builds are for testing and may have bugs. When an update is available, Decky asks you to confirm the installation.

@@ -27,6 +27,7 @@ def bundled_theme(tmp_path: Path) -> Path:
     )
     (source / "clean.css").write_text(".row { background: #123; }", encoding="utf-8")
     (source / "custom.css").write_text(".row { background: #abc; }", encoding="utf-8")
+    (source / "layout.css").write_text(".slot { height: 30px; }", encoding="utf-8")
     return source
 
 
