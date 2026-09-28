@@ -74,7 +74,7 @@ You have two options for manual installation through the Decky Loader's Develope
 SDH-Ludusavi installs an **SDH-Ludusavi Status** theme with the plugin. The theme only changes the bars if [CSS Loader](https://docs.deckthemes.com/CSSLoader/) is installed and the theme is enabled there. In CSS Loader, open the theme and move **Save Status** to:
 
 - **Default**: Keep the Steam Cloud and Ludusavi bars as they are.
-- **Clean View**: Give both bars a subtle dark background while keeping them at the bottom of the game details page.
+- **Clean View**: Give both bars a subtle dark background without a line along the top. They stay at the bottom of the game details page.
 - **Custom**: Pick background, text, icon, and outline colors. The color pickers also let you change transparency.
 
 The **Outline Width** slider has Off, Thin, Medium, and Thick settings. It only changes the bars in Custom mode, though it remains visible in CSS Loader in the other modes. Warning and error appearances stay unchanged so they remain easy to recognize. The theme does not move the bars or offer an icon-only mode.
