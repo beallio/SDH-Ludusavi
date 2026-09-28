@@ -79,6 +79,8 @@ SDH-Ludusavi installs an **SDH-Ludusavi Status** theme with the plugin. The them
 
 The **Outline Width** slider has Off, Thin, Medium, and Thick settings. It only changes the bars in Custom mode, though it remains visible in CSS Loader in the other modes. Warning and error appearances stay unchanged so they remain easy to recognize. The theme does not move the bars or offer an icon-only mode.
 
+On game pages, the game's picture can now show through a transparent or partly transparent save-status bar, even when no trailer is playing. The bar stays in place. If Decky Metadata is playing a trailer, that plugin controls the picture behind the bar. The separate strip during game launch is unchanged.
+
 If the theme is missing after installation, open CSS Loader and select **Refresh**. Your mode and color choices stay in place when you update SDH-Ludusavi. Removing SDH-Ludusavi normally removes its theme but keeps your choices for a later reinstall. If you added your own files inside the theme folder, the plugin leaves that folder alone. If the old appearance stays on screen after removal, refresh CSS Loader or restart Steam. CSS Loader and your other themes are not removed.
 
 ## In-Plugin Updates

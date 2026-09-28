@@ -343,6 +343,17 @@ extending its lifetime. Terminal observations remain in frontend state through t
 but the frontend marks interrupted or superseded activity as remote-unverified instead of showing
 an endless transfer. A local result and a remote observation remain distinct in the row text.
 
+The mounted game-details header also owns a temporary artwork extension in Steam's native
+Gamepad document. This applies to either a visible Steam Cloud band or a Ludusavi row, including
+when no trailer is playing. It selects only the current app's full-size Steam hero or custom
+shortcut hero and measures the full-width status band at the artwork's lower edge. Layout heights,
+not transform-scaled screen heights, determine the extension while the game page animates in.
+The band itself does not move. The original inline image height and priority return when the band
+is hidden, yields, leaves the viewport, or the route unmounts; native DOM, scroll, and resize
+changes resync the image. If Decky Metadata marks the hero as its trailer target, the Ludusavi
+extension yields so the trailer plugin alone controls that surface. The launch-time BrowserView
+strip remains separate.
+
 ### Optional CSS Loader theme
 
 The plugin ZIP includes `theme/theme.json`, `theme/clean.css`, and `theme/custom.css`.
