@@ -1,146 +1,94 @@
 # SDH-Ludusavi
 
-SDH-Ludusavi keeps your game saves protected without pulling you out of Game Mode. It brings Ludusavi's backup and restore tools into Decky Loader, checks for newer saves before launch, and backs up your progress when you quit.
+SDH-Ludusavi helps you back up and restore game saves from Gaming Mode on your Steam Deck. It uses Ludusavi to keep copies of your saves. If you turn on **Automatic Sync**, it checks for a newer backup before a game starts and backs up your saves when you quit.
 
-![SDH-Ludusavi demo](assets/demo.webp?cacheBuster=12)
+![SDH-Ludusavi in Gaming Mode](assets/demo.webp?cacheBuster=12)
 
-![Ludusavi showing Up to date on a non-Steam game details page](assets/native-status-row.webp?cacheBuster=12)
+You can see the latest save result on supported non-Steam game pages without opening the Decky menu. Steam Cloud pages keep their usual Steam Cloud status.
 
-The read-only Ludusavi row keeps the latest save result visible without opening the Decky menu.
+![Ludusavi showing Up to date on a non-Steam game page](assets/native-status-row.webp?cacheBuster=12)
 
-## Features
+## Before you install
 
-- **Automatic Sync**: Restores your save if the backup is newer before a game starts, and automatically performs a backup after you exit. Each Ludusavi-managed game also has a **Sync This Game** toggle that defaults to on. Turning it off blocks both the launch restore and exit backup for that game; the preference remains editable but has no effect while global Automatic Sync is off. With global sync on, starting or exiting a disabled game briefly shows **SAVE SYNC DISABLED FOR THIS GAME**.
-- **SteamOS Integration**: Shows one read-only Ludusavi save-status row in the native status band on eligible non-Steam game details pages. Steam Cloud-enabled entries keep their native Steam Cloud row unchanged; this display rule does not change backup or restore eligibility. The row identifies local results separately from observed remote Syncthing results. A separate compact strip remains on the launch screen for protected checking, restore, and conflict work.
-- **Optional status-bar themes**: If you use CSS Loader, choose Default, Clean View, or Custom for both the Steam Cloud and Ludusavi bars on game details pages. The separate strip shown during game launch is unchanged.
-- **Syncthing Activity**: Shows observed Syncthing activity and outcomes. A successful local backup is not presented as proof that a remote device received it.
-- **Launch Gate**: Pauses game launch for save conflicts and observed incoming Syncthing activity, verifying stable backup files before deciding which save to use.
-- **Manual Control**: Force a backup for any Ludusavi-managed game at any time, and restore from any snapshot through the Backup Browser.
-- **Backup Browser**: View historical backup snapshots for a game directly in the plugin and selectively perform a point-in-time restore.
-- **Unified Logging**: View backend and frontend logs directly within the plugin's "View Logs" modal. Optionally enable **Debug Logging** for verbose diagnostics.
-- **In-Plugin Updates**: Automatically or manually check for newer GitHub Release builds, choose between Stable and Development channels, and perform one-click installations via Decky Loader.
+- Install [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) on your Steam Deck.
+- Install [Ludusavi](https://flathub.org/apps/com.github.mtkennerly.ludusavi) from the Discover app in Desktop Mode. SDH-Ludusavi needs Ludusavi to make backups.
 
-## Installation (Early Access)
+## Install SDH-Ludusavi
 
-As the plugin is currently in development and not yet available in the Decky Store, install it using one of the two methods below.
+SDH-Ludusavi is not in the standard Decky Store. Choose one of these ways to install it.
 
-> [!WARNING]
-> Prereleases (versioned with `-dev.gSHORTSHA`) are intended for development, testing, and early access. They may contain bugs and should be used with caution.
+### Option 1: Decky Plugins Extended (in Gaming Mode)
 
-### Method 1: Guided Desktop Installer (Recommended)
+[Decky Plugins Extended](https://github.com/beallio/decky-plugins-extended) is a custom Decky store that includes SDH-Ludusavi. You do not need Developer Mode for this option.
 
-Download **[SDH-Ludusavi Installer Bundle.zip](https://github.com/beallio/SDH-Ludusavi/raw/main/SDH-Ludusavi%20Installer%20Bundle.zip)** from this repository.
+1. Open the **Quick Access Menu**, select the **Decky Loader** plug icon, then open **Settings** (the gear icon).
+2. On the **General** tab, set **Store Channel** to **Custom**.
+3. Set **Custom Store** to:
 
-Use this for **both a first-time install and for updating** an existing install. The installer finds the newest release on GitHub, verifies its SHA-256 checksum before installing, and replaces any existing copy in place — rolling back automatically if anything fails. Decky Loader Developer Mode is **not** required.
-
-1. Switch the Steam Deck to **Desktop Mode**.
-2. Extract the archive onto the Desktop, so that the `DeckyPluginInstaller` folder and `Install SDH-Ludusavi Decky Plugin` sit directly on the Desktop.
-3. Double-click **Install SDH-Ludusavi Decky Plugin**.
-4. Approve the installation and administrator-authentication prompts.
-5. Return to Gaming Mode. If the plugin does not appear immediately, restart Steam.
-
-No Konsole window is needed. The installer writes a log to `/home/deck/Desktop/Decky Plugin Installer.log`.
-
-To update later, run the same installer again — it always fetches the latest release. You can also update from inside the plugin itself; see [In-Plugin Updates](#in-plugin-updates).
-
-> [!NOTE]
-> If the launcher does nothing when double-clicked, KDE may not trust it yet. Right-click it, choose **Properties → Permissions**, and ensure it is executable — or right-click and select **Run**.
-
-### Method 2: Manual install via Decky Loader
-
-Download the latest release archive from the [GitHub Releases](https://github.com/beallio/SDH-Ludusavi/releases) page. Always download the versioned ZIP file (e.g., `SDH-Ludusavi-vX.Y.Z.zip`).
-
-#### 1. Enable Decky Loader Developer Mode
-1. Open the Decky Loader menu in the Steam Deck Quick Access Menu (QAM).
-2. Go to **Settings** (the gear icon).
-3. Under **General**, scroll down to find **Developer Mode** and toggle it **On**.
-
-#### 2. Install the Plugin
-You have two options for manual installation through the Decky Loader's Developer menu:
-
-- **Option A: Install from URL**
-  1. In the Decky Settings, go to the **Developer** tab.
-  2. Select **Install from URL**.
-  3. Enter the URL for the desired SDH-Ludusavi release ZIP from GitHub Releases (for example, `https://github.com/beallio/SDH-Ludusavi/releases/download/vX.Y.Z/SDH-Ludusavi-vX.Y.Z.zip`) and click **Install** after replacing `X.Y.Z` with the release version.
-
-- **Option B: Install from Local ZIP**
-  1. Download the latest versioned `SDH-Ludusavi-vX.Y.Z.zip` to your Steam Deck.
-  2. In the Decky Settings, go to the **Developer** tab.
-  3. Select **Install from Local ZIP**.
-  4. Navigate to and select the downloaded `.zip` file.
-
-## Save-status appearance with CSS Loader
-
-SDH-Ludusavi installs an **SDH-Ludusavi Status** theme with the plugin. The theme only changes the bars if [CSS Loader](https://docs.deckthemes.com/CSSLoader/) is installed and the theme is enabled there. In CSS Loader, open the theme and move **Save Status** to:
-
-- **Default**: Keep the Steam Cloud and Ludusavi bars as they are.
-- **Clean View**: Give both bars a subtle dark background without a line along the top. They stay at the bottom of the game details page.
-- **Custom**: Pick background, text, icon, and outline colors. The color pickers also let you change transparency.
-
-The **Outline Width** slider has Off, Thin, Medium, and Thick settings. It only changes the bars in Custom mode, though it remains visible in CSS Loader in the other modes. Warning and error appearances stay unchanged so they remain easy to recognize. The theme does not move the bars or offer an icon-only mode.
-
-On game pages, the game's picture can now show through a transparent or partly transparent save-status bar, even when no trailer is playing. The bar stays in place. If Decky Metadata is playing a trailer, that plugin controls the picture behind the bar. The separate strip during game launch is unchanged.
-
-If the theme is missing after installation, open CSS Loader and select **Refresh**. Your mode and color choices stay in place when you update SDH-Ludusavi. Removing SDH-Ludusavi normally removes its theme but keeps your choices for a later reinstall. If you added your own files inside the theme folder, the plugin leaves that folder alone. If the old appearance stays on screen after removal, refresh CSS Loader or restart Steam. CSS Loader and your other themes are not removed.
-
-## In-Plugin Updates
-
-Once installed, the plugin can handle updates directly from the UI:
-
-- **Update Channels**: Choose between **Stable releases only** (default) or **Development releases** (includes prereleases for testing).
-- **Automatic & Manual Checks**: When automatic checks are enabled, the plugin checks in the background 30 seconds after loading and every 6 hours afterward, even while the QAM panel is closed. You can also trigger a manual check at any time.
-- **Update Notifications**: A newly available release raises one toast per release tag. The **Plugin Updates** notification toggle controls these toasts, and the master **All Notifications** toggle silences them with every other plugin notification.
-- **Security Validation**: Pre-validates release checksums and metadata before initiating Decky's native installation prompts.
-- **Manual Fallback & Recovery**: If one-click installation fails (e.g., due to a temporary network issue or Decky API drift), you can view release notes on GitHub and reinstall using the [guided desktop installer](#method-1-guided-desktop-installer-recommended) or either manual option.
-
-## Prerequisites
-
-- **[Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)**: Installed and running on your Steam Deck.
-- **[Ludusavi Flatpak](https://flathub.org/apps/com.github.mtkennerly.ludusavi)**: This plugin requires the Ludusavi Flatpak to manage saves. You can install it from the Discover store or via terminal:
-  ```bash
-  flatpak install flathub com.github.mtkennerly.ludusavi
-  ```
-
-## Recommended Workflow (The "Gold Standard")
-
-For the best experience, we recommend pairing SDH-Ludusavi with **[SyncThingy](https://flathub.org/apps/com.github.zocker_160.SyncThingy)** to ensure your saves are synchronized across devices without the lag or offline limitations of traditional cloud providers.
-
-### 1. Setup SyncThingy
-1. Install the SyncThingy Flatpak:
-   ```bash
-   flatpak install flathub com.github.zocker_160.SyncThingy
+   ```text
+   https://decky-extended-plugins.beallio.com/plugins.json
    ```
-2. Open SyncThingy and follow its internal instructions to set up the systemd service for background synchronization.
-3. (Optional) Install the **Syncthing** plugin from the Decky Store to monitor sync status directly from Game Mode.
 
-### 2. Configure Save Sync
-1. In **Ludusavi**, set your backup directory to a folder that SyncThingy will watch (e.g., `/home/deck/ludusavi-backup`).
-2. In **SyncThingy**, share that folder with your other nodes (PC, other Deck, etc.).
-3. **Note**: Ensure that at least one node is online during sync events (game start/exit) to guarantee your saves propagate correctly.
+4. Return to the Decky Store (the shopping bag icon), find **SDH-Ludusavi**, and select **Install**.
 
-### 3. Why Syncthing?
-While Ludusavi supports traditional cloud providers (rclone), using them can introduce significant lag during game launch and exit as files are uploaded/downloaded. Furthermore, cloud sync will fail if your Steam Deck is offline.
+This changes the store list you see in Decky. You can switch **Store Channel** back to your previous setting later; the plugin you installed stays on your Deck.
 
-Using Syncthing allows for near-instant local backups that sync in the background. You can still use Ludusavi's [Backup Retention](https://github.com/mtkennerly/ludusavi/blob/master/docs/help/backup-retention.md) settings to manage versions and diffs.
+### Option 2: Desktop installer
 
-*See also: Ludusavi [Cloud Backup](https://github.com/mtkennerly/ludusavi/blob/master/docs/help/cloud-backup.md) documentation.*
+Download the [SDH-Ludusavi Installer Bundle.zip](https://github.com/beallio/SDH-Ludusavi/raw/main/SDH-Ludusavi%20Installer%20Bundle.zip). Use it for a first install or to update an existing copy. You do not need Developer Mode.
 
-## Understanding Status Messages
+1. Switch your Steam Deck to **Desktop Mode**.
+2. Extract the ZIP onto the Desktop. The `DeckyPluginInstaller` folder and **Install SDH-Ludusavi Decky Plugin** launcher should both be on the Desktop.
+3. Double-click **Install SDH-Ludusavi Decky Plugin** and approve the prompts, including the request for your administrator password.
+4. Return to Gaming Mode. If the plugin does not appear, restart Steam.
 
-The Game Details row gives you a quick save status:
+If double-clicking the launcher does nothing, right-click it and choose **Run**. If needed, open **Properties → Permissions** and allow it to run. The installer writes a log named **Decky Plugin Installer.log** on your Desktop if you need help.
 
-- **Checking, Backing up, Restoring, Uploading, or Downloading**: Save work is in progress.
-- **Up to date**: The latest save check finished successfully.
-- **Out of sync**: This game needs its first backup.
-- **File conflict**: Choose which save to keep.
-- **Unable to sync**: The last save or remote sync check did not finish.
-- **Disabled**: Automatic sync is off for this game.
-- **Unknown**: No clear recent result is available.
+### Option 3: Install a release ZIP through Decky
 
-Local backups and remote sync are reported separately. **Up to date** does not mean that an
-offline device has received the save. If save work stalls or overlaps another task, the plugin
-stops safely and reports the problem instead of guessing.
+1. Download the latest stable **SDH-Ludusavi-v…zip** file from [GitHub Releases](https://github.com/beallio/SDH-Ludusavi/releases). Do not download the installer bundle for this option.
+2. In Decky Loader **Settings → General**, turn on **Developer Mode**.
+3. Open the **Developer** tab and choose **Install from Local ZIP**.
+4. Select the release ZIP you downloaded and follow Decky's prompts.
+
+## Start using it
+
+1. Open Ludusavi in Desktop Mode and choose a folder for your backups.
+2. In Gaming Mode, open **SDH-Ludusavi** from the Decky menu. Select a game and choose **Force Backup** to make its first backup.
+3. Turn on **Automatic Sync** to check for newer backups before games start and back up saves when you quit. **Sync This Game** lets you turn this off for one game without changing the others.
+
+You can still use **Force Backup** and **Browse Backups** when Automatic Sync is off. Browse Backups lets you choose an older copy to restore. Check the date before restoring: restoring an older copy can replace your current save.
+
+If a game is missing from the list, check that Ludusavi recognizes it, then choose **Refresh Games** in the plugin. Automatic Sync cannot restore a game until a backup exists.
+
+## Understand the save status
+
+The game page can show **Checking**, **Backing up**, **Restoring**, **Up to date**, **Out of sync**, or an error. **Out of sync** can mean a game needs its first backup. If the plugin finds a save conflict, it asks which copy you want to keep before the game starts. During this check, a separate message can appear on the game launch screen.
+
+A completed local backup is not proof that another device has received it. If you also use Syncthing, the plugin shows the remote activity it can observe separately from local backup results. An offline device may still need to catch up.
+
+## Sync backups with another device (optional)
+
+You do not need another app to keep backups on your Steam Deck. To share them with a PC or another Deck, you can install [SyncThingy](https://flathub.org/apps/com.github.zocker_160.SyncThingy) from Discover and follow its setup instructions. Point Ludusavi at a backup folder that SyncThingy shares with your other device.
+
+Syncthing sends the backups in the background when the devices can connect. Check its status on your other device before you rely on a backup there. The optional Syncthing plugin for Decky can also show connection status in Gaming Mode.
+
+## Change the look of the status bars (optional)
+
+If you use [CSS Loader](https://docs.deckthemes.com/CSSLoader/), SDH-Ludusavi adds an **SDH-Ludusavi Status** theme. In CSS Loader, use **Save Status** to choose:
+
+- **Default:** Keep the usual Steam Cloud and Ludusavi bars.
+- **Clean View:** Give both bars a plain dark background.
+- **Custom:** Choose the background, text, icon, and outline colors. You can also make the bars partly transparent.
+
+The theme changes how the bars look on game pages, not how saves work. Warning and error colors stay the same. The separate message on the game launch screen does not change. If the theme does not appear after installation, choose **Refresh** in CSS Loader. Your choices stay in place when you update SDH-Ludusavi.
+
+## Updates and help
+
+Open **Updates** in SDH-Ludusavi to check for a new release or enable automatic checks. The plugin offers stable releases by default. **Receive development releases** is optional; those builds are for testing and may have bugs. When an update is available, Decky asks you to confirm the installation.
+
+If an update from the plugin does not work, use the [desktop installer](#option-2-desktop-installer) or a [release ZIP](#option-3-install-a-release-zip-through-decky). Open **View Logs** in the plugin if you need to report a problem on the [issue page](https://github.com/beallio/SDH-Ludusavi/issues).
 
 ## License
 
-Project-authored code is available under the MIT License. Retained portions from decky-ludusavi and the Decky plugin template remain under BSD-3-Clause, and bundled third-party components retain their own licenses. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for project lineage, design inspiration, and third-party attribution. For technical documentation, see [DEVELOPMENT.md](DEVELOPMENT.md).
+Project code is available under the MIT License. Some code from decky-ludusavi and the Decky plugin template uses the BSD-3-Clause license, and bundled components keep their own licenses. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for details. Developer information is in [DEVELOPMENT.md](DEVELOPMENT.md).
