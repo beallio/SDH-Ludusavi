@@ -65,13 +65,13 @@ If a game is missing from the list, check that Ludusavi recognizes it, then choo
 
 The game page can show **Checking**, **Backing up**, **Restoring**, **Up to date**, **Out of sync**, or an error. **Out of sync** can mean a game needs its first backup. If the plugin finds a save conflict, it asks which copy you want to keep before the game starts. During this check, a separate message can appear on the game launch screen.
 
-A completed local backup is not proof that another device has received it. If you also use Syncthing, the plugin shows the remote activity it can observe separately from local backup results. An offline device may still need to catch up.
+A completed local backup is not proof that another device has received it. If you also use Syncthing, the plugin shows the remote activity it can observe separately from local backup results. An offline device may still need to catch up. [Read the save-status guide](docs/guides/save-status.md) for more about each message.
 
 ## Sync backups with another device (optional)
 
 You do not need another app to keep backups on your Steam Deck. To share them with a PC or another Deck, you can install [SyncThingy](https://flathub.org/apps/com.github.zocker_160.SyncThingy) from Discover and follow its setup instructions. Point Ludusavi at a backup folder that SyncThingy shares with your other device.
 
-Syncthing sends the backups in the background when the devices can connect. Check its status on your other device before you rely on a backup there. The optional Syncthing plugin for Decky can also show connection status in Gaming Mode.
+Syncthing sends the backups in the background when the devices can connect. Check its status on your other device before you rely on a backup there. The optional Syncthing plugin for Decky can also show connection status in Gaming Mode. [Follow the Syncthing setup guide](docs/guides/syncthing.md) for an example from a Steam Deck.
 
 ## Change the look of the status bars (optional)
 
