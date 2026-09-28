@@ -366,9 +366,9 @@ control discovers a new theme when it was already running and did not observe di
 creation.
 
 `Save Status` is a three-notch CSS Loader slider: `Default` injects no stylesheet,
-`Clean View` injects only a translucent play-section-style surface, and `Custom` injects
-the user-selected background, text, icon, and inset outline colors. The four color
-pickers are visible only when Custom is selected and their alpha channels control
+`Clean View` injects only a translucent play-section-style background with no top-edge
+shadow, and `Custom` injects the user-selected background, text, icon, and inset outline
+colors. The four color pickers are visible only when Custom is selected and their alpha channels control
 transparency. A separate `Outline Width` slider provides Off, Thin, Medium, and Thick;
 CSS Loader shows it in all three modes, but only Custom reads its CSS variable. Active
 Ludusavi text/icon styling, native Steam Cloud transfer colors/pulse, and both
