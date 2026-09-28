@@ -3,8 +3,9 @@ import { cloneElement, createElement, isValidElement, useEffect, useState, useSy
 
 import type { LudusaviStateStore } from "../state/ludusaviState";
 import { sessionFromAppOverview } from "../utils/steam";
-import { getAppDetailsForAppID, getAppOverviewForAppID, subscribeToAppDetails } from "../utils/steamRuntime";
+import { getAppDetailsForAppID, getAppOverviewForAppID, getGamepadMainWindow, subscribeToAppDetails } from "../utils/steamRuntime";
 import { selectGameDetailsStatus, getSteamCloudEligibility, type GameDetailsStatusViewModel } from "./gameDetailsStatusModel";
+import { mountGameDetailsArtworkBackdrop } from "./gameDetailsArtworkBackdrop";
 import { iconSvgForAutoSyncStatus } from "./autoSyncStatusRenderer";
 import type { DetailsStatusPresentationSurface } from "./autoSyncStatusSurface";
 
@@ -14,7 +15,7 @@ const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // update an already-mounted details page without a navigation.
 const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
 // Bump when an existing route wrapper cannot render the newest status-row contract.
-const GAME_DETAILS_ROUTE_RENDER_VERSION = 2;
+const GAME_DETAILS_ROUTE_RENDER_VERSION = 3;
 export type GameDetailsStatusSurface = Readonly<{
   dispose(): void;
 }>;
@@ -225,6 +226,11 @@ function ActiveGameDetailsStatusHeader({ appID, header, headerProps, store, stat
     () => statusSurface.shouldDetailsRowYield(appID),
     () => statusSurface.shouldDetailsRowYield(appID),
   );
+  useEffect(() => {
+    const hostWindow = getGamepadMainWindow();
+    if (!hostWindow) return;
+    return mountGameDetailsArtworkBackdrop(hostWindow, appID);
+  }, [appID]);
   useEffect(() => {
     const refreshDetails = () => setDetails(getAppDetailsForAppID(appID));
     refreshDetails();
