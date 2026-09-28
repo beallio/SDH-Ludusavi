@@ -4,7 +4,7 @@ SDH-Ludusavi makes backups with Ludusavi on your Steam Deck. Syncthing is option
 
 Do not share a game's live save folder for this setup. Share Ludusavi's backup folder instead. Keep a backup on the Deck before you rely on another device having a copy.
 
-## Example from this Steam Deck
+## Steam Deck Example
 
 - Ludusavi's backup location is `/home/deck/ludusavi-backup`.
 - SyncThingy's Syncthing folder is named **ludusavi-backup**. Its folder path is the **same** `/home/deck/ludusavi-backup` folder, and its folder type is **Send & Receive**.
