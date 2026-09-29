@@ -67,6 +67,8 @@ class Plugin:
         # Daemon workers: an in-flight RPC must never keep the old plugin
         # process alive after Decky's SystemExit during update/unload.
         self._executor = DaemonThreadPool(max_workers=4, thread_name_prefix="sdh-rpc")
+        self._theme_ready = asyncio.Event()
+        self._theme_refresh_needed = False
 
     def _service(self) -> SDHLudusaviService:
         if self._backend is None:
@@ -80,6 +82,12 @@ class Plugin:
 
     async def get_settings(self) -> dict[str, Any]:
         return await self._call("get_settings", lambda: self._service().get_settings())
+
+    async def consume_theme_refresh_needed(self) -> bool:
+        await self._theme_ready.wait()
+        needed = self._theme_refresh_needed
+        self._theme_refresh_needed = False
+        return needed
 
     async def get_game_history(self) -> dict[str, dict[str, Any]]:
         return await self._call("get_game_history", lambda: self._service().get_game_history())
@@ -340,6 +348,8 @@ class Plugin:
             decky.logger.warning(
                 "CSS Loader theme could not be installed: %s", theme_result.get("message")
             )
+        self._theme_refresh_needed = theme_result is True
+        self._theme_ready.set()
 
         init_result = await self._call("startup_init", self._service)
         if isinstance(init_result, dict) and init_result.get("status") == "failed":

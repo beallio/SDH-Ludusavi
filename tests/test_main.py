@@ -936,6 +936,62 @@ def test_main_offloads_service_initialization(
     assert "reconcile_call" in calls
 
 
+def test_theme_refresh_waits_for_install_and_is_consumed_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decky, _logger = fake_decky_module(tmp_path)
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+    finish_install = asyncio.Event()
+
+    async def fake_call(operation: str, _callback: Any) -> object:
+        if operation == "install_status_theme":
+            await finish_install.wait()
+            return True
+        if operation == "startup_init":
+            return {"status": "failed", "message": "service not needed for this check"}
+        return None
+
+    monkeypatch.setattr(plugin, "_call", fake_call)
+
+    async def scenario() -> None:
+        startup = asyncio.create_task(plugin._main())
+        first_refresh = asyncio.create_task(plugin.consume_theme_refresh_needed())
+        await asyncio.sleep(0)
+        assert not first_refresh.done()
+
+        finish_install.set()
+        assert await first_refresh is True
+        assert await plugin.consume_theme_refresh_needed() is False
+        await startup
+
+    asyncio.run(scenario())
+
+
+def test_failed_theme_install_does_not_request_css_loader_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decky, logger = fake_decky_module(tmp_path)
+    module = import_main(monkeypatch, decky)
+    plugin = module.Plugin()
+
+    async def fake_call(operation: str, _callback: Any) -> object:
+        if operation == "install_status_theme":
+            return {"status": "failed", "message": "theme belongs to someone else"}
+        if operation == "startup_init":
+            return {"status": "failed", "message": "service not needed for this check"}
+        return None
+
+    monkeypatch.setattr(plugin, "_call", fake_call)
+
+    async def scenario() -> None:
+        await plugin._main()
+        assert await asyncio.wait_for(plugin.consume_theme_refresh_needed(), 0.25) is False
+
+    asyncio.run(scenario())
+    assert any("theme could not be installed" in msg for msg in logger.warnings)
+
+
 def test_main_logs_initialization_failure_without_crashing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

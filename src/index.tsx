@@ -7,6 +7,7 @@ import {
   backupGameOnExitCall,
   checkGameExitCall,
   checkGameStartCall,
+  consumeThemeRefreshNeededCall,
   checkForPluginUpdateCall,
   getGameHistoryCall,
   getSettings,
@@ -44,6 +45,7 @@ import {
 } from "./state/ludusaviState";
 
 import { createPluginRuntime } from "./runtime/pluginRuntime";
+import { resetCssLoaderThemes, startCssLoaderThemeRefresh } from "./runtime/cssLoaderThemeRefresh";
 import { createStartupHydration } from "./runtime/startupHydration";
 import { createUpdatePoller } from "./runtime/updatePoller";
 
@@ -227,6 +229,11 @@ export default definePlugin(() => {
     logUiEvent,
     logError: (message) => log("error", message),
   });
+  const cssLoaderThemeRefresh = startCssLoaderThemeRefresh({
+    consumeChange: consumeThemeRefreshNeededCall,
+    resetThemes: resetCssLoaderThemes,
+    warn: (message) => log("warning", message, "theme"),
+  });
   const lifecycleStateReady = startupHydration.ready;
   const lifecycleController = createGameLifecycleController({
     store: ludusaviStore,
@@ -285,6 +292,7 @@ export default definePlugin(() => {
     onDismount() {
       logUiEvent("plugin_dismounting", {}, "info");
       startupHydration.dispose();
+      cssLoaderThemeRefresh.dispose();
       updatePoller.dispose();
 
       let cleanupComplete = false;

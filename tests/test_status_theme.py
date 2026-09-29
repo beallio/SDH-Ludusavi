@@ -69,6 +69,23 @@ def test_update_preserves_css_loader_choices_and_user_files(tmp_path: Path) -> N
     assert (destination / "PRIORITY").read_text(encoding="utf-8") == "25\n"
 
 
+def test_theme_refresh_needed_only_when_managed_files_or_choices_change(tmp_path: Path) -> None:
+    source = bundled_theme(tmp_path)
+    decky_home = tmp_path / "homebrew"
+    preferences = theme_preferences_dir(decky_home)
+
+    assert install_status_theme(source, decky_home, preferences) is True
+    assert install_status_theme(source, decky_home, preferences) is False
+
+    (source / "layout.css").write_text(".slot { height: 31px; }", encoding="utf-8")
+    assert install_status_theme(source, decky_home, preferences) is True
+    assert install_status_theme(source, decky_home, preferences) is False
+
+    (decky_home / "themes" / THEME_NAME / "config_USER.json").unlink()
+    assert install_status_theme(source, decky_home, preferences) is True
+    assert install_status_theme(source, decky_home, preferences) is False
+
+
 def test_existing_unowned_theme_is_not_overwritten_or_deleted(tmp_path: Path) -> None:
     source = bundled_theme(tmp_path)
     decky_home = tmp_path / "homebrew"
