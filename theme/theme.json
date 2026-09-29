@@ -2,10 +2,10 @@
   "name": "SDH-Ludusavi Status",
   "author": "SDH-Ludusavi",
   "version": "v1.0",
-  "description": "Optional appearance for Steam Cloud and Ludusavi save status rows.",
+  "description": "Style save-status bars and keep their space on games without one.",
   "target": "Library",
   "manifest_version": 5,
-  "inject": {},
+  "inject": { "layout.css": ["SP"] },
   "patches": {
     "Save Status": {
       "type": "slider",

@@ -2,11 +2,11 @@
 
 SDH-Ludusavi helps you back up and restore game saves from Gaming Mode on your Steam Deck. It uses Ludusavi to keep copies of your saves. If you turn on **Automatic Sync**, it checks for a newer backup before a game starts and backs up your saves when you quit.
 
-![SDH-Ludusavi in Gaming Mode](assets/demo.webp?cacheBuster=12)
+![SDH-Ludusavi in Gaming Mode](assets/demo.webp?cacheBuster=13)
 
 You can see the latest save result on supported non-Steam game pages without opening the Decky menu. Steam Cloud pages keep their usual Steam Cloud status.
 
-![Ludusavi showing Up to date on a non-Steam game page](assets/native-status-row.webp?cacheBuster=12)
+![Ludusavi showing Up to date on a non-Steam game page](assets/native-status-row.webp?cacheBuster=13)
 
 ## Before you install
 
@@ -81,7 +81,9 @@ If you use [CSS Loader](https://docs.deckthemes.com/CSSLoader/), SDH-Ludusavi ad
 - **Clean View:** Give both bars a plain dark background.
 - **Custom:** Choose the background, text, icon, and outline colors. You can also make the bars partly transparent.
 
-The theme changes how the bars look on game pages, not how saves work. Warning and error colors stay the same. The separate message on the game launch screen does not change. If the theme does not appear after installation, choose **Refresh** in CSS Loader. Your choices stay in place when you update SDH-Ludusavi.
+The theme changes how the bars look on game pages, not how saves work. Warning and error colors stay the same. The separate message on the game launch screen does not change. When you install or update SDH-Ludusavi, it asks CSS Loader to reload the theme if its files changed. If the theme is missing or the new look does not appear, choose **Refresh** in CSS Loader. Your choices stay in place when you update SDH-Ludusavi.
+
+On game pages without a save-status bar, the theme leaves a blank row below the play controls before Activity. Clean View and Custom give this space the same background as their status bars; Custom also uses your outline choice. If you use Clean Gameview, the game's picture or trailer can show through the blank row. It does not show a save result. On an uninstalled Steam game, you may need to scroll down to see Activity.
 
 ## Updates and help
 

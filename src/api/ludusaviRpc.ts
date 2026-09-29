@@ -26,6 +26,7 @@ import type {
 } from "../types";
 
 export const getSettings = callable<[], RpcResult<Settings>>("get_settings");
+export const consumeThemeRefreshNeededCall = callable<[], boolean>("consume_theme_refresh_needed");
 export const getGameHistoryCall = callable<[], RpcResult<Record<string, GameOperationHistory>>>("get_game_history");
 export const updateSettingsCall = callable<[patch: SettingsPatch], RpcResult<Settings>>(
   "update_settings"

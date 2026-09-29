@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 THEME_NAME = "SDH-Ludusavi Status"
-_THEME_FILES = ("theme.json", "clean.css", "custom.css")
+_THEME_FILES = ("theme.json", "clean.css", "custom.css", "layout.css")
 _MARKER = ".sdh-ludusavi-status-theme"
 _MARKER_VALUE = "sdh-ludusavi-status-theme-1\n"
 _PREFERENCE_BACKUPS = {
@@ -38,14 +38,15 @@ def _atomic_write(path: Path, content: bytes, mode: int = 0o644) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def install_status_theme(source: Path, decky_home: Path, preferences_dir: Path) -> None:
-    """Deploy bundled files and restore CSS Loader choices after a Decky replacement."""
+def install_status_theme(source: Path, decky_home: Path, preferences_dir: Path) -> bool:
+    """Deploy bundled files and report whether CSS Loader must reload them."""
     manifest_file = source / "theme.json"
     if manifest_file.is_symlink() or any((source / name).is_symlink() for name in _THEME_FILES):
         raise ThemeOwnershipError("Bundled theme files must not be symlinks")
     manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
     if manifest.get("name") != THEME_NAME:
         raise ValueError("Bundled CSS Loader theme has an unexpected name")
+    changed = False
 
     destination = _theme_directory(decky_home)
     if destination.is_symlink():
@@ -67,6 +68,7 @@ def install_status_theme(source: Path, decky_home: Path, preferences_dir: Path) 
         content = (source / name).read_bytes()
         if not file.exists() or file.read_bytes() != content:
             _atomic_write(file, content)
+            changed = True
 
     for name, backup_name in _PREFERENCE_BACKUPS.items():
         file = destination / name
@@ -75,10 +77,13 @@ def install_status_theme(source: Path, decky_home: Path, preferences_dir: Path) 
             raise ThemeOwnershipError(f"Theme preferences contain a symlink: {file}")
         if not file.exists() and backup.is_file():
             _atomic_write(file, backup.read_bytes(), mode=0o644 if name == "PRIORITY" else 0o600)
+            changed = True
 
     config = destination / "config_USER.json"
     if not config.exists():
         _atomic_write(config, b'{"active": true}\n', mode=0o600)
+        changed = True
+    return changed
 
 
 def uninstall_status_theme(decky_home: Path, preferences_dir: Path) -> None:

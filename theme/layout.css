@@ -1,0 +1,19 @@
+/* Keep Activity below the status band even when no save-status row is present. */
+.basicappdetailssectionstyler_AppDetailsRoot_3fp5y
+  > .basicappdetailssectionstyler_PlaySection_3scbH
+  + .Panel:empty {
+  height: 30px !important;
+}
+
+/* Clean Gameview stops the hero at the play bar. Extend its existing artwork
+   behind an empty status row without moving the play controls or Activity. */
+.appdetails_InnerContainer_1Svpj:has(
+  .basicappdetailssectionstyler_AppDetailsRoot_3fp5y
+    > .basicappdetailssectionstyler_PlaySection_3scbH
+    + .Panel:empty
+) :is(
+  .sharedappdetailsheader_HeaderBackgroundImage_1sarA,
+  .sharedappdetailsheader_ImgSrc__dije
+) {
+  min-height: calc(var(--CGV-image-height, 0px) + 30px) !important;
+}
