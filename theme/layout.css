@@ -5,12 +5,16 @@
   height: 30px !important;
 }
 
-/* Clean Gameview stops the hero at the play bar. Extend its existing artwork
-   behind an empty status row without moving the play controls or Activity. */
+/* Reserve Clean Gameview's full artwork height before the status slot fills.
+   Keep the play controls and Activity in place while Steam animates the page. */
 .appdetails_InnerContainer_1Svpj:has(
   .basicappdetailssectionstyler_AppDetailsRoot_3fp5y
     > .basicappdetailssectionstyler_PlaySection_3scbH
-    + .Panel:empty
+    + :is(
+      .Panel:empty,
+      .appdetailsplaysection_CloudStatusRow_QvHky,
+      [data-sdh-ludusavi-status-row="true"]
+    )
 ) :is(
   .sharedappdetailsheader_HeaderBackgroundImage_1sarA,
   .sharedappdetailsheader_ImgSrc__dije

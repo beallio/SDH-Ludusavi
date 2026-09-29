@@ -356,17 +356,26 @@ strip remains separate.
 
 ### Optional CSS Loader theme
 
-The plugin ZIP includes `theme/theme.json`, `theme/clean.css`, and `theme/custom.css`.
+The plugin ZIP includes `theme/theme.json`, `theme/layout.css`, `theme/clean.css`, and `theme/custom.css`.
 On backend startup, `status_theme.install_status_theme` copies those managed files into
 `DECKY_HOME/themes/SDH-Ludusavi Status`. A marker identifies the owned directory. The first
-install enables the theme with its no-op `Default` selection. Later startups replace only
+install enables the theme with its `Default` selection. Later startups replace only
 managed theme files and preserve CSS Loader's choices. CSS Loader need not be installed for
 the assets to be deployed: without it, no theme CSS is injected. CSS Loader's Refresh
 control discovers a new theme when it was already running and did not observe directory
 creation.
 
-`Save Status` is a three-notch CSS Loader slider: `Default` injects no stylesheet,
-`Clean View` injects only a translucent play-section-style background with no top-edge
+`layout.css` is injected in every selection while the theme is enabled. It reserves a
+30-pixel empty panel immediately after the play section. With Clean Gameview, the hero
+background and image receive a minimum layout height of `--CGV-image-height + 30px`
+when that slot is empty, contains Steam's Cloud row, or contains the Ludusavi row.
+The reservation applies before the first game-page paint and remains stable as the
+slot fills, so neither the image crop nor the trailer container needs a late height
+change. Steam's page-scale transition remains unchanged. Without CSS Loader or with
+the theme disabled, the mounted header's measured artwork extension remains in use.
+
+`Save Status` is a three-notch CSS Loader slider: `Default` injects no extra color stylesheet,
+`Clean View` injects a translucent play-section-style background with no top-edge
 shadow, and `Custom` injects the user-selected background, text, icon, and inset outline
 colors. The four color pickers are visible only when Custom is selected and their alpha channels control
 transparency. A separate `Outline Width` slider provides Off, Thin, Medium, and Thick;
@@ -378,9 +387,10 @@ accessible descriptions remain unchanged.
 The theme targets Steam's Cloud-status CSS module selectors, translated by CSS Loader
 for the current Steam client, plus stable `data-sdh-ludusavi-*` attributes on the
 plugin's row, label, and icon. The row also exposes tone and active state to keep
-problem and running states distinct. The theme never changes row dimensions,
-placement, visibility, focus, or hit testing: those properties participate in
-details-row ownership and BrowserView-strip fallback. It does not style the separate
+problem and running states distinct. Apart from the empty-panel spacer and artwork
+reservation, the theme never changes status-row dimensions, placement, visibility,
+focus, or hit testing: those properties participate in details-row ownership and
+BrowserView-strip fallback. It does not style the separate
 launch BrowserView document. Clean Gameview's optional top-right icon relocation is
 not part of this theme.
 
