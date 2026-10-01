@@ -317,11 +317,21 @@ controls. The row releases ownership when it is hidden, clipped, offscreen, or c
 icon and transfer animation are
 presentation only and it adds no controller focus stop.
 
-The row follows Steam's native Cloud status presentation. It is 30 pixels high, centers the icon
-and label as one group, and uses 12-pixel bold uppercase Motiva Sans text with 0.5-pixel letter
-spacing and 22-pixel line height. Normal rows are transparent with equal dividers on both sides.
-Warning and error rows use Steam's translucent problem background and omit the dividers. Active
-icons pulse over 1.5 seconds instead of rotating, and active status text uses Steam blue.
+The row uses Steam's supplied Cloud-status row, icon, SVG, label, problem, transfer-pulse,
+and active-value classes. Its root is a direct sibling after the native play section; the
+deferred Cloud component and plugin row share a React Fragment, not DOM wrappers. Steam
+owns visual presentation, including pseudo-element dividers. The plugin adds no inline
+fonts, colors, sizes, spacing, or divider elements. Steam's default row is 30 pixels high;
+themes may change its dimensions, placement, or visibility through native selectors.
+Warning and error states use the native problem class, and active states use the native
+pulse and blue value classes. Missing class capabilities leave the native header unchanged.
+
+A fully visible compact indicator can own exit status; there is no fixed minimum row
+height. Theme-supplied opacity zero, hidden visibility, clipping, and occlusion cannot
+suppress the fallback strip. The plugin's own paint-suppressed row is measured with its
+inline opacity temporarily removed, then restored with its original priority. Visibility,
+slot, and artwork observers share a mutation-batch guard so these measurements do not
+cause an observer feedback loop.
 
 Visible row text uses short Steam-style states: `Checking...`, `Backing up...`, `Restoring...`,
 `Uploading...`, `Downloading...`, `Up to date`, `Out of sync`, `File conflict`, `Disabled`,
@@ -346,13 +356,16 @@ an endless transfer. A local result and a remote observation remain distinct in 
 The mounted game-details header also owns a temporary artwork extension in Steam's native
 Gamepad document. This applies to either a visible Steam Cloud band or a Ludusavi row, including
 when no trailer is playing. It selects only the current app's full-size Steam hero or custom
-shortcut hero and measures the full-width status band at the artwork's lower edge. Layout heights,
-not transform-scaled screen heights, determine the extension while the game page animates in.
-The band itself does not move. The original inline image height and priority return when the band
-is hidden, yields, leaves the viewport, or the route unmounts; native DOM, scroll, and resize
-changes resync the image. If Decky Metadata marks the hero as its trailer target, the Ludusavi
-extension yields so the trailer plugin alone controls that surface. The launch-time BrowserView
-strip remains separate.
+shortcut hero and measures a native-class or plugin-marked, full-width, in-flow status band
+at the artwork's lower edge. The band's actual layout height determines the extension;
+transform-scaled screen heights only locate that edge while the game page animates in.
+Compact, moved, hidden, clipped, and unrelated rows do not reserve artwork space. Hit-testing
+near the band's upper edge permits artwork behind a row whose center lies under Steam's
+footer. The band itself does not move. Original inline image height, CSS-variable values,
+marker attributes, and priorities return when the extension ends. Native DOM, stylesheet,
+scroll, resize, and band-size changes resync the image. If Decky Metadata marks the hero
+as its trailer target, Ludusavi yields so the trailer plugin alone controls that surface.
+The launch-time BrowserView strip remains separate.
 
 ### Optional CSS Loader theme
 
@@ -366,13 +379,12 @@ control discovers a new theme when it was already running and did not observe di
 creation.
 
 `layout.css` is injected in every selection while the theme is enabled. It reserves a
-30-pixel empty panel immediately after the play section. With Clean Gameview, the hero
-background and image receive a minimum layout height of `--CGV-image-height + 30px`
-when that slot is empty, contains Steam's Cloud row, or contains the Ludusavi row.
-The reservation applies before the first game-page paint and remains stable as the
-slot fills, so neither the image crop nor the trailer container needs a late height
-change. Steam's page-scale transition remains unchanged. Without CSS Loader or with
-the theme disabled, the mounted header's measured artwork extension remains in use.
+30-pixel empty panel immediately after the play section. With Clean Gameview, that empty
+slot keeps the early `--CGV-image-height + 30px` minimum height. A real status band instead
+uses the runtime's measured `--sdh-status-band-height` on plugin-marked artwork. Hidden,
+compact, and relocated indicators therefore do not trigger a fixed 30-pixel reservation.
+Steam's page-scale transition remains unchanged. Without CSS Loader or with the theme
+disabled, the mounted header's measured artwork extension remains in use.
 
 `Save Status` is a three-notch CSS Loader slider: `Default` injects no extra color stylesheet,
 `Clean View` injects a translucent play-section-style background with no top-edge

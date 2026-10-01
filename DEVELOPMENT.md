@@ -38,7 +38,7 @@ Install frontend dependencies when needed:
 
 The repository uses `pnpm-lock.yaml` as the canonical frontend lockfile. Do not use `npm install` or add `package-lock.json`. The pnpm store and heavy virtual store are configured under `/tmp/sdh_ludusavi`; the local `node_modules/` directory is ignored and contains only pnpm links/bin shims needed by package scripts.
 
-`react-dom` 18.3.1 is a development-only dependency used to render the native status row in frontend behavior tests alongside the project's pinned React 18. It is not bundled as a Decky runtime dependency.
+`react-dom` 18.3.1 and `linkedom` 0.18.12 are development-only dependencies for native status-row behavior tests. React DOM renders the row, and LinkeDOM supplies the DOM for selector and visibility checks. They are not bundled as Decky runtime dependencies. Live Deck checks are still required for computed Steam styles, native clipping, and MutationObserver behavior.
 
 ## Build & Packaging
 

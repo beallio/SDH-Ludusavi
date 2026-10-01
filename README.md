@@ -75,17 +75,19 @@ Syncthing sends the backups in the background when the devices can connect. Chec
 
 ## Change the look of the status bars (optional)
 
+The Ludusavi bar uses Steam's game-page styles. A theme that changes the Steam Cloud bar can also change the Ludusavi bar's text, size, position, or visibility. If a theme hides or covers the bar, save-operation messages can use the separate status strip. Protected game-launch messages always use that strip.
+
 If you use [CSS Loader](https://docs.deckthemes.com/CSSLoader/), SDH-Ludusavi adds an **SDH-Ludusavi Status** theme. In CSS Loader, use **Save Status** to choose:
 
 - **Default:** Keep the usual Steam Cloud and Ludusavi bars.
 - **Clean View:** Give both bars a plain dark background.
 - **Custom:** Choose the background, text, icon, and outline colors. You can also make the bars partly transparent.
 
-The theme changes how the bars look on game pages, not how saves work. Warning and error colors stay the same. The separate message on the game launch screen does not change. When you install or update SDH-Ludusavi, it asks CSS Loader to reload the theme if its files changed. If the theme is missing or the new look does not appear, choose **Refresh** in CSS Loader. Your choices stay in place when you update SDH-Ludusavi.
+The theme changes how the bars look on game pages, not how saves work. Warning and error bars keep their distinct appearance. The separate message on the game launch screen does not change. When you install or update SDH-Ludusavi, it asks CSS Loader to reload the theme if its files changed. If the theme is missing or the new look does not appear, choose **Refresh** in CSS Loader. Your choices stay in place when you update SDH-Ludusavi.
 
 On game pages without a save-status bar, the theme leaves a blank row below the play controls before Activity. Clean View and Custom give this space the same background as their status bars; Custom also uses your outline choice. If you use Clean Gameview, the game's picture or trailer can show through the blank row. It does not show a save result. On an uninstalled Steam game, you may need to scroll down to see Activity.
 
-With Clean Gameview, the theme reserves the picture's height before the status bar appears. This prevents a second crop change as the game page opens. Steam's normal page animation still plays.
+With Clean Gameview, the picture follows the visible, full-width status bar's height. A compact, moved, or hidden bar does not add full-width picture space. Steam's normal page animation still plays.
 
 ## Updates and help
 

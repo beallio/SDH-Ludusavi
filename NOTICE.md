@@ -92,6 +92,12 @@ notices are in [LICENSE](LICENSE).
   bundled in the Decky plugin.
 - **License:** MIT
 
+### [WebReflection/linkedom 0.18.12](https://github.com/WebReflection/linkedom)
+
+- **Role:** Development-only DOM for native status-row behavior tests; not
+  bundled in the Decky plugin.
+- **License:** ISC
+
 ## Runtime and API integrations
 
 ### [DeckThemes/SDH-CssLoader](https://github.com/DeckThemes/SDH-CssLoader)

@@ -1,5 +1,4 @@
 import { createContext, createElement, type ReactElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const routeMock = vi.hoisted(() => ({ addPatch: vi.fn((_: string, patch: unknown) => patch), removePatch: vi.fn() }));
@@ -16,16 +15,11 @@ vi.mock("../utils/steamRuntime", () => ({
 }));
 
 import { createLudusaviStateStore } from "../state/ludusaviState";
-import type { GameDetailsStatusViewModel } from "./gameDetailsStatusModel";
 import { createAutoSyncStatusSurface, type DetailsStatusPresentationSurface } from "./autoSyncStatusSurface";
 import {
-  composeInNativeStatusSlot,
-  GameDetailsStatusRow,
   createGameDetailsStatusSurface,
-  detailsRowPaintStyle,
   type GameDetailsStatusContributionSource,
   isVisibleStatusBand,
-  DETAILS_STATUS_VISIBILITY_THRESHOLDS,
   isFullyIntersecting,
 } from "./gameDetailsStatus";
 
@@ -134,48 +128,6 @@ describe("game details route adapter", () => {
     expect(routeMock.removePatch).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps a same-game fallback row measurable but non-painting", () => {
-    expect(detailsRowPaintStyle(true)).toEqual({
-      opacity: 0,
-    });
-    expect(detailsRowPaintStyle(false)).toEqual({});
-  });
-  it("exposes a stable visual state to external status themes without hiding the accessible label", () => {
-    const warning: GameDetailsStatusViewModel = {
-      eligibility: "eligible",
-      kind: "needs_backup",
-      status: "unknown",
-      localStatus: null,
-      syncStatus: null,
-      syncVerification: "not_checked",
-      label: "Ludusavi: Out of sync",
-      description: "A local backup is needed.",
-      tone: "warning",
-      active: false,
-      showRow: true,
-      canOwnStatusArea: true,
-    };
-    const statusSurface = {
-      subscribeDetailsPresentation: vi.fn(() => () => {}),
-      shouldDetailsRowYield: vi.fn(() => false),
-      registerDetailsOwner: vi.fn(() => () => {}),
-    } satisfies DetailsStatusPresentationSurface;
-    const warningHtml = renderToStaticMarkup(createElement(GameDetailsStatusRow, {
-      appID: "100", model: warning, statusSurface, suppressed: false,
-    }));
-    const activeHtml = renderToStaticMarkup(createElement(GameDetailsStatusRow, {
-      appID: "100", model: { ...warning, kind: "active", tone: "info", active: true },
-      statusSurface, suppressed: false,
-    }));
-
-    expect(warningHtml).toContain('data-sdh-ludusavi-tone="warning"');
-    expect(warningHtml).toContain('data-sdh-ludusavi-active="false"');
-    expect(warningHtml).toContain('data-sdh-ludusavi-status-label="true"');
-    expect(warningHtml).toContain('role="status"');
-    expect(warningHtml).toContain("A local backup is needed.");
-    expect(activeHtml).toContain('data-sdh-ludusavi-tone="info"');
-    expect(activeHtml).toContain('data-sdh-ludusavi-active="true"');
-  });
 
 
   it("hands a recovered native band from the fallback strip to one row, then restores the strip", () => {
@@ -202,16 +154,13 @@ describe("game details route adapter", () => {
       contains: (candidate: unknown) => candidate === row,
       ownerDocument: undefined as unknown,
     };
-    const fallbackObstruction = {};
     const gamepadWindow = {
       getComputedStyle: () => ({ display: "flex", visibility: "visible", overflow: "hidden" }),
     };
     const gamepadDocument = {
       documentElement: { clientHeight: 534, clientWidth: 854 },
       defaultView: gamepadWindow,
-      elementFromPoint: () => detailsRowPaintStyle(surface.shouldDetailsRowYield("100")).pointerEvents === "none"
-        ? fallbackObstruction
-        : row,
+      elementFromPoint: () => row,
     };
     row.ownerDocument = gamepadDocument;
 
@@ -230,23 +179,6 @@ describe("game details route adapter", () => {
     surface.dispose();
   });
 
-  it("composes through the deferred Cloud component in the real four-child header", () => {
-    const play = createElement("play");
-    const cloud = createElement(() => null);
-    const feedback = createElement("feedback");
-    const tabs = createElement("tabs");
-    const root = createElement("app-details-root", { marker: "native" }, [play, cloud, feedback, tabs]);
-    const row = createElement("ludusavi-status");
-    const contributed = composeInNativeStatusSlot(root, row) as any;
-    expect(contributed.props.marker).toBe("native");
-    expect(contributed).not.toBe(root);
-    expect(contributed.props.children).toHaveLength(4);
-    expect(contributed.props.children[0]).toBe(play);
-    expect(contributed.props.children[1].props.nativeStatus).toBe(cloud);
-    expect(contributed.props.children[1].props.row).toBe(row);
-    expect(contributed.props.children[2]).toBe(feedback);
-    expect(contributed.props.children[3]).toBe(tabs);
-  });
 
   it("releases ownership when an ancestor hides the otherwise measured row", () => {
     const ancestor = { hidden: false, parentElement: null };
@@ -351,7 +283,6 @@ describe("game details route adapter", () => {
 
   it("observes the partial-to-full threshold needed for details ownership", () => {
     const bounds = { width: 1280, height: 30 };
-    expect(DETAILS_STATUS_VISIBILITY_THRESHOLDS).toEqual([0, 0.99, 1]);
     expect(isFullyIntersecting({
       isIntersecting: true,
       intersectionRatio: 0.5,

@@ -1,13 +1,14 @@
 import { routerHook, type RoutePatch } from "@decky/api";
-import { cloneElement, createElement, isValidElement, useEffect, useState, useSyncExternalStore, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { Fragment, cloneElement, createElement, isValidElement, useEffect, useLayoutEffect, useState, useSyncExternalStore, type CSSProperties, type ReactElement, type ReactNode } from "react";
 
 import type { LudusaviStateStore } from "../state/ludusaviState";
 import { sessionFromAppOverview } from "../utils/steam";
 import { getAppDetailsForAppID, getAppOverviewForAppID, getGamepadMainWindow, subscribeToAppDetails } from "../utils/steamRuntime";
 import { selectGameDetailsStatus, getSteamCloudEligibility, type GameDetailsStatusViewModel } from "./gameDetailsStatusModel";
-import { mountGameDetailsArtworkBackdrop } from "./gameDetailsArtworkBackdrop";
+import { isStatusPaintMeasurement, measureStatusBandPaint, mountGameDetailsArtworkBackdrop } from "./gameDetailsArtworkBackdrop";
 import { iconSvgForAutoSyncStatus } from "./autoSyncStatusRenderer";
 import type { DetailsStatusPresentationSurface } from "./autoSyncStatusSurface";
+import { getNativeGameDetailsStatusClasses, type NativeGameDetailsStatusClasses } from "./gameDetailsStatusClasses";
 
 const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // Runtime disposal can follow the launch-lease cleanup ceiling. Retain only
@@ -15,7 +16,7 @@ const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // update an already-mounted details page without a navigation.
 const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
 // Bump when an existing route wrapper cannot render the newest status-row contract.
-const GAME_DETAILS_ROUTE_RENDER_VERSION = 3;
+const GAME_DETAILS_ROUTE_RENDER_VERSION = 6;
 export type GameDetailsStatusSurface = Readonly<{
   dispose(): void;
 }>;
@@ -226,7 +227,7 @@ function ActiveGameDetailsStatusHeader({ appID, header, headerProps, store, stat
     () => statusSurface.shouldDetailsRowYield(appID),
     () => statusSurface.shouldDetailsRowYield(appID),
   );
-  useEffect(() => {
+  useLayoutEffect(() => {
     const hostWindow = getGamepadMainWindow();
     if (!hostWindow) return;
     return mountGameDetailsArtworkBackdrop(hostWindow, appID);
@@ -255,38 +256,51 @@ function ActiveGameDetailsStatusHeader({ appID, header, headerProps, store, stat
 // retains ownership whenever it renders a real native status band.
 export function composeInNativeStatusSlot(nativeHeader: ReactNode, row: ReactElement): ReactNode {
   const header = asNativeHeaderElement(nativeHeader);
-  if (!header) return nativeHeader;
+  const classes = getNativeGameDetailsStatusClasses();
+  if (!header || !classes) return nativeHeader;
   const children = header.props.children;
   if (!Array.isArray(children) || children.length < 4) return nativeHeader;
   const nativeStatus = children[1];
   if (!isValidElement(nativeStatus)) return nativeHeader;
   const nextChildren: unknown[] = [...children];
-  nextChildren[1] = createElement(NativeStatusSlot, { nativeStatus, row });
+  nextChildren[1] = createElement(NativeStatusSlot, { key: nativeStatus.key, nativeStatus, row: row as ReactElement<GameDetailsStatusRowProps>, classes });
   return cloneElement(header, { ...header.props, children: nextChildren });
 }
 
-type NativeStatusSlotProps = Readonly<{ nativeStatus: ReactElement; row: ReactElement }>;
+type NativeStatusSlotProps = Readonly<{
+  nativeStatus: ReactElement;
+  row: ReactElement<GameDetailsStatusRowProps>;
+  classes: NativeGameDetailsStatusClasses;
+}>;
 
-function NativeStatusSlot({ nativeStatus, row }: NativeStatusSlotProps): ReactNode {
-  const [slot, setSlot] = useState<HTMLDivElement | null>(null);
-  const [nativeVisible, setNativeVisible] = useState(true);
-  useEffect(() => {
-    if (!slot) return;
+function NativeStatusSlot({ nativeStatus, row, classes }: NativeStatusSlotProps): ReactNode {
+  const [element, setElement] = useState<HTMLDivElement | null>(null);
+  const [nativeOccupied, setNativeOccupied] = useState(true);
+  useLayoutEffect(() => {
+    const parent = element?.parentElement;
+    if (!element || !parent) return;
     const update = () => {
-      const occupied = Array.from(slot.children).some((child) =>
-        child.getAttribute("data-sdh-ludusavi-fallback") !== "true" && child.getClientRects().length > 0,
-      );
-      setNativeVisible(occupied);
+      let occupied = false;
+      for (let sibling = element.previousElementSibling; sibling; sibling = sibling.previousElementSibling) {
+        if (sibling.classList.contains(classes.playSection)) break;
+        if (sibling.classList.contains(classes.row) || sibling.getClientRects().length > 0) {
+          occupied = true;
+          break;
+        }
+      }
+      setNativeOccupied(occupied);
     };
     update();
-    const HostMutationObserver = getStatusHostWindow(slot)?.MutationObserver;
-    const observer = HostMutationObserver ? new HostMutationObserver(update) : null;
-    observer?.observe(slot, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
+    const HostMutationObserver = getStatusHostWindow(element)?.MutationObserver;
+    const observer = HostMutationObserver ? new HostMutationObserver((records) => {
+      if (records.some((record) => !isStatusPaintMeasurement(record))) update();
+    }) : null;
+    observer?.observe(parent, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
     return () => observer?.disconnect();
-  }, [slot, nativeStatus]);
-  return createElement("div", { ref: setSlot, style: { display: "contents" } },
+  }, [element, classes]);
+  return createElement(Fragment, null,
     nativeStatus,
-    createElement("div", { "data-sdh-ludusavi-fallback": "true", style: { display: nativeVisible ? "none" : "contents" } }, row),
+    cloneElement(row, { classes, nativeOccupied, onElement: setElement }),
   );
 }
 
@@ -295,128 +309,55 @@ type GameDetailsStatusRowProps = Readonly<{
   model: GameDetailsStatusViewModel;
   statusSurface: DetailsStatusPresentationSurface;
   suppressed: boolean;
+  classes?: NativeGameDetailsStatusClasses;
+  nativeOccupied?: boolean;
+  onElement?: (element: HTMLDivElement | null) => void;
 }>;
 
-export function detailsRowPaintStyle(suppressed: boolean): Pick<CSSProperties, "opacity" | "pointerEvents"> {
-  // The hidden row must still receive the host document's hit test. That is
-  // how it detects that a previously clipped native band became usable and
-  // can replace the fallback strip. It has no handlers or focus stop, and is
-  // aria-hidden while suppressed, so retaining pointer participation exposes
-  // no interactive surface.
+export function detailsRowPaintStyle(suppressed: boolean): Pick<CSSProperties, "opacity"> {
   return suppressed ? { opacity: 0 } : {};
 }
 
 
-const DETAILS_ROW_BASE_STYLE: CSSProperties = {
-  width: "100%",
-  height: 30,
-  minHeight: 30,
-  boxSizing: "border-box",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: "4px 0",
-  textAlign: "center",
-  overflow: "hidden",
-  whiteSpace: "nowrap",
-};
-const DETAILS_ROW_STYLE: CSSProperties = { ...DETAILS_ROW_BASE_STYLE, background: "transparent" };
-const DETAILS_ROW_PROBLEM_STYLE: CSSProperties = {
-  ...DETAILS_ROW_BASE_STYLE,
-  background: "rgba(255, 255, 255, 0.16)",
-};
-const DETAILS_DIVIDER_STYLE: CSSProperties = {
-  flex: "1 1 0",
-  minWidth: 0,
-  height: 2,
-  marginInline: 12,
-  backgroundColor: "rgba(61, 68, 80, 0.54)",
-};
-const DETAILS_CONTENT_STYLE: CSSProperties = {
-  minWidth: 0,
-  flex: "0 1 auto",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-};
-const DETAILS_ICON_STYLE: CSSProperties = {
-  width: 16,
-  height: 16,
-  flex: "0 0 16px",
-  marginInline: 8,
-  color: "#dcdedf",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-};
-const DETAILS_ACTIVE_ICON_STYLE: CSSProperties = {
-  ...DETAILS_ICON_STYLE,
-  animation: "sdh-ludusavi-status-pulse 1.5s infinite",
-};
-const DETAILS_LABEL_STYLE: CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  fontFamily: "\"Motiva Sans\", Helvetica, sans-serif",
-  fontSize: 12,
-  fontWeight: 700,
-  lineHeight: "22px",
-  letterSpacing: "0.5px",
-  textTransform: "uppercase",
-  color: "rgba(255, 255, 255, 0.7)",
-};
-const DETAILS_VALUE_STYLE: CSSProperties = { color: "rgba(255, 255, 255, 0.7)" };
-const DETAILS_ACTIVE_VALUE_STYLE: CSSProperties = { color: "#1a9fff" };
-
-
-export function GameDetailsStatusRow({ appID, model, statusSurface, suppressed }: GameDetailsStatusRowProps): ReactNode {
+export function GameDetailsStatusRow({ appID, model, statusSurface, suppressed, classes: providedClasses, nativeOccupied = false, onElement }: GameDetailsStatusRowProps): ReactNode {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
   const visible = useVisibleLayout(element);
-  useEffect(() => {
-    if (!model.canOwnStatusArea || !visible) return;
+  const classes = providedClasses ?? getNativeGameDetailsStatusClasses();
+  useLayoutEffect(() => {
+    if (!model.canOwnStatusArea || !visible || nativeOccupied) return;
     return statusSurface.registerDetailsOwner({ appID, visible: true, layoutValid: true });
-  }, [appID, model.canOwnStatusArea, statusSurface, visible]);
+  }, [appID, model.canOwnStatusArea, statusSurface, visible, nativeOccupied]);
+  useLayoutEffect(() => {
+    onElement?.(element);
+    return () => onElement?.(null);
+  }, [element, onElement]);
+  if (!classes) return null;
   const status = model.status ?? "unknown";
   const value = model.label.startsWith("Ludusavi: ") ? model.label.slice("Ludusavi: ".length) : model.label;
   const problem = model.tone === "warning" || model.tone === "error";
-  const rowStyle = problem ? DETAILS_ROW_PROBLEM_STYLE : DETAILS_ROW_STYLE;
-  const dividerStyle = problem ? null : DETAILS_DIVIDER_STYLE;
-  const iconStyle = model.active ? DETAILS_ACTIVE_ICON_STYLE : DETAILS_ICON_STYLE;
-  const valueStyle = model.active && !problem ? DETAILS_ACTIVE_VALUE_STYLE : DETAILS_VALUE_STYLE;
-  const divider = dividerStyle
-    ? createElement("span", { "aria-hidden": true, style: dividerStyle })
-    : null;
-  return createElement("div", { style: { display: "contents" } },
-    createElement("style", null,
-      "@keyframes sdh-ludusavi-status-pulse { 0%, 100% { color: #dcdedf; } 50% { color: #3d4450; } } "
-      + "[data-sdh-ludusavi-status-icon=\"true\"] svg { display: block; width: 16px; height: 16px; }",
-    ),
-    createElement("div", {
-      ref: setElement,
-      role: suppressed ? undefined : "status",
-      "aria-hidden": suppressed || undefined,
-      "aria-label": suppressed ? undefined : `${model.label}. ${model.description}`,
-      "data-sdh-ludusavi-status-row": "true",
-      "data-sdh-ludusavi-tone": model.tone,
-      "data-sdh-ludusavi-active": String(model.active),
-      style: { ...rowStyle, ...detailsRowPaintStyle(suppressed) },
-    },
-    divider,
-    createElement("span", { style: DETAILS_CONTENT_STYLE },
-      createElement("span", {
-        "aria-hidden": true,
-        "data-sdh-ludusavi-status-icon": "true",
-        style: iconStyle,
-        dangerouslySetInnerHTML: { __html: iconSvgForAutoSyncStatus(status) },
-      }),
-      createElement("span", { "data-sdh-ludusavi-status-label": "true", style: DETAILS_LABEL_STYLE },
-        "Ludusavi: ",
-        createElement("span", { style: valueStyle }, value),
-      ),
-    ),
-    dividerStyle ? createElement("span", { "aria-hidden": true, style: dividerStyle }) : null,
-    ),
-  );
+  const svg = iconSvgForAutoSyncStatus(status).replace("<svg ", `<svg class="${classes.iconSvg}" `);
+  return createElement("div", {
+    ref: setElement,
+    className: `${classes.row} Panel${problem ? ` ${classes.problem}` : ""}`,
+    role: suppressed || nativeOccupied ? undefined : "status",
+    "aria-hidden": suppressed || nativeOccupied || undefined,
+    "aria-label": suppressed || nativeOccupied ? undefined : `${model.label}. ${model.description}`,
+    "data-sdh-ludusavi-status-row": "true",
+    "data-sdh-ludusavi-tone": model.tone,
+    "data-sdh-ludusavi-active": String(model.active),
+    "data-sdh-ludusavi-paint-suppressed": String(suppressed),
+    style: nativeOccupied ? { display: "none" } : detailsRowPaintStyle(suppressed),
+  },
+  createElement("span", {
+    "aria-hidden": true,
+    className: `${classes.icon}${model.active ? ` ${classes.syncing}` : ""}`,
+    "data-sdh-ludusavi-status-icon": "true",
+    dangerouslySetInnerHTML: { __html: svg },
+  }),
+  createElement("span", { className: classes.label, "data-sdh-ludusavi-status-label": "true" },
+    "Ludusavi: ",
+    createElement("span", { className: model.active && !problem ? classes.activeValue : undefined }, value),
+  ));
 }
 
 export const DETAILS_STATUS_VISIBILITY_THRESHOLDS = [0, 0.99, 1];
@@ -444,33 +385,52 @@ function getStatusHostWindow(element: Element): StatusHostWindow | null {
 
 function useVisibleLayout(element: HTMLDivElement | null): boolean {
   const [visible, setVisible] = useState(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!element) return;
     const hostWindow = getStatusHostWindow(element);
     if (!hostWindow) return;
+    let frame: number | null = null;
+    let fullyIntersecting = hostWindow.IntersectionObserver === undefined;
+    const watchStyles = () => {
+      for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+        mutationObserver?.observe(ancestor, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
+      }
+      if (element.ownerDocument.head) mutationObserver?.observe(element.ownerDocument.head, { childList: true, characterData: true, subtree: true, attributes: true });
+    };
+    const update = () => {
+      frame = null;
+      // Measuring our own paint-suppressed row briefly removes its inline opacity.
+      // Do not feed those synchronous measurement writes back into this observer.
+      mutationObserver?.disconnect();
+      const nextVisible = isVisibleStatusBand(element, fullyIntersecting);
+      watchStyles();
+      setVisible(nextVisible);
+    };
+    const schedule = () => {
+      if (frame !== null) return;
+      frame = hostWindow.requestAnimationFrame(update);
+    };
+    const HostMutationObserver = hostWindow.MutationObserver;
+    const mutationObserver = HostMutationObserver ? new HostMutationObserver((records) => {
+      if (records.some((record) => !isStatusPaintMeasurement(record))) schedule();
+    }) : null;
     const HostIntersectionObserver = hostWindow.IntersectionObserver;
-    let fullyIntersecting = HostIntersectionObserver === undefined;
-    const update = () => setVisible(isVisibleStatusBand(element, fullyIntersecting));
     const observer = HostIntersectionObserver ? new HostIntersectionObserver((entries) => {
       const entry = entries.find((candidate) => candidate.target === element);
       fullyIntersecting = isFullyIntersecting(entry);
-      update();
+      schedule();
     }, { threshold: DETAILS_STATUS_VISIBILITY_THRESHOLDS }) : null;
     observer?.observe(element);
     const HostResizeObserver = hostWindow.ResizeObserver;
-    const resizeObserver = HostResizeObserver ? new HostResizeObserver(update) : null;
+    const resizeObserver = HostResizeObserver ? new HostResizeObserver(schedule) : null;
     resizeObserver?.observe(element);
-    const HostMutationObserver = hostWindow.MutationObserver;
-    const mutationObserver = HostMutationObserver ? new HostMutationObserver(update) : null;
-    for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
-      mutationObserver?.observe(ancestor, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
-    }
-    hostWindow.addEventListener("resize", update);
-    hostWindow.addEventListener("scroll", update, true);
+    hostWindow.addEventListener("resize", schedule);
+    hostWindow.addEventListener("scroll", schedule, true);
     update();
     return () => {
       observer?.disconnect(); resizeObserver?.disconnect(); mutationObserver?.disconnect();
-      hostWindow.removeEventListener("resize", update); hostWindow.removeEventListener("scroll", update, true);
+      if (frame !== null) hostWindow.cancelAnimationFrame(frame);
+      hostWindow.removeEventListener("resize", schedule); hostWindow.removeEventListener("scroll", schedule, true);
     };
   }, [element]);
   return visible;
@@ -478,16 +438,21 @@ function useVisibleLayout(element: HTMLDivElement | null): boolean {
 
 export function isVisibleStatusBand(element: HTMLDivElement, intersecting: boolean): boolean {
   if (!intersecting) return false;
+  return measureStatusBandPaint(element, () => isThemedStatusBandVisible(element));
+}
+
+function isThemedStatusBandVisible(element: HTMLDivElement): boolean {
   const ownerDocument = element.ownerDocument;
   const hostDocument = ownerDocument ?? document;
   const hostWindow = ownerDocument?.defaultView ?? (ownerDocument ? null : window);
   if (!hostWindow) return false;
   const rect = element.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height < 20) return false;
+  if (rect.width <= 0 || rect.height <= 0) return false;
   for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
     if (ancestor.hidden) return false;
     const style = hostWindow.getComputedStyle?.(ancestor);
-    if (style?.display === "none" || style?.visibility === "hidden" || style?.visibility === "collapse") return false;
+    if (style?.display === "none" || style?.visibility === "hidden" || style?.visibility === "collapse"
+      || (style?.opacity !== undefined && Number(style.opacity) <= 0)) return false;
     if (ancestor !== element && typeof ancestor.getBoundingClientRect === "function") {
       const bounds = ancestor.getBoundingClientRect();
       const clipsX = clipsOverflow(style?.overflowX ?? style?.overflow);

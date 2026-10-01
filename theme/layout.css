@@ -5,19 +5,21 @@
   height: 30px !important;
 }
 
-/* Reserve Clean Gameview's full artwork height before the status slot fills.
-   Keep the play controls and Activity in place while Steam animates the page. */
+/* Keep Clean Gameview's early reservation limited to its intentional empty spacer. */
 .appdetails_InnerContainer_1Svpj:has(
   .basicappdetailssectionstyler_AppDetailsRoot_3fp5y
     > .basicappdetailssectionstyler_PlaySection_3scbH
-    + :is(
-      .Panel:empty,
-      .appdetailsplaysection_CloudStatusRow_QvHky,
-      [data-sdh-ludusavi-status-row="true"]
-    )
+    + .Panel:empty
 ) :is(
   .sharedappdetailsheader_HeaderBackgroundImage_1sarA,
   .sharedappdetailsheader_ImgSrc__dije
 ) {
   min-height: calc(var(--CGV-image-height, 0px) + 30px) !important;
+}
+
+/* The runtime marks only a visible, in-flow status band and supplies its measured height. */
+.appdetails_InnerContainer_1Svpj [data-sdh-ludusavi-artwork-band="true"] {
+  min-height: calc(
+    var(--CGV-image-height, 0px) + var(--sdh-status-band-height, 30px)
+  ) !important;
 }
