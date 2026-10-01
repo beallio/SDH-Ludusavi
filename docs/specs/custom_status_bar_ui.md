@@ -359,12 +359,16 @@ when no trailer is playing. It selects only the current app's full-size Steam he
 shortcut hero and measures a native-class or plugin-marked, full-width, in-flow status band
 at the artwork's lower edge. The band's actual layout height determines the extension;
 transform-scaled screen heights only locate that edge while the game page animates in.
-Compact, moved, hidden, clipped, and unrelated rows do not reserve artwork space. Hit-testing
-near the band's upper edge permits artwork behind a row whose center lies under Steam's
-footer. The band itself does not move. Original inline image height, CSS-variable values,
-marker attributes, and priorities return when the extension ends. Native DOM, stylesheet,
-scroll, resize, and band-size changes resync the image. If Decky Metadata marks the hero
-as its trailer target, Ludusavi yields so the trailer plugin alone controls that surface.
+Compact, moved, and genuinely hidden rows do not reserve artwork space. Temporary
+coverage or clipping during page entry retains a valid row's layout reservation,
+but only a paintable row permits the inline artwork extension. Hit-testing near
+the band's upper edge permits artwork behind a row whose center lies under Steam's
+footer. Initial measurement runs after the native slot's layout-effect commits,
+not against its temporary hidden row. The band itself does not move. Original inline
+image height, CSS-variable values, marker attributes, and priorities return when
+the extension ends. Native DOM, stylesheet, scroll, resize, and band-size changes
+resync the image. If Decky Metadata marks the hero as its trailer target, Ludusavi
+yields so the trailer plugin alone controls that surface.
 The launch-time BrowserView strip remains separate.
 
 ### Optional CSS Loader theme
@@ -379,10 +383,19 @@ control discovers a new theme when it was already running and did not observe di
 creation.
 
 `layout.css` is injected in every selection while the theme is enabled. It reserves a
-30-pixel empty panel immediately after the play section. With Clean Gameview, that empty
-slot keeps the early `--CGV-image-height + 30px` minimum height. A real status band instead
-uses the runtime's measured `--sdh-status-band-height` on plugin-marked artwork. Hidden,
-compact, and relocated indicators therefore do not trigger a fixed 30-pixel reservation.
+30-pixel empty panel immediately after the play section. With Clean Gameview, the native
+header image and background reserve `--CGV-image-height + 30px` before the status children
+mount. The `--sdh-status-band-reserved` flag identifies this allowance; runtimes subtract
+it before deriving the original artwork height, then set the measured
+`--sdh-status-band-height`. Hidden, compact, and relocated indicators reduce that
+allowance to zero after layout settles. No row leaves the theme's early blank-slot
+allowance intact. Without Clean Gameview's image-height variable, no allowance is
+subtracted.
+
+Ludusavi and Metadata share a native-window WeakMap keyed by the header background.
+The first owner saves the genuine inline variable value and priority; a handoff changes
+only ownership. Only the current owner restores that value. This avoids a second crop
+change during trailer attachment and prevents an old owner from overwriting a new one.
 Steam's page-scale transition remains unchanged. Without CSS Loader or with the theme
 disabled, the mounted header's measured artwork extension remains in use.
 

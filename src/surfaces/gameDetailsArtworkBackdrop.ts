@@ -1,4 +1,5 @@
 import { getNativeGameDetailsStatusClasses } from "./gameDetailsStatusClasses";
+import { appDetailsHeaderClasses } from "@decky/ui";
 
 type HostWindow = Window & {
   MutationObserver?: typeof MutationObserver;
@@ -7,8 +8,6 @@ type HostWindow = Window & {
 type ArtworkStyleSnapshot = Readonly<{
   element: HTMLElement;
   marker: string | null;
-  bandHeight: string;
-  bandHeightPriority: string;
 }>;
 type ExtendedArtwork = {
   image: HTMLImageElement;
@@ -29,6 +28,47 @@ const CLIPPING_OVERFLOW: Record<string, true> = {
   auto: true,
   scroll: true,
 };
+
+type SharedBandReservation = { original: string; priority: string; owner: object };
+type ReservationWindow = Window & {
+  __sdhStatusBandReservations?: WeakMap<HTMLElement, SharedBandReservation>;
+};
+
+function reservedBandHeight(element: HTMLElement, host: Window): number {
+  const style = host.getComputedStyle(element);
+  if (style.getPropertyValue?.("--sdh-status-band-reserved") !== "1"
+    || !style.getPropertyValue("--CGV-image-height")) return 0;
+  const value = Number.parseFloat(style.getPropertyValue(BAND_HEIGHT_PROPERTY) || "30");
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function reserveBand(background: HTMLElement, owner: object, height: number): void {
+  const host = background.ownerDocument.defaultView as ReservationWindow | null;
+  if (!host) return;
+  const reservations = host.__sdhStatusBandReservations ??= new WeakMap();
+  let reservation = reservations.get(background);
+  if (!reservation) {
+    reservation = { original: background.style.getPropertyValue(BAND_HEIGHT_PROPERTY),
+      priority: background.style.getPropertyPriority(BAND_HEIGHT_PROPERTY), owner };
+    reservations.set(background, reservation);
+  }
+  reservation.owner = owner;
+  const value = `${height}px`;
+  if (background.style.getPropertyValue(BAND_HEIGHT_PROPERTY) !== value
+    || background.style.getPropertyPriority(BAND_HEIGHT_PROPERTY) !== "") {
+    background.style.setProperty(BAND_HEIGHT_PROPERTY, value);
+  }
+}
+
+function releaseBand(background: HTMLElement | null, owner: object): void {
+  if (!background) return;
+  const reservations = (background.ownerDocument.defaultView as ReservationWindow | null)?.__sdhStatusBandReservations;
+  const reservation = reservations?.get(background);
+  if (!reservation || reservation.owner !== owner) return;
+  if (reservation.original) background.style.setProperty(BAND_HEIGHT_PROPERTY, reservation.original, reservation.priority);
+  else background.style.removeProperty(BAND_HEIGHT_PROPERTY);
+  reservations?.delete(background);
+}
 
 const paintMeasurements = new WeakSet<Node>();
 
@@ -66,6 +106,9 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
   let frame: number | null = null;
   let frameWindow: HostWindow | null = null;
   let restoreBeforeSync = false;
+  const reservationOwner = {};
+  let reservationBackground: HTMLElement | null = null;
+  const backgroundClass = (appDetailsHeaderClasses as Record<string, string | undefined> | undefined)?.HeaderBackgroundImage;
 
   function cancelFrame(): void {
     if (frame === null) return;
@@ -153,11 +196,6 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     if (inlineHeight) image.style.setProperty("height", inlineHeight, priority);
     else image.style.removeProperty("height");
     for (const snapshot of previous.managedStyles) {
-      if (snapshot.bandHeight) {
-        snapshot.element.style.setProperty(BAND_HEIGHT_PROPERTY, snapshot.bandHeight, snapshot.bandHeightPriority);
-      } else {
-        snapshot.element.style.removeProperty(BAND_HEIGHT_PROPERTY);
-      }
       if (snapshot.marker === null) snapshot.element.removeAttribute(ARTWORK_MARKER);
       else snapshot.element.setAttribute(ARTWORK_MARKER, snapshot.marker);
     }
@@ -180,6 +218,39 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     return nativeClasses !== null && element.classList?.contains(nativeClasses.row) === true;
   }
 
+  function layoutBandHeight(element: HTMLElement | null, artwork: DOMRect, edge: number): number {
+    if (!element || !isStatusBand(element)) return 0;
+    return measureStatusBandPaint(element, () => {
+      const rect = element.getBoundingClientRect();
+      const style = currentWindow.getComputedStyle(element);
+      if (element.offsetHeight <= 0 || Math.abs(rect.width - artwork.width) > 2
+        || Math.abs(rect.top - edge) > 1 || style.display === "none"
+        || style.visibility === "hidden" || style.visibility === "collapse"
+        || (style.opacity !== "" && Number(style.opacity) <= 0)
+        || style.position === "absolute" || style.position === "fixed" || style.position === "sticky") return 0;
+      return element.offsetHeight;
+    });
+  }
+
+  function reserveLayoutBand(background: HTMLElement | null, artwork: DOMRect, edge: number): void {
+    if (!background || currentWindow.getComputedStyle(background).getPropertyValue?.("--sdh-status-band-reserved") !== "1") return;
+    let found = false;
+    let height = 0;
+    for (const row of currentDocument!.querySelectorAll<HTMLElement>(
+      `[${STATUS_ROW_MARKER}="true"]${nativeClasses ? `,.${nativeClasses.row}` : ""}`,
+    )) {
+      found = true;
+      height = layoutBandHeight(row, artwork, edge);
+      if (height) break;
+    }
+    if (found) {
+      reservationBackground = background;
+      reserveBand(background, reservationOwner, height);
+    } else {
+      releaseBand(reservationBackground, reservationOwner);
+      reservationBackground = null;
+    }
+  }
 
   function visibleBandHeight(
     element: HTMLElement,
@@ -230,17 +301,10 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       return elements.map((element) => ({
         element,
         marker: element.getAttribute(ARTWORK_MARKER),
-        bandHeight: element.style.getPropertyValue(BAND_HEIGHT_PROPERTY),
-        bandHeightPriority: element.style.getPropertyPriority(BAND_HEIGHT_PROPERTY),
       }));
     })();
-    const managedHeight = `${bandHeight}px`;
     for (const snapshot of managedStyles) {
       snapshot.element.setAttribute(ARTWORK_MARKER, "true");
-      if (snapshot.element.style.getPropertyValue(BAND_HEIGHT_PROPERTY) !== managedHeight
-        || snapshot.element.style.getPropertyPriority(BAND_HEIGHT_PROPERTY) !== "") {
-        snapshot.element.style.setProperty(BAND_HEIGHT_PROPERTY, managedHeight);
-      }
     }
     image.style.setProperty("height", `${naturalHeight + bandHeight}px`, "important");
     if (extended) extended.bandHeight = bandHeight;
@@ -253,9 +317,16 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     if (!currentDocument) return;
     const image = findArtwork();
     if (extended && extended.image !== image) restore();
+    const background = image && backgroundClass ? image.closest(`.${backgroundClass}`) as HTMLElement | null : null;
+    if (reservationBackground !== background) {
+      releaseBand(reservationBackground, reservationOwner);
+      reservationBackground = null;
+    }
     if (!image || image.closest(".decky-metadata-trailer-target")) {
       observeBand(null);
       restore();
+      releaseBand(reservationBackground, reservationOwner);
+      reservationBackground = null;
       return;
     }
     const ownerDocument = image.ownerDocument ?? currentDocument;
@@ -268,20 +339,26 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       return;
     }
     const scaleY = artwork.height / imageHeight;
-    const naturalHeight = extended?.naturalHeight ?? imageHeight;
+    const naturalHeight = extended?.naturalHeight ?? imageHeight - reservedBandHeight(image, currentWindow);
     const edge = artwork.top + naturalHeight * scaleY;
     let element = ownerDocument.elementFromPoint(artwork.left + artwork.width / 2, edge + 1) as HTMLElement | null;
     while (element && element !== ownerDocument.body && !isStatusBand(element)) element = element.parentElement;
     if (!element || element === ownerDocument.body) {
       observeBand(null);
       restore();
+      reserveLayoutBand(background, artwork, edge);
       return;
     }
     const bandHeight = visibleBandHeight(element, artwork, edge, ownerDocument);
     if (bandHeight === null) {
       observeBand(null);
       restore();
+      reserveLayoutBand(background, artwork, edge);
       return;
+    }
+    if (background && currentWindow.getComputedStyle(image).getPropertyValue?.("--sdh-status-band-reserved") === "1") {
+      reservationBackground = background;
+      reserveBand(background, reservationOwner, bandHeight);
     }
     observeBand(element);
     if (extended?.bandHeight === bandHeight) return;
@@ -289,7 +366,9 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
   }
 
   bindDocument(initialDocument);
-  sync();
+  // NativeStatusSlot resolves its occupied state in layout effects. Measure after
+  // those commits, before paint, rather than collapsing their temporary hidden row.
+  schedule();
   return () => {
     mutationObserver?.disconnect();
     resizeObserver?.disconnect();
@@ -298,5 +377,6 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     cancelFrame();
     observeBand(null);
     restore();
+    releaseBand(reservationBackground, reservationOwner);
   };
 }

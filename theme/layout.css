@@ -5,21 +5,12 @@
   height: 30px !important;
 }
 
-/* Keep Clean Gameview's early reservation limited to its intentional empty spacer. */
-.appdetails_InnerContainer_1Svpj:has(
-  .basicappdetailssectionstyler_AppDetailsRoot_3fp5y
-    > .basicappdetailssectionstyler_PlaySection_3scbH
-    + .Panel:empty
-) :is(
+/* The native header can paint before its play/status children mount. Reserve
+   the normal band immediately; the geometry owners supply the actual height. */
+:is(
   .sharedappdetailsheader_HeaderBackgroundImage_1sarA,
   .sharedappdetailsheader_ImgSrc__dije
 ) {
-  min-height: calc(var(--CGV-image-height, 0px) + 30px) !important;
-}
-
-/* The runtime marks only a visible, in-flow status band and supplies its measured height. */
-.appdetails_InnerContainer_1Svpj [data-sdh-ludusavi-artwork-band="true"] {
-  min-height: calc(
-    var(--CGV-image-height, 0px) + var(--sdh-status-band-height, 30px)
-  ) !important;
+  --sdh-status-band-reserved: 1;
+  min-height: calc(var(--CGV-image-height, 0px) + var(--sdh-status-band-height, 30px)) !important;
 }

@@ -12,6 +12,7 @@ vi.mock("@decky/ui", () => ({
     CloudStatusUploading: "native-status-uploading",
   },
   basicAppDetailsSectionStylerClasses: { PlaySection: "native-play-section" },
+  appDetailsHeaderClasses: { HeaderBackgroundImage: "native-artwork-background" },
 }));
 
 function gamePage(appID: string, src: string) {
@@ -30,6 +31,7 @@ function gamePage(appID: string, src: string) {
   let nativeStatusClass = false;
   let clipped = false;
   let metadataOwnsHero = false;
+  let earlyReservation = false;
   let notifyMutation = () => {};
   let nextFrame = 0;
   const frames = new Map<number, FrameRequestCallback>();
@@ -63,8 +65,12 @@ function gamePage(appID: string, src: string) {
     getAttribute: (name: string) => imageAttributes.get(name) ?? null,
     setAttribute: (name: string, value: string) => imageAttributes.set(name, value),
     removeAttribute: (name: string) => imageAttributes.delete(name),
-    closest: (selector: string) => selector === ".decky-metadata-trailer-target" && metadataOwnsHero ? {} : null,
-    get offsetHeight() { return Number.parseFloat(imageStyle.getPropertyValue("height")) || naturalHeight; },
+    closest: (selector: string) => selector === ".decky-metadata-trailer-target" && metadataOwnsHero ? {}
+      : selector === ".native-artwork-background" ? background : null,
+    get offsetHeight() {
+      const reserved = earlyReservation ? Number.parseFloat(artworkStyle.getPropertyValue("--sdh-status-band-height") || "30") : 0;
+      return Math.max(Number.parseFloat(imageStyle.getPropertyValue("height")) || naturalHeight, naturalHeight + reserved);
+    },
     getBoundingClientRect() {
       const renderedHeight = this.offsetHeight * scale;
       return { left: 0, top: 0, width: 854 * scale, height: renderedHeight, right: 854 * scale, bottom: renderedHeight };
@@ -119,6 +125,8 @@ function gamePage(appID: string, src: string) {
     head: {},
     documentElement: { clientWidth: 854, clientHeight: 534 },
     images: [image],
+    querySelector: () => rowMarked || nativeStatusClass ? row : null,
+    querySelectorAll: () => rowMarked || nativeStatusClass ? [row] : [],
     elementFromPoint: (x: number, y: number) =>
       rowVisible && x >= 0 && x <= rowWidth * scale && y >= rowTop * scale
         && y < (rowTop + rowHeight) * scale ? label : null,
@@ -133,6 +141,9 @@ function gamePage(appID: string, src: string) {
       overflow: element === rowParent && clipped ? "hidden" : "visible",
       overflowX: "visible",
       overflowY: element === rowParent && clipped ? "hidden" : "visible",
+      getPropertyValue: (name: string) => name === "--sdh-status-band-reserved" ? earlyReservation ? "1" : ""
+        : name === "--CGV-image-height" ? earlyReservation ? `${naturalHeight}px` : ""
+          : name === "--sdh-status-band-height" ? artworkStyle.getPropertyValue(name) : "",
     }),
     MutationObserver: class {
       constructor(callback: MutationCallback) { notifyMutation = () => callback([], this as unknown as MutationObserver); }
@@ -150,6 +161,7 @@ function gamePage(appID: string, src: string) {
   };
   Object.assign(hostDocument, { defaultView: hostWindow });
   Object.assign(image, { ownerDocument: hostDocument });
+  Object.assign(background, { ownerDocument: hostDocument });
   function flush() {
     for (const [id, callback] of frames) {
       frames.delete(id);
@@ -161,6 +173,7 @@ function gamePage(appID: string, src: string) {
     image,
     row,
     hostWindow: hostWindow as unknown as Window,
+    flush,
     get height() { return imageStyle.getPropertyValue("height"); },
     get originalHeight() { return naturalHeight; },
     get bandVariable() { return imageStyle.getPropertyValue("--sdh-status-band-height"); },
@@ -178,6 +191,7 @@ function gamePage(appID: string, src: string) {
     },
     set metadataOwnsHero(value: boolean) { metadataOwnsHero = value; notifyMutation(); flush(); },
     set scale(value: number) { scale = value; notifyMutation(); flush(); },
+    set earlyReservation(value: boolean) { earlyReservation = value; notifyMutation(); flush(); },
     set bandHeight(value: number) { rowHeight = value; notifyMutation(); flush(); },
     set bandOpacity(value: string) { rowOpacity = value; notifyMutation(); flush(); },
     set bandVisibility(value: string) { rowVisibility = value; notifyMutation(); flush(); },
@@ -209,9 +223,9 @@ it("shows a Steam Cloud row over artwork without fighting an active Metadata tra
   const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
   vi.stubGlobal("document", { images: [], elementFromPoint: () => null });
   const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
 
   expect(page.image.getBoundingClientRect().bottom).toBe(page.row.getBoundingClientRect().bottom);
-  expect(page.bandVariable).toBe("30px");
   expect(page.artworkMarker).toBe("true");
   page.scroll();
   expect(page.image.getBoundingClientRect().bottom).toBe(524);
@@ -232,6 +246,7 @@ it("keeps the full status image visible while Steam scales the entering page", (
   const page = gamePage("3156562597", "/customimages/3156562597_hero.png");
   page.scale = 0.95;
   const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
   expect(page.image.getBoundingClientRect().bottom).toBeCloseTo(page.row.getBoundingClientRect().bottom);
 
   page.scale = 1;
@@ -244,6 +259,7 @@ it("restores a non-Steam image when its Ludusavi row yields, leaves, or resizes"
   const page = gamePage("3156562597", "/customimages/3156562597_hero.png?v=1");
   page.rowText = "Ludusavi: Up to date";
   const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
   expect(page.image.getBoundingClientRect().bottom).toBe(524);
 
   page.suppressed = true;
@@ -271,11 +287,10 @@ it("covers the actual themed band height instead of a fixed 30-pixel allowance",
   page.bandHeight = 52;
   page.scale = 0.95;
   const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
   expect(page.image.getBoundingClientRect().bottom).toBeCloseTo(page.row.getBoundingClientRect().bottom);
-  expect(page.bandVariable).toBe("52px");
   page.bandHeight = 44;
   expect(page.image.getBoundingClientRect().bottom).toBeCloseTo(page.row.getBoundingClientRect().bottom);
-  expect(page.bandVariable).toBe("44px");
   expect(page.height).toBe("538px");
   dispose();
   expect(page.height).toBe("");
@@ -285,12 +300,11 @@ it("restores original artwork styles and attributes on cleanup", () => {
   const page = gamePage("3156562597", "/customimages/3156562597_hero.png");
   page.seedOriginalStyles();
   const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
 
   expect(page.height).toBe("524px");
   expect(page.artworkMarker).toBe("true");
-  expect(page.bandVariable).toBe("30px");
   expect(page.backgroundMarker).toBe("true");
-  expect(page.backgroundBandVariable).toBe("30px");
   dispose();
   expect(page.height).toBe("494px");
   expect(page.artworkMarker).toBe("original-image-marker");
@@ -307,6 +321,7 @@ it("recognizes Steam-native rows but never extends arbitrary or clipped artwork 
   page.marker = false;
   page.rowText = "Activity";
   const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
   expect(page.image.getBoundingClientRect().bottom).toBe(494);
 
   page.nativeClass = true;
@@ -323,6 +338,7 @@ it("recognizes Steam-native rows but never extends arbitrary or clipped artwork 
 it("restores the artwork when a status row is moved or display-hidden", () => {
   const page = gamePage("3156562597", "/customimages/3156562597_hero.png");
   const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
   expect(page.image.getBoundingClientRect().bottom).toBe(524);
 
   page.bandPosition = "fixed";
@@ -344,6 +360,7 @@ it("restores the artwork when a status row is moved or display-hidden", () => {
 it("does not reserve full-width artwork for a theme-hidden or compact indicator", () => {
   const page = gamePage("3156562597", "/customimages/3156562597_hero.png");
   const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
   page.bandOpacity = "0";
   expect(page.image.getBoundingClientRect().bottom).toBe(494);
   page.bandOpacity = "1";
@@ -351,5 +368,59 @@ it("does not reserve full-width artwork for a theme-hidden or compact indicator"
   page.bandWidth = 32;
   page.bandHeight = 16;
   expect(page.image.getBoundingClientRect().bottom).toBe(494);
+  dispose();
+});
+
+it("adopts an early theme reservation and resizes the band without a second crop or double allowance", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.earlyReservation = true;
+  expect(page.image.offsetHeight).toBe(524);
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  expect(page.image.offsetHeight).toBe(524);
+  page.bandHeight = 52;
+  expect(page.image.offsetHeight).toBe(546);
+  page.bandWidth = 32;
+  page.bandHeight = 16;
+  expect(page.image.offsetHeight).toBe(494);
+  dispose();
+  expect(page.backgroundBandVariable).toBe("");
+});
+
+it("keeps a full-width row reserved while the entering page is temporarily covered", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.earlyReservation = true;
+  page.visible = false;
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  expect(page.image.offsetHeight).toBe(524);
+  page.visible = true;
+  expect(page.image.offsetHeight).toBe(524);
+  page.bandOpacity = "0";
+  expect(page.image.offsetHeight).toBe(494);
+  dispose();
+});
+
+it("restores the genuine CSS variable when the reservation theme is enabled after the artwork extension", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.seedOriginalStyles();
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  page.earlyReservation = true;
+  expect(page.image.offsetHeight).toBe(524);
+  dispose();
+  expect(page.backgroundBandVariable).toBe("14px");
+  expect(page.backgroundBandVariablePriority).toBe("important");
+  expect(page.bandVariable).toBe("12px");
+});
+
+it("keeps the early reservation until native slot layout effects finish", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.earlyReservation = true;
+  page.bandDisplay = "none";
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  expect(page.image.offsetHeight).toBe(524);
+  page.bandDisplay = "flex";
+  expect(page.image.offsetHeight).toBe(524);
   dispose();
 });
