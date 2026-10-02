@@ -2,7 +2,6 @@ import { act, cloneElement, createElement, useEffect, type ReactElement } from "
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setTimeout as waitForUpdate } from "node:timers/promises";
 
 const nativeClasses = vi.hoisted(() => ({
   play: {
@@ -67,7 +66,7 @@ const header = (nativeStatus: ReactElement) => createElement("div", { className:
   createElement("div", { key: "play", className: "native-play-section" }, "Play"), cloneElement(nativeStatus, { key: "cloud" }),
   createElement("div", { key: "feedback" }), createElement("div", { key: "activity" }, "Activity"),
 ]);
-const render = async (node: ReactElement) => { await act(async () => { root.render(node); await waitForUpdate(20); }); };
+const render = async (node: ReactElement) => { await act(async () => { root.render(node); await new Promise<void>((resolve) => setTimeout(resolve, 20)); }); };
 
 it("lets direct-child, sibling, and descendant Steam theme selectors reach the fallback row", async () => {
   await render(composeInNativeStatusSlot(header(createElement(() => null)), pluginRow()) as ReactElement);
