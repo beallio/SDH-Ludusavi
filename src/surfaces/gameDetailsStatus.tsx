@@ -16,7 +16,7 @@ const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // update an already-mounted details page without a navigation.
 const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
 // Bump when an existing route wrapper cannot render the newest status-row contract.
-const GAME_DETAILS_ROUTE_RENDER_VERSION = 12;
+const GAME_DETAILS_ROUTE_RENDER_VERSION = 13;
 export type GameDetailsStatusSurface = Readonly<{
   dispose(): void;
 }>;
@@ -143,18 +143,24 @@ function retainGameDetailsRoutePatch(contributionRegistry: GameDetailsStatusCont
       if (!wrappedHeader) {
         wrappedHeader = (headerProps: unknown) => {
           const contribution = contributionRegistry.getSnapshot();
-          return createElement(GameDetailsStatusHeader, {
-            appID,
-            header: nativeHeader,
-            headerProps,
-            contributionSource: contributionRegistry,
-            store: contribution?.store ?? null,
-            statusSurface: contribution?.statusSurface ?? null,
-          });
+          // Keep the native Provider as the route result. Downstream route
+          // patches read its direct child props, so page presence belongs in
+          // this stable header boundary rather than around that Provider.
+          return createElement(Fragment, null,
+            createElement(DetailsPagePresence, { appID, contributionSource: contributionRegistry }),
+            createElement(GameDetailsStatusHeader, {
+              appID,
+              header: nativeHeader,
+              headerProps,
+              contributionSource: contributionRegistry,
+              store: contribution?.store ?? null,
+              statusSurface: contribution?.statusSurface ?? null,
+            }),
+          );
         };
         wrappersForHeader.set(appID, wrappedHeader);
       }
-      return withDetailsPagePresence(cloneElement(provider, { ...provider.props, value: wrappedHeader }));
+      return cloneElement(provider, { ...provider.props, value: wrappedHeader });
     };
     // Decky's dispatcher consumes the React child's props. Preserve every native
     // prop and replace only the route callback.

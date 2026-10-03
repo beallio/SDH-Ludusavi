@@ -1,4 +1,4 @@
-import { createContext, createElement, type ReactElement } from "react";
+import { cloneElement, createContext, createElement, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const routeMock = vi.hoisted(() => ({ addPatch: vi.fn((_: string, patch: unknown) => patch), removePatch: vi.fn() }));
@@ -52,8 +52,8 @@ describe("game details route adapter", () => {
     expect(patched.children.props.renderFunc).not.toBe(originalRender);
     const first = patched.children.props.renderFunc({ params: { appid: "100" } });
     const second = patched.children.props.renderFunc({ params: { appid: "100" } });
-    const firstProvider = first.props.children[1] as ReactElement<{ children: ReactElement; value: unknown }>;
-    const secondProvider = second.props.children[1] as ReactElement<{ children: ReactElement; value: unknown }>;
+    const firstProvider = first as ReactElement<{ children: ReactElement; value: unknown }>;
+    const secondProvider = second as ReactElement<{ children: ReactElement; value: unknown }>;
     expect(firstProvider.props.children.type).toBe("native-children");
     expect(firstProvider.props.value).not.toBe(nativeHeader);
     expect(secondProvider.props.value).toBe(firstProvider.props.value);
@@ -64,6 +64,80 @@ describe("game details route adapter", () => {
     expect(routeMock.removePatch).not.toHaveBeenCalled();
     vi.runOnlyPendingTimers();
     expect(routeMock.removePatch).toHaveBeenCalledWith("/library/app/:appid", patch);
+  });
+
+  it("preserves a native provider root for downstream details patches in cold and hot-reload order", () => {
+    const surface = createGameDetailsStatusSurface(createLudusaviStateStore(), {
+      registerDetailsOwner: vi.fn(), registerDetailsPage: vi.fn(() => () => {}),
+      subscribeDetailsPresentation: vi.fn(() => () => {}), shouldDetailsRowYield: vi.fn(() => false),
+    } satisfies DetailsStatusPresentationSurface);
+    try {
+      const sdhPatch = routeMock.addPatch.mock.calls.at(-1)?.[1] as (route: any) => any;
+      const context = createContext<unknown>(null);
+      const nativeHeader = () => createElement("native-header");
+      type PlayTimeDetails = { nPlaytimeForever: number };
+      type RouteBodyProps = { overview: { appid: number }; details: PlayTimeDetails };
+      const routeBody = ({ details }: RouteBodyProps) => createElement("output", {
+        "data-sdh-playtime": "true",
+      }, details.nPlaytimeForever);
+
+      const withPlayTimeUpdate = (route: any) => {
+        const child = route.children as ReactElement<{ renderFunc: (...args: unknown[]) => ReactElement }>;
+        return {
+          ...route,
+          children: cloneElement(child, {
+            ...child.props,
+            renderFunc: (...args: unknown[]) => {
+              const result = child.props.renderFunc(...args) as ReactElement<{ children: ReactElement<RouteBodyProps> }>;
+              // This is the direct access pattern used by the installed downstream
+              // PlayTime route patch. It must not see an SDH wrapper Fragment.
+              const overview = result.props.children.props.overview;
+              const details = result.props.children.props.details;
+              if (overview.appid === 100) details.nPlaytimeForever = 0;
+              return result;
+            },
+          }),
+        };
+      };
+      const makeRoute = (details: PlayTimeDetails) => ({
+        path: "/library/app/:appid",
+        children: createElement("native-route", {
+          renderFunc: () => createElement(
+            context.Provider,
+            { value: nativeHeader },
+            createElement(routeBody, { overview: { appid: 100 }, details }),
+          ),
+        }),
+      });
+      const expectPeerAndNativeRender = (
+        result: ReactElement<{
+          children: ReactElement<RouteBodyProps, typeof routeBody>;
+          value: (props: unknown) => ReactElement<{ children: ReactElement[] }>;
+        }>,
+        details: PlayTimeDetails,
+      ) => {
+        expect(result.type).toBe(context.Provider);
+        expect(result.props.children.props.overview.appid).toBe(100);
+        expect(details.nPlaytimeForever).toBe(0);
+        const visibleRouteBody = result.props.children.type(result.props.children.props);
+        expect((visibleRouteBody.props as { children?: unknown }).children).toBe(0);
+        const headerBoundary = result.props.value({});
+        const statusHeader = headerBoundary.props.children[1] as ReactElement<{ header: () => ReactElement }>;
+        expect(statusHeader.props.header().type).toBe("native-header");
+      };
+
+      const coldDetails = { nPlaytimeForever: -999 };
+      const coldRendered = withPlayTimeUpdate(sdhPatch(makeRoute(coldDetails)))
+        .children.props.renderFunc({ params: { appid: "100" } });
+      expectPeerAndNativeRender(coldRendered, coldDetails);
+
+      const hotDetails = { nPlaytimeForever: -999 };
+      const hotRendered = sdhPatch(withPlayTimeUpdate(makeRoute(hotDetails)))
+        .children.props.renderFunc({ params: { appid: "100" } });
+      expectPeerAndNativeRender(hotRendered, hotDetails);
+    } finally {
+      surface.dispose();
+    }
   });
 
   it("keeps the mounted route contribution alive through a dispose and replacement without adding another patch", () => {
@@ -79,16 +153,19 @@ describe("game details route adapter", () => {
     const child = createElement("native-route", { renderFunc: originalRender });
     const patched = firstPatch({ path: "/library/app/:appid", children: child });
     const rendered = patched.children.props.renderFunc({ params: { appid: "100" } });
-    const retainedProvider = rendered.props.children[1] as ReactElement<{ value: unknown }>;
+    const retainedProvider = rendered as ReactElement<{ value: unknown }>;
     const retainedHeader = retainedProvider.props.value as (props: unknown) => ReactElement<{
+      children: ReactElement[];
+    }>;
+    const retainedStatusHeader = () => retainedHeader({}).props.children[1] as ReactElement<{
       store: unknown;
       contributionSource: GameDetailsStatusContributionSource;
     }>;
-    const retainedContributionSource = retainedHeader({}).props.contributionSource;
+    const retainedContributionSource = retainedStatusHeader().props.contributionSource;
     const notifyRetainedHeader = vi.fn();
     const unsubscribe = retainedContributionSource.subscribe(notifyRetainedHeader);
 
-    expect(retainedHeader({}).props.store).toBe(firstStore);
+    expect(retainedStatusHeader().props.store).toBe(firstStore);
 
     firstSurface.dispose();
     expect(retainedContributionSource.getSnapshot()).toBeNull();
@@ -101,7 +178,7 @@ describe("game details route adapter", () => {
 
     // This is the original mounted route contribution. It must update to the
     // current runtime rather than requiring Steam to navigate or rerender it.
-    expect(retainedHeader({}).props.store).toBe(replacementStore);
+    expect(retainedStatusHeader().props.store).toBe(replacementStore);
     expect(retainedContributionSource.getSnapshot()?.store).toBe(replacementStore);
     expect(notifyRetainedHeader).toHaveBeenCalledTimes(2);
     expect(routeMock.addPatch).toHaveBeenCalledTimes(1);
