@@ -317,3 +317,79 @@ it("keeps same-page fallback active when the mounted route body never renders it
   Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRoutePatch");
   Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRegistry");
 });
+
+it("keeps the same-page fallback through loading, multi-child, and empty route roots", async () => {
+  const cases = [
+    {
+      name: "loading text",
+      renderResult: () => createElement("native-loading", { "data-loading": "true" }, "Loading details"),
+      assertOriginalContent: () => expect(host.querySelector("[data-loading=\"true\"]")?.textContent).toBe("Loading details"),
+    },
+    {
+      name: "multi-child provider",
+      renderResult: () => {
+        const context = createContext<unknown>(null);
+        return createElement(context.Provider, { value: {} }, [
+          createElement("native-first", { key: "first" }, "First"),
+          createElement("native-second", { key: "second" }, "Second"),
+        ]);
+      },
+      assertOriginalContent: () => expect(host.textContent).toBe("FirstSecond"),
+    },
+    {
+      name: "empty provider",
+      renderResult: () => {
+        const context = createContext<unknown>(null);
+        return createElement(context.Provider, { value: {} });
+      },
+      assertOriginalContent: () => expect(host.textContent).toBe(""),
+    },
+  ];
+
+  for (const testCase of cases) {
+    const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
+    const store = createLudusaviStateStore();
+    store.applyRefreshResult({
+      games: [{ name: "Fixture", steam_id: "100", configured: true, has_backup: false, needs_first_backup: true, error: null, status: "needs_first_backup" }],
+      aliases: {}, history: {}, dependency_error: null,
+    });
+    const statusSurface = createAutoSyncStatusSurface(view, store);
+    const gameDetailsSurface = createGameDetailsStatusSurface(store, statusSurface);
+    const patch = routeMock.addPatch.mock.calls.at(-1)?.[1] as (route: any) => any;
+    const child = createElement("native-route", { renderFunc: testCase.renderResult });
+    const patched = patch({ path: "/library/app/:appid", children: child });
+    const renderKnownPage = () => patched.children.props.renderFunc({ params: { appid: "100" } });
+
+    try {
+      await render(renderKnownPage());
+      testCase.assertOriginalContent();
+      statusSurface.publish("backing_up", {
+        source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 25,
+        gameName: "Fixture", appID: "100", tracked: true,
+      });
+      const observation = store.getSnapshot().autoSyncObservations["100"];
+      expect(observation, testCase.name).toBeDefined();
+      expect(view.sync, testCase.name).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
+
+      await render(createElement("native-home"));
+      expect(view.sync, testCase.name).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
+      expect(store.getSnapshot().autoSyncObservations["100"], testCase.name).toBe(observation);
+
+      await render(renderKnownPage());
+      testCase.assertOriginalContent();
+      expect(view.sync, testCase.name).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
+      expect(store.getSnapshot().autoSyncObservations["100"], testCase.name).toBe(observation);
+
+      await render(createElement("native-home"));
+      expect(view.sync, testCase.name).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
+      expect(store.getSnapshot().autoSyncObservations["100"], testCase.name).toBe(observation);
+    } finally {
+      gameDetailsSurface.dispose();
+      statusSurface.dispose();
+      const routePatch = globalThis.__sdhLudusaviGameDetailsStatusRoutePatch;
+      if (routePatch?.removalTimer !== null && routePatch?.removalTimer !== undefined) clearTimeout(routePatch.removalTimer);
+      Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRoutePatch");
+      Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRegistry");
+    }
+  }
+});

@@ -16,7 +16,7 @@ const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // update an already-mounted details page without a navigation.
 const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
 // Bump when an existing route wrapper cannot render the newest status-row contract.
-const GAME_DETAILS_ROUTE_RENDER_VERSION = 14;
+const GAME_DETAILS_ROUTE_RENDER_VERSION = 15;
 export type GameDetailsStatusSurface = Readonly<{
   dispose(): void;
 }>;
@@ -261,17 +261,32 @@ function wrapRouteResultWithDetailsPagePresence(
   const routeResult = asRouteResultElement(rendered);
   if (!routeResult) return rendered;
   const routeChild = asRouteResultElement(routeResult.props.children);
-  if (!routeChild) return rendered;
-  const routeChildProps = asRecord(routeChild.props);
-  if (!routeChildProps) return rendered;
-  const pageBoundary = createElement(DetailsPageRouteChild, {
-    ...routeChildProps,
-    appID,
-    contributionSource,
-    routeChild,
-    key: routeChild.key,
-  });
-  return cloneElement(routeResult, { ...routeResult.props, children: pageBoundary });
+  const routeChildProps = routeChild && asRecord(routeChild.props);
+  if (routeChild && routeChildProps) {
+    const pageBoundary = createElement(DetailsPageRouteChild, {
+      ...routeChildProps,
+      appID,
+      contributionSource,
+      routeChild,
+      key: routeChild.key,
+    });
+    return cloneElement(routeResult, { ...routeResult.props, children: pageBoundary });
+  }
+  const routeChildren = routeResult.props.children;
+  if (!isRenderableRouteChildren(routeChildren)) return rendered;
+  // Loading, empty, and multi-child route roots have no direct element whose
+  // props peers can consume. Keep those native children in order and append
+  // only the lifecycle owner so page presence stays independent of row/header.
+  return cloneElement(
+    routeResult,
+    { ...routeResult.props },
+    routeChildren,
+    createElement(DetailsPagePresence, {
+      appID,
+      contributionSource,
+      key: "sdh-ludusavi-details-page-presence",
+    }),
+  );
 }
 
 type ActiveGameDetailsStatusHeaderProps = Pick<
@@ -593,6 +608,12 @@ function asRouteResultElement(value: unknown): ReactElement<RouteRecord> | null 
   const props = asRecord(value.props);
   if (!props) return null;
   return value as ReactElement<RouteRecord>;
+}
+
+function isRenderableRouteChildren(value: unknown): value is ReactNode {
+  if (value === null || value === undefined || isValidElement(value)) return true;
+  if (["string", "number", "bigint", "boolean"].includes(typeof value)) return true;
+  return Array.isArray(value) && value.every(isRenderableRouteChildren);
 }
 
 function asNativeProviderElement(value: unknown): ReactElement<NativeProviderProps> | null {
