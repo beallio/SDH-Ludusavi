@@ -33,6 +33,12 @@ describe("game details route adapter", () => {
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    const routePatch = globalThis.__sdhLudusaviGameDetailsStatusRoutePatch;
+    if (routePatch?.removalTimer !== null && routePatch?.removalTimer !== undefined) {
+      clearTimeout(routePatch.removalTimer);
+    }
+    Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRoutePatch");
+    Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRegistry");
   });
 
   it("clones the supported React route child, keeps its props, and reuses the native header wrapper", () => {
@@ -54,7 +60,7 @@ describe("game details route adapter", () => {
     const second = patched.children.props.renderFunc({ params: { appid: "100" } });
     const firstProvider = first as ReactElement<{ children: ReactElement; value: unknown }>;
     const secondProvider = second as ReactElement<{ children: ReactElement; value: unknown }>;
-    expect(firstProvider.props.children.type).toBe("native-children");
+    expect(firstProvider.props.children).toBeDefined();
     expect(firstProvider.props.value).not.toBe(nativeHeader);
     expect(secondProvider.props.value).toBe(firstProvider.props.value);
 
@@ -99,42 +105,78 @@ describe("game details route adapter", () => {
           }),
         };
       };
-      const makeRoute = (details: PlayTimeDetails) => ({
+      const makeRoute = (details: PlayTimeDetails, headerValue: unknown = nativeHeader) => ({
         path: "/library/app/:appid",
         children: createElement("native-route", {
           renderFunc: () => createElement(
             context.Provider,
-            { value: nativeHeader },
+            { value: headerValue },
+            createElement(routeBody, { overview: { appid: 100 }, details }),
+          ),
+        }),
+      });
+      const makeNonProviderRoute = (details: PlayTimeDetails) => ({
+        path: "/library/app/:appid",
+        children: createElement("native-route", {
+          renderFunc: () => createElement(
+            "native-route-result",
+            null,
             createElement(routeBody, { overview: { appid: 100 }, details }),
           ),
         }),
       });
       const expectPeerAndNativeRender = (
         result: ReactElement<{
-          children: ReactElement<RouteBodyProps, typeof routeBody>;
-          value: (props: unknown) => ReactElement<{ children: ReactElement[] }>;
+          children: ReactElement<RouteBodyProps>;
+          value: unknown;
         }>,
         details: PlayTimeDetails,
+        headerValue: unknown,
+        isProvider = true,
       ) => {
-        expect(result.type).toBe(context.Provider);
+        expect(result.type).toBe(isProvider ? context.Provider : "native-route-result");
         expect(result.props.children.props.overview.appid).toBe(100);
         expect(details.nPlaytimeForever).toBe(0);
-        const visibleRouteBody = result.props.children.type(result.props.children.props);
+        const presenceBoundary = (result.props.children.type as (props: RouteBodyProps) => ReactElement<{ children: ReactElement[] }>)(result.props.children.props);
+        const nativeRouteBody = presenceBoundary.props.children[1] as ReactElement<RouteBodyProps, typeof routeBody>;
+        expect(nativeRouteBody.type).toBe(routeBody);
+        expect(nativeRouteBody.props.overview.appid).toBe(100);
+        const visibleRouteBody = nativeRouteBody.type(nativeRouteBody.props);
         expect((visibleRouteBody.props as { children?: unknown }).children).toBe(0);
-        const headerBoundary = result.props.value({});
-        const statusHeader = headerBoundary.props.children[1] as ReactElement<{ header: () => ReactElement }>;
-        expect(statusHeader.props.header().type).toBe("native-header");
+        if (isProvider && typeof result.props.value === "function") {
+          const headerBoundary = result.props.value({});
+          const statusHeader = headerBoundary.props.children as ReactElement<{ header: () => ReactElement }>;
+          expect(statusHeader.props.header().type).toBe("native-header");
+        } else if (isProvider) {
+          expect(result.props.value).toBe(headerValue);
+        }
       };
 
       const coldDetails = { nPlaytimeForever: -999 };
       const coldRendered = withPlayTimeUpdate(sdhPatch(makeRoute(coldDetails)))
         .children.props.renderFunc({ params: { appid: "100" } });
-      expectPeerAndNativeRender(coldRendered, coldDetails);
+      expectPeerAndNativeRender(coldRendered, coldDetails, nativeHeader);
 
       const hotDetails = { nPlaytimeForever: -999 };
       const hotRendered = sdhPatch(withPlayTimeUpdate(makeRoute(hotDetails)))
         .children.props.renderFunc({ params: { appid: "100" } });
-      expectPeerAndNativeRender(hotRendered, hotDetails);
+      expectPeerAndNativeRender(hotRendered, hotDetails, nativeHeader);
+
+      const unsupportedHeader = {};
+      const coldUnsupportedDetails = { nPlaytimeForever: -999 };
+      const coldUnsupportedRendered = withPlayTimeUpdate(sdhPatch(makeRoute(coldUnsupportedDetails, unsupportedHeader)))
+        .children.props.renderFunc({ params: { appid: "100" } });
+      expectPeerAndNativeRender(coldUnsupportedRendered, coldUnsupportedDetails, unsupportedHeader);
+
+      const hotUnsupportedDetails = { nPlaytimeForever: -999 };
+      const hotUnsupportedRendered = sdhPatch(withPlayTimeUpdate(makeRoute(hotUnsupportedDetails, unsupportedHeader)))
+        .children.props.renderFunc({ params: { appid: "100" } });
+      expectPeerAndNativeRender(hotUnsupportedRendered, hotUnsupportedDetails, unsupportedHeader);
+
+      const nonProviderDetails = { nPlaytimeForever: -999 };
+      const nonProviderRendered = withPlayTimeUpdate(sdhPatch(makeNonProviderRoute(nonProviderDetails)))
+        .children.props.renderFunc({ params: { appid: "100" } });
+      expectPeerAndNativeRender(nonProviderRendered, nonProviderDetails, undefined, false);
     } finally {
       surface.dispose();
     }
@@ -155,9 +197,9 @@ describe("game details route adapter", () => {
     const rendered = patched.children.props.renderFunc({ params: { appid: "100" } });
     const retainedProvider = rendered as ReactElement<{ value: unknown }>;
     const retainedHeader = retainedProvider.props.value as (props: unknown) => ReactElement<{
-      children: ReactElement[];
+      children: ReactElement;
     }>;
-    const retainedStatusHeader = () => retainedHeader({}).props.children[1] as ReactElement<{
+    const retainedStatusHeader = () => retainedHeader({}).props.children as ReactElement<{
       store: unknown;
       contributionSource: GameDetailsStatusContributionSource;
     }>;

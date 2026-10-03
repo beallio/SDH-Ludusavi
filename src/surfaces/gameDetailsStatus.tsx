@@ -16,7 +16,7 @@ const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // update an already-mounted details page without a navigation.
 const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
 // Bump when an existing route wrapper cannot render the newest status-row contract.
-const GAME_DETAILS_ROUTE_RENDER_VERSION = 13;
+const GAME_DETAILS_ROUTE_RENDER_VERSION = 14;
 export type GameDetailsStatusSurface = Readonly<{
   dispose(): void;
 }>;
@@ -126,14 +126,15 @@ function retainGameDetailsRoutePatch(contributionRegistry: GameDetailsStatusCont
       const rendered = renderFunc(...args);
       const appID = routeAppID(args) ?? routeAppID([record]);
       if (!appID) return rendered;
-      const withDetailsPagePresence = (content: ReactNode) => createElement(Fragment, null,
-        createElement(DetailsPagePresence, { appID, contributionSource: contributionRegistry }),
-        content,
+      const withDetailsPagePresence = wrapRouteResultWithDetailsPagePresence(
+        rendered,
+        appID,
+        contributionRegistry,
       );
-      const provider = asNativeProviderElement(rendered);
-      if (!provider) return withDetailsPagePresence(rendered as ReactNode);
+      const provider = asNativeProviderElement(withDetailsPagePresence);
+      if (!provider) return withDetailsPagePresence;
       const nativeHeader = asNativeHeader(provider.props.value);
-      if (!nativeHeader) return withDetailsPagePresence(rendered as ReactNode);
+      if (!nativeHeader) return provider;
       let wrappersForHeader = wrappedHeaders.get(nativeHeader);
       if (!wrappersForHeader) {
         wrappersForHeader = new Map();
@@ -143,11 +144,10 @@ function retainGameDetailsRoutePatch(contributionRegistry: GameDetailsStatusCont
       if (!wrappedHeader) {
         wrappedHeader = (headerProps: unknown) => {
           const contribution = contributionRegistry.getSnapshot();
-          // Keep the native Provider as the route result. Downstream route
-          // patches read its direct child props, so page presence belongs in
-          // this stable header boundary rather than around that Provider.
+          // Keep the native Provider and its direct route child intact for
+          // downstream route patches. The independently mounted child
+          // boundary reports page presence even when this header is absent.
           return createElement(Fragment, null,
-            createElement(DetailsPagePresence, { appID, contributionSource: contributionRegistry }),
             createElement(GameDetailsStatusHeader, {
               appID,
               header: nativeHeader,
@@ -230,6 +230,48 @@ function DetailsPagePresence({ appID, contributionSource }: Pick<GameDetailsStat
   );
   useLayoutEffect(() => contribution?.statusSurface.registerDetailsPage(appID), [appID, contribution?.statusSurface]);
   return null;
+}
+
+type DetailsPageRouteChildProps = RouteRecord & Readonly<{
+  appID: string;
+  contributionSource: GameDetailsStatusContributionSource;
+  routeChild: ReactElement<RouteRecord>;
+}>;
+
+// This boundary is the mounted route lifecycle owner. It forwards the native
+// route child's real props to the real child, while its outer element keeps
+// those props directly available to peer route patches.
+function DetailsPageRouteChild({
+  appID,
+  contributionSource,
+  routeChild,
+  ...routeChildProps
+}: DetailsPageRouteChildProps): ReactNode {
+  return createElement(Fragment, null,
+    createElement(DetailsPagePresence, { appID, contributionSource }),
+    cloneElement(routeChild, routeChildProps),
+  );
+}
+
+function wrapRouteResultWithDetailsPagePresence(
+  rendered: unknown,
+  appID: string,
+  contributionSource: GameDetailsStatusContributionSource,
+): unknown {
+  const routeResult = asRouteResultElement(rendered);
+  if (!routeResult) return rendered;
+  const routeChild = asRouteResultElement(routeResult.props.children);
+  if (!routeChild) return rendered;
+  const routeChildProps = asRecord(routeChild.props);
+  if (!routeChildProps) return rendered;
+  const pageBoundary = createElement(DetailsPageRouteChild, {
+    ...routeChildProps,
+    appID,
+    contributionSource,
+    routeChild,
+    key: routeChild.key,
+  });
+  return cloneElement(routeResult, { ...routeResult.props, children: pageBoundary });
 }
 
 type ActiveGameDetailsStatusHeaderProps = Pick<
@@ -544,6 +586,13 @@ function asNativeRouteChild(value: unknown): ReactElement<NativeRouteChildProps>
   const props = asRecord(value.props);
   if (!props || typeof props.renderFunc !== "function") return null;
   return value as ReactElement<NativeRouteChildProps>;
+}
+
+function asRouteResultElement(value: unknown): ReactElement<RouteRecord> | null {
+  if (!isValidElement(value)) return null;
+  const props = asRecord(value.props);
+  if (!props) return null;
+  return value as ReactElement<RouteRecord>;
 }
 
 function asNativeProviderElement(value: unknown): ReactElement<NativeProviderProps> | null {

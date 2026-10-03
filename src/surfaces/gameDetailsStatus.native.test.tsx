@@ -272,3 +272,48 @@ it("keeps same-page fallback active through an unsupported header and runtime re
   Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRoutePatch");
   Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRegistry");
 });
+
+it("keeps same-page fallback active when the mounted route body never renders its optional header", async () => {
+  const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
+  const store = createLudusaviStateStore();
+  store.applyRefreshResult({
+    games: [{ name: "Fixture", steam_id: "100", configured: true, has_backup: false, needs_first_backup: true, error: null, status: "needs_first_backup" }],
+    aliases: {}, history: {}, dependency_error: null,
+  });
+  const statusSurface = createAutoSyncStatusSurface(view, store);
+  const gameDetailsSurface = createGameDetailsStatusSurface(store, statusSurface);
+  const patch = routeMock.addPatch.mock.calls.at(-1)?.[1] as (route: any) => any;
+  const context = createContext<unknown>(null);
+  const nativeHeader = vi.fn(() => createElement("native-header"));
+  type RouteBodyProps = { overview: { appid: number }; details: { nPlaytimeForever: number } };
+  const routeBody = ({ details }: RouteBodyProps) => createElement("native-children", {
+    "data-sdh-playtime": "true",
+  }, details.nPlaytimeForever);
+  const child = createElement("native-route", {
+    renderFunc: () => createElement(
+      context.Provider,
+      { value: nativeHeader },
+      createElement(routeBody, { overview: { appid: 100 }, details: { nPlaytimeForever: 12 } }),
+    ),
+  });
+  const patched = patch({ path: "/library/app/:appid", children: child });
+
+  await render(patched.children.props.renderFunc({ params: { appid: "100" } }));
+  expect(host.querySelector("native-children")?.textContent).toBe("12");
+  expect(nativeHeader).not.toHaveBeenCalled();
+
+  statusSurface.publish("backing_up", {
+    source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 24,
+    gameName: "Fixture", appID: "100", tracked: true,
+  });
+  const observation = store.getSnapshot().autoSyncObservations["100"];
+  expect(observation).toBeDefined();
+  expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({ status: "backing_up", visible: true }));
+  expect(store.getSnapshot().autoSyncObservations["100"]).toBe(observation);
+
+  gameDetailsSurface.dispose(); statusSurface.dispose();
+  const routePatch = globalThis.__sdhLudusaviGameDetailsStatusRoutePatch;
+  if (routePatch?.removalTimer !== null && routePatch?.removalTimer !== undefined) clearTimeout(routePatch.removalTimer);
+  Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRoutePatch");
+  Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRegistry");
+});
