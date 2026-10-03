@@ -122,7 +122,6 @@ describe("game details status selection", () => {
     expect(selected.localStatus).toBe("has_backup");
     expect(selected.syncStatus).toBe("syncthing_folder_not_found");
     expect(selected.canOwnStatusArea).toBe(true);
-    expect(selected.label).toBe("Ludusavi: Unable to sync");
 
     const otherGame = selectGameDetailsStatus({
       snapshot: state,
@@ -133,6 +132,50 @@ describe("game details status selection", () => {
     });
     expect(otherGame.kind).toBe("not_tracked");
     expect(otherGame.syncStatus).toBeNull();
+  });
+
+  it("keeps accepted post-game local and remote facts distinct", () => {
+    const activeWarning = selectGameDetailsStatus({
+      snapshot: snapshot({ autoSyncObservations: { "100": {
+        appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", lifecycle: "lifecycle_exit", generation: 8,
+        status: "syncthing_upload_incomplete", activity: "active", observedAt: 30,
+        localOperation: { status: "has_backup", resultStatus: "backed_up", lifecycle: "lifecycle_exit", observedAt: 20, generation: 8 },
+        syncObservation: { status: "syncthing_upload_incomplete", lifecycle: "lifecycle_exit", observedAt: 30, generation: 8 },
+      } } }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(activeWarning).toMatchObject({
+      kind: "active", status: "syncthing_upload_incomplete", localStatus: "has_backup",
+      syncStatus: "syncthing_upload_incomplete", lifecycle: "lifecycle_exit", tone: "warning", active: true,
+    });
+
+    const acceptedWarning = selectGameDetailsStatus({
+      snapshot: snapshot({ autoSyncObservations: { "100": {
+        appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", lifecycle: "lifecycle_exit", generation: 9,
+        status: "syncthing_upload_incomplete", activity: "settled", observedAt: 30,
+        localOperation: { status: "has_backup", resultStatus: "backed_up", lifecycle: "lifecycle_exit", observedAt: 20, generation: 9 },
+        syncObservation: { status: "syncthing_upload_incomplete", lifecycle: "lifecycle_exit", observedAt: 30, generation: 9 },
+      } } }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(acceptedWarning).toMatchObject({
+      kind: "last_observed", status: "syncthing_upload_incomplete", localStatus: "has_backup",
+      syncStatus: "syncthing_upload_incomplete", lifecycle: "lifecycle_exit", tone: "warning", active: false,
+    });
+
+    const unacceptedWarning = selectGameDetailsStatus({
+      snapshot: snapshot({ autoSyncObservations: { "100": {
+        appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", lifecycle: "lifecycle_exit", generation: 10,
+        status: "syncthing_upload_incomplete", activity: "settled", observedAt: 30,
+        localOperation: { status: "error", resultStatus: "failed", lifecycle: "lifecycle_exit", observedAt: 20, generation: 10 },
+        syncObservation: { status: "syncthing_upload_incomplete", lifecycle: "lifecycle_exit", observedAt: 30, generation: 10 },
+      } } }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(unacceptedWarning).toMatchObject({
+      kind: "last_observed", status: "syncthing_upload_incomplete", localStatus: "error",
+      syncStatus: "syncthing_upload_incomplete", lifecycle: "lifecycle_exit", tone: "warning", active: false,
+    });
   });
 
   it("uses a reload's last durable local operation without inventing remote delivery", () => {
@@ -206,9 +249,7 @@ describe("game details status selection", () => {
     });
 
     expect(selected.status).toBe("has_backup");
-    expect(selected.label).toBe("Ludusavi: Up to date");
-    expect(selected.description).toContain("Local save already current");
-    expect(selected.description).toContain("Remote sync was not checked after reload");
+    expect(selected).toMatchObject({ kind: "local_result", localStatus: "has_backup", syncVerification: "unverified", tone: "success", active: false });
   });
 
   it("uses the normal native row treatment for an unknown durable result", () => {
@@ -235,7 +276,6 @@ describe("game details status selection", () => {
     });
 
     expect(selected.status).toBe("unknown");
-    expect(selected.label).toBe("Ludusavi: Unknown");
     expect(selected.tone).toBe("info");
   });
 
@@ -326,7 +366,7 @@ describe("game details status selection", () => {
     expect(active.kind).toBe("active");
   });
 
-  it("keeps local and remote wording tied to their own result and lifecycle", () => {
+  it("keeps local and remote facts tied to their lifecycle", () => {
     const start = selectGameDetailsStatus({
       snapshot: snapshot({ autoSyncObservations: { "100": {
         appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", lifecycle: "lifecycle_start", generation: 5,
@@ -336,8 +376,10 @@ describe("game details status selection", () => {
       } } }),
       appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
     });
-    expect(start.description).toContain("Local result: Local save already current.");
-    expect(start.description).toContain("Last remote observation: Incoming folder activity settled.");
+    expect(start).toMatchObject({
+      kind: "last_observed", status: "syncthing_complete", localStatus: "has_backup",
+      syncStatus: "syncthing_complete", lifecycle: "lifecycle_start", syncVerification: "observed",
+    });
 
     const exit = selectGameDetailsStatus({
       snapshot: snapshot({ autoSyncObservations: { "100": {
@@ -348,11 +390,13 @@ describe("game details status selection", () => {
       } } }),
       appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
     });
-    expect(exit.description).toContain("Remote upload observed with a connected peer.");
-    expect(exit.description).not.toContain("Incoming folder activity settled.");
+    expect(exit).toMatchObject({
+      kind: "last_observed", status: "syncthing_complete", localStatus: "has_backup",
+      syncStatus: "syncthing_complete", lifecycle: "lifecycle_exit", syncVerification: "observed",
+    });
   });
 
-  it("uses Steam-style visible statuses while retaining detailed local meaning", () => {
+  it("selects post-game activity and retained non-post-game results", () => {
     const restored = selectGameDetailsStatus({
       snapshot: snapshot({ gameHistory: { Fixture: {
         last_backup: null, last_restore: null, last_skip: null, last_failure: null,
@@ -363,8 +407,7 @@ describe("game details status selection", () => {
       } } }),
       appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
     });
-    expect(restored.label).toBe("Ludusavi: Up to date");
-    expect(restored.description).toContain("Local restore complete");
+    expect(restored).toMatchObject({ kind: "local_result", status: "has_backup", localStatus: "has_backup", tone: "success", active: false });
 
     const active = selectGameDetailsStatus({
       snapshot: snapshot({ autoSyncObservations: { "100": {
@@ -375,14 +418,13 @@ describe("game details status selection", () => {
       } } }),
       appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
     });
-    expect(active.label).toBe("Ludusavi: Backing up...");
-    expect(active.description).toContain("Current activity: Backing up local save.");
+    expect(active).toMatchObject({ kind: "active", status: "backing_up", localStatus: "backing_up", lifecycle: "lifecycle_exit", tone: "info", active: true });
 
     const disabled = selectGameDetailsStatus({
       snapshot: snapshot({ settings: { ...settings, auto_sync_enabled: false } }),
       appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
     });
-    expect(disabled.label).toBe("Ludusavi: Disabled");
+    expect(disabled).toMatchObject({ kind: "auto_sync_disabled", status: "game_sync_disabled", tone: "warning", active: false });
   });
 
   it("honors fresh missing-backup inventory unless a local result is newer", () => {

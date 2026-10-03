@@ -307,8 +307,10 @@ The row appears only after the selected library entry has loaded matching detail
 Cloud enable flags. It is hidden when both flags are enabled, which is a display rule only and
 does not change backup or restore eligibility. It reads the selected entry through the native
 app-details subscription and does not substitute a catalog match or mutate Steam Cloud data.
-Unknown details and unsupported native provider shapes leave Steam unchanged and keep the
-BrowserView strip available.
+Unknown details leave the native row unchanged, but the mounted route still claims the details page
+so a same-page post-game fallback remains possible. Unsupported native provider shapes leave Steam
+unchanged and cannot mount the route contribution, so post-game BrowserView presentation stays
+hidden; protected launch presentation remains available.
 
 The route contribution clones Decky's React route child and composes at its deferred native
 Cloud-status component boundary. The Cloud component stays mounted. The row appears only when that
@@ -316,6 +318,13 @@ component renders no native status band, so it never creates a second band or re
 controls. The row releases ownership when it is hidden, clipped, offscreen, or covered. Its status
 icon and transfer animation are
 presentation only and it adds no controller focus stop.
+
+A separate route-lifecycle component registers the mounted `/library/app/:appid` page with the
+active details presentation surface. The registration is tokenized: cleanup releases only the
+claim it created, so a stale unmount cannot clear a newer app or replacement-runtime claim. Page
+presence is independent of Cloud eligibility, native class discovery, row rendering, and row
+geometry. A page change or runtime replacement resynchronizes presentation only; it does not
+publish, settle, hide, or otherwise change the retained operation observation.
 
 The row uses Steam's supplied Cloud-status row, icon, SVG, label, problem, transfer-pulse,
 and active-value classes. Its root is a direct sibling after the native play section; the
@@ -326,14 +335,14 @@ themes may change its dimensions, placement, or visibility through native select
 Warning and error states use the native problem class, and active states use the native
 pulse and blue value classes. Missing class capabilities leave the native header unchanged.
 
-A fully visible compact indicator can own exit status; there is no fixed minimum row
-height. Theme-supplied opacity zero, hidden visibility, clipping, and occlusion cannot
+A fully visible indicator with its complete label can own exit status; there is no fixed minimum row
+height. Theme-supplied opacity zero, hidden visibility, clipping, label truncation, and occlusion cannot
 suppress the fallback strip. The plugin's own paint-suppressed row is measured with its
 inline opacity temporarily removed, then restored with its original priority. Visibility,
 slot, and artwork observers share a mutation-batch guard so these measurements do not
 cause an observer feedback loop.
 
-Visible row text uses short Steam-style states: `Checking...`, `Backing up...`, `Restoring...`,
+Visible inventory, durable-history, and pre-game row text uses short Steam-style states: `Checking...`, `Backing up...`, `Restoring...`,
 `Uploading...`, `Downloading...`, `Up to date`, `Out of sync`, `File conflict`, `Disabled`,
 `Unable to sync`, and `Unknown`. The accessible description keeps the precise local-result and
 remote-observation wording. A short visible label must not imply remote delivery that was not
@@ -345,13 +354,18 @@ frontend reload while its accessible description remains `Local save already cur
 classification consumes both the recorded status and reason. `Unknown` uses the normal
 transparent row with dividers; it is not a warning/problem presentation.
 
-For exit work, a mounted, visible, layout-valid row for the same app suppresses duplicate
-BrowserView pixels without stopping timers, watches, or status production. Start-side checking,
-restore, and conflict work always use the strip, and the row also yields when another app owns an
-outstanding strip. A row unmount or Cloud-state change restores an outstanding strip without
-extending its lifetime. Terminal observations remain in frontend state through the strip timeout,
-but the frontend marks interrupted or superseded activity as remote-unverified instead of showing
-an endless transfer. A local result and a remote observation remain distinct in the row text.
+For exit work, a mounted page claim for the same app is required before either presentation can
+paint. A mounted, visible, layout-valid row with a complete label suppresses duplicate BrowserView
+pixels; otherwise, the fallback can paint on that same page only. Home and another game's page do
+not show exit pixels, and an exit operation for one app does not make another app's ordinary row
+yield. Page changes and row ownership changes do not stop timers, watches, or status production.
+They also do not extend a result strip lifetime. Terminal observations remain in frontend state
+through the strip timeout, but the frontend marks interrupted or superseded activity as
+remote-unverified instead of showing an endless transfer. Accepted `lifecycle_exit` activity and
+retained facts use `autoSyncStatusText` as their full native label. A success-prefixed remote
+warning needs an accepted `backed_up` local fact; otherwise it keeps its compact warning label. A
+local result and a remote observation remain distinct in the row text. Start-side checking,
+restore, and conflict work always use the strip.
 
 The mounted game-details header also owns a temporary artwork extension in Steam's native
 Gamepad document. This applies to either a visible Steam Cloud band or a Ludusavi row, including
@@ -406,8 +420,9 @@ colors. The four color pickers are visible only when Custom is selected and thei
 transparency. A separate `Outline Width` slider provides Off, Thin, Medium, and Thick;
 CSS Loader shows it in all three modes, but only Custom reads its CSS variable. Active
 Ludusavi text/icon styling, native Steam Cloud transfer colors/pulse, and both
-implementations' problem rows retain their own visual state. The status labels and
-accessible descriptions remain unchanged.
+implementations' problem rows retain their own visual state. Accepted post-game native labels use
+the canonical full status text; compact inventory, durable-history, and non-post-game labels and
+all accessible descriptions retain their existing meanings.
 
 The theme targets Steam's Cloud-status CSS module selectors, translated by CSS Loader
 for the current Steam client, plus stable `data-sdh-ludusavi-*` attributes on the

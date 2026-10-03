@@ -4,7 +4,7 @@ SDH-Ludusavi helps you back up and restore game saves from Gaming Mode on your S
 
 ![SDH-Ludusavi in Gaming Mode](assets/demo.webp?cacheBuster=14)
 
-You can see the latest save result on supported non-Steam game pages without opening the Decky menu. Steam Cloud pages keep their usual Steam Cloud status.
+You can see the latest save result on supported non-Steam game pages without opening the Decky menu. After automatic work when you quit a game, that game's page shows the full save message, such as local backup, upload, or upload-warning progress. If you leave the page, the post-game message hides but the work continues. Returning shows the latest active state or retained result. Steam Cloud pages keep their usual Steam Cloud status.
 
 ![Ludusavi showing Up to date on a non-Steam game page](assets/native-status-row.webp?cacheBuster=14)
 
@@ -75,7 +75,7 @@ Syncthing sends the backups in the background when the devices can connect. Chec
 
 ## Change the look of the status bars (optional)
 
-The Ludusavi bar uses Steam's game-page styles. A theme that changes the Steam Cloud bar can also change the Ludusavi bar's text, size, position, or visibility. If a theme hides or covers the bar, save-operation messages can use the separate status strip. Protected game-launch messages always use that strip.
+The Ludusavi bar uses Steam's game-page styles. A theme that changes the Steam Cloud bar can also change the Ludusavi bar's text, size, position, or visibility. If a theme hides, covers, clips, or cannot fit the full post-game message, that game's page can use the separate status strip. Home and other game pages stay quiet for that work. Protected game-launch messages always use that strip.
 
 If you use [CSS Loader](https://docs.deckthemes.com/CSSLoader/), SDH-Ludusavi adds an **SDH-Ludusavi Status** theme. In CSS Loader, use **Save Status** to choose:
 

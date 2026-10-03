@@ -104,4 +104,25 @@ describe("autoSyncStatusBrowserView", () => {
     expect(loadURL.mock.calls[0][0]).toMatch(/^data:text\/html/);
     api.clearShowTimeout();
   });
+
+  it("cancels a delayed reveal when presentation becomes hidden before the callback", () => {
+    const loadURL = vi.fn();
+    const setVisible = vi.fn();
+    const createBrowserView = vi.fn(() => ({
+      m_browserView: { LoadURL: loadURL, SetBounds: vi.fn(), SetVisible: setVisible },
+    }));
+    mockGetGamepadUIMainWindowInstance.mockReturnValue({ CreateBrowserView: createBrowserView });
+    mockGetSteamClient.mockReturnValue({});
+    const api = createAutoSyncStatusBrowserView();
+    const state = { status: "backing_up" as const, visible: true, source: "lifecycle_exit" as const };
+
+    api.setContext(state);
+    api.sync(state);
+    api.setContext({ ...state, visible: false });
+    api.sync({ ...state, visible: false });
+    vi.advanceTimersByTime(100);
+
+    expect(loadURL).toHaveBeenLastCalledWith("about:blank");
+    expect(setVisible).not.toHaveBeenLastCalledWith(true);
+  });
 });

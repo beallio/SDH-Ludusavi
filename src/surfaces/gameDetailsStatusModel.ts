@@ -65,7 +65,7 @@ export function selectGameDetailsStatus(input: GameDetailsStatusSelectorInput): 
   if (observation?.activity === "active") {
     return statusModel(
       eligibility, "active", observation.status, local?.status ?? null, sync?.status ?? null,
-      true, syncVerification, observation.lifecycle, observation.resultStatus,
+      true, syncVerification, observation.lifecycle, observation.resultStatus, local?.resultStatus,
     );
   }
   // Once work is idle, current settings describe what can happen next. Retained
@@ -180,13 +180,34 @@ function statusModel(
   const detail = `${prefix}: ${primary}.${localDetail}${primaryIsSync ? "" : syncDetail(syncStatus, syncVerification, syncLifecycle)}`;
   return {
     eligibility, kind, status, localStatus, syncStatus, syncVerification, lifecycle,
-    label: `Ludusavi: ${VISIBLE_STATUS_PHRASES[status]}`,
+    label: `Ludusavi: ${postGameStatusLabel(status, primaryLifecycle, localStatus, localResultStatus)}`,
     description: detail,
     tone: toneForStatus(status),
     active,
     showRow: true,
     canOwnStatusArea: true,
   };
+}
+
+function postGameStatusLabel(
+  status: AutoSyncStatusKind,
+  lifecycle: "lifecycle_start" | "lifecycle_exit" | undefined,
+  localStatus: AutoSyncStatusKind | null,
+  localResultStatus: AutoSyncStatusFact["resultStatus"] | undefined,
+): string {
+  if (lifecycle !== "lifecycle_exit") return VISIBLE_STATUS_PHRASES[status];
+  if (isSuccessPrefixedRemoteWarning(status)
+    && (localStatus !== "has_backup" || localResultStatus !== "backed_up")) {
+    return VISIBLE_STATUS_PHRASES[status];
+  }
+  return autoSyncStatusText[status];
+}
+
+function isSuccessPrefixedRemoteWarning(status: AutoSyncStatusKind): boolean {
+  return status === "syncthing_upload_incomplete"
+    || status === "syncthing_unavailable"
+    || status === "syncthing_folder_not_found"
+    || status === "syncthing_no_peers";
 }
 
 function statusPhrase(

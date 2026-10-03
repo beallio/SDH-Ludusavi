@@ -1,5 +1,5 @@
 import { routerHook, type RoutePatch } from "@decky/api";
-import { Fragment, cloneElement, createElement, isValidElement, useEffect, useLayoutEffect, useState, useSyncExternalStore, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { Fragment, cloneElement, createElement, isValidElement, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactElement, type ReactNode } from "react";
 
 import type { LudusaviStateStore } from "../state/ludusaviState";
 import { sessionFromAppOverview } from "../utils/steam";
@@ -16,7 +16,7 @@ const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // update an already-mounted details page without a navigation.
 const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
 // Bump when an existing route wrapper cannot render the newest status-row contract.
-const GAME_DETAILS_ROUTE_RENDER_VERSION = 10;
+const GAME_DETAILS_ROUTE_RENDER_VERSION = 15;
 export type GameDetailsStatusSurface = Readonly<{
   dispose(): void;
 }>;
@@ -124,11 +124,17 @@ function retainGameDetailsRoutePatch(contributionRegistry: GameDetailsStatusCont
     const renderFunc = child.props.renderFunc;
     const wrappedRenderFunc = (...args: unknown[]) => {
       const rendered = renderFunc(...args);
-      const provider = asNativeProviderElement(rendered);
-      if (!provider) return rendered;
-      const nativeHeader = asNativeHeader(provider.props.value);
       const appID = routeAppID(args) ?? routeAppID([record]);
-      if (!nativeHeader || !appID) return rendered;
+      if (!appID) return rendered;
+      const withDetailsPagePresence = wrapRouteResultWithDetailsPagePresence(
+        rendered,
+        appID,
+        contributionRegistry,
+      );
+      const provider = asNativeProviderElement(withDetailsPagePresence);
+      if (!provider) return withDetailsPagePresence;
+      const nativeHeader = asNativeHeader(provider.props.value);
+      if (!nativeHeader) return provider;
       let wrappersForHeader = wrappedHeaders.get(nativeHeader);
       if (!wrappersForHeader) {
         wrappersForHeader = new Map();
@@ -138,14 +144,19 @@ function retainGameDetailsRoutePatch(contributionRegistry: GameDetailsStatusCont
       if (!wrappedHeader) {
         wrappedHeader = (headerProps: unknown) => {
           const contribution = contributionRegistry.getSnapshot();
-          return createElement(GameDetailsStatusHeader, {
-            appID,
-            header: nativeHeader,
-            headerProps,
-            contributionSource: contributionRegistry,
-            store: contribution?.store ?? null,
-            statusSurface: contribution?.statusSurface ?? null,
-          });
+          // Keep the native Provider and its direct route child intact for
+          // downstream route patches. The independently mounted child
+          // boundary reports page presence even when this header is absent.
+          return createElement(Fragment, null,
+            createElement(GameDetailsStatusHeader, {
+              appID,
+              header: nativeHeader,
+              headerProps,
+              contributionSource: contributionRegistry,
+              store: contribution?.store ?? null,
+              statusSurface: contribution?.statusSurface ?? null,
+            }),
+          );
         };
         wrappersForHeader.set(appID, wrappedHeader);
       }
@@ -209,6 +220,73 @@ function GameDetailsStatusHeader({
     store: contribution.store,
     statusSurface: contribution.statusSurface,
   });
+}
+
+function DetailsPagePresence({ appID, contributionSource }: Pick<GameDetailsStatusHeaderProps, "appID" | "contributionSource">): null {
+  const contribution = useSyncExternalStore(
+    contributionSource.subscribe,
+    contributionSource.getSnapshot,
+    contributionSource.getSnapshot,
+  );
+  useLayoutEffect(() => contribution?.statusSurface.registerDetailsPage(appID), [appID, contribution?.statusSurface]);
+  return null;
+}
+
+type DetailsPageRouteChildProps = RouteRecord & Readonly<{
+  appID: string;
+  contributionSource: GameDetailsStatusContributionSource;
+  routeChild: ReactElement<RouteRecord>;
+}>;
+
+// This boundary is the mounted route lifecycle owner. It forwards the native
+// route child's real props to the real child, while its outer element keeps
+// those props directly available to peer route patches.
+function DetailsPageRouteChild({
+  appID,
+  contributionSource,
+  routeChild,
+  ...routeChildProps
+}: DetailsPageRouteChildProps): ReactNode {
+  return createElement(Fragment, null,
+    createElement(DetailsPagePresence, { appID, contributionSource }),
+    cloneElement(routeChild, routeChildProps),
+  );
+}
+
+function wrapRouteResultWithDetailsPagePresence(
+  rendered: unknown,
+  appID: string,
+  contributionSource: GameDetailsStatusContributionSource,
+): unknown {
+  const routeResult = asRouteResultElement(rendered);
+  if (!routeResult) return rendered;
+  const routeChild = asRouteResultElement(routeResult.props.children);
+  const routeChildProps = routeChild && asRecord(routeChild.props);
+  if (routeChild && routeChildProps) {
+    const pageBoundary = createElement(DetailsPageRouteChild, {
+      ...routeChildProps,
+      appID,
+      contributionSource,
+      routeChild,
+      key: routeChild.key,
+    });
+    return cloneElement(routeResult, { ...routeResult.props, children: pageBoundary });
+  }
+  const routeChildren = routeResult.props.children;
+  if (!isRenderableRouteChildren(routeChildren)) return rendered;
+  // Loading, empty, and multi-child route roots have no direct element whose
+  // props peers can consume. Keep those native children in order and append
+  // only the lifecycle owner so page presence stays independent of row/header.
+  return cloneElement(
+    routeResult,
+    { ...routeResult.props },
+    routeChildren,
+    createElement(DetailsPagePresence, {
+      appID,
+      contributionSource,
+      key: "sdh-ludusavi-details-page-presence",
+    }),
+  );
 }
 
 type ActiveGameDetailsStatusHeaderProps = Pick<
@@ -321,7 +399,7 @@ export function detailsRowPaintStyle(suppressed: boolean): Pick<CSSProperties, "
 
 export function GameDetailsStatusRow({ appID, model, statusSurface, suppressed, classes: providedClasses, nativeOccupied = false, onElement }: GameDetailsStatusRowProps): ReactNode {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
-  const visible = useVisibleLayout(element);
+  const visible = useVisibleLayout(element, model.label);
   const classes = providedClasses ?? getNativeGameDetailsStatusClasses();
   useLayoutEffect(() => {
     if (!model.canOwnStatusArea || !visible || nativeOccupied) return;
@@ -383,8 +461,9 @@ function getStatusHostWindow(element: Element): StatusHostWindow | null {
   return element.ownerDocument?.defaultView ?? null;
 }
 
-function useVisibleLayout(element: HTMLDivElement | null): boolean {
+function useVisibleLayout(element: HTMLDivElement | null, label: string): boolean {
   const [visible, setVisible] = useState(false);
+  const scheduleVisibilityCheck = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     if (!element) return;
     const hostWindow = getStatusHostWindow(element);
@@ -392,7 +471,14 @@ function useVisibleLayout(element: HTMLDivElement | null): boolean {
     let frame: number | null = null;
     let fullyIntersecting = hostWindow.IntersectionObserver === undefined;
     const watchStyles = () => {
-      for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+      mutationObserver?.observe(element, {
+        attributes: true,
+        attributeFilter: ["class", "style", "hidden"],
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
         mutationObserver?.observe(ancestor, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
       }
       if (element.ownerDocument.head) mutationObserver?.observe(element.ownerDocument.head, { childList: true, characterData: true, subtree: true, attributes: true });
@@ -400,16 +486,16 @@ function useVisibleLayout(element: HTMLDivElement | null): boolean {
     const update = () => {
       frame = null;
       // Measuring our own paint-suppressed row briefly removes its inline opacity.
-      // Do not feed those synchronous measurement writes back into this observer.
-      mutationObserver?.disconnect();
-      const nextVisible = isVisibleStatusBand(element, fullyIntersecting);
-      watchStyles();
+      // Ignore those synchronous measurement writes in the existing observer.
+      const nextVisible = isVisibleStatusBand(element, fullyIntersecting)
+        && isStatusLabelFullyVisible(element);
       setVisible(nextVisible);
     };
     const schedule = () => {
       if (frame !== null) return;
       frame = hostWindow.requestAnimationFrame(update);
     };
+    scheduleVisibilityCheck.current = schedule;
     const HostMutationObserver = hostWindow.MutationObserver;
     const mutationObserver = HostMutationObserver ? new HostMutationObserver((records) => {
       if (records.some((record) => !isStatusPaintMeasurement(record))) schedule();
@@ -426,14 +512,41 @@ function useVisibleLayout(element: HTMLDivElement | null): boolean {
     resizeObserver?.observe(element);
     hostWindow.addEventListener("resize", schedule);
     hostWindow.addEventListener("scroll", schedule, true);
+    watchStyles();
     update();
     return () => {
+      scheduleVisibilityCheck.current = null;
       observer?.disconnect(); resizeObserver?.disconnect(); mutationObserver?.disconnect();
       if (frame !== null) hostWindow.cancelAnimationFrame(frame);
       hostWindow.removeEventListener("resize", schedule); hostWindow.removeEventListener("scroll", schedule, true);
     };
   }, [element]);
+  useLayoutEffect(() => { scheduleVisibilityCheck.current?.(); }, [label]);
   return visible;
+}
+
+export function isStatusLabelFullyVisible(element: HTMLDivElement): boolean {
+  const label = element.querySelector<HTMLElement>("[data-sdh-ludusavi-status-label=\"true\"]");
+  if (!label) return false;
+  const rowBounds = element.getBoundingClientRect();
+  const labelBounds = label.getBoundingClientRect();
+  if (rowBounds.width <= 0 || rowBounds.height <= 0 || labelBounds.width <= 0 || labelBounds.height <= 0) {
+    return false;
+  }
+  const hostWindow = getStatusHostWindow(label);
+  for (const textElement of [label, ...label.querySelectorAll<HTMLElement>("*")]) {
+    if (textElement.hidden) return false;
+    const style = hostWindow?.getComputedStyle?.(textElement);
+    if (style?.display === "none" || style?.visibility === "hidden" || style?.visibility === "collapse"
+      || (style?.opacity !== undefined && Number(style.opacity) <= 0)) return false;
+  }
+  if (labelBounds.left < rowBounds.left - 1 || labelBounds.right > rowBounds.right + 1
+    || labelBounds.top < rowBounds.top - 1 || labelBounds.bottom > rowBounds.bottom + 1) {
+    return false;
+  }
+  if (label.clientWidth > 0 && label.scrollWidth > label.clientWidth + 1) return false;
+  if (label.clientHeight > 0 && label.scrollHeight > label.clientHeight + 1) return false;
+  return true;
 }
 
 export function isVisibleStatusBand(element: HTMLDivElement, intersecting: boolean): boolean {
@@ -488,6 +601,19 @@ function asNativeRouteChild(value: unknown): ReactElement<NativeRouteChildProps>
   const props = asRecord(value.props);
   if (!props || typeof props.renderFunc !== "function") return null;
   return value as ReactElement<NativeRouteChildProps>;
+}
+
+function asRouteResultElement(value: unknown): ReactElement<RouteRecord> | null {
+  if (!isValidElement(value)) return null;
+  const props = asRecord(value.props);
+  if (!props) return null;
+  return value as ReactElement<RouteRecord>;
+}
+
+function isRenderableRouteChildren(value: unknown): value is ReactNode {
+  if (value === null || value === undefined || isValidElement(value)) return true;
+  if (["string", "number", "bigint", "boolean"].includes(typeof value)) return true;
+  return Array.isArray(value) && value.every(isRenderableRouteChildren);
 }
 
 function asNativeProviderElement(value: unknown): ReactElement<NativeProviderProps> | null {

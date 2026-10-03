@@ -38,6 +38,8 @@ Install frontend dependencies when needed:
 
 The repository uses `pnpm-lock.yaml` as the canonical frontend lockfile. Do not use `npm install` or add `package-lock.json`. The pnpm store and heavy virtual store are configured under `/tmp/sdh_ludusavi`; the local `node_modules/` directory is ignored and contains only pnpm links/bin shims needed by package scripts.
 
+The project-owned `rollup.config.js` uses direct, build-only Rollup plugins for TypeScript, JSON, CommonJS, browser resolution, replacements, Decky globals, and bundled assets. It also removes only the generated `dist/` directory at the start of each build. Keep these direct dependencies and the configuration together when the build pipeline changes; they are not bundled runtime dependencies.
+
 `react-dom` 18.3.1 and `linkedom` 0.18.12 are development-only dependencies for native status-row behavior tests. React DOM renders the row, and LinkeDOM supplies the DOM for selector and visibility checks. They are not bundled as Decky runtime dependencies. Live Deck checks are still required for computed Steam styles, native clipping, and MutationObserver behavior.
 
 Native DOM fixture waits use standard timer callbacks wrapped in promises, not Node-specific promise timer APIs. Keep these fixtures compatible with the locked dependency graph on a clean install.

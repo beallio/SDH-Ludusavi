@@ -1,6 +1,6 @@
 # Understand your save status
 
-SDH-Ludusavi shows what it knows about your game saves in two places. The row on a supported non-Steam game's page shows the latest known result. A separate message appears while the plugin checks saves before a game starts or backs them up after you quit. The game-page row is for information only; use the Decky menu to change settings or choose a backup.
+SDH-Ludusavi shows what it knows about your game saves in two places. The row on a supported non-Steam game's page shows the latest known result. A separate message appears while the plugin checks saves before a game starts. After you quit, the full post-game message appears only on the affected game's page, either in its normal row or in a same-page fallback when the row cannot be used. The game-page row is for information only; use the Decky menu to change settings or choose a backup.
 
 Steam Cloud games keep their Steam Cloud status. The Ludusavi row does not replace Steam Cloud or change which games the plugin can back up.
 
@@ -35,6 +35,8 @@ The row can include more detail about the **local result** and a **remote observ
 - **LOCAL BACKUP SAVED - SYNCTHING UNAVAILABLE**: The local backup was made, but the plugin could not check Syncthing.
 - **UNABLE TO SYNC**: The save check or operation failed or could not continue safely. Look at **View Logs** if it happens again.
 
-These short messages can disappear after they finish. You can check the latest known result on the game page, but a past message does not replace a check on the other device. If a game page has no Ludusavi row after the plugin reloads, open another page and return. Some layouts may not have room for the row; you can still use the plugin from Decky.
+After you quit, leave the affected game page to hide its post-game message. This does not stop a backup or Syncthing observation. If you return while work continues, the page shows the latest state without starting it again. If work finished, the row keeps the latest local result and remote observation even after the short fallback message expires. The fallback does not get a new lifetime when you return.
+
+You can check the latest known result on the game page, but a past message does not replace a check on the other device. If a game page has no Ludusavi row after the plugin reloads, open another page and return. Some layouts may not have room for the full row message; the fallback then stays on that same game page. You can still use the plugin from Decky.
 
 For help with sharing backups, see [Set up Syncthing](syncthing.md). Return to the [main README](../../README.md) for installation and first use.
