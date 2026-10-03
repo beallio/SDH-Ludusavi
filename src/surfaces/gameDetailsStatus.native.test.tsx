@@ -1,4 +1,4 @@
-import { act, cloneElement, createElement, useEffect, type ReactElement } from "react";
+import { act, cloneElement, createContext, createElement, useEffect, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -12,13 +12,15 @@ const nativeClasses = vi.hoisted(() => ({
   } as Record<string, string | undefined>,
   root: { AppDetailsRoot: "native-details-root", PlaySection: "native-play-section" },
 }));
-vi.mock("@decky/api", () => ({ routerHook: { addPatch: vi.fn(), removePatch: vi.fn() } }));
+const routeMock = vi.hoisted(() => ({ addPatch: vi.fn((_: string, patch: unknown) => patch), removePatch: vi.fn() }));
+vi.mock("@decky/api", () => ({ routerHook: routeMock }));
 vi.mock("@decky/ui", () => ({ playSectionClasses: nativeClasses.play, basicAppDetailsSectionStylerClasses: nativeClasses.root }));
 vi.mock("../utils/logging", () => ({ log: vi.fn() }));
 vi.mock("../utils/steam", () => ({ sessionFromAppOverview: () => null }));
 vi.mock("../utils/steamRuntime", () => ({ getAppDetailsForAppID: () => null, getAppOverviewForAppID: () => null, getGamepadMainWindow: () => null, subscribeToAppDetails: () => () => {} }));
-import { composeInNativeStatusSlot, GameDetailsStatusRow, isVisibleStatusBand } from "./gameDetailsStatus";
+import { createGameDetailsStatusSurface, composeInNativeStatusSlot, GameDetailsStatusRow, isStatusLabelFullyVisible, isVisibleStatusBand } from "./gameDetailsStatus";
 import type { GameDetailsStatusViewModel } from "./gameDetailsStatusModel";
+import { createLudusaviStateStore } from "../state/ludusaviState";
 
 const model: GameDetailsStatusViewModel = {
   eligibility: "eligible", kind: "local_backup_available", status: "has_backup",
@@ -33,6 +35,7 @@ let window: Window & { MutationObserver: typeof MutationObserver };
 const owners = new Set<string>();
 const surface = {
   subscribeDetailsPresentation: () => () => {}, shouldDetailsRowYield: () => false,
+  registerDetailsPage: () => () => {},
   registerDetailsOwner: ({ appID }: { appID: string }) => { owners.add(appID); return () => owners.delete(appID); },
 };
 
@@ -122,3 +125,81 @@ it("rejects theme-hidden opacity while allowing only our own temporary paint sup
   expect(row.style.opacity).toBe("0");
 });
 
+it("rejects a clipped full label until its available content width recovers", () => {
+  const row = document.createElement("div");
+  const label = document.createElement("span");
+  label.dataset.sdhLudusaviStatusLabel = "true";
+  row.append(label); document.body.append(row);
+  row.getBoundingClientRect = () => ({ width: 100, height: 30, left: 0, top: 0, right: 100, bottom: 30 } as DOMRect);
+  label.getBoundingClientRect = () => ({ width: 140, height: 22, left: 0, top: 4, right: 140, bottom: 26 } as DOMRect);
+  Object.defineProperties(label, {
+    clientWidth: { configurable: true, value: 100 }, scrollWidth: { configurable: true, value: 140 },
+    clientHeight: { configurable: true, value: 22 }, scrollHeight: { configurable: true, value: 22 },
+  });
+
+  expect(isStatusLabelFullyVisible(row)).toBe(false);
+  label.getBoundingClientRect = () => ({ width: 100, height: 22, left: 0, top: 4, right: 100, bottom: 26 } as DOMRect);
+  Object.defineProperty(label, "scrollWidth", { configurable: true, value: 100 });
+  expect(isStatusLabelFullyVisible(row)).toBe(true);
+});
+
+it("rechecks row ownership when a full post-game label changes", async () => {
+  await render(pluginRow());
+  expect(owners).toEqual(new Set(["100"]));
+  const label = host.querySelector('[data-sdh-ludusavi-status-label="true"]') as HTMLElement;
+  Object.defineProperties(label, {
+    clientWidth: { configurable: true, value: 100 }, scrollWidth: { configurable: true, value: 300 },
+    clientHeight: { configurable: true, value: 22 }, scrollHeight: { configurable: true, value: 22 },
+  });
+  label.getBoundingClientRect = () => ({ width: 300, height: 22, left: 0, top: 256, right: 300, bottom: 278 } as DOMRect);
+  const clippedModel = { ...model, label: `Ludusavi: ${"W".repeat(64)}` };
+
+  await render(createElement(GameDetailsStatusRow, { appID: "100", model: clippedModel, statusSurface: surface, suppressed: false }));
+  expect(owners).toEqual(new Set());
+
+  Object.defineProperties(label, {
+    clientWidth: { configurable: true, value: 854 }, scrollWidth: { configurable: true, value: 854 },
+  });
+  label.getBoundingClientRect = () => ({ width: 854, height: 22, left: 0, top: 256, right: 854, bottom: 278 } as DOMRect);
+  await render(createElement(GameDetailsStatusRow, { appID: "100", model: { ...clippedModel, label: `${clippedModel.label} ` }, statusSurface: surface, suppressed: false }));
+  expect(owners).toEqual(new Set(["100"]));
+});
+
+it("transfers page presence on route changes and runtime replacement without requiring a status row", async () => {
+  const firstPages = vi.fn(() => vi.fn());
+  const first = createGameDetailsStatusSurface(createLudusaviStateStore(), {
+    subscribeDetailsPresentation: () => () => {}, shouldDetailsRowYield: () => false,
+    registerDetailsPage: firstPages, registerDetailsOwner: () => () => {},
+  });
+  const patch = routeMock.addPatch.mock.calls.at(-1)?.[1] as (route: any) => any;
+  const context = createContext<unknown>(null);
+  const nativeHeader = () => header(createElement(() => null));
+  const child = createElement("native-route", {
+    renderFunc: () => createElement(context.Provider, { value: nativeHeader }, createElement("native-children")),
+  });
+  const patched = patch({ path: "/library/app/:appid", children: child });
+  const routeHeader = (appID: string) => patched.children.props.renderFunc({ params: { appid: appID } }).props.value;
+
+  await render(createElement(routeHeader("100"), {}));
+  expect(firstPages).toHaveBeenCalledWith("100");
+  const firstCleanup = firstPages.mock.results[0]?.value as ReturnType<typeof vi.fn>;
+
+  await render(createElement(routeHeader("101"), {}));
+  expect(firstCleanup).toHaveBeenCalledOnce();
+  expect(firstPages).toHaveBeenLastCalledWith("101");
+
+  const replacementPages = vi.fn(() => vi.fn());
+  const replacement = createGameDetailsStatusSurface(createLudusaviStateStore(), {
+    subscribeDetailsPresentation: () => () => {}, shouldDetailsRowYield: () => false,
+    registerDetailsPage: replacementPages, registerDetailsOwner: () => () => {},
+  });
+  await act(async () => { await new Promise<void>((resolve) => setTimeout(resolve, 20)); });
+  expect(replacementPages).toHaveBeenCalledWith("101");
+  expect(firstPages.mock.results.at(-1)?.value).toHaveBeenCalledOnce();
+
+  first.dispose(); replacement.dispose();
+  const routePatch = globalThis.__sdhLudusaviGameDetailsStatusRoutePatch;
+  if (routePatch?.removalTimer !== null && routePatch?.removalTimer !== undefined) clearTimeout(routePatch.removalTimer);
+  Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRoutePatch");
+  Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRegistry");
+});

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { autoSyncStatusText } from "./autoSyncStatusRenderer";
 import {
   getSteamCloudEligibility,
   selectGameDetailsStatus,
@@ -122,7 +123,7 @@ describe("game details status selection", () => {
     expect(selected.localStatus).toBe("has_backup");
     expect(selected.syncStatus).toBe("syncthing_folder_not_found");
     expect(selected.canOwnStatusArea).toBe(true);
-    expect(selected.label).toBe("Ludusavi: Unable to sync");
+    expect(selected.label).toBe(`Ludusavi: ${autoSyncStatusText.syncthing_folder_not_found}`);
 
     const otherGame = selectGameDetailsStatus({
       snapshot: state,
@@ -133,6 +134,41 @@ describe("game details status selection", () => {
     });
     expect(otherGame.kind).toBe("not_tracked");
     expect(otherGame.syncStatus).toBeNull();
+  });
+
+  it("uses canonical full copy for accepted post-game facts without inventing a local success", () => {
+    const activeWarning = selectGameDetailsStatus({
+      snapshot: snapshot({ autoSyncObservations: { "100": {
+        appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", lifecycle: "lifecycle_exit", generation: 8,
+        status: "syncthing_upload_incomplete", activity: "active", observedAt: 30,
+        localOperation: { status: "has_backup", resultStatus: "backed_up", lifecycle: "lifecycle_exit", observedAt: 20, generation: 8 },
+        syncObservation: { status: "syncthing_upload_incomplete", lifecycle: "lifecycle_exit", observedAt: 30, generation: 8 },
+      } } }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(activeWarning.label).toBe(`Ludusavi: ${autoSyncStatusText.syncthing_upload_incomplete}`);
+
+    const acceptedWarning = selectGameDetailsStatus({
+      snapshot: snapshot({ autoSyncObservations: { "100": {
+        appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", lifecycle: "lifecycle_exit", generation: 9,
+        status: "syncthing_upload_incomplete", activity: "settled", observedAt: 30,
+        localOperation: { status: "has_backup", resultStatus: "backed_up", lifecycle: "lifecycle_exit", observedAt: 20, generation: 9 },
+        syncObservation: { status: "syncthing_upload_incomplete", lifecycle: "lifecycle_exit", observedAt: 30, generation: 9 },
+      } } }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(acceptedWarning.label).toBe(`Ludusavi: ${autoSyncStatusText.syncthing_upload_incomplete}`);
+
+    const unacceptedWarning = selectGameDetailsStatus({
+      snapshot: snapshot({ autoSyncObservations: { "100": {
+        appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", lifecycle: "lifecycle_exit", generation: 10,
+        status: "syncthing_upload_incomplete", activity: "settled", observedAt: 30,
+        localOperation: { status: "error", resultStatus: "failed", lifecycle: "lifecycle_exit", observedAt: 20, generation: 10 },
+        syncObservation: { status: "syncthing_upload_incomplete", lifecycle: "lifecycle_exit", observedAt: 30, generation: 10 },
+      } } }),
+      appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
+    });
+    expect(unacceptedWarning.label).not.toBe(`Ludusavi: ${autoSyncStatusText.syncthing_upload_incomplete}`);
   });
 
   it("uses a reload's last durable local operation without inventing remote delivery", () => {
@@ -352,7 +388,7 @@ describe("game details status selection", () => {
     expect(exit.description).not.toContain("Incoming folder activity settled.");
   });
 
-  it("uses Steam-style visible statuses while retaining detailed local meaning", () => {
+  it("uses full post-game copy while retaining compact non-post-game summaries", () => {
     const restored = selectGameDetailsStatus({
       snapshot: snapshot({ gameHistory: { Fixture: {
         last_backup: null, last_restore: null, last_skip: null, last_failure: null,
@@ -375,7 +411,7 @@ describe("game details status selection", () => {
       } } }),
       appID: "100", gameName: "Fixture", canonicalGameName: "Fixture", eligibility: "eligible",
     });
-    expect(active.label).toBe("Ludusavi: Backing up...");
+    expect(active.label).toBe(`Ludusavi: ${autoSyncStatusText.backing_up}`);
     expect(active.description).toContain("Current activity: Backing up local save.");
 
     const disabled = selectGameDetailsStatus({

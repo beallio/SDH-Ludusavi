@@ -37,8 +37,9 @@ describe("game details route adapter", () => {
 
   it("clones the supported React route child, keeps its props, and reuses the native header wrapper", () => {
     const surface = createGameDetailsStatusSurface(createLudusaviStateStore(), {
-      registerDetailsOwner: vi.fn(), subscribeDetailsPresentation: vi.fn(() => () => {}), shouldDetailsRowYield: vi.fn(() => false),
-    } as any);
+      registerDetailsOwner: vi.fn(), registerDetailsPage: vi.fn(() => () => {}),
+      subscribeDetailsPresentation: vi.fn(() => () => {}), shouldDetailsRowYield: vi.fn(() => false),
+    } satisfies DetailsStatusPresentationSurface);
     const patch = routeMock.addPatch.mock.calls.at(-1)?.[1] as (route: any) => any;
     const context = createContext<unknown>(null);
     const nativeHeader = () => createElement("native-header");
@@ -66,8 +67,9 @@ describe("game details route adapter", () => {
   it("keeps the mounted route contribution alive through a dispose and replacement without adding another patch", () => {
     const firstStore = createLudusaviStateStore();
     const firstSurface = createGameDetailsStatusSurface(firstStore, {
-      registerDetailsOwner: vi.fn(), subscribeDetailsPresentation: vi.fn(() => () => {}), shouldDetailsRowYield: vi.fn(() => false),
-    } as any);
+      registerDetailsOwner: vi.fn(), registerDetailsPage: vi.fn(() => () => {}),
+      subscribeDetailsPresentation: vi.fn(() => () => {}), shouldDetailsRowYield: vi.fn(() => false),
+    } satisfies DetailsStatusPresentationSurface);
     const firstPatch = routeMock.addPatch.mock.calls.at(-1)?.[1] as (route: any) => any;
     const context = createContext<unknown>(null);
     const nativeHeader = () => createElement("native-header");
@@ -90,8 +92,9 @@ describe("game details route adapter", () => {
     expect(routeMock.removePatch).not.toHaveBeenCalled();
     const replacementStore = createLudusaviStateStore();
     const replacementSurface = createGameDetailsStatusSurface(replacementStore, {
-      registerDetailsOwner: vi.fn(), subscribeDetailsPresentation: vi.fn(() => () => {}), shouldDetailsRowYield: vi.fn(() => false),
-    } as any);
+      registerDetailsOwner: vi.fn(), registerDetailsPage: vi.fn(() => () => {}),
+      subscribeDetailsPresentation: vi.fn(() => () => {}), shouldDetailsRowYield: vi.fn(() => false),
+    } satisfies DetailsStatusPresentationSurface);
 
     // This is the original mounted route contribution. It must update to the
     // current runtime rather than requiring Steam to navigate or rerender it.
@@ -109,6 +112,7 @@ describe("game details route adapter", () => {
     const statusSurface = {
       subscribeDetailsPresentation: vi.fn(() => () => {}),
       shouldDetailsRowYield: vi.fn(() => false),
+      registerDetailsPage: vi.fn(() => () => {}),
       registerDetailsOwner: vi.fn(() => () => {}),
     } satisfies DetailsStatusPresentationSurface;
     const original = createGameDetailsStatusSurface(createLudusaviStateStore(), statusSurface);
@@ -134,6 +138,7 @@ describe("game details route adapter", () => {
     vi.stubGlobal("window", globalThis);
     const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
     const surface = createAutoSyncStatusSurface(view, createLudusaviStateStore());
+    const releasePage = surface.registerDetailsPage("100");
     surface.publish("backing_up", {
       source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 9,
       gameName: "Fixture", appID: "100", tracked: true,
@@ -176,6 +181,7 @@ describe("game details route adapter", () => {
     release();
     expect(surface.shouldDetailsRowYield("100")).toBe(true);
     expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
+    releasePage();
     surface.dispose();
   });
 

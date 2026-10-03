@@ -80,11 +80,18 @@ notices are in [LICENSE](LICENSE).
 
 ## Build tooling
 
-### [`@decky/rollup` 1.0.2](https://www.npmjs.com/package/@decky/rollup)
+### Project-owned Rollup configuration
 
-- **Role:** Build-time Rollup preset; not shipped as a standalone runtime
-  package.
-- **License:** BSD-3-Clause
+- **Role:** Build-time configuration for the Decky frontend; not shipped as a
+  standalone runtime package.
+- **Source lineage:** Retains the Decky plugin template build contract while
+  using direct Rollup plugins instead of the `@decky/rollup` preset.
+- **Direct build dependencies:** `@rollup/plugin-commonjs`,
+  `@rollup/plugin-json`, `@rollup/plugin-node-resolve`,
+  `@rollup/plugin-replace`, `@rollup/plugin-typescript`,
+  `rollup-plugin-external-globals`, and `rollup-plugin-import-assets`.
+- **License:** MIT for the direct build dependencies. The BSD-3-Clause Decky
+  template lineage remains attributed in the project-license section.
 
 ### [facebook/react: react-dom 18.3.1](https://github.com/facebook/react)
 

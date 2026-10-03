@@ -16,7 +16,7 @@ const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // update an already-mounted details page without a navigation.
 const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
 // Bump when an existing route wrapper cannot render the newest status-row contract.
-const GAME_DETAILS_ROUTE_RENDER_VERSION = 10;
+const GAME_DETAILS_ROUTE_RENDER_VERSION = 11;
 export type GameDetailsStatusSurface = Readonly<{
   dispose(): void;
 }>;
@@ -202,13 +202,21 @@ function GameDetailsStatusHeader({
   );
   const nativeHeader = header(headerProps);
   if (!contribution) return nativeHeader;
-  return createElement(ActiveGameDetailsStatusHeader, {
-    appID,
-    header,
-    headerProps,
-    store: contribution.store,
-    statusSurface: contribution.statusSurface,
-  });
+  return createElement(Fragment, null,
+    createElement(DetailsPagePresence, { appID, statusSurface: contribution.statusSurface }),
+    createElement(ActiveGameDetailsStatusHeader, {
+      appID,
+      header,
+      headerProps,
+      store: contribution.store,
+      statusSurface: contribution.statusSurface,
+    }),
+  );
+}
+
+function DetailsPagePresence({ appID, statusSurface }: Pick<ActiveGameDetailsStatusHeaderProps, "appID" | "statusSurface">): null {
+  useLayoutEffect(() => statusSurface.registerDetailsPage(appID), [appID, statusSurface]);
+  return null;
 }
 
 type ActiveGameDetailsStatusHeaderProps = Pick<
@@ -321,7 +329,7 @@ export function detailsRowPaintStyle(suppressed: boolean): Pick<CSSProperties, "
 
 export function GameDetailsStatusRow({ appID, model, statusSurface, suppressed, classes: providedClasses, nativeOccupied = false, onElement }: GameDetailsStatusRowProps): ReactNode {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
-  const visible = useVisibleLayout(element);
+  const visible = useVisibleLayout(element, model.label);
   const classes = providedClasses ?? getNativeGameDetailsStatusClasses();
   useLayoutEffect(() => {
     if (!model.canOwnStatusArea || !visible || nativeOccupied) return;
@@ -383,7 +391,7 @@ function getStatusHostWindow(element: Element): StatusHostWindow | null {
   return element.ownerDocument?.defaultView ?? null;
 }
 
-function useVisibleLayout(element: HTMLDivElement | null): boolean {
+function useVisibleLayout(element: HTMLDivElement | null, label: string): boolean {
   const [visible, setVisible] = useState(false);
   useLayoutEffect(() => {
     if (!element) return;
@@ -395,6 +403,7 @@ function useVisibleLayout(element: HTMLDivElement | null): boolean {
       for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
         mutationObserver?.observe(ancestor, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
       }
+      mutationObserver?.observe(element, { childList: true, characterData: true, subtree: true });
       if (element.ownerDocument.head) mutationObserver?.observe(element.ownerDocument.head, { childList: true, characterData: true, subtree: true, attributes: true });
     };
     const update = () => {
@@ -402,7 +411,8 @@ function useVisibleLayout(element: HTMLDivElement | null): boolean {
       // Measuring our own paint-suppressed row briefly removes its inline opacity.
       // Do not feed those synchronous measurement writes back into this observer.
       mutationObserver?.disconnect();
-      const nextVisible = isVisibleStatusBand(element, fullyIntersecting);
+      const nextVisible = isVisibleStatusBand(element, fullyIntersecting)
+        && isStatusLabelFullyVisible(element);
       watchStyles();
       setVisible(nextVisible);
     };
@@ -432,8 +442,21 @@ function useVisibleLayout(element: HTMLDivElement | null): boolean {
       if (frame !== null) hostWindow.cancelAnimationFrame(frame);
       hostWindow.removeEventListener("resize", schedule); hostWindow.removeEventListener("scroll", schedule, true);
     };
-  }, [element]);
+  }, [element, label]);
   return visible;
+}
+
+export function isStatusLabelFullyVisible(element: HTMLDivElement): boolean {
+  const label = element.querySelector<HTMLElement>("[data-sdh-ludusavi-status-label=\"true\"]");
+  if (!label) return false;
+  const rowBounds = element.getBoundingClientRect();
+  const labelBounds = label.getBoundingClientRect();
+  if (labelBounds.width > 0 && (labelBounds.left < rowBounds.left - 1 || labelBounds.right > rowBounds.right + 1)) {
+    return false;
+  }
+  if (label.clientWidth > 0 && label.scrollWidth > label.clientWidth + 1) return false;
+  if (label.clientHeight > 0 && label.scrollHeight > label.clientHeight + 1) return false;
+  return true;
 }
 
 export function isVisibleStatusBand(element: HTMLDivElement, intersecting: boolean): boolean {

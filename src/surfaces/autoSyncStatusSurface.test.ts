@@ -358,6 +358,7 @@ describe("AutoSyncStatusSurface Dwell Time", () => {
     });
     vi.advanceTimersByTime(0);
     mockStatusView.sync.mockClear();
+    const leaveDetailsPage = surface.registerDetailsPage("1145300");
     surface.complete(disabledResult, {
       lifecycle: "lifecycle_exit",
       gameName: "Hades",
@@ -375,6 +376,7 @@ describe("AutoSyncStatusSurface Dwell Time", () => {
     expect(mockStatusView.sync).toHaveBeenCalledWith(
       expect.objectContaining({ visible: false }),
     );
+    leaveDetailsPage();
   });
 
   it("coalesces multiple syncthing publishes during the dwell time", () => {
