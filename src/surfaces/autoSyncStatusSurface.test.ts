@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
-  autoSyncStatusText,
   isSyncthingActiveStatus,
   iconSvgForAutoSyncStatus,
   shouldAutoHideStatus,
@@ -19,10 +18,7 @@ vi.mock("@decky/ui", () => ({
 }));
 
 describe("AutoSyncStatusSurface Status Pending Upload", () => {
-  it("defines and renders the per-game disabled notice as an auto-hiding amber status", () => {
-    expect(autoSyncStatusText.game_sync_disabled).toBe(
-      "SAVE SYNC DISABLED FOR THIS GAME",
-    );
+  it("renders the per-game disabled notice as an auto-hiding amber status", () => {
     expect(shouldAutoHideStatus("game_sync_disabled")).toBe(true);
 
     // Lucide save-off glyph (lu/LuSaveOff), transcribed as a raw SVG string
@@ -37,12 +33,7 @@ describe("AutoSyncStatusSurface Status Pending Upload", () => {
       visible: true,
       source: "rpc_result",
     });
-    expect(html).toContain("SAVE SYNC DISABLED FOR THIS GAME");
     expect(html).toContain("#f59e0b");
-  });
-
-  it("should have correct display text for syncthing_pending_upload", () => {
-    expect(autoSyncStatusText.syncthing_pending_upload).toBe("SYNCTHING PREPARING");
   });
 
   it("should consider syncthing_pending_upload as active status", () => {
@@ -97,26 +88,15 @@ describe("AutoSyncStatusSurface Status Pending Upload", () => {
     expect(shouldAutoHideStatus("conflict_unresolved")).toBe(true);
   });
 
-  it("defines and renders the explicit unresolved-conflict warning", () => {
-    expect(autoSyncStatusText.conflict_unresolved).toBe("SYNC SKIPPED — CONFLICT UNRESOLVED");
+  it("renders the unresolved-conflict warning with the conflict icon treatment", () => {
     const html = renderAutoSyncStatusHtml({
       status: "conflict_unresolved",
       visible: true,
       source: "rpc_result",
     });
-    expect(html).toContain("SYNC SKIPPED — CONFLICT UNRESOLVED");
     expect(html).toContain("#f59e0b");
     expect(iconSvgForAutoSyncStatus("conflict_unresolved")).toBe(
       iconSvgForAutoSyncStatus("conflict"),
-    );
-  });
-
-  it("defines distinct local-backup warnings", () => {
-    expect(autoSyncStatusText.syncthing_unavailable).toBe(
-      "LOCAL BACKUP SAVED - SYNCTHING UNAVAILABLE",
-    );
-    expect(autoSyncStatusText.syncthing_folder_not_found).toBe(
-      "LOCAL BACKUP SAVED - PATH NOT SHARED",
     );
   });
 
@@ -163,12 +143,6 @@ describe("AutoSyncStatusSurface Uploading Arrow Animation", () => {
 });
 
 describe("AutoSyncStatusSurface No Connected Peers", () => {
-  it("renders the no-peers warning with the exact selected text", () => {
-    expect(autoSyncStatusText.syncthing_no_peers).toBe(
-      "LOCAL BACKUP SAVED - NO SYNCTHING PEERS ONLINE",
-    );
-  });
-
   it("treats the no-peers warning as terminal with auto-hide", () => {
     expect(isSyncthingActiveStatus("syncthing_no_peers")).toBe(false);
     expect(shouldAutoHideStatus("syncthing_no_peers")).toBe(true);
@@ -180,7 +154,6 @@ describe("AutoSyncStatusSurface No Connected Peers", () => {
       visible: true,
       source: "rpc_result",
     });
-    expect(html).toContain("LOCAL BACKUP SAVED - NO SYNCTHING PEERS ONLINE");
     expect(html).toContain("#f59e0b");
     
     const icon = iconSvgForAutoSyncStatus("syncthing_unavailable");

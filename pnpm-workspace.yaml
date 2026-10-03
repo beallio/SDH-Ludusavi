@@ -30,8 +30,3 @@ overrides:
   # GHSA-2v37-7h3g-55p8 (custom generators loop) in 3.3.18 — the advisory
   # originally named 3.3.17 and was later widened to <3.3.18.
   nanoid@<3.3.18: 3.3.18
-  # GHSA-mh99-v99m-4gvg reaches brace-expansion only through these two build
-  # tools. Forcing both to current majors drops the legacy glob/minimatch
-  # chains that pin the vulnerable brace-expansion builds.
-  "@rollup/plugin-commonjs@^26.0.0": 29.0.3
-  rollup-plugin-delete@^2.0.0: 3.0.2

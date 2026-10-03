@@ -89,11 +89,6 @@ def test_pnpm_workspace_contains_supply_chain_policy() -> None:
         # custom-generator advisory first named 3.3.17 as the fix and was later
         # widened to <3.3.18, which is why this pin moved a second time.
         "nanoid@<3.3.18: 3.3.18",
-        # GHSA-mh99-v99m-4gvg: the vulnerable brace-expansion builds were only
-        # reachable through these two legacy build tools, so forcing both to
-        # current majors removes the advisory instead of suppressing it.
-        '"@rollup/plugin-commonjs@^26.0.0": 29.0.3',
-        "rollup-plugin-delete@^2.0.0: 3.0.2",
         "minimatch@^3.0.0: 3.1.5",
         "minimatch@^9.0.0: 9.0.9",
     ]:

@@ -52,9 +52,11 @@ describe("game details route adapter", () => {
     expect(patched.children.props.renderFunc).not.toBe(originalRender);
     const first = patched.children.props.renderFunc({ params: { appid: "100" } });
     const second = patched.children.props.renderFunc({ params: { appid: "100" } });
-    expect(first.props.children.type).toBe("native-children");
-    expect(first.props.value).not.toBe(nativeHeader);
-    expect(second.props.value).toBe(first.props.value);
+    const firstProvider = first.props.children[1] as ReactElement<{ children: ReactElement; value: unknown }>;
+    const secondProvider = second.props.children[1] as ReactElement<{ children: ReactElement; value: unknown }>;
+    expect(firstProvider.props.children.type).toBe("native-children");
+    expect(firstProvider.props.value).not.toBe(nativeHeader);
+    expect(secondProvider.props.value).toBe(firstProvider.props.value);
 
     const unsupported = { children: {} };
     expect(patch(unsupported)).toBe(unsupported);
@@ -77,7 +79,8 @@ describe("game details route adapter", () => {
     const child = createElement("native-route", { renderFunc: originalRender });
     const patched = firstPatch({ path: "/library/app/:appid", children: child });
     const rendered = patched.children.props.renderFunc({ params: { appid: "100" } });
-    const retainedHeader = rendered.props.value as (props: unknown) => ReactElement<{
+    const retainedProvider = rendered.props.children[1] as ReactElement<{ value: unknown }>;
+    const retainedHeader = retainedProvider.props.value as (props: unknown) => ReactElement<{
       store: unknown;
       contributionSource: GameDetailsStatusContributionSource;
     }>;

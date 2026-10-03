@@ -1,5 +1,5 @@
 import { routerHook, type RoutePatch } from "@decky/api";
-import { Fragment, cloneElement, createElement, isValidElement, useEffect, useLayoutEffect, useState, useSyncExternalStore, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { Fragment, cloneElement, createElement, isValidElement, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactElement, type ReactNode } from "react";
 
 import type { LudusaviStateStore } from "../state/ludusaviState";
 import { sessionFromAppOverview } from "../utils/steam";
@@ -16,7 +16,7 @@ const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // update an already-mounted details page without a navigation.
 const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
 // Bump when an existing route wrapper cannot render the newest status-row contract.
-const GAME_DETAILS_ROUTE_RENDER_VERSION = 11;
+const GAME_DETAILS_ROUTE_RENDER_VERSION = 12;
 export type GameDetailsStatusSurface = Readonly<{
   dispose(): void;
 }>;
@@ -124,11 +124,16 @@ function retainGameDetailsRoutePatch(contributionRegistry: GameDetailsStatusCont
     const renderFunc = child.props.renderFunc;
     const wrappedRenderFunc = (...args: unknown[]) => {
       const rendered = renderFunc(...args);
-      const provider = asNativeProviderElement(rendered);
-      if (!provider) return rendered;
-      const nativeHeader = asNativeHeader(provider.props.value);
       const appID = routeAppID(args) ?? routeAppID([record]);
-      if (!nativeHeader || !appID) return rendered;
+      if (!appID) return rendered;
+      const withDetailsPagePresence = (content: ReactNode) => createElement(Fragment, null,
+        createElement(DetailsPagePresence, { appID, contributionSource: contributionRegistry }),
+        content,
+      );
+      const provider = asNativeProviderElement(rendered);
+      if (!provider) return withDetailsPagePresence(rendered as ReactNode);
+      const nativeHeader = asNativeHeader(provider.props.value);
+      if (!nativeHeader) return withDetailsPagePresence(rendered as ReactNode);
       let wrappersForHeader = wrappedHeaders.get(nativeHeader);
       if (!wrappersForHeader) {
         wrappersForHeader = new Map();
@@ -149,7 +154,7 @@ function retainGameDetailsRoutePatch(contributionRegistry: GameDetailsStatusCont
         };
         wrappersForHeader.set(appID, wrappedHeader);
       }
-      return cloneElement(provider, { ...provider.props, value: wrappedHeader });
+      return withDetailsPagePresence(cloneElement(provider, { ...provider.props, value: wrappedHeader }));
     };
     // Decky's dispatcher consumes the React child's props. Preserve every native
     // prop and replace only the route callback.
@@ -202,20 +207,22 @@ function GameDetailsStatusHeader({
   );
   const nativeHeader = header(headerProps);
   if (!contribution) return nativeHeader;
-  return createElement(Fragment, null,
-    createElement(DetailsPagePresence, { appID, statusSurface: contribution.statusSurface }),
-    createElement(ActiveGameDetailsStatusHeader, {
-      appID,
-      header,
-      headerProps,
-      store: contribution.store,
-      statusSurface: contribution.statusSurface,
-    }),
-  );
+  return createElement(ActiveGameDetailsStatusHeader, {
+    appID,
+    header,
+    headerProps,
+    store: contribution.store,
+    statusSurface: contribution.statusSurface,
+  });
 }
 
-function DetailsPagePresence({ appID, statusSurface }: Pick<ActiveGameDetailsStatusHeaderProps, "appID" | "statusSurface">): null {
-  useLayoutEffect(() => statusSurface.registerDetailsPage(appID), [appID, statusSurface]);
+function DetailsPagePresence({ appID, contributionSource }: Pick<GameDetailsStatusHeaderProps, "appID" | "contributionSource">): null {
+  const contribution = useSyncExternalStore(
+    contributionSource.subscribe,
+    contributionSource.getSnapshot,
+    contributionSource.getSnapshot,
+  );
+  useLayoutEffect(() => contribution?.statusSurface.registerDetailsPage(appID), [appID, contribution?.statusSurface]);
   return null;
 }
 
@@ -393,6 +400,7 @@ function getStatusHostWindow(element: Element): StatusHostWindow | null {
 
 function useVisibleLayout(element: HTMLDivElement | null, label: string): boolean {
   const [visible, setVisible] = useState(false);
+  const scheduleVisibilityCheck = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     if (!element) return;
     const hostWindow = getStatusHostWindow(element);
@@ -400,26 +408,31 @@ function useVisibleLayout(element: HTMLDivElement | null, label: string): boolea
     let frame: number | null = null;
     let fullyIntersecting = hostWindow.IntersectionObserver === undefined;
     const watchStyles = () => {
-      for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+      mutationObserver?.observe(element, {
+        attributes: true,
+        attributeFilter: ["class", "style", "hidden"],
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
         mutationObserver?.observe(ancestor, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
       }
-      mutationObserver?.observe(element, { childList: true, characterData: true, subtree: true });
       if (element.ownerDocument.head) mutationObserver?.observe(element.ownerDocument.head, { childList: true, characterData: true, subtree: true, attributes: true });
     };
     const update = () => {
       frame = null;
       // Measuring our own paint-suppressed row briefly removes its inline opacity.
-      // Do not feed those synchronous measurement writes back into this observer.
-      mutationObserver?.disconnect();
+      // Ignore those synchronous measurement writes in the existing observer.
       const nextVisible = isVisibleStatusBand(element, fullyIntersecting)
         && isStatusLabelFullyVisible(element);
-      watchStyles();
       setVisible(nextVisible);
     };
     const schedule = () => {
       if (frame !== null) return;
       frame = hostWindow.requestAnimationFrame(update);
     };
+    scheduleVisibilityCheck.current = schedule;
     const HostMutationObserver = hostWindow.MutationObserver;
     const mutationObserver = HostMutationObserver ? new HostMutationObserver((records) => {
       if (records.some((record) => !isStatusPaintMeasurement(record))) schedule();
@@ -436,13 +449,16 @@ function useVisibleLayout(element: HTMLDivElement | null, label: string): boolea
     resizeObserver?.observe(element);
     hostWindow.addEventListener("resize", schedule);
     hostWindow.addEventListener("scroll", schedule, true);
+    watchStyles();
     update();
     return () => {
+      scheduleVisibilityCheck.current = null;
       observer?.disconnect(); resizeObserver?.disconnect(); mutationObserver?.disconnect();
       if (frame !== null) hostWindow.cancelAnimationFrame(frame);
       hostWindow.removeEventListener("resize", schedule); hostWindow.removeEventListener("scroll", schedule, true);
     };
-  }, [element, label]);
+  }, [element]);
+  useLayoutEffect(() => { scheduleVisibilityCheck.current?.(); }, [label]);
   return visible;
 }
 
@@ -451,7 +467,18 @@ export function isStatusLabelFullyVisible(element: HTMLDivElement): boolean {
   if (!label) return false;
   const rowBounds = element.getBoundingClientRect();
   const labelBounds = label.getBoundingClientRect();
-  if (labelBounds.width > 0 && (labelBounds.left < rowBounds.left - 1 || labelBounds.right > rowBounds.right + 1)) {
+  if (rowBounds.width <= 0 || rowBounds.height <= 0 || labelBounds.width <= 0 || labelBounds.height <= 0) {
+    return false;
+  }
+  const hostWindow = getStatusHostWindow(label);
+  for (const textElement of [label, ...label.querySelectorAll<HTMLElement>("*")]) {
+    if (textElement.hidden) return false;
+    const style = hostWindow?.getComputedStyle?.(textElement);
+    if (style?.display === "none" || style?.visibility === "hidden" || style?.visibility === "collapse"
+      || (style?.opacity !== undefined && Number(style.opacity) <= 0)) return false;
+  }
+  if (labelBounds.left < rowBounds.left - 1 || labelBounds.right > rowBounds.right + 1
+    || labelBounds.top < rowBounds.top - 1 || labelBounds.bottom > rowBounds.bottom + 1) {
     return false;
   }
   if (label.clientWidth > 0 && label.scrollWidth > label.clientWidth + 1) return false;
