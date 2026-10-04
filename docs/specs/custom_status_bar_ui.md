@@ -386,7 +386,7 @@ temporary hidden row. The band itself does not move. Original inline image heigh
 CSS-variable values, marker attributes, and priorities return when the extension ends.
 Native DOM, stylesheet, scroll, resize, and band-size changes resync the image.
 
-For the verified standard-equation Clean Gameview profiles only, the same lifecycle also measures the
+For Clean Gameview layouts with recognized standard-equation geometry, the same lifecycle also measures the
 visible band and temporarily deducts it from both the top-panel and image budgets on Decky's
 `appDetailsClasses.InnerContainer`, when it is the common route-content ancestor of the header
 artwork and status body. The nested play/status `AppDetailsRoot` is not a budget target because it
