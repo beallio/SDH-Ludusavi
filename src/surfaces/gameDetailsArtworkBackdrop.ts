@@ -20,6 +20,7 @@ type ExtendedArtwork = {
 
 const ARTWORK_MARKER = "data-sdh-ludusavi-artwork-band";
 const STATUS_ROW_MARKER = "data-sdh-ludusavi-status-row";
+const STATUS_ROW_APP_ID = "data-sdh-ludusavi-status-appid";
 const PAINT_SUPPRESSED_MARKER = "data-sdh-ludusavi-paint-suppressed";
 const BAND_HEIGHT_PROPERTY = "--sdh-status-band-height";
 const CLIPPING_OVERFLOW: Record<string, true> = {
@@ -302,6 +303,8 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     if (currentDocument) {
       currentWindow.removeEventListener("scroll", schedule, true);
       currentWindow.removeEventListener("resize", resize);
+      currentDocument.removeEventListener("animationend", schedule, true);
+      currentDocument.removeEventListener("transitionend", schedule, true);
       releaseCgvBudgetCompensation();
     }
     if (restoreBeforeSync) {
@@ -313,12 +316,13 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     currentWindow = (document.defaultView as HostWindow | null) ?? (hostWindow as HostWindow);
     const HostMutationObserver = currentWindow.MutationObserver;
     mutationObserver = HostMutationObserver ? new HostMutationObserver((records) => {
-      if (records.length > 0 && records.every(isStatusPaintMeasurement)) return;
-      if (records.length > 0 && records.every(isManagedCgvBudgetStyle)) return;
       const managedStyles = extended?.managedStyles;
-      if (records.length > 0 && managedStyles && records.every((record) => record.type === "attributes"
-        && (record.attributeName === "style" || record.attributeName === ARTWORK_MARKER)
-        && managedStyles.some(({ element }) => element === record.target))) return;
+      const isOwnedMutation = (record: MutationRecord) => isStatusPaintMeasurement(record)
+        || isManagedCgvBudgetStyle(record)
+        || Boolean(managedStyles && record.type === "attributes"
+          && (record.attributeName === "style" || record.attributeName === ARTWORK_MARKER)
+          && managedStyles.some(({ element }) => element === record.target));
+      if (records.length > 0 && records.every(isOwnedMutation)) return;
       schedule();
     }) : null;
     const HostResizeObserver = currentWindow.ResizeObserver;
@@ -338,6 +342,11 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     });
     currentWindow.addEventListener("scroll", schedule, true);
     currentWindow.addEventListener("resize", resize);
+    // Steam's entry animation changes geometry without a DOM mutation. A final
+    // animation or transition event retries a temporarily rejected native band
+    // once without polling, scrolling, or weakening its ownership checks.
+    document.addEventListener("animationend", schedule, true);
+    document.addEventListener("transitionend", schedule, true);
   }
 
   function observeBand(element: Element | null): void {
@@ -362,8 +371,8 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
 
   function releaseCgvBudgetCompensation(): void {
     const root = cgvBudgetRoot;
-    cgvBudgetRoot = null;
     if (!releaseCgvBudgets(root, cgvBudgetOwner)) return;
+    cgvBudgetRoot = null;
     // The existing extension is based on the compensated artwork budget.
     // Restore it before measuring the unmodified geometry again.
     restore();
@@ -442,7 +451,7 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
   function visibleBandHeight(
     element: HTMLElement,
     document: Document,
-    expectedArtwork: Readonly<{ width: number; edge: number }> | null,
+    expectedGeometry: Readonly<{ width: number; edge?: number }> | null,
   ): number | null {
     const ownSuppression = element.getAttribute(PAINT_SUPPRESSED_MARKER) === "true"
       && element.style.getPropertyValue("opacity") === "0";
@@ -451,9 +460,9 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       const bandHeight = element.offsetHeight;
       const root = document.documentElement;
       if (bandHeight <= 0 || band.height <= 0 || band.width <= 0
-        || (expectedArtwork !== null && (Math.abs(band.top - expectedArtwork.edge) > 1
-          || Math.abs(band.width - expectedArtwork.width) > 2))
-        || (expectedArtwork === null && root.clientWidth > 0 && Math.abs(band.width - root.clientWidth) > 2)) return null;
+        || (expectedGeometry !== null && (Math.abs(band.width - expectedGeometry.width) > 2
+          || (expectedGeometry.edge !== undefined && Math.abs(band.top - expectedGeometry.edge) > 1)))
+        || (expectedGeometry === null && root.clientWidth > 0 && Math.abs(band.width - root.clientWidth) > 2)) return null;
 
       for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
         if (ancestor.hidden || (ancestor.getAttribute("aria-hidden") === "true" && !(ancestor === element && ownSuppression))) return null;
@@ -486,12 +495,21 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     return element.closest(`.${rootClass}`) as HTMLElement | null;
   }
 
-  function visibleRouteBand(document: Document): Readonly<{ element: HTMLElement; height: number }> | null {
+  function visibleRouteBand(document: Document): Readonly<{
+    element: HTMLElement;
+    height: number;
+    contentRoot: HTMLElement;
+  }> | null {
     for (const element of document.querySelectorAll<HTMLElement>(
       `[${STATUS_ROW_MARKER}="true"]${nativeClasses ? `,.${nativeClasses.row}` : ""}`,
     )) {
-      const height = visibleBandHeight(element, document, null);
-      if (height !== null) return { element, height };
+      if (element.getAttribute(STATUS_ROW_APP_ID) !== appID) continue;
+      const contentRoot = routeContentAncestor(element);
+      if (!contentRoot) continue;
+      const rootBounds = contentRoot.getBoundingClientRect();
+      if (rootBounds.width <= 0) continue;
+      const height = visibleBandHeight(element, document, { width: rootBounds.width });
+      if (height !== null) return { element, height, contentRoot };
     }
     return null;
   }
@@ -528,9 +546,8 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     }
     if (!image) {
       const routeBand = visibleRouteBand(currentDocument);
-      const contentRoot = routeBand && routeContentAncestor(routeBand.element);
-      const compensated = contentRoot !== null && routeBand !== null
-        && applyCgvBudgetCompensation(contentRoot, routeBand.height);
+      const compensated = routeBand !== null
+        && applyCgvBudgetCompensation(routeBand.contentRoot, routeBand.height);
       if (!compensated) releaseCgvBudgetCompensation();
       const reflowedBand = compensated ? visibleRouteBand(currentDocument) : routeBand;
       if (compensated && reflowedBand === null) {
@@ -618,6 +635,8 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     resizeObserver?.disconnect();
     currentWindow.removeEventListener("scroll", schedule, true);
     currentWindow.removeEventListener("resize", resize);
+    currentDocument?.removeEventListener("animationend", schedule, true);
+    currentDocument?.removeEventListener("transitionend", schedule, true);
     cancelFrame();
     observeBand(null);
     restore();

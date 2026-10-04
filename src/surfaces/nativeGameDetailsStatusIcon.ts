@@ -8,7 +8,7 @@ function svg(className: string, content: string): string {
 }
 
 const cloud = "M4.3 12.6h7.15a2.45 2.45 0 0 0 .44-4.86A3.88 3.88 0 0 0 4.78 6.5 3.05 3.05 0 0 0 4.3 12.6Z";
-const cloudCutout = (cutout: string) => `<path d="${cloud}${cutout}" fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>`;
+const cloudCutout = (cutout: string) => `<path d="${cloud}${cutout}" fill="currentColor" fill-rule="evenodd"/><path d="${cloud}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>`;
 const uploadCutout = "M7.05 11.55V8.7L5.8 9.95 4.35 8.5 8 4.85l3.65 3.65-1.45 1.45L8.95 8.7v2.85Z";
 const downloadCutout = "M7.05 4.85V7.7L5.8 6.45 4.35 7.9 8 11.55l3.65-3.65-1.45-1.45L8.95 7.7V4.85Z";
 const completeCutout = "M4.85 8.25 6.5 6.6l1.35 1.35 2.35-2.35 1.65 1.65-4 4Z";
@@ -23,7 +23,7 @@ export function nativeIconSvgForAutoSyncStatus(status: AutoSyncStatusKind, class
     return svg(className, '<path d="M4 3.25h6.1l1.9 1.9v7.6H4zM6 3.25v3h3" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="m2.7 2.7 10.6 10.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>');
   }
   if (status === "conflict" || status === "conflict_unresolved") {
-    return svg(className, '<path d="M8 1.7 14.4 13.9H1.6zM7.2 5.3h1.6v4.1H7.2zM7.2 11.2h1.6v1.45H7.2z" fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>');
+    return svg(className, '<path d="M8 1.7 14.4 13.9H1.6zM7.2 5.3h1.6v4.1H7.2zM7.2 11.2h1.6v1.45H7.2z" fill="currentColor" fill-rule="evenodd"/><path d="M8 1.7 14.4 13.9H1.6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>');
   }
   if (status === "has_backup") {
     return svg(className, '<path d="M8 1.15a6.85 6.85 0 1 1 0 13.7 6.85 6.85 0 0 1 0-13.7ZM3.3 7.9l2.1-2.1 1.85 1.85 3.5-3.5 2.1 2.1-5.6 5.6Z" fill="currentColor" fill-rule="evenodd"/>');

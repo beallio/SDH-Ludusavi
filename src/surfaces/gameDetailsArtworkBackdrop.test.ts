@@ -35,33 +35,48 @@ function gamePage(appID: string, src: string) {
   let cgvMode: "none" | "standard" | "connected" = "none";
   let resolvedCgvGeometry = false;
   let matchingHero = true;
-  let notifyMutation = () => {};
+  let staleRoute = false;
   let nextFrame = 0;
+  let frameRuns = 0;
   const frames = new Map<number, FrameRequestCallback>();
-  const listeners = new Map<string, () => void>();
-  const makeStyle = () => {
+  const listeners = new Map<string, Set<() => void>>();
+  const documentListeners = new Map<string, Set<() => void>>();
+  const mutationCallbacks = new Set<MutationCallback>();
+  const pendingMutations: MutationRecord[] = [];
+  const mutationTargets = new Map<string, () => Node>();
+  const queueMutation = (target: string, attributeName = "style") => {
+    const node = mutationTargets.get(target)?.();
+    if (node) pendingMutations.push({ type: "attributes", attributeName, target: node } as MutationRecord);
+  };
+  const makeStyle = (target: string) => {
     const values = new Map<string, string>();
     const priorities = new Map<string, string>();
     return {
       getPropertyValue: (name: string) => values.get(name) ?? "",
       getPropertyPriority: (name: string) => priorities.get(name) ?? "",
       setProperty(name: string, value: string, importance = "") {
+        if (values.get(name) === value && priorities.get(name) === importance) return;
         values.set(name, value);
         priorities.set(name, importance);
+        queueMutation(target);
       },
       removeProperty(name: string) {
         const value = values.get(name) ?? "";
+        const hadValue = values.has(name) || priorities.has(name);
         values.delete(name);
         priorities.delete(name);
+        if (hadValue) queueMutation(target);
         return value;
       },
     };
   };
   const imageAttributes = new Map<string, string>([["src", src]]);
-  const imageStyle = makeStyle();
-  const rowStyle = makeStyle();
-  const artworkStyle = makeStyle();
-  const contentStyle = makeStyle();
+  const imageStyle = makeStyle("image");
+  const rowStyle = makeStyle("row");
+  const artworkStyle = makeStyle("artwork");
+  const contentStyle = makeStyle("content");
+  const staleRowStyle = makeStyle("stale-row");
+  const staleContentStyle = makeStyle("stale-content");
   const budgetDeduction = (property: string) => {
     const match = contentStyle.getPropertyValue(property).match(/-\s*(\d+(?:\.\d+)?)px\)\s*$/);
     return match ? Number(match[1]) : 0;
@@ -71,8 +86,8 @@ function gamePage(appID: string, src: string) {
     style: imageStyle,
     get parentElement() { return background; },
     getAttribute: (name: string) => imageAttributes.get(name) ?? null,
-    setAttribute: (name: string, value: string) => imageAttributes.set(name, value),
-    removeAttribute: (name: string) => imageAttributes.delete(name),
+    setAttribute(name: string, value: string) { imageAttributes.set(name, value); queueMutation("image", name); },
+    removeAttribute(name: string) { imageAttributes.delete(name); queueMutation("image", name); },
     closest: (selector: string) => selector === ".decky-metadata-trailer-target" && metadataOwnsHero ? {}
       : selector === ".native-artwork-background" ? background : null,
     get offsetHeight() {
@@ -89,8 +104,8 @@ function gamePage(appID: string, src: string) {
     style: artworkStyle,
     get parentElement() { return content; },
     getAttribute: (name: string) => backgroundAttributes.get(name) ?? null,
-    setAttribute: (name: string, value: string) => backgroundAttributes.set(name, value),
-    removeAttribute: (name: string) => backgroundAttributes.delete(name),
+    setAttribute(name: string, value: string) { backgroundAttributes.set(name, value); queueMutation("artwork", name); },
+    removeAttribute(name: string) { backgroundAttributes.delete(name); queueMutation("artwork", name); },
   };
   const body = {
     parentElement: null,
@@ -101,6 +116,14 @@ function gamePage(appID: string, src: string) {
   };
   const content = {
     style: contentStyle,
+    parentElement: body,
+    hidden: false,
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 854 * scale, bottom: 534 * scale,
+      width: 854 * scale, height: 534 * scale }),
+  };
+  const staleContent = {
+    style: staleContentStyle,
     parentElement: body,
     hidden: false,
     getAttribute: () => null,
@@ -135,24 +158,66 @@ function gamePage(appID: string, src: string) {
     hidden: false,
     getAttribute: (name: string) => name === "aria-hidden" && rowSuppressed ? "true"
       : name === "data-sdh-ludusavi-status-row" && rowMarked ? "true"
-        : name === "data-sdh-ludusavi-paint-suppressed" && rowSuppressed ? "true" : null,
+        : name === "data-sdh-ludusavi-paint-suppressed" && rowSuppressed ? "true"
+          : name === "data-sdh-ludusavi-status-appid" ? appID : null,
     closest: (selector: string) => selector === ".native-details-root" ? content : null,
     getClientRects: () => [rowRect()],
     get offsetHeight() { return rowHeight; },
     getBoundingClientRect: rowRect,
   };
   label.parentElement = row;
+  const staleRowTop = 360;
+  const staleRowRect = () => ({ left: 0, top: staleRowTop * scale, width: 854 * scale,
+    height: rowHeight * scale, right: 854 * scale, bottom: (staleRowTop + rowHeight) * scale });
+  const staleLabel = {
+    parentElement: null as object | null,
+    getBoundingClientRect: () => ({ left: 340 * scale, top: (staleRowTop + 4) * scale,
+      width: 174 * scale, height: Math.max(1, rowHeight - 8) * scale }),
+  };
+  const staleRowParent = {
+    parentElement: staleContent,
+    hidden: false,
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 854 * scale, bottom: 534 * scale,
+      width: 854 * scale, height: 534 * scale }),
+  };
+  const staleRow = {
+    style: staleRowStyle,
+    textContent: "Ludusavi: Old game",
+    parentElement: staleRowParent,
+    classList: { contains: () => false },
+    contains: (element: unknown) => element === staleLabel,
+    hidden: false,
+    getAttribute: (name: string) => name === "data-sdh-ludusavi-status-row" ? "true"
+      : name === "data-sdh-ludusavi-status-appid" ? "old-app" : null,
+    closest: (selector: string) => selector === ".native-details-root" ? staleContent : null,
+    getClientRects: () => [staleRowRect()],
+    get offsetHeight() { return rowHeight; },
+    getBoundingClientRect: staleRowRect,
+  };
+  staleLabel.parentElement = staleRow;
+  const notifyMutation = () => {
+    const record = { type: "attributes", attributeName: "class", target: body } as unknown as MutationRecord;
+    mutationCallbacks.forEach((callback) => callback([record], null as unknown as MutationObserver));
+  };
   const hostDocument = {
     body,
     head: {},
     documentElement: { clientWidth: 854, clientHeight: 534 },
     get images() { return matchingHero ? [image] : []; },
     querySelector: () => rowMarked || nativeStatusClass ? row : null,
-    querySelectorAll: () => rowMarked || nativeStatusClass ? [row] : [],
+    querySelectorAll: () => rowMarked || nativeStatusClass ? staleRoute ? [staleRow, row] : [row] : [],
     elementFromPoint: (x: number, y: number) => {
+      const staleRect = staleRowRect();
+      if (staleRoute && x >= staleRect.left && x <= staleRect.right && y >= staleRect.top && y < staleRect.bottom) return staleLabel;
       const rect = rowRect();
       return rowVisible && x >= rect.left && x <= rect.right && y >= rect.top && y < rect.bottom ? label : null;
     },
+    addEventListener: (type: string, listener: () => void) => {
+      const callbacks = documentListeners.get(type) ?? new Set<() => void>();
+      callbacks.add(listener); documentListeners.set(type, callbacks);
+    },
+    removeEventListener: (type: string, listener: () => void) => documentListeners.get(type)?.delete(listener),
   };
   const hostWindow = {
     document: hostDocument,
@@ -167,16 +232,17 @@ function gamePage(appID: string, src: string) {
       getPropertyValue: (name: string) => {
         if (name === "--sdh-status-band-reserved") return earlyReservation ? "1" : "";
         if (name === "--sdh-status-band-height") return artworkStyle.getPropertyValue(name);
-        if (name === "--CGV-image-height" && element !== content) return contentStyle.getPropertyValue(name)
+        if (name === "--CGV-image-height" && element !== content && element !== staleContent) return contentStyle.getPropertyValue(name)
           || (earlyReservation ? `${naturalHeight}px`
             : cgvMode === "standard" ? resolvedCgvGeometry ? "calc(100vh - 40px)" : "calc(100vh - var(--CGV-footer-height))"
               : cgvMode === "connected" ? "100%" : "");
-        if (element === content) {
-          if (name === "--CGV-top-panel-height") return contentStyle.getPropertyValue(name)
+        if (element === content || element === staleContent) {
+          const style = element === content ? contentStyle : staleContentStyle;
+          if (name === "--CGV-top-panel-height") return style.getPropertyValue(name)
             || (cgvMode === "standard" ? resolvedCgvGeometry ? "calc(100vh - 80px - 40px)" : "calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))"
               : cgvMode === "connected" ? "calc(100% - var(--CGV-play-bar-height) - var(--CGV-footer-height))" : "");
-          if (name === "--CGV-image-height") return contentStyle.getPropertyValue(name)
-            || (cgvMode === "standard" ? "calc(100vh - var(--CGV-footer-height))"
+          if (name === "--CGV-image-height") return style.getPropertyValue(name)
+            || (cgvMode === "standard" ? resolvedCgvGeometry ? "calc(100vh - 40px)" : "calc(100vh - var(--CGV-footer-height))"
               : cgvMode === "connected" ? "100%" : "");
           if (name === "--CGV-play-bar-height") return cgvMode === "none" ? "" : "80px";
           if (name === "--CGV-footer-height") return cgvMode === "none" ? "" : "40px";
@@ -185,13 +251,16 @@ function gamePage(appID: string, src: string) {
       },
     }),
     MutationObserver: class {
-      constructor(callback: MutationCallback) { notifyMutation = () => callback([], this as unknown as MutationObserver); }
-      observe() {}
-      disconnect() { notifyMutation = () => {}; }
+      constructor(private readonly callback: MutationCallback) {}
+      observe() { mutationCallbacks.add(this.callback); }
+      disconnect() { mutationCallbacks.delete(this.callback); }
       takeRecords() { return []; }
     },
-    addEventListener: (type: string, listener: () => void) => listeners.set(type, listener),
-    removeEventListener: (type: string) => listeners.delete(type),
+    addEventListener: (type: string, listener: () => void) => {
+      const callbacks = listeners.get(type) ?? new Set<() => void>();
+      callbacks.add(listener); listeners.set(type, callbacks);
+    },
+    removeEventListener: (type: string, listener: () => void) => listeners.get(type)?.delete(listener),
     requestAnimationFrame(callback: FrameRequestCallback) {
       frames.set(++nextFrame, callback);
       return nextFrame;
@@ -202,10 +271,26 @@ function gamePage(appID: string, src: string) {
   Object.assign(image, { ownerDocument: hostDocument });
   Object.assign(background, { ownerDocument: hostDocument });
   Object.assign(content, { ownerDocument: hostDocument });
+  Object.assign(staleContent, { ownerDocument: hostDocument });
+  mutationTargets.set("image", () => image as unknown as Node);
+  mutationTargets.set("row", () => row as unknown as Node);
+  mutationTargets.set("artwork", () => background as unknown as Node);
+  mutationTargets.set("content", () => content as unknown as Node);
+  mutationTargets.set("stale-row", () => staleRow as unknown as Node);
+  mutationTargets.set("stale-content", () => staleContent as unknown as Node);
   function flush() {
-    for (const [id, callback] of frames) {
-      frames.delete(id);
-      callback(0);
+    let passes = 0;
+    while (frames.size > 0 || pendingMutations.length > 0) {
+      if (++passes > 20) throw new Error("fixture did not settle");
+      for (const [id, callback] of [...frames]) {
+        frames.delete(id);
+        frameRuns += 1;
+        callback(0);
+      }
+      if (pendingMutations.length > 0) {
+        const records = pendingMutations.splice(0);
+        mutationCallbacks.forEach((callback) => callback(records, null as unknown as MutationObserver));
+      }
     }
   }
   return {
@@ -214,6 +299,7 @@ function gamePage(appID: string, src: string) {
     row,
     hostWindow: hostWindow as unknown as Window,
     flush,
+    get frameRuns() { return frameRuns; },
     get height() { return imageStyle.getPropertyValue("height"); },
     get originalHeight() { return naturalHeight; },
     get bandVariable() { return imageStyle.getPropertyValue("--sdh-status-band-height"); },
@@ -249,10 +335,10 @@ function gamePage(appID: string, src: string) {
       artworkStyle.setProperty("--sdh-status-band-height", "14px", "important");
       backgroundAttributes.set("data-sdh-ludusavi-artwork-band", "original-background-marker");
     },
-    resize(height: number) { naturalHeight = height; rowTop = height; listeners.get("resize")?.(); flush(); },
+    resize(height: number) { naturalHeight = height; rowTop = height; listeners.get("resize")?.forEach((listener) => listener()); flush(); },
     get backgroundBandVariable() { return artworkStyle.getPropertyValue("--sdh-status-band-height"); },
     get backgroundMarker() { return backgroundAttributes.get("data-sdh-ludusavi-artwork-band") ?? null; },
-    scroll() { listeners.get("scroll")?.(); flush(); },
+    scroll() { listeners.get("scroll")?.forEach((listener) => listener()); flush(); },
     get backgroundBandVariablePriority() { return artworkStyle.getPropertyPriority("--sdh-status-band-height"); },
     get topPanelBudget() { return contentStyle.getPropertyValue("--CGV-top-panel-height"); },
     get imageBudget() { return contentStyle.getPropertyValue("--CGV-image-height"); },
@@ -261,6 +347,15 @@ function gamePage(appID: string, src: string) {
     set cgv(value: "none" | "standard" | "connected") { cgvMode = value; notifyMutation(); flush(); },
     set browserResolvedCgvGeometry(value: boolean) { resolvedCgvGeometry = value; notifyMutation(); flush(); },
     set matchingHeroAvailable(value: boolean) { matchingHero = value; notifyMutation(); flush(); },
+    set oldRouteMounted(value: boolean) { staleRoute = value; notifyMutation(); flush(); },
+    completeEntryAnimation() {
+      scale = 1;
+      rowVisible = true;
+      documentListeners.get("animationend")?.forEach((listener) => listener());
+      flush();
+    },
+    get browserResolvedTopBudget() { return hostWindow.getComputedStyle(content).getPropertyValue("--CGV-top-panel-height"); },
+    get browserResolvedImageBudget() { return hostWindow.getComputedStyle(content).getPropertyValue("--CGV-image-height"); },
     seedBudgetStyles(deduction = 0) {
       const suffix = deduction ? ` - ${deduction}px` : "";
       contentStyle.setProperty("--CGV-top-panel-height", `calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height)${suffix})`, "important");
@@ -500,6 +595,8 @@ it("recognizes browser-resolved standard CGV budgets before allocating the visib
   page.cgv = "standard";
   // Browser computed custom properties substitute nested var() references.
   page.browserResolvedCgvGeometry = true;
+  expect(page.browserResolvedTopBudget).toBe("calc(100vh - 80px - 40px)");
+  expect(page.browserResolvedImageBudget).toBe("calc(100vh - 40px)");
   const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
   page.flush();
 
@@ -556,16 +653,18 @@ it("keeps a recognized third-party CGV deduction while reserving the measured na
   expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height) - 12px)");
 });
 
-it("does not let stale CGV cleanup erase a newer lifecycle lease", () => {
+it("keeps a newer CGV lease after old and new route lifecycles receive repeated events", () => {
   const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
   page.cgv = "standard";
-  page.metadataOwnsHero = true;
+  page.matchingHeroAvailable = false;
   page.seedBudgetStyles();
   const first = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
   page.flush();
   const second = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
   page.flush();
 
+  page.scroll();
+  page.scroll();
   first();
   expect(page.topPanelBudget).toContain("- 30px)");
   expect(page.imageBudget).toContain("- 30px)");
@@ -601,4 +700,49 @@ it("allocates a supported route band for a Metadata trailer view without a match
   dispose();
   expect(page.topPanelBudget).toBe("");
   expect(page.imageBudget).toBe("");
+});
+
+it("does not schedule another frame for a mixed owned paint and CGV-budget mutation batch", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.matchingHeroAvailable = false;
+  page.suppressed = true;
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.frameRuns).toBe(1);
+  expect(page.topPanelBudget).toContain("- 30px)");
+  page.bandHeight = 44;
+  expect(page.frameRuns).toBe(2);
+  expect(page.topPanelBudget).toContain("- 44px)");
+  dispose();
+});
+
+it("recovers a transformed no-image route on animation completion without a scroll event", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.matchingHeroAvailable = false;
+  page.scale = 0.95;
+  page.visible = false;
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.topPanelBudget).toBe("");
+  page.completeEntryAnimation();
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.topPanelBudget).toContain("- 30px)");
+  dispose();
+});
+
+it("allocates only the mounted app route when an old visible details header remains in the document", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.matchingHeroAvailable = false;
+  page.oldRouteMounted = true;
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.topPanelBudget).toContain("- 30px)");
+  dispose();
 });

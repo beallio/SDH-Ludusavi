@@ -81,14 +81,15 @@ it("lets direct-child, sibling, and descendant Steam theme selectors reach the f
   expect(icon).not.toBeNull();
   expect(row?.querySelector(":scope > .native-status-label")?.textContent).toContain("Ludusavi: Up to date");
   expect(row?.getAttribute("aria-label")).toContain("remote delivery is not verified");
+  expect(row?.dataset.sdhLudusaviStatusAppid).toBe("100");
   expect(row?.querySelector("[tabindex],button,a,input")).toBeNull();
 });
 
-it("replaces the retained version-15 wrapper while preserving direct cold-peer overview and details props", async () => {
+it("replaces the retained version-16 wrapper while preserving direct cold-peer overview and details props", async () => {
   const legacyPatch = vi.fn();
   const legacyInstalledPatch = vi.fn();
   globalThis.__sdhLudusaviGameDetailsStatusRoutePatch = {
-    version: 15, patch: legacyPatch, installedPatch: legacyInstalledPatch, removalTimer: null,
+    version: 16, patch: legacyPatch, installedPatch: legacyInstalledPatch, removalTimer: null,
   };
   const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
   const store = createLudusaviStateStore();

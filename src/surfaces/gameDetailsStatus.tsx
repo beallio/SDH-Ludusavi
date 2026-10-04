@@ -16,7 +16,7 @@ const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // update an already-mounted details page without a navigation.
 const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
 // Bump when an existing route wrapper cannot render the newest status-row contract.
-const GAME_DETAILS_ROUTE_RENDER_VERSION = 16;
+const GAME_DETAILS_ROUTE_RENDER_VERSION = 17;
 export type GameDetailsStatusSurface = Readonly<{
   dispose(): void;
 }>;
@@ -421,6 +421,7 @@ export function GameDetailsStatusRow({ appID, model, statusSurface, suppressed, 
     "aria-hidden": suppressed || nativeOccupied || undefined,
     "aria-label": suppressed || nativeOccupied ? undefined : `${model.label}. ${model.description}`,
     "data-sdh-ludusavi-status-row": "true",
+    "data-sdh-ludusavi-status-appid": appID,
     "data-sdh-ludusavi-tone": model.tone,
     "data-sdh-ludusavi-active": String(model.active),
     "data-sdh-ludusavi-paint-suppressed": String(suppressed),
