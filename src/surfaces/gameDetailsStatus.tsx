@@ -6,7 +6,7 @@ import { sessionFromAppOverview } from "../utils/steam";
 import { getAppDetailsForAppID, getAppOverviewForAppID, getGamepadMainWindow, subscribeToAppDetails } from "../utils/steamRuntime";
 import { selectGameDetailsStatus, getSteamCloudEligibility, type GameDetailsStatusViewModel } from "./gameDetailsStatusModel";
 import { isStatusPaintMeasurement, measureStatusBandPaint, mountGameDetailsArtworkBackdrop } from "./gameDetailsArtworkBackdrop";
-import { iconSvgForAutoSyncStatus } from "./autoSyncStatusRenderer";
+import { nativeIconSvgForAutoSyncStatus } from "./nativeGameDetailsStatusIcon";
 import type { DetailsStatusPresentationSurface } from "./autoSyncStatusSurface";
 import { getNativeGameDetailsStatusClasses, type NativeGameDetailsStatusClasses } from "./gameDetailsStatusClasses";
 
@@ -16,7 +16,7 @@ const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // update an already-mounted details page without a navigation.
 const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
 // Bump when an existing route wrapper cannot render the newest status-row contract.
-const GAME_DETAILS_ROUTE_RENDER_VERSION = 15;
+const GAME_DETAILS_ROUTE_RENDER_VERSION = 18;
 export type GameDetailsStatusSurface = Readonly<{
   dispose(): void;
 }>;
@@ -413,7 +413,7 @@ export function GameDetailsStatusRow({ appID, model, statusSurface, suppressed, 
   const status = model.status ?? "unknown";
   const value = model.label.startsWith("Ludusavi: ") ? model.label.slice("Ludusavi: ".length) : model.label;
   const problem = model.tone === "warning" || model.tone === "error";
-  const svg = iconSvgForAutoSyncStatus(status).replace("<svg ", `<svg class="${classes.iconSvg}" `);
+  const svg = nativeIconSvgForAutoSyncStatus(status, classes.iconSvg);
   return createElement("div", {
     ref: setElement,
     className: `${classes.row} Panel${problem ? ` ${classes.problem}` : ""}`,
@@ -421,6 +421,7 @@ export function GameDetailsStatusRow({ appID, model, statusSurface, suppressed, 
     "aria-hidden": suppressed || nativeOccupied || undefined,
     "aria-label": suppressed || nativeOccupied ? undefined : `${model.label}. ${model.description}`,
     "data-sdh-ludusavi-status-row": "true",
+    "data-sdh-ludusavi-status-appid": appID,
     "data-sdh-ludusavi-tone": model.tone,
     "data-sdh-ludusavi-active": String(model.active),
     "data-sdh-ludusavi-paint-suppressed": String(suppressed),

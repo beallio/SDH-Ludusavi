@@ -10,11 +10,16 @@ const nativeClasses = vi.hoisted(() => ({
     CloudSyncProblem: "native-status-problem", CloudSynching: "native-status-active",
     CloudStatusUploading: "native-status-uploading",
   } as Record<string, string | undefined>,
-  root: { AppDetailsRoot: "native-details-root", PlaySection: "native-play-section" },
+  root: { PlaySection: "native-play-section" },
+  details: { InnerContainer: "native-inner-container" },
 }));
 const routeMock = vi.hoisted(() => ({ addPatch: vi.fn((_: string, patch: unknown) => patch), removePatch: vi.fn() }));
 vi.mock("@decky/api", () => ({ routerHook: routeMock }));
-vi.mock("@decky/ui", () => ({ playSectionClasses: nativeClasses.play, basicAppDetailsSectionStylerClasses: nativeClasses.root }));
+vi.mock("@decky/ui", () => ({
+  playSectionClasses: nativeClasses.play,
+  basicAppDetailsSectionStylerClasses: nativeClasses.root,
+  appDetailsClasses: nativeClasses.details,
+}));
 vi.mock("../utils/logging", () => ({ log: vi.fn() }));
 vi.mock("../utils/steam", () => ({ normalize: (name: string) => name.toLowerCase(), sessionFromAppOverview: () => null }));
 vi.mock("../utils/steamRuntime", () => ({ getAppDetailsForAppID: () => null, getAppOverviewForAppID: () => null, getGamepadMainWindow: () => null, subscribeToAppDetails: () => () => {} }));
@@ -77,10 +82,53 @@ it("lets direct-child, sibling, and descendant Steam theme selectors reach the f
   const row = host.querySelector(".native-details-root > .native-play-section + .native-status-row") as HTMLElement | null;
   expect(row).not.toBeNull();
   expect(row?.style.display).not.toBe("none");
-  expect(row?.querySelector(":scope > .native-status-icon > svg.native-status-svg")).not.toBeNull();
+  const icon = row?.querySelector(":scope > .native-status-icon > svg.native-status-svg") as SVGElement | null;
+  expect(icon).not.toBeNull();
   expect(row?.querySelector(":scope > .native-status-label")?.textContent).toContain("Ludusavi: Up to date");
   expect(row?.getAttribute("aria-label")).toContain("remote delivery is not verified");
   expect(row?.querySelector("[tabindex],button,a,input")).toBeNull();
+});
+
+it("replaces the retained version-17 wrapper while preserving direct cold-peer overview and details props", async () => {
+  const legacyPatch = vi.fn();
+  const legacyInstalledPatch = vi.fn();
+  globalThis.__sdhLudusaviGameDetailsStatusRoutePatch = {
+    version: 17, patch: legacyPatch, installedPatch: legacyInstalledPatch, removalTimer: null,
+  };
+  const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
+  const store = createLudusaviStateStore();
+  const statusSurface = createAutoSyncStatusSurface(view, store);
+  const gameDetailsSurface = createGameDetailsStatusSurface(store, statusSurface);
+
+  try {
+    expect(routeMock.removePatch).toHaveBeenCalledWith("/library/app/:appid", legacyInstalledPatch);
+    const patch = routeMock.addPatch.mock.calls.at(-1)?.[1] as (route: any) => any;
+    const context = createContext<unknown>(null);
+    const routeChild = createElement("native-route-body", {
+      overview: { appid: 100 }, details: { nPlaytimeForever: 12 },
+    }, "Cold peer content");
+    const nativeRoute = createElement("native-route", {
+      renderFunc: () => createElement(context.Provider, { value: {} }, routeChild),
+    });
+    const patched = patch({ path: "/library/app/:appid", children: nativeRoute });
+    type ColdPeerProps = { overview: { appid: number }; details: { nPlaytimeForever: number } };
+    const result = patched.children.props.renderFunc({ params: { appid: "100" } }) as ReactElement<{
+      children: ReactElement<ColdPeerProps>;
+    }>;
+    const peerChild = result.props.children;
+
+    expect(peerChild.props.overview.appid).toBe(100);
+    expect(peerChild.props.details.nPlaytimeForever).toBe(12);
+    await render(result);
+    expect(host.querySelector("native-route-body")?.textContent).toBe("Cold peer content");
+  } finally {
+    gameDetailsSurface.dispose();
+    statusSurface.dispose();
+    const routePatch = globalThis.__sdhLudusaviGameDetailsStatusRoutePatch;
+    if (routePatch?.removalTimer !== null && routePatch?.removalTimer !== undefined) clearTimeout(routePatch.removalTimer);
+    Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRoutePatch");
+    Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRegistry");
+  }
 });
 
 it("keeps native Cloud controls mounted and authoritative even when a theme hides them", async () => {

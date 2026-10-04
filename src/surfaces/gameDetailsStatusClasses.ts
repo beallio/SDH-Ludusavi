@@ -1,4 +1,4 @@
-import { basicAppDetailsSectionStylerClasses, playSectionClasses } from "@decky/ui";
+import { appDetailsClasses, basicAppDetailsSectionStylerClasses, playSectionClasses } from "@decky/ui";
 
 export type NativeGameDetailsStatusClasses = Readonly<{
   row: string;
@@ -8,6 +8,7 @@ export type NativeGameDetailsStatusClasses = Readonly<{
   problem: string;
   syncing: string;
   activeValue: string;
+  appDetailsInnerContainer: string | null;
   playSection: string;
 }>;
 
@@ -15,7 +16,8 @@ let cachedClasses: NativeGameDetailsStatusClasses | null = null;
 
 export function getNativeGameDetailsStatusClasses(): NativeGameDetailsStatusClasses | null {
   const play = playSectionClasses as Record<string, string | undefined> | undefined;
-  const root = basicAppDetailsSectionStylerClasses as Record<string, string | undefined> | undefined;
+  const details = appDetailsClasses as Record<string, string | undefined> | undefined;
+  const basic = basicAppDetailsSectionStylerClasses as Record<string, string | undefined> | undefined;
   const row = play?.CloudStatusRow;
   const icon = play?.CloudStatusIcon;
   const iconSvg = play?.CloudIconSVG;
@@ -23,14 +25,21 @@ export function getNativeGameDetailsStatusClasses(): NativeGameDetailsStatusClas
   const problem = play?.CloudSyncProblem;
   const syncing = play?.CloudSynching;
   const activeValue = play?.CloudStatusUploading;
-  const playSection = root?.PlaySection;
+  const appDetailsInnerContainer = details?.InnerContainer;
+  const playSection = basic?.PlaySection;
   if (typeof row !== "string" || !row || typeof icon !== "string" || !icon
     || typeof iconSvg !== "string" || !iconSvg || typeof label !== "string" || !label
     || typeof problem !== "string" || !problem || typeof syncing !== "string" || !syncing
     || typeof activeValue !== "string" || !activeValue || typeof playSection !== "string" || !playSection) return null;
   if (cachedClasses?.row === row && cachedClasses.icon === icon && cachedClasses.iconSvg === iconSvg
     && cachedClasses.label === label && cachedClasses.problem === problem && cachedClasses.syncing === syncing
-    && cachedClasses.activeValue === activeValue && cachedClasses.playSection === playSection) return cachedClasses;
-  cachedClasses = { row, icon, iconSvg, label, problem, syncing, activeValue, playSection };
+    && cachedClasses.activeValue === activeValue
+    && cachedClasses.appDetailsInnerContainer === (typeof appDetailsInnerContainer === "string" ? appDetailsInnerContainer : null)
+    && cachedClasses.playSection === playSection) return cachedClasses;
+  cachedClasses = {
+    row, icon, iconSvg, label, problem, syncing, activeValue,
+    appDetailsInnerContainer: typeof appDetailsInnerContainer === "string" ? appDetailsInnerContainer : null,
+    playSection,
+  };
   return cachedClasses;
 }

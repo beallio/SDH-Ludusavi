@@ -11,11 +11,12 @@ vi.mock("@decky/ui", () => ({
     CloudSynching: "native-status-syncing",
     CloudStatusUploading: "native-status-uploading",
   },
-  basicAppDetailsSectionStylerClasses: { PlaySection: "native-play-section" },
+  basicAppDetailsSectionStylerClasses: { AppDetailsRoot: "native-details-root", PlaySection: "native-play-section" },
+  appDetailsClasses: { InnerContainer: "native-inner-container", Header: "native-header" },
   appDetailsHeaderClasses: { HeaderBackgroundImage: "native-artwork-background" },
 }));
 
-function gamePage(appID: string, src: string) {
+function gamePage(appID: string, src: string, siblingHeader = false) {
   let naturalHeight = 494;
   let rowTop = 494;
   let scale = 1;
@@ -32,44 +33,69 @@ function gamePage(appID: string, src: string) {
   let clipped = false;
   let metadataOwnsHero = false;
   let earlyReservation = false;
-  let notifyMutation = () => {};
+  let cgvMode: "none" | "standard" | "connected" = "none";
+  let resolvedCgvGeometry = false;
+  let matchingHero = true;
+  let staleRoute = false;
   let nextFrame = 0;
+  let frameRuns = 0;
   const frames = new Map<number, FrameRequestCallback>();
-  const listeners = new Map<string, () => void>();
-  const makeStyle = () => {
+  const listeners = new Map<string, Set<() => void>>();
+  const documentListeners = new Map<string, Set<() => void>>();
+  const mutationCallbacks = new Set<MutationCallback>();
+  const pendingMutations: MutationRecord[] = [];
+  const mutationTargets = new Map<string, () => Node>();
+  const queueMutation = (target: string, attributeName = "style") => {
+    const node = mutationTargets.get(target)?.();
+    if (node) pendingMutations.push({ type: "attributes", attributeName, target: node } as MutationRecord);
+  };
+  const makeStyle = (target: string) => {
     const values = new Map<string, string>();
     const priorities = new Map<string, string>();
     return {
       getPropertyValue: (name: string) => values.get(name) ?? "",
       getPropertyPriority: (name: string) => priorities.get(name) ?? "",
       setProperty(name: string, value: string, importance = "") {
+        if (values.get(name) === value && priorities.get(name) === importance) return;
         values.set(name, value);
         priorities.set(name, importance);
+        queueMutation(target);
       },
       removeProperty(name: string) {
         const value = values.get(name) ?? "";
+        const hadValue = values.has(name) || priorities.has(name);
         values.delete(name);
         priorities.delete(name);
+        if (hadValue) queueMutation(target);
         return value;
       },
     };
   };
   const imageAttributes = new Map<string, string>([["src", src]]);
-  const imageStyle = makeStyle();
-  const rowStyle = makeStyle();
-  const artworkStyle = makeStyle();
+  const imageStyle = makeStyle("image");
+  const rowStyle = makeStyle("row");
+  const artworkStyle = makeStyle("artwork");
+  const contentStyle = makeStyle("content");
+  const commonContentStyle = siblingHeader ? makeStyle("common-content") : contentStyle;
+  const staleRowStyle = makeStyle("stale-row");
+  const staleContentStyle = makeStyle("stale-content");
+  const budgetDeduction = (property: string) => {
+    const match = commonContentStyle.getPropertyValue(property).match(/-\s*(\d+(?:\.\d+)?)px\)\s*$/);
+    return match ? Number(match[1]) : 0;
+  };
   const backgroundAttributes = new Map<string, string>();
   const image = {
     style: imageStyle,
     get parentElement() { return background; },
     getAttribute: (name: string) => imageAttributes.get(name) ?? null,
-    setAttribute: (name: string, value: string) => imageAttributes.set(name, value),
-    removeAttribute: (name: string) => imageAttributes.delete(name),
+    setAttribute(name: string, value: string) { imageAttributes.set(name, value); queueMutation("image", name); },
+    removeAttribute(name: string) { imageAttributes.delete(name); queueMutation("image", name); },
     closest: (selector: string) => selector === ".decky-metadata-trailer-target" && metadataOwnsHero ? {}
       : selector === ".native-artwork-background" ? background : null,
     get offsetHeight() {
       const reserved = earlyReservation ? Number.parseFloat(artworkStyle.getPropertyValue("--sdh-status-band-height") || "30") : 0;
-      return Math.max(Number.parseFloat(imageStyle.getPropertyValue("height")) || naturalHeight, naturalHeight + reserved);
+      const layoutHeight = naturalHeight - budgetDeduction("--CGV-image-height");
+      return Math.max(Number.parseFloat(imageStyle.getPropertyValue("height")) || layoutHeight, layoutHeight + reserved);
     },
     getBoundingClientRect() {
       const renderedHeight = this.offsetHeight * scale;
@@ -78,9 +104,10 @@ function gamePage(appID: string, src: string) {
   };
   const background = {
     style: artworkStyle,
+    get parentElement() { return siblingHeader ? commonContent : content; },
     getAttribute: (name: string) => backgroundAttributes.get(name) ?? null,
-    setAttribute: (name: string, value: string) => backgroundAttributes.set(name, value),
-    removeAttribute: (name: string) => backgroundAttributes.delete(name),
+    setAttribute(name: string, value: string) { backgroundAttributes.set(name, value); queueMutation("artwork", name); },
+    removeAttribute(name: string) { backgroundAttributes.delete(name); queueMutation("artwork", name); },
   };
   const body = {
     parentElement: null,
@@ -89,20 +116,47 @@ function gamePage(appID: string, src: string) {
     getBoundingClientRect: () => ({ left: 0, top: 0, right: 854 * scale, bottom: 534 * scale,
       width: 854 * scale, height: 534 * scale }),
   };
-  const rowParent = {
+  const content = {
+    style: contentStyle,
+    get parentElement() { return siblingHeader ? commonContent : body; },
+    hidden: false,
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 854 * scale, bottom: 534 * scale,
+      width: 854 * scale, height: 534 * scale }),
+  };
+  const commonContent = {
+    style: commonContentStyle,
     parentElement: body,
+    hidden: false,
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 854 * scale, bottom: 534 * scale,
+      width: 854 * scale, height: 534 * scale }),
+  };
+  const staleContent = {
+    style: staleContentStyle,
+    parentElement: body,
+    hidden: false,
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 854 * scale, bottom: 534 * scale,
+      width: 854 * scale, height: 534 * scale }),
+  };
+  const rowParent = {
+    parentElement: content,
     hidden: false,
     getAttribute: () => null,
     getBoundingClientRect: () => ({ left: 0, top: 0, right: 854 * scale, bottom: clipped ? (rowTop + 8) * scale : 534 * scale,
       width: 854 * scale, height: clipped ? (rowTop + 8) * scale : 534 * scale }),
   };
-  const rowRect = () => ({ left: 0, top: rowTop * scale, width: rowWidth * scale,
-    height: rowHeight * scale, right: rowWidth * scale, bottom: (rowTop + rowHeight) * scale });
+  const rowRect = () => {
+    const top = rowTop - budgetDeduction("--CGV-top-panel-height");
+    return { left: 0, top: top * scale, width: rowWidth * scale,
+      height: rowHeight * scale, right: rowWidth * scale, bottom: (top + rowHeight) * scale };
+  };
   const label: { parentElement: object | null; getBoundingClientRect: () => {
     left: number; top: number; width: number; height: number;
   } } = {
     parentElement: null,
-    getBoundingClientRect: () => ({ left: 340 * scale, top: (rowTop + 4) * scale,
+    getBoundingClientRect: () => ({ left: 340 * scale, top: (rowTop - budgetDeduction("--CGV-top-panel-height") + 4) * scale,
       width: 174 * scale, height: Math.max(1, rowHeight - 8) * scale }),
   };
   const row = {
@@ -114,22 +168,68 @@ function gamePage(appID: string, src: string) {
     hidden: false,
     getAttribute: (name: string) => name === "aria-hidden" && rowSuppressed ? "true"
       : name === "data-sdh-ludusavi-status-row" && rowMarked ? "true"
-        : name === "data-sdh-ludusavi-paint-suppressed" && rowSuppressed ? "true" : null,
+        : name === "data-sdh-ludusavi-paint-suppressed" && rowSuppressed ? "true"
+          : name === "data-sdh-ludusavi-status-appid" ? appID : null,
+    closest: (selector: string) => selector === ".native-details-root" ? content
+      : selector === ".native-inner-container" ? siblingHeader ? commonContent : content : null,
     getClientRects: () => [rowRect()],
     get offsetHeight() { return rowHeight; },
     getBoundingClientRect: rowRect,
   };
   label.parentElement = row;
+  const staleRowTop = 360;
+  const staleRowRect = () => ({ left: 0, top: staleRowTop * scale, width: 854 * scale,
+    height: rowHeight * scale, right: 854 * scale, bottom: (staleRowTop + rowHeight) * scale });
+  const staleLabel = {
+    parentElement: null as object | null,
+    getBoundingClientRect: () => ({ left: 340 * scale, top: (staleRowTop + 4) * scale,
+      width: 174 * scale, height: Math.max(1, rowHeight - 8) * scale }),
+  };
+  const staleRowParent = {
+    parentElement: staleContent,
+    hidden: false,
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 854 * scale, bottom: 534 * scale,
+      width: 854 * scale, height: 534 * scale }),
+  };
+  const staleRow = {
+    style: staleRowStyle,
+    textContent: "Ludusavi: Old game",
+    parentElement: staleRowParent,
+    classList: { contains: () => false },
+    contains: (element: unknown) => element === staleLabel,
+    hidden: false,
+    getAttribute: (name: string) => name === "data-sdh-ludusavi-status-row" ? "true"
+      : name === "data-sdh-ludusavi-status-appid" ? "old-app" : null,
+    closest: (selector: string) => selector === ".native-details-root" ? staleContent
+      : selector === ".native-inner-container" ? staleContent : null,
+    getClientRects: () => [staleRowRect()],
+    get offsetHeight() { return rowHeight; },
+    getBoundingClientRect: staleRowRect,
+  };
+  staleLabel.parentElement = staleRow;
+  const notifyMutation = () => {
+    const record = { type: "attributes", attributeName: "class", target: body } as unknown as MutationRecord;
+    mutationCallbacks.forEach((callback) => callback([record], null as unknown as MutationObserver));
+  };
   const hostDocument = {
     body,
     head: {},
     documentElement: { clientWidth: 854, clientHeight: 534 },
-    images: [image],
+    get images() { return matchingHero ? [image] : []; },
     querySelector: () => rowMarked || nativeStatusClass ? row : null,
-    querySelectorAll: () => rowMarked || nativeStatusClass ? [row] : [],
-    elementFromPoint: (x: number, y: number) =>
-      rowVisible && x >= 0 && x <= rowWidth * scale && y >= rowTop * scale
-        && y < (rowTop + rowHeight) * scale ? label : null,
+    querySelectorAll: () => rowMarked || nativeStatusClass ? staleRoute ? [staleRow, row] : [row] : [],
+    elementFromPoint: (x: number, y: number) => {
+      const staleRect = staleRowRect();
+      if (staleRoute && x >= staleRect.left && x <= staleRect.right && y >= staleRect.top && y < staleRect.bottom) return staleLabel;
+      const rect = rowRect();
+      return rowVisible && x >= rect.left && x <= rect.right && y >= rect.top && y < rect.bottom ? label : null;
+    },
+    addEventListener: (type: string, listener: () => void) => {
+      const callbacks = documentListeners.get(type) ?? new Set<() => void>();
+      callbacks.add(listener); documentListeners.set(type, callbacks);
+    },
+    removeEventListener: (type: string, listener: () => void) => documentListeners.get(type)?.delete(listener),
   };
   const hostWindow = {
     document: hostDocument,
@@ -141,18 +241,34 @@ function gamePage(appID: string, src: string) {
       overflow: element === rowParent && clipped ? "hidden" : "visible",
       overflowX: "visible",
       overflowY: element === rowParent && clipped ? "hidden" : "visible",
-      getPropertyValue: (name: string) => name === "--sdh-status-band-reserved" ? earlyReservation ? "1" : ""
-        : name === "--CGV-image-height" ? earlyReservation ? `${naturalHeight}px` : ""
-          : name === "--sdh-status-band-height" ? artworkStyle.getPropertyValue(name) : "",
+      getPropertyValue: (name: string) => {
+        if (name === "--sdh-status-band-reserved") return earlyReservation ? "1" : "";
+        if (name === "--sdh-status-band-height") return artworkStyle.getPropertyValue(name);
+        const directStyle = element === content ? contentStyle
+          : element === staleContent ? staleContentStyle : commonContentStyle;
+        if (name === "--CGV-image-height") return directStyle.getPropertyValue(name)
+          || (earlyReservation && element !== commonContent && element !== content && element !== staleContent ? `${naturalHeight}px`
+            : cgvMode === "standard" ? resolvedCgvGeometry ? "calc(100vh - 40px)" : "calc(100vh - var(--CGV-footer-height))"
+              : cgvMode === "connected" ? "100%" : "");
+        if (name === "--CGV-top-panel-height") return directStyle.getPropertyValue(name)
+          || (cgvMode === "standard" ? resolvedCgvGeometry ? "calc(100vh - 80px - 40px)" : "calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))"
+            : cgvMode === "connected" ? "calc(100% - var(--CGV-play-bar-height) - var(--CGV-footer-height))" : "");
+        if (name === "--CGV-play-bar-height") return cgvMode === "none" ? "" : "80px";
+        if (name === "--CGV-footer-height") return cgvMode === "none" ? "" : "40px";
+        return "";
+      },
     }),
     MutationObserver: class {
-      constructor(callback: MutationCallback) { notifyMutation = () => callback([], this as unknown as MutationObserver); }
-      observe() {}
-      disconnect() { notifyMutation = () => {}; }
+      constructor(private readonly callback: MutationCallback) {}
+      observe() { mutationCallbacks.add(this.callback); }
+      disconnect() { mutationCallbacks.delete(this.callback); }
       takeRecords() { return []; }
     },
-    addEventListener: (type: string, listener: () => void) => listeners.set(type, listener),
-    removeEventListener: (type: string) => listeners.delete(type),
+    addEventListener: (type: string, listener: () => void) => {
+      const callbacks = listeners.get(type) ?? new Set<() => void>();
+      callbacks.add(listener); listeners.set(type, callbacks);
+    },
+    removeEventListener: (type: string, listener: () => void) => listeners.get(type)?.delete(listener),
     requestAnimationFrame(callback: FrameRequestCallback) {
       frames.set(++nextFrame, callback);
       return nextFrame;
@@ -162,10 +278,29 @@ function gamePage(appID: string, src: string) {
   Object.assign(hostDocument, { defaultView: hostWindow });
   Object.assign(image, { ownerDocument: hostDocument });
   Object.assign(background, { ownerDocument: hostDocument });
+  Object.assign(content, { ownerDocument: hostDocument });
+  Object.assign(commonContent, { ownerDocument: hostDocument });
+  Object.assign(staleContent, { ownerDocument: hostDocument });
+  mutationTargets.set("image", () => image as unknown as Node);
+  mutationTargets.set("row", () => row as unknown as Node);
+  mutationTargets.set("artwork", () => background as unknown as Node);
+  mutationTargets.set("content", () => content as unknown as Node);
+  mutationTargets.set("common-content", () => commonContent as unknown as Node);
+  mutationTargets.set("stale-row", () => staleRow as unknown as Node);
+  mutationTargets.set("stale-content", () => staleContent as unknown as Node);
   function flush() {
-    for (const [id, callback] of frames) {
-      frames.delete(id);
-      callback(0);
+    let passes = 0;
+    while (frames.size > 0 || pendingMutations.length > 0) {
+      if (++passes > 20) throw new Error("fixture did not settle");
+      for (const [id, callback] of [...frames]) {
+        frames.delete(id);
+        frameRuns += 1;
+        callback(0);
+      }
+      if (pendingMutations.length > 0) {
+        const records = pendingMutations.splice(0);
+        mutationCallbacks.forEach((callback) => callback(records, null as unknown as MutationObserver));
+      }
     }
   }
   return {
@@ -174,6 +309,7 @@ function gamePage(appID: string, src: string) {
     row,
     hostWindow: hostWindow as unknown as Window,
     flush,
+    get frameRuns() { return frameRuns; },
     get height() { return imageStyle.getPropertyValue("height"); },
     get originalHeight() { return naturalHeight; },
     get bandVariable() { return imageStyle.getPropertyValue("--sdh-status-band-height"); },
@@ -209,11 +345,34 @@ function gamePage(appID: string, src: string) {
       artworkStyle.setProperty("--sdh-status-band-height", "14px", "important");
       backgroundAttributes.set("data-sdh-ludusavi-artwork-band", "original-background-marker");
     },
-    resize(height: number) { naturalHeight = height; rowTop = height; listeners.get("resize")?.(); flush(); },
+    resize(height: number) { naturalHeight = height; rowTop = height; listeners.get("resize")?.forEach((listener) => listener()); flush(); },
     get backgroundBandVariable() { return artworkStyle.getPropertyValue("--sdh-status-band-height"); },
     get backgroundMarker() { return backgroundAttributes.get("data-sdh-ludusavi-artwork-band") ?? null; },
-    scroll() { listeners.get("scroll")?.(); flush(); },
+    scroll() { listeners.get("scroll")?.forEach((listener) => listener()); flush(); },
     get backgroundBandVariablePriority() { return artworkStyle.getPropertyPriority("--sdh-status-band-height"); },
+    get topPanelBudget() { return commonContentStyle.getPropertyValue("--CGV-top-panel-height"); },
+    get imageBudget() { return commonContentStyle.getPropertyValue("--CGV-image-height"); },
+    get topPanelBudgetPriority() { return commonContentStyle.getPropertyPriority("--CGV-top-panel-height"); },
+    get imageBudgetPriority() { return commonContentStyle.getPropertyPriority("--CGV-image-height"); },
+    get playStatusTopPanelBudget() { return contentStyle.getPropertyValue("--CGV-top-panel-height"); },
+    get playStatusImageBudget() { return contentStyle.getPropertyValue("--CGV-image-height"); },
+    set cgv(value: "none" | "standard" | "connected") { cgvMode = value; notifyMutation(); flush(); },
+    set browserResolvedCgvGeometry(value: boolean) { resolvedCgvGeometry = value; notifyMutation(); flush(); },
+    set matchingHeroAvailable(value: boolean) { matchingHero = value; notifyMutation(); flush(); },
+    set oldRouteMounted(value: boolean) { staleRoute = value; notifyMutation(); flush(); },
+    completeEntryAnimation() {
+      scale = 1;
+      rowVisible = true;
+      documentListeners.get("animationend")?.forEach((listener) => listener());
+      flush();
+    },
+    get browserResolvedTopBudget() { return hostWindow.getComputedStyle(commonContent).getPropertyValue("--CGV-top-panel-height"); },
+    get browserResolvedImageBudget() { return hostWindow.getComputedStyle(commonContent).getPropertyValue("--CGV-image-height"); },
+    seedBudgetStyles(deduction = 0) {
+      const suffix = deduction ? ` - ${deduction}px` : "";
+      commonContentStyle.setProperty("--CGV-top-panel-height", `calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height)${suffix})`, "important");
+      commonContentStyle.setProperty("--CGV-image-height", `calc(100vh - var(--CGV-footer-height)${suffix})`, "important");
+    },
   };
 }
 
@@ -422,5 +581,220 @@ it("keeps the early reservation until native slot layout effects finish", () => 
   expect(page.image.offsetHeight).toBe(524);
   page.bandDisplay = "flex";
   expect(page.image.offsetHeight).toBe(524);
+  dispose();
+});
+
+it("moves a supported default CGV row into the visible budget without changing its native band", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.image.getBoundingClientRect().bottom).toBe(494);
+  expect(page.topPanelBudget).toBe("calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height) - 30px)");
+  expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height) - 30px)");
+  expect(page.topPanelBudgetPriority).toBe("important");
+  expect(page.imageBudgetPriority).toBe("important");
+
+  dispose();
+  expect(page.topPanelBudget).toBe("");
+  expect(page.imageBudget).toBe("");
+});
+
+it("allocates both CGV budgets on the route root shared by the header artwork and status body", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg", true);
+  page.cgv = "standard";
+  page.earlyReservation = true;
+  expect(page.row.getBoundingClientRect().top).toBe(494);
+  expect(page.image.getBoundingClientRect().bottom).toBe(524);
+
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.playStatusTopPanelBudget).toBe("");
+  expect(page.playStatusImageBudget).toBe("");
+  expect(page.topPanelBudget).toContain("- 30px)");
+  expect(page.imageBudget).toContain("- 30px)");
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.image.getBoundingClientRect().bottom).toBe(494);
+  dispose();
+  expect(page.topPanelBudget).toBe("");
+  expect(page.imageBudget).toBe("");
+});
+
+it("uses the same shared route root when a Metadata trailer has no matching hero image", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg", true);
+  page.cgv = "standard";
+  page.matchingHeroAvailable = false;
+  expect(page.row.getBoundingClientRect().top).toBe(494);
+
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.topPanelBudget).toContain("- 30px)");
+  expect(page.imageBudget).toContain("- 30px)");
+  expect(page.playStatusTopPanelBudget).toBe("");
+  expect(page.playStatusImageBudget).toBe("");
+  dispose();
+  expect(page.topPanelBudget).toBe("");
+  expect(page.imageBudget).toBe("");
+});
+
+it("recognizes browser-resolved standard CGV budgets before allocating the visible native band", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  // Browser computed custom properties substitute nested var() references.
+  page.browserResolvedCgvGeometry = true;
+  expect(page.browserResolvedTopBudget).toBe("calc(100vh - 80px - 40px)");
+  expect(page.browserResolvedImageBudget).toBe("calc(100vh - 40px)");
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.image.getBoundingClientRect().bottom).toBe(494);
+  expect(page.topPanelBudget).toContain("- 30px)");
+  expect(page.imageBudget).toContain("- 30px)");
+  dispose();
+});
+
+it("restores supported CGV budgets on a theme change and leaves unsupported geometry untouched", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+
+  page.cgv = "connected";
+  expect(page.topPanelBudget).toBe("");
+  expect(page.imageBudget).toBe("");
+  expect(page.topPanelBudgetPriority).toBe("");
+  expect(page.imageBudgetPriority).toBe("");
+
+  dispose();
+});
+
+it("restores pre-existing CGV budget values and priorities on cleanup", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.seedBudgetStyles();
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.topPanelBudget).toContain("- 30px)");
+  expect(page.imageBudget).toContain("- 30px)");
+  dispose();
+  expect(page.topPanelBudget).toBe("calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))");
+  expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height))");
+  expect(page.topPanelBudgetPriority).toBe("important");
+  expect(page.imageBudgetPriority).toBe("important");
+});
+
+it("keeps a recognized third-party CGV deduction while reserving the measured native band", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.seedBudgetStyles(12);
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.topPanelBudget).toContain("- 42px)");
+  expect(page.imageBudget).toContain("- 42px)");
+  dispose();
+  expect(page.topPanelBudget).toBe("calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height) - 12px)");
+  expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height) - 12px)");
+});
+
+it("keeps a newer CGV lease after old and new route lifecycles receive repeated events", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.matchingHeroAvailable = false;
+  page.seedBudgetStyles();
+  const first = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  const second = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  page.scroll();
+  page.scroll();
+  first();
+  expect(page.topPanelBudget).toContain("- 30px)");
+  expect(page.imageBudget).toContain("- 30px)");
+  second();
+  expect(page.topPanelBudget).toBe("calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))");
+  expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height))");
+});
+
+it("keeps CGV allocation available when Metadata owns the trailer without extending its artwork", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.metadataOwnsHero = true;
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.image.getBoundingClientRect().bottom).toBe(464);
+  expect(page.height).toBe("");
+  dispose();
+});
+
+it("allocates a supported route band for a Metadata trailer view without a matching hero image", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.matchingHeroAvailable = false;
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.topPanelBudget).toContain("- 30px)");
+  expect(page.imageBudget).toContain("- 30px)");
+  expect(page.height).toBe("");
+  dispose();
+  expect(page.topPanelBudget).toBe("");
+  expect(page.imageBudget).toBe("");
+});
+
+it("does not schedule another frame for a mixed owned paint and CGV-budget mutation batch", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.matchingHeroAvailable = false;
+  page.suppressed = true;
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.frameRuns).toBe(1);
+  expect(page.topPanelBudget).toContain("- 30px)");
+  page.bandHeight = 44;
+  expect(page.frameRuns).toBe(2);
+  expect(page.topPanelBudget).toContain("- 44px)");
+  dispose();
+});
+
+it("recovers a transformed no-image route on animation completion without a scroll event", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.matchingHeroAvailable = false;
+  page.scale = 0.95;
+  page.visible = false;
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.topPanelBudget).toBe("");
+  page.completeEntryAnimation();
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.topPanelBudget).toContain("- 30px)");
+  dispose();
+});
+
+it("allocates only the mounted app route when an old visible details header remains in the document", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.matchingHeroAvailable = false;
+  page.oldRouteMounted = true;
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.topPanelBudget).toContain("- 30px)");
   dispose();
 });
