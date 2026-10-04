@@ -387,8 +387,10 @@ CSS-variable values, marker attributes, and priorities return when the extension
 Native DOM, stylesheet, scroll, resize, and band-size changes resync the image.
 
 For the known standard Clean Gameview geometry only, the same lifecycle also measures the
-visible band and temporarily deducts it from both the top-panel and image budgets on their
-common route-content ancestor. It records each original property value and priority under a
+visible band and temporarily deducts it from both the top-panel and image budgets on Decky's
+`appDetailsClasses.InnerContainer`, when it is the common route-content ancestor of the header
+artwork and status body. The nested play/status `AppDetailsRoot` is not a budget target because it
+does not own the header artwork. It records each original property value and priority under a
 lease, so a stale page or document cleanup cannot overwrite a newer owner. The lifecycle removes
 its own properties before checking the current computed geometry, then reapplies them, so a theme
 change can release the deduction. It remeasures after the browser reflows; a clipped, covered, or

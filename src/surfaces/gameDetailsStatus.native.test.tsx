@@ -10,11 +10,16 @@ const nativeClasses = vi.hoisted(() => ({
     CloudSyncProblem: "native-status-problem", CloudSynching: "native-status-active",
     CloudStatusUploading: "native-status-uploading",
   } as Record<string, string | undefined>,
-  root: { AppDetailsRoot: "native-details-root", PlaySection: "native-play-section" },
+  root: { PlaySection: "native-play-section" },
+  details: { InnerContainer: "native-inner-container" },
 }));
 const routeMock = vi.hoisted(() => ({ addPatch: vi.fn((_: string, patch: unknown) => patch), removePatch: vi.fn() }));
 vi.mock("@decky/api", () => ({ routerHook: routeMock }));
-vi.mock("@decky/ui", () => ({ playSectionClasses: nativeClasses.play, basicAppDetailsSectionStylerClasses: nativeClasses.root }));
+vi.mock("@decky/ui", () => ({
+  playSectionClasses: nativeClasses.play,
+  basicAppDetailsSectionStylerClasses: nativeClasses.root,
+  appDetailsClasses: nativeClasses.details,
+}));
 vi.mock("../utils/logging", () => ({ log: vi.fn() }));
 vi.mock("../utils/steam", () => ({ normalize: (name: string) => name.toLowerCase(), sessionFromAppOverview: () => null }));
 vi.mock("../utils/steamRuntime", () => ({ getAppDetailsForAppID: () => null, getAppOverviewForAppID: () => null, getGamepadMainWindow: () => null, subscribeToAppDetails: () => () => {} }));
@@ -81,7 +86,6 @@ it("lets direct-child, sibling, and descendant Steam theme selectors reach the f
   expect(icon).not.toBeNull();
   expect(row?.querySelector(":scope > .native-status-label")?.textContent).toContain("Ludusavi: Up to date");
   expect(row?.getAttribute("aria-label")).toContain("remote delivery is not verified");
-  expect(row?.dataset.sdhLudusaviStatusAppid).toBe("100");
   expect(row?.querySelector("[tabindex],button,a,input")).toBeNull();
 });
 

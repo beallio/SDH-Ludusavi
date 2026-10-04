@@ -490,9 +490,9 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
   }
 
   function routeContentAncestor(element: HTMLElement): HTMLElement | null {
-    const rootClass = nativeClasses?.appDetailsRoot;
-    if (!rootClass) return null;
-    return element.closest(`.${rootClass}`) as HTMLElement | null;
+    const innerContainerClass = nativeClasses?.appDetailsInnerContainer;
+    if (!innerContainerClass) return null;
+    return element.closest(`.${innerContainerClass}`) as HTMLElement | null;
   }
 
   function visibleRouteBand(document: Document): Readonly<{
@@ -588,8 +588,8 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     let bandHeight = visibleHeight();
     let compensated = false;
     if (bandHeight !== null && geometry.element) {
-      const contentRoot = routeContentAncestor(geometry.element)
-        ?? commonContentAncestor(image, geometry.element, ownerDocument);
+      const contentRoot = commonContentAncestor(image, geometry.element, ownerDocument)
+        ?? routeContentAncestor(geometry.element);
       compensated = contentRoot !== null && applyCgvBudgetCompensation(contentRoot, bandHeight);
       if (!compensated) releaseCgvBudgetCompensation();
       geometry = measureGeometry();

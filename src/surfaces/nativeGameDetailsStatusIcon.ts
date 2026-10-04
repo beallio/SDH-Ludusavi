@@ -23,7 +23,7 @@ export function nativeIconSvgForAutoSyncStatus(status: AutoSyncStatusKind, class
     return svg(className, '<path d="M4 3.25h6.1l1.9 1.9v7.6H4zM6 3.25v3h3" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="m2.7 2.7 10.6 10.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>');
   }
   if (status === "conflict" || status === "conflict_unresolved") {
-    return svg(className, '<path d="M8 1.7 14.4 13.9H1.6zM7.2 5.3h1.6v4.1H7.2zM7.2 11.2h1.6v1.45H7.2z" fill="currentColor" fill-rule="evenodd"/><path d="M8 1.7 14.4 13.9H1.6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>');
+    return svg(className, '<path d="M8 .35 14.4 15.45H1.6zM7.15 4.1h1.7v5.2h-1.7zM7.15 11.15h1.7v1.65h-1.7z" fill="currentColor" fill-rule="evenodd"/><path d="M8 .35 14.4 15.45H1.6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>');
   }
   if (status === "has_backup") {
     return svg(className, '<path d="M8 1.15a6.85 6.85 0 1 1 0 13.7 6.85 6.85 0 0 1 0-13.7ZM3.3 7.9l2.1-2.1 1.85 1.85 3.5-3.5 2.1 2.1-5.6 5.6Z" fill="currentColor" fill-rule="evenodd"/>');
