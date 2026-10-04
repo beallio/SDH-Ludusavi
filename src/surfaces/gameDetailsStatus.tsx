@@ -6,7 +6,7 @@ import { sessionFromAppOverview } from "../utils/steam";
 import { getAppDetailsForAppID, getAppOverviewForAppID, getGamepadMainWindow, subscribeToAppDetails } from "../utils/steamRuntime";
 import { selectGameDetailsStatus, getSteamCloudEligibility, type GameDetailsStatusViewModel } from "./gameDetailsStatusModel";
 import { isStatusPaintMeasurement, measureStatusBandPaint, mountGameDetailsArtworkBackdrop } from "./gameDetailsArtworkBackdrop";
-import { iconSvgForAutoSyncStatus } from "./autoSyncStatusRenderer";
+import { nativeIconSvgForAutoSyncStatus } from "./nativeGameDetailsStatusIcon";
 import type { DetailsStatusPresentationSurface } from "./autoSyncStatusSurface";
 import { getNativeGameDetailsStatusClasses, type NativeGameDetailsStatusClasses } from "./gameDetailsStatusClasses";
 
@@ -413,7 +413,7 @@ export function GameDetailsStatusRow({ appID, model, statusSurface, suppressed, 
   const status = model.status ?? "unknown";
   const value = model.label.startsWith("Ludusavi: ") ? model.label.slice("Ludusavi: ".length) : model.label;
   const problem = model.tone === "warning" || model.tone === "error";
-  const svg = iconSvgForAutoSyncStatus(status).replace("<svg ", `<svg class="${classes.iconSvg}" `);
+  const svg = nativeIconSvgForAutoSyncStatus(status, classes.iconSvg);
   return createElement("div", {
     ref: setElement,
     className: `${classes.row} Panel${problem ? ` ${classes.problem}` : ""}`,

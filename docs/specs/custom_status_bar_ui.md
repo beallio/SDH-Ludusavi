@@ -326,14 +326,18 @@ presence is independent of Cloud eligibility, native class discovery, row render
 geometry. A page change or runtime replacement resynchronizes presentation only; it does not
 publish, settle, hide, or otherwise change the retained operation observation.
 
-The row uses Steam's supplied Cloud-status row, icon, SVG, label, problem, transfer-pulse,
+The row uses Steam's supplied Cloud-status row, icon slot, SVG class, label, problem, transfer-pulse,
 and active-value classes. Its root is a direct sibling after the native play section; the
 deferred Cloud component and plugin row share a React Fragment, not DOM wrappers. Steam
 owns visual presentation, including pseudo-element dividers. The plugin adds no inline
 fonts, colors, sizes, spacing, or divider elements. Steam's default row is 30 pixels high;
 themes may change its dimensions, placement, or visibility through native selectors.
 Warning and error states use the native problem class, and active states use the native
-pulse and blue value classes. Missing class capabilities leave the native header unchanged.
+pulse and blue value classes. The native-only status glyphs are static, use inherited
+`currentColor` and transparent negative space, and carry no fixed canvas size, strip background,
+or strip animation. They keep the local, remote, completed, warning, error, and disabled states
+distinct without changing the BrowserView glyphs. Missing class capabilities leave the native
+header unchanged.
 
 A fully visible indicator with its complete label can own exit status; there is no fixed minimum row
 height. Theme-supplied opacity zero, hidden visibility, clipping, label truncation, and occlusion cannot
@@ -376,13 +380,22 @@ transform-scaled screen heights only locate that edge while the game page animat
 Compact, moved, and genuinely hidden rows do not reserve artwork space. Temporary
 coverage or clipping during page entry retains a valid row's layout reservation,
 but only a paintable row permits the inline artwork extension. Hit-testing near
-the band's upper edge permits artwork behind a row whose center lies under Steam's
-footer. Initial measurement runs after the native slot's layout-effect commits,
-not against its temporary hidden row. The band itself does not move. Original inline
-image height, CSS-variable values, marker attributes, and priorities return when
-the extension ends. Native DOM, stylesheet, scroll, resize, and band-size changes
-resync the image. If Decky Metadata marks the hero as its trailer target, Ludusavi
-yields so the trailer plugin alone controls that surface.
+the band's upper edge retains the normal occlusion check; there is no footer exception.
+Initial measurement runs after the native slot's layout-effect commits, not against its
+temporary hidden row. The band itself does not move. Original inline image height,
+CSS-variable values, marker attributes, and priorities return when the extension ends.
+Native DOM, stylesheet, scroll, resize, and band-size changes resync the image.
+
+For the known standard Clean Gameview geometry only, the same lifecycle also measures the
+visible band and temporarily deducts it from both the top-panel and image budgets on their
+common route-content ancestor. It records each original property value and priority under a
+lease, so a stale page or document cleanup cannot overwrite a newer owner. The lifecycle removes
+its own properties before checking the current computed geometry, then reapplies them, so a theme
+change can release the deduction. It remeasures after the browser reflows; a clipped, covered, or
+otherwise invalid row releases the deduction and keeps the existing fallback. Decky Metadata can
+own the trailer artwork while this route-local budget remains available; Ludusavi does not extend
+the trailer itself. Percentage-based, connected, compact, absolute, hidden, and otherwise
+unrecognized Clean Gameview geometry receives no guessed adjustment.
 The launch-time BrowserView strip remains separate.
 
 ### Optional CSS Loader theme
@@ -408,8 +421,10 @@ subtracted.
 
 Ludusavi and Metadata share a native-window WeakMap keyed by the header background.
 The first owner saves the genuine inline variable value and priority; a handoff changes
-only ownership. Only the current owner restores that value. This avoids a second crop
-change during trailer attachment and prevents an old owner from overwriting a new one.
+only ownership. Only the current owner restores that value. A separate lease on the common
+route-content ancestor gives the standard Clean Gameview top-panel and image deductions the
+same stale-owner protection. This avoids a second crop change during trailer attachment and
+prevents an old owner from overwriting a new one.
 Steam's page-scale transition remains unchanged. Without CSS Loader or with the theme
 disabled, the mounted header's measured artwork extension remains in use.
 

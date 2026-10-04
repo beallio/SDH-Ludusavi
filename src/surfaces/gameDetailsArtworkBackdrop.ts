@@ -32,7 +32,139 @@ const CLIPPING_OVERFLOW: Record<string, true> = {
 type SharedBandReservation = { original: string; priority: string; owner: object };
 type ReservationWindow = Window & {
   __sdhStatusBandReservations?: WeakMap<HTMLElement, SharedBandReservation>;
+  __sdhCgvBudgetReservations?: WeakMap<HTMLElement, Map<string, SharedBandReservation>>;
 };
+
+const CGV_TOP_PANEL_HEIGHT = "--CGV-top-panel-height";
+const CGV_IMAGE_HEIGHT = "--CGV-image-height";
+const CGV_BUDGET_PROPERTIES = [CGV_TOP_PANEL_HEIGHT, CGV_IMAGE_HEIGHT] as const;
+const managedCgvBudgetStyles = new WeakSet<Node>();
+
+function isManagedCgvBudgetStyle(record: MutationRecord): boolean {
+  return record.type === "attributes" && record.attributeName === "style" && managedCgvBudgetStyles.has(record.target);
+}
+
+function manageCgvBudgetStyle(element: HTMLElement, update: () => void): void {
+  managedCgvBudgetStyles.add(element);
+  update();
+  queueMicrotask(() => managedCgvBudgetStyles.delete(element));
+}
+
+function cgvBudgetReservations(element: HTMLElement): Map<string, SharedBandReservation> | null {
+  const host = element.ownerDocument.defaultView as ReservationWindow | null;
+  if (!host) return null;
+  const roots = host.__sdhCgvBudgetReservations ??= new WeakMap();
+  let reservations = roots.get(element);
+  if (!reservations) {
+    reservations = new Map();
+    roots.set(element, reservations);
+  }
+  return reservations;
+}
+
+function cgvBudgetValue(property: typeof CGV_TOP_PANEL_HEIGHT | typeof CGV_IMAGE_HEIGHT, bandHeight: number): string {
+  const band = `${bandHeight}px`;
+  return property === CGV_TOP_PANEL_HEIGHT
+    ? `calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height) - ${band})`
+    : `calc(100vh - var(--CGV-footer-height) - ${band})`;
+}
+
+function reserveCgvBudgets(root: HTMLElement, owner: object, bandHeight: number): void {
+  const reservations = cgvBudgetReservations(root);
+  if (!reservations) return;
+  manageCgvBudgetStyle(root, () => {
+    for (const property of CGV_BUDGET_PROPERTIES) {
+      let reservation = reservations.get(property);
+      if (!reservation) {
+        reservation = {
+          original: root.style.getPropertyValue(property),
+          priority: root.style.getPropertyPriority(property),
+          owner,
+        };
+        reservations.set(property, reservation);
+      }
+      reservation.owner = owner;
+      const value = cgvBudgetValue(property, bandHeight);
+      if (root.style.getPropertyValue(property) !== value || root.style.getPropertyPriority(property) !== "important") {
+        root.style.setProperty(property, value, "important");
+      }
+    }
+  });
+}
+
+function releaseCgvBudgets(root: HTMLElement | null, owner: object): boolean {
+  if (!root) return false;
+  const reservations = (root.ownerDocument.defaultView as ReservationWindow | null)
+    ?.__sdhCgvBudgetReservations?.get(root);
+  if (!reservations || !CGV_BUDGET_PROPERTIES.some((property) => reservations.get(property)?.owner === owner)) return false;
+  manageCgvBudgetStyle(root, () => {
+    for (const property of CGV_BUDGET_PROPERTIES) {
+      const reservation = reservations.get(property);
+      if (!reservation || reservation.owner !== owner) continue;
+      if (reservation.original) root.style.setProperty(property, reservation.original, reservation.priority);
+      else root.style.removeProperty(property);
+      reservations.delete(property);
+    }
+  });
+  return true;
+}
+
+function ownsCgvBudgets(root: HTMLElement, owner: object): boolean {
+  const reservations = (root.ownerDocument.defaultView as ReservationWindow | null)
+    ?.__sdhCgvBudgetReservations?.get(root);
+  return Boolean(reservations && CGV_BUDGET_PROPERTIES.every((property) => reservations.get(property)?.owner === owner));
+}
+
+function measureCgvBaseGeometry<T>(root: HTMLElement, owner: object, measure: () => T): T {
+  const reservations = (root.ownerDocument.defaultView as ReservationWindow | null)
+    ?.__sdhCgvBudgetReservations?.get(root);
+  const owned = reservations && CGV_BUDGET_PROPERTIES.every((property) => reservations.get(property)?.owner === owner);
+  if (!owned) return measure();
+  const current = CGV_BUDGET_PROPERTIES.map((property) => ({
+    property,
+    value: root.style.getPropertyValue(property),
+    priority: root.style.getPropertyPriority(property),
+    reservation: reservations.get(property)!,
+  }));
+  manageCgvBudgetStyle(root, () => {
+    for (const entry of current) {
+      if (entry.reservation.original) root.style.setProperty(entry.property, entry.reservation.original, entry.reservation.priority);
+      else root.style.removeProperty(entry.property);
+    }
+  });
+  try {
+    return measure();
+  } finally {
+    manageCgvBudgetStyle(root, () => {
+      for (const entry of current) root.style.setProperty(entry.property, entry.value, entry.priority);
+    });
+  }
+}
+
+function isSupportedCgvGeometry(root: HTMLElement, host: Window, owner: object): boolean {
+  return measureCgvBaseGeometry(root, owner, () => {
+    const style = host.getComputedStyle(root);
+    const compact = (property: string) => style.getPropertyValue(property).replace(/\s+/g, "");
+    const top = compact(CGV_TOP_PANEL_HEIGHT);
+    const image = compact(CGV_IMAGE_HEIGHT);
+    return compact("--CGV-play-bar-height") !== "" && compact("--CGV-footer-height") !== ""
+      && /^calc\(100vh-var\(--CGV-play-bar-height\)-var\(--CGV-footer-height\)(?:-[\d.]+px)?\)$/.test(top)
+      && /^calc\(100vh-var\(--CGV-footer-height\)(?:-[\d.]+px)?\)$/.test(image);
+  });
+}
+
+function commonContentAncestor(first: HTMLElement, second: HTMLElement, document: Document): HTMLElement | null {
+  const firstAncestors = new Set<HTMLElement>();
+  for (let ancestor: HTMLElement | null = first.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    firstAncestors.add(ancestor);
+  }
+  let ancestor = second.parentElement;
+  while (ancestor !== null) {
+    if (firstAncestors.has(ancestor) && ancestor !== document.body && ancestor !== document.documentElement) return ancestor;
+    ancestor = ancestor.parentElement;
+  }
+  return null;
+}
 
 function reservedBandHeight(element: HTMLElement, host: Window): number {
   const style = host.getComputedStyle(element);
@@ -108,6 +240,8 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
   let restoreBeforeSync = false;
   const reservationOwner = {};
   let reservationBackground: HTMLElement | null = null;
+  const cgvBudgetOwner = {};
+  let cgvBudgetRoot: HTMLElement | null = null;
   const backgroundClass = (appDetailsHeaderClasses as Record<string, string | undefined> | undefined)?.HeaderBackgroundImage;
 
   function cancelFrame(): void {
@@ -145,6 +279,7 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     if (currentDocument) {
       currentWindow.removeEventListener("scroll", schedule, true);
       currentWindow.removeEventListener("resize", resize);
+      releaseCgvBudgetCompensation();
     }
     if (restoreBeforeSync) {
       restoreBeforeSync = false;
@@ -156,6 +291,7 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     const HostMutationObserver = currentWindow.MutationObserver;
     mutationObserver = HostMutationObserver ? new HostMutationObserver((records) => {
       if (records.length > 0 && records.every(isStatusPaintMeasurement)) return;
+      if (records.length > 0 && records.every(isManagedCgvBudgetStyle)) return;
       const managedStyles = extended?.managedStyles;
       if (records.length > 0 && managedStyles && records.every((record) => record.type === "attributes"
         && (record.attributeName === "style" || record.attributeName === ARTWORK_MARKER)
@@ -199,6 +335,33 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       if (snapshot.marker === null) snapshot.element.removeAttribute(ARTWORK_MARKER);
       else snapshot.element.setAttribute(ARTWORK_MARKER, snapshot.marker);
     }
+  }
+
+  function releaseCgvBudgetCompensation(): void {
+    const root = cgvBudgetRoot;
+    cgvBudgetRoot = null;
+    if (!releaseCgvBudgets(root, cgvBudgetOwner)) return;
+    // The existing extension is based on the compensated artwork budget.
+    // Restore it before measuring the unmodified geometry again.
+    restore();
+  }
+
+  function applyCgvBudgetCompensation(root: HTMLElement, bandHeight: number): boolean {
+    if (cgvBudgetRoot === root && !ownsCgvBudgets(root, cgvBudgetOwner)) return false;
+    if (!isSupportedCgvGeometry(root, currentWindow, cgvBudgetOwner)) {
+      releaseCgvBudgetCompensation();
+      return false;
+    }
+    const budgetChanged = CGV_BUDGET_PROPERTIES.some((property) => root.style.getPropertyValue(property) !== cgvBudgetValue(property, bandHeight)
+      || root.style.getPropertyPriority(property) !== "important");
+    const isNewRoot = cgvBudgetRoot !== root;
+    if (isNewRoot) {
+      releaseCgvBudgetCompensation();
+      cgvBudgetRoot = root;
+    }
+    if (isNewRoot || budgetChanged) restore();
+    reserveCgvBudgets(root, cgvBudgetOwner, bandHeight);
+    return true;
   }
 
   function findArtwork(): HTMLImageElement | null {
@@ -322,7 +485,8 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       releaseBand(reservationBackground, reservationOwner);
       reservationBackground = null;
     }
-    if (!image || image.closest(".decky-metadata-trailer-target")) {
+    if (!image) {
+      releaseCgvBudgetCompensation();
       observeBand(null);
       restore();
       releaseBand(reservationBackground, reservationOwner);
@@ -331,38 +495,66 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     }
     const ownerDocument = image.ownerDocument ?? currentDocument;
     if (ownerDocument !== currentDocument) bindDocument(ownerDocument);
-    const artwork = image.getBoundingClientRect();
-    const imageHeight = image.offsetHeight;
-    if (imageHeight <= 0) {
+    const trailerOwnsArtwork = image.closest(".decky-metadata-trailer-target") !== null;
+    const measureGeometry = () => {
+      const artwork = image.getBoundingClientRect();
+      const imageHeight = image.offsetHeight;
+      if (imageHeight <= 0) return null;
+      const scaleY = artwork.height / imageHeight;
+      const naturalHeight = extended?.naturalHeight ?? imageHeight - reservedBandHeight(image, currentWindow);
+      const edge = artwork.top + naturalHeight * scaleY;
+      let element = ownerDocument.elementFromPoint(artwork.left + artwork.width / 2, edge + 1) as HTMLElement | null;
+      while (element && element !== ownerDocument.body && !isStatusBand(element)) element = element.parentElement;
+      return { artwork, imageHeight, naturalHeight, edge, element };
+    };
+    let geometry = measureGeometry();
+    if (!geometry) {
+      releaseCgvBudgetCompensation();
       observeBand(null);
       restore();
       return;
     }
-    const scaleY = artwork.height / imageHeight;
-    const naturalHeight = extended?.naturalHeight ?? imageHeight - reservedBandHeight(image, currentWindow);
-    const edge = artwork.top + naturalHeight * scaleY;
-    let element = ownerDocument.elementFromPoint(artwork.left + artwork.width / 2, edge + 1) as HTMLElement | null;
-    while (element && element !== ownerDocument.body && !isStatusBand(element)) element = element.parentElement;
-    if (!element || element === ownerDocument.body) {
+    const visibleHeight = () => geometry?.element && geometry.element !== ownerDocument.body
+      ? visibleBandHeight(geometry.element, geometry.artwork, geometry.edge, ownerDocument)
+      : null;
+    let bandHeight = visibleHeight();
+    let compensated = false;
+    if (bandHeight !== null && geometry.element) {
+      const contentRoot = commonContentAncestor(image, geometry.element, ownerDocument);
+      compensated = contentRoot !== null && applyCgvBudgetCompensation(contentRoot, bandHeight);
+      if (!compensated) releaseCgvBudgetCompensation();
+      geometry = measureGeometry();
+      bandHeight = visibleHeight();
+    } else {
+      releaseCgvBudgetCompensation();
+    }
+    if (compensated && (!geometry || bandHeight === null || !geometry.element || geometry.element === ownerDocument.body)) {
+      // A supported formula is still rejected if its real reflow fails the
+      // unchanged ownership checks. Return to the unmodified layout instead
+      // of leaving a partially allocated status band behind.
+      releaseCgvBudgetCompensation();
+      geometry = measureGeometry();
+      bandHeight = visibleHeight();
+    }
+    if (!geometry || bandHeight === null || !geometry.element || geometry.element === ownerDocument.body) {
       observeBand(null);
       restore();
-      reserveLayoutBand(background, artwork, edge);
+      if (geometry) reserveLayoutBand(background, geometry.artwork, geometry.edge);
       return;
     }
-    const bandHeight = visibleBandHeight(element, artwork, edge, ownerDocument);
-    if (bandHeight === null) {
-      observeBand(null);
-      restore();
-      reserveLayoutBand(background, artwork, edge);
-      return;
-    }
-    if (background && currentWindow.getComputedStyle(image).getPropertyValue?.("--sdh-status-band-reserved") === "1") {
+    if (!trailerOwnsArtwork && background && currentWindow.getComputedStyle(image).getPropertyValue?.("--sdh-status-band-reserved") === "1") {
       reservationBackground = background;
       reserveBand(background, reservationOwner, bandHeight);
     }
-    observeBand(element);
+    observeBand(geometry.element);
+    if (trailerOwnsArtwork) {
+      restore();
+      releaseBand(reservationBackground, reservationOwner);
+      reservationBackground = null;
+      return;
+    }
     if (extended?.bandHeight === bandHeight) return;
-    applyExtension(bandHeight, image, extended?.naturalHeight ?? naturalHeight);
+    applyExtension(bandHeight, image, extended?.naturalHeight ?? geometry.naturalHeight);
   }
 
   bindDocument(initialDocument);
@@ -378,5 +570,6 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     observeBand(null);
     restore();
     releaseBand(reservationBackground, reservationOwner);
+    releaseCgvBudgets(cgvBudgetRoot, cgvBudgetOwner);
   };
 }

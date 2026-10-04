@@ -77,7 +77,13 @@ it("lets direct-child, sibling, and descendant Steam theme selectors reach the f
   const row = host.querySelector(".native-details-root > .native-play-section + .native-status-row") as HTMLElement | null;
   expect(row).not.toBeNull();
   expect(row?.style.display).not.toBe("none");
-  expect(row?.querySelector(":scope > .native-status-icon > svg.native-status-svg")).not.toBeNull();
+  const icon = row?.querySelector(":scope > .native-status-icon > svg.native-status-svg") as SVGElement | null;
+  expect(icon).not.toBeNull();
+  // The native icon slot owns the 16px canvas and color. A BrowserView asset
+  // must not carry its old fixed dimensions or strip-only paint colors here.
+  expect(icon?.getAttribute("width")).toBeNull();
+  expect(icon?.getAttribute("height")).toBeNull();
+  expect(icon?.outerHTML).not.toMatch(/#[0-9a-f]{3,8}/i);
   expect(row?.querySelector(":scope > .native-status-label")?.textContent).toContain("Ludusavi: Up to date");
   expect(row?.getAttribute("aria-label")).toContain("remote delivery is not verified");
   expect(row?.querySelector("[tabindex],button,a,input")).toBeNull();

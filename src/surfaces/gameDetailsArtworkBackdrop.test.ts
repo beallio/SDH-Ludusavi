@@ -32,6 +32,7 @@ function gamePage(appID: string, src: string) {
   let clipped = false;
   let metadataOwnsHero = false;
   let earlyReservation = false;
+  let cgvMode: "none" | "standard" | "connected" = "none";
   let notifyMutation = () => {};
   let nextFrame = 0;
   const frames = new Map<number, FrameRequestCallback>();
@@ -58,6 +59,11 @@ function gamePage(appID: string, src: string) {
   const imageStyle = makeStyle();
   const rowStyle = makeStyle();
   const artworkStyle = makeStyle();
+  const contentStyle = makeStyle();
+  const budgetDeduction = (property: string) => {
+    const match = contentStyle.getPropertyValue(property).match(/-\s*(\d+(?:\.\d+)?)px\)\s*$/);
+    return match ? Number(match[1]) : 0;
+  };
   const backgroundAttributes = new Map<string, string>();
   const image = {
     style: imageStyle,
@@ -69,7 +75,8 @@ function gamePage(appID: string, src: string) {
       : selector === ".native-artwork-background" ? background : null,
     get offsetHeight() {
       const reserved = earlyReservation ? Number.parseFloat(artworkStyle.getPropertyValue("--sdh-status-band-height") || "30") : 0;
-      return Math.max(Number.parseFloat(imageStyle.getPropertyValue("height")) || naturalHeight, naturalHeight + reserved);
+      const layoutHeight = naturalHeight - budgetDeduction("--CGV-image-height");
+      return Math.max(Number.parseFloat(imageStyle.getPropertyValue("height")) || layoutHeight, layoutHeight + reserved);
     },
     getBoundingClientRect() {
       const renderedHeight = this.offsetHeight * scale;
@@ -78,6 +85,7 @@ function gamePage(appID: string, src: string) {
   };
   const background = {
     style: artworkStyle,
+    get parentElement() { return content; },
     getAttribute: (name: string) => backgroundAttributes.get(name) ?? null,
     setAttribute: (name: string, value: string) => backgroundAttributes.set(name, value),
     removeAttribute: (name: string) => backgroundAttributes.delete(name),
@@ -89,20 +97,31 @@ function gamePage(appID: string, src: string) {
     getBoundingClientRect: () => ({ left: 0, top: 0, right: 854 * scale, bottom: 534 * scale,
       width: 854 * scale, height: 534 * scale }),
   };
-  const rowParent = {
+  const content = {
+    style: contentStyle,
     parentElement: body,
+    hidden: false,
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 854 * scale, bottom: 534 * scale,
+      width: 854 * scale, height: 534 * scale }),
+  };
+  const rowParent = {
+    parentElement: content,
     hidden: false,
     getAttribute: () => null,
     getBoundingClientRect: () => ({ left: 0, top: 0, right: 854 * scale, bottom: clipped ? (rowTop + 8) * scale : 534 * scale,
       width: 854 * scale, height: clipped ? (rowTop + 8) * scale : 534 * scale }),
   };
-  const rowRect = () => ({ left: 0, top: rowTop * scale, width: rowWidth * scale,
-    height: rowHeight * scale, right: rowWidth * scale, bottom: (rowTop + rowHeight) * scale });
+  const rowRect = () => {
+    const top = rowTop - budgetDeduction("--CGV-top-panel-height");
+    return { left: 0, top: top * scale, width: rowWidth * scale,
+      height: rowHeight * scale, right: rowWidth * scale, bottom: (top + rowHeight) * scale };
+  };
   const label: { parentElement: object | null; getBoundingClientRect: () => {
     left: number; top: number; width: number; height: number;
   } } = {
     parentElement: null,
-    getBoundingClientRect: () => ({ left: 340 * scale, top: (rowTop + 4) * scale,
+    getBoundingClientRect: () => ({ left: 340 * scale, top: (rowTop - budgetDeduction("--CGV-top-panel-height") + 4) * scale,
       width: 174 * scale, height: Math.max(1, rowHeight - 8) * scale }),
   };
   const row = {
@@ -127,9 +146,10 @@ function gamePage(appID: string, src: string) {
     images: [image],
     querySelector: () => rowMarked || nativeStatusClass ? row : null,
     querySelectorAll: () => rowMarked || nativeStatusClass ? [row] : [],
-    elementFromPoint: (x: number, y: number) =>
-      rowVisible && x >= 0 && x <= rowWidth * scale && y >= rowTop * scale
-        && y < (rowTop + rowHeight) * scale ? label : null,
+    elementFromPoint: (x: number, y: number) => {
+      const rect = rowRect();
+      return rowVisible && x >= rect.left && x <= rect.right && y >= rect.top && y < rect.bottom ? label : null;
+    },
   };
   const hostWindow = {
     document: hostDocument,
@@ -141,9 +161,25 @@ function gamePage(appID: string, src: string) {
       overflow: element === rowParent && clipped ? "hidden" : "visible",
       overflowX: "visible",
       overflowY: element === rowParent && clipped ? "hidden" : "visible",
-      getPropertyValue: (name: string) => name === "--sdh-status-band-reserved" ? earlyReservation ? "1" : ""
-        : name === "--CGV-image-height" ? earlyReservation ? `${naturalHeight}px` : ""
-          : name === "--sdh-status-band-height" ? artworkStyle.getPropertyValue(name) : "",
+      getPropertyValue: (name: string) => {
+        if (name === "--sdh-status-band-reserved") return earlyReservation ? "1" : "";
+        if (name === "--sdh-status-band-height") return artworkStyle.getPropertyValue(name);
+        if (name === "--CGV-image-height" && element !== content) return contentStyle.getPropertyValue(name)
+          || (earlyReservation ? `${naturalHeight}px`
+            : cgvMode === "standard" ? "calc(100vh - var(--CGV-footer-height))"
+              : cgvMode === "connected" ? "100%" : "");
+        if (element === content) {
+          if (name === "--CGV-top-panel-height") return contentStyle.getPropertyValue(name)
+            || (cgvMode === "standard" ? "calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))"
+              : cgvMode === "connected" ? "calc(100% - var(--CGV-play-bar-height) - var(--CGV-footer-height))" : "");
+          if (name === "--CGV-image-height") return contentStyle.getPropertyValue(name)
+            || (cgvMode === "standard" ? "calc(100vh - var(--CGV-footer-height))"
+              : cgvMode === "connected" ? "100%" : "");
+          if (name === "--CGV-play-bar-height") return cgvMode === "none" ? "" : "80px";
+          if (name === "--CGV-footer-height") return cgvMode === "none" ? "" : "40px";
+        }
+        return "";
+      },
     }),
     MutationObserver: class {
       constructor(callback: MutationCallback) { notifyMutation = () => callback([], this as unknown as MutationObserver); }
@@ -162,6 +198,7 @@ function gamePage(appID: string, src: string) {
   Object.assign(hostDocument, { defaultView: hostWindow });
   Object.assign(image, { ownerDocument: hostDocument });
   Object.assign(background, { ownerDocument: hostDocument });
+  Object.assign(content, { ownerDocument: hostDocument });
   function flush() {
     for (const [id, callback] of frames) {
       frames.delete(id);
@@ -214,6 +251,15 @@ function gamePage(appID: string, src: string) {
     get backgroundMarker() { return backgroundAttributes.get("data-sdh-ludusavi-artwork-band") ?? null; },
     scroll() { listeners.get("scroll")?.(); flush(); },
     get backgroundBandVariablePriority() { return artworkStyle.getPropertyPriority("--sdh-status-band-height"); },
+    get topPanelBudget() { return contentStyle.getPropertyValue("--CGV-top-panel-height"); },
+    get imageBudget() { return contentStyle.getPropertyValue("--CGV-image-height"); },
+    get topPanelBudgetPriority() { return contentStyle.getPropertyPriority("--CGV-top-panel-height"); },
+    get imageBudgetPriority() { return contentStyle.getPropertyPriority("--CGV-image-height"); },
+    set cgv(value: "none" | "standard" | "connected") { cgvMode = value; notifyMutation(); flush(); },
+    seedBudgetStyles() {
+      contentStyle.setProperty("--CGV-top-panel-height", "calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))", "important");
+      contentStyle.setProperty("--CGV-image-height", "calc(100vh - var(--CGV-footer-height))", "important");
+    },
   };
 }
 
@@ -422,5 +468,86 @@ it("keeps the early reservation until native slot layout effects finish", () => 
   expect(page.image.offsetHeight).toBe(524);
   page.bandDisplay = "flex";
   expect(page.image.offsetHeight).toBe(524);
+  dispose();
+});
+
+it("moves a supported default CGV row into the visible budget without changing its native band", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.image.getBoundingClientRect().bottom).toBe(494);
+  expect(page.topPanelBudget).toBe("calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height) - 30px)");
+  expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height) - 30px)");
+  expect(page.topPanelBudgetPriority).toBe("important");
+  expect(page.imageBudgetPriority).toBe("important");
+
+  dispose();
+  expect(page.topPanelBudget).toBe("");
+  expect(page.imageBudget).toBe("");
+});
+
+it("restores supported CGV budgets on a theme change and leaves unsupported geometry untouched", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+
+  page.cgv = "connected";
+  expect(page.topPanelBudget).toBe("");
+  expect(page.imageBudget).toBe("");
+  expect(page.topPanelBudgetPriority).toBe("");
+  expect(page.imageBudgetPriority).toBe("");
+
+  dispose();
+});
+
+it("restores pre-existing CGV budget values and priorities on cleanup", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.seedBudgetStyles();
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.topPanelBudget).toContain("- 30px)");
+  expect(page.imageBudget).toContain("- 30px)");
+  dispose();
+  expect(page.topPanelBudget).toBe("calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))");
+  expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height))");
+  expect(page.topPanelBudgetPriority).toBe("important");
+  expect(page.imageBudgetPriority).toBe("important");
+});
+
+it("does not let stale CGV cleanup erase a newer lifecycle lease", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.metadataOwnsHero = true;
+  page.seedBudgetStyles();
+  const first = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  const second = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  first();
+  expect(page.topPanelBudget).toContain("- 30px)");
+  expect(page.imageBudget).toContain("- 30px)");
+  second();
+  expect(page.topPanelBudget).toBe("calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))");
+  expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height))");
+});
+
+it("keeps CGV allocation available when Metadata owns the trailer without extending its artwork", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.metadataOwnsHero = true;
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.image.getBoundingClientRect().bottom).toBe(464);
+  expect(page.height).toBe("");
   dispose();
 });
