@@ -386,7 +386,7 @@ temporary hidden row. The band itself does not move. Original inline image heigh
 CSS-variable values, marker attributes, and priorities return when the extension ends.
 Native DOM, stylesheet, scroll, resize, and band-size changes resync the image.
 
-For the known standard Clean Gameview geometry only, the same lifecycle also measures the
+For the verified standard-equation Clean Gameview profiles only, the same lifecycle also measures the
 visible band and temporarily deducts it from both the top-panel and image budgets on Decky's
 `appDetailsClasses.InnerContainer`, when it is the common route-content ancestor of the header
 artwork and status body. The nested play/status `AppDetailsRoot` is not a budget target because it
@@ -396,8 +396,11 @@ its own properties before checking the current computed geometry, then reapplies
 change can release the deduction. It remeasures after the browser reflows; a clipped, covered, or
 otherwise invalid row releases the deduction and keeps the existing fallback. Decky Metadata can
 own the trailer artwork while this route-local budget remains available; Ludusavi does not extend
-the trailer itself. Percentage-based, connected, compact, absolute, hidden, and otherwise
-unrecognized Clean Gameview geometry receives no guessed adjustment.
+the trailer itself. The checked profiles have the footer enabled and use Transparent with Zoom
+Center, Zoom Left, or Contain, or Blur with centered alignment. Connected with Body, layouts that
+ignore the footer, percentage-based, compact, absolute, hidden, and otherwise unrecognized Clean
+Gameview geometry receives no guessed adjustment. Other Clean Gameview choices and CSS Loader
+versions are not yet verified.
 The launch-time BrowserView strip remains separate.
 
 ### Optional CSS Loader theme
@@ -424,7 +427,7 @@ subtracted.
 Ludusavi and Metadata share a native-window WeakMap keyed by the header background.
 The first owner saves the genuine inline variable value and priority; a handoff changes
 only ownership. Only the current owner restores that value. A separate lease on the common
-route-content ancestor gives the standard Clean Gameview top-panel and image deductions the
+route-content ancestor gives the verified Clean Gameview top-panel and image deductions the
 same stale-owner protection. This avoids a second crop change during trailer attachment and
 prevents an old owner from overwriting a new one.
 Steam's page-scale transition remains unchanged. Without CSS Loader or with the theme
