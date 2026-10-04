@@ -62,14 +62,18 @@ function cgvBudgetReservations(element: HTMLElement): Map<string, SharedBandRese
   return reservations;
 }
 
-function cgvBudgetValue(property: typeof CGV_TOP_PANEL_HEIGHT | typeof CGV_IMAGE_HEIGHT, bandHeight: number): string {
-  const band = `${bandHeight}px`;
+function cgvBudgetValue(
+  property: typeof CGV_TOP_PANEL_HEIGHT | typeof CGV_IMAGE_HEIGHT,
+  bandHeight: number,
+  existingDeduction: number,
+): string {
+  const deduction = bandHeight + existingDeduction;
   return property === CGV_TOP_PANEL_HEIGHT
-    ? `calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height) - ${band})`
-    : `calc(100vh - var(--CGV-footer-height) - ${band})`;
+    ? `calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height) - ${deduction}px)`
+    : `calc(100vh - var(--CGV-footer-height) - ${deduction}px)`;
 }
 
-function reserveCgvBudgets(root: HTMLElement, owner: object, bandHeight: number): void {
+function reserveCgvBudgets(root: HTMLElement, owner: object, bandHeight: number, existingDeduction: number): void {
   const reservations = cgvBudgetReservations(root);
   if (!reservations) return;
   manageCgvBudgetStyle(root, () => {
@@ -84,7 +88,7 @@ function reserveCgvBudgets(root: HTMLElement, owner: object, bandHeight: number)
         reservations.set(property, reservation);
       }
       reservation.owner = owner;
-      const value = cgvBudgetValue(property, bandHeight);
+      const value = cgvBudgetValue(property, bandHeight, existingDeduction);
       if (root.style.getPropertyValue(property) !== value || root.style.getPropertyPriority(property) !== "important") {
         root.style.setProperty(property, value, "important");
       }
@@ -115,11 +119,11 @@ function ownsCgvBudgets(root: HTMLElement, owner: object): boolean {
   return Boolean(reservations && CGV_BUDGET_PROPERTIES.every((property) => reservations.get(property)?.owner === owner));
 }
 
-function measureCgvBaseGeometry<T>(root: HTMLElement, owner: object, measure: () => T): T {
+function measureCgvBaseGeometry<T>(root: HTMLElement, measure: () => T): T {
   const reservations = (root.ownerDocument.defaultView as ReservationWindow | null)
     ?.__sdhCgvBudgetReservations?.get(root);
-  const owned = reservations && CGV_BUDGET_PROPERTIES.every((property) => reservations.get(property)?.owner === owner);
-  if (!owned) return measure();
+  const managed = reservations && CGV_BUDGET_PROPERTIES.every((property) => reservations.has(property));
+  if (!managed) return measure();
   const current = CGV_BUDGET_PROPERTIES.map((property) => ({
     property,
     value: root.style.getPropertyValue(property),
@@ -141,15 +145,34 @@ function measureCgvBaseGeometry<T>(root: HTMLElement, owner: object, measure: ()
   }
 }
 
-function isSupportedCgvGeometry(root: HTMLElement, host: Window, owner: object): boolean {
-  return measureCgvBaseGeometry(root, owner, () => {
+function knownCgvDeduction(value: string, bases: readonly string[]): number | null {
+  for (const base of bases) {
+    if (value === `${base})`) return 0;
+    const suffix = value.slice(base.length);
+    const match = suffix.match(/^-(\d+(?:\.\d+)?)px\)$/);
+    if (value.startsWith(base) && match) return Number(match[1]);
+  }
+  return null;
+}
+
+function isSupportedCgvGeometry(root: HTMLElement, host: Window): number | null {
+  return measureCgvBaseGeometry(root, () => {
     const style = host.getComputedStyle(root);
     const compact = (property: string) => style.getPropertyValue(property).replace(/\s+/g, "");
+    const playBar = compact("--CGV-play-bar-height");
+    const footer = compact("--CGV-footer-height");
     const top = compact(CGV_TOP_PANEL_HEIGHT);
     const image = compact(CGV_IMAGE_HEIGHT);
-    return compact("--CGV-play-bar-height") !== "" && compact("--CGV-footer-height") !== ""
-      && /^calc\(100vh-var\(--CGV-play-bar-height\)-var\(--CGV-footer-height\)(?:-[\d.]+px)?\)$/.test(top)
-      && /^calc\(100vh-var\(--CGV-footer-height\)(?:-[\d.]+px)?\)$/.test(image);
+    if (!/^\d+(?:\.\d+)?px$/.test(playBar) || !/^\d+(?:\.\d+)?px$/.test(footer)) return null;
+    const topDeduction = knownCgvDeduction(top, [
+      `calc(100vh-${playBar}-${footer}`,
+      "calc(100vh-var(--CGV-play-bar-height)-var(--CGV-footer-height)",
+    ]);
+    const imageDeduction = knownCgvDeduction(image, [
+      `calc(100vh-${footer}`,
+      "calc(100vh-var(--CGV-footer-height)",
+    ]);
+    return topDeduction !== null && topDeduction === imageDeduction ? topDeduction : null;
   });
 }
 
@@ -348,11 +371,12 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
 
   function applyCgvBudgetCompensation(root: HTMLElement, bandHeight: number): boolean {
     if (cgvBudgetRoot === root && !ownsCgvBudgets(root, cgvBudgetOwner)) return false;
-    if (!isSupportedCgvGeometry(root, currentWindow, cgvBudgetOwner)) {
+    const existingDeduction = isSupportedCgvGeometry(root, currentWindow);
+    if (existingDeduction === null) {
       releaseCgvBudgetCompensation();
       return false;
     }
-    const budgetChanged = CGV_BUDGET_PROPERTIES.some((property) => root.style.getPropertyValue(property) !== cgvBudgetValue(property, bandHeight)
+    const budgetChanged = CGV_BUDGET_PROPERTIES.some((property) => root.style.getPropertyValue(property) !== cgvBudgetValue(property, bandHeight, existingDeduction)
       || root.style.getPropertyPriority(property) !== "important");
     const isNewRoot = cgvBudgetRoot !== root;
     if (isNewRoot) {
@@ -360,7 +384,7 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       cgvBudgetRoot = root;
     }
     if (isNewRoot || budgetChanged) restore();
-    reserveCgvBudgets(root, cgvBudgetOwner, bandHeight);
+    reserveCgvBudgets(root, cgvBudgetOwner, bandHeight, existingDeduction);
     return true;
   }
 
@@ -417,17 +441,19 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
 
   function visibleBandHeight(
     element: HTMLElement,
-    artwork: DOMRect,
-    edge: number,
     document: Document,
+    expectedArtwork: Readonly<{ width: number; edge: number }> | null,
   ): number | null {
     const ownSuppression = element.getAttribute(PAINT_SUPPRESSED_MARKER) === "true"
       && element.style.getPropertyValue("opacity") === "0";
     return measureStatusBandPaint(element, () => {
       const band = element.getBoundingClientRect();
       const bandHeight = element.offsetHeight;
+      const root = document.documentElement;
       if (bandHeight <= 0 || band.height <= 0 || band.width <= 0
-        || Math.abs(band.top - edge) > 1 || Math.abs(band.width - artwork.width) > 2) return null;
+        || (expectedArtwork !== null && (Math.abs(band.top - expectedArtwork.edge) > 1
+          || Math.abs(band.width - expectedArtwork.width) > 2))
+        || (expectedArtwork === null && root.clientWidth > 0 && Math.abs(band.width - root.clientWidth) > 2)) return null;
 
       for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
         if (ancestor.hidden || (ancestor.getAttribute("aria-hidden") === "true" && !(ancestor === element && ownSuppression))) return null;
@@ -444,7 +470,6 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
         }
       }
 
-      const root = document.documentElement;
       if ((root.clientWidth > 0 && (band.left < 0 || band.right > root.clientWidth))
         || (root.clientHeight > 0 && (band.bottom <= 0 || band.top >= root.clientHeight))) return null;
       if (typeof document.elementFromPoint === "function") {
@@ -453,6 +478,22 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       }
       return bandHeight;
     });
+  }
+
+  function routeContentAncestor(element: HTMLElement): HTMLElement | null {
+    const rootClass = nativeClasses?.appDetailsRoot;
+    if (!rootClass) return null;
+    return element.closest(`.${rootClass}`) as HTMLElement | null;
+  }
+
+  function visibleRouteBand(document: Document): Readonly<{ element: HTMLElement; height: number }> | null {
+    for (const element of document.querySelectorAll<HTMLElement>(
+      `[${STATUS_ROW_MARKER}="true"]${nativeClasses ? `,.${nativeClasses.row}` : ""}`,
+    )) {
+      const height = visibleBandHeight(element, document, null);
+      if (height !== null) return { element, height };
+    }
+    return null;
   }
 
   function applyExtension(bandHeight: number, image: HTMLImageElement, naturalHeight: number): void {
@@ -486,8 +527,18 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       reservationBackground = null;
     }
     if (!image) {
-      releaseCgvBudgetCompensation();
-      observeBand(null);
+      const routeBand = visibleRouteBand(currentDocument);
+      const contentRoot = routeBand && routeContentAncestor(routeBand.element);
+      const compensated = contentRoot !== null && routeBand !== null
+        && applyCgvBudgetCompensation(contentRoot, routeBand.height);
+      if (!compensated) releaseCgvBudgetCompensation();
+      const reflowedBand = compensated ? visibleRouteBand(currentDocument) : routeBand;
+      if (compensated && reflowedBand === null) {
+        releaseCgvBudgetCompensation();
+        observeBand(null);
+      } else {
+        observeBand(reflowedBand?.element ?? null);
+      }
       restore();
       releaseBand(reservationBackground, reservationOwner);
       reservationBackground = null;
@@ -515,12 +566,13 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       return;
     }
     const visibleHeight = () => geometry?.element && geometry.element !== ownerDocument.body
-      ? visibleBandHeight(geometry.element, geometry.artwork, geometry.edge, ownerDocument)
+      ? visibleBandHeight(geometry.element, ownerDocument, { width: geometry.artwork.width, edge: geometry.edge })
       : null;
     let bandHeight = visibleHeight();
     let compensated = false;
     if (bandHeight !== null && geometry.element) {
-      const contentRoot = commonContentAncestor(image, geometry.element, ownerDocument);
+      const contentRoot = routeContentAncestor(geometry.element)
+        ?? commonContentAncestor(image, geometry.element, ownerDocument);
       compensated = contentRoot !== null && applyCgvBudgetCompensation(contentRoot, bandHeight);
       if (!compensated) releaseCgvBudgetCompensation();
       geometry = measureGeometry();

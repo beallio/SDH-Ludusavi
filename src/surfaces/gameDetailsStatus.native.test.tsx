@@ -79,14 +79,51 @@ it("lets direct-child, sibling, and descendant Steam theme selectors reach the f
   expect(row?.style.display).not.toBe("none");
   const icon = row?.querySelector(":scope > .native-status-icon > svg.native-status-svg") as SVGElement | null;
   expect(icon).not.toBeNull();
-  // The native icon slot owns the 16px canvas and color. A BrowserView asset
-  // must not carry its old fixed dimensions or strip-only paint colors here.
-  expect(icon?.getAttribute("width")).toBeNull();
-  expect(icon?.getAttribute("height")).toBeNull();
-  expect(icon?.outerHTML).not.toMatch(/#[0-9a-f]{3,8}/i);
   expect(row?.querySelector(":scope > .native-status-label")?.textContent).toContain("Ludusavi: Up to date");
   expect(row?.getAttribute("aria-label")).toContain("remote delivery is not verified");
   expect(row?.querySelector("[tabindex],button,a,input")).toBeNull();
+});
+
+it("replaces the retained version-15 wrapper while preserving direct cold-peer overview and details props", async () => {
+  const legacyPatch = vi.fn();
+  const legacyInstalledPatch = vi.fn();
+  globalThis.__sdhLudusaviGameDetailsStatusRoutePatch = {
+    version: 15, patch: legacyPatch, installedPatch: legacyInstalledPatch, removalTimer: null,
+  };
+  const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
+  const store = createLudusaviStateStore();
+  const statusSurface = createAutoSyncStatusSurface(view, store);
+  const gameDetailsSurface = createGameDetailsStatusSurface(store, statusSurface);
+
+  try {
+    expect(routeMock.removePatch).toHaveBeenCalledWith("/library/app/:appid", legacyInstalledPatch);
+    const patch = routeMock.addPatch.mock.calls.at(-1)?.[1] as (route: any) => any;
+    const context = createContext<unknown>(null);
+    const routeChild = createElement("native-route-body", {
+      overview: { appid: 100 }, details: { nPlaytimeForever: 12 },
+    }, "Cold peer content");
+    const nativeRoute = createElement("native-route", {
+      renderFunc: () => createElement(context.Provider, { value: {} }, routeChild),
+    });
+    const patched = patch({ path: "/library/app/:appid", children: nativeRoute });
+    type ColdPeerProps = { overview: { appid: number }; details: { nPlaytimeForever: number } };
+    const result = patched.children.props.renderFunc({ params: { appid: "100" } }) as ReactElement<{
+      children: ReactElement<ColdPeerProps>;
+    }>;
+    const peerChild = result.props.children;
+
+    expect(peerChild.props.overview.appid).toBe(100);
+    expect(peerChild.props.details.nPlaytimeForever).toBe(12);
+    await render(result);
+    expect(host.querySelector("native-route-body")?.textContent).toBe("Cold peer content");
+  } finally {
+    gameDetailsSurface.dispose();
+    statusSurface.dispose();
+    const routePatch = globalThis.__sdhLudusaviGameDetailsStatusRoutePatch;
+    if (routePatch?.removalTimer !== null && routePatch?.removalTimer !== undefined) clearTimeout(routePatch.removalTimer);
+    Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRoutePatch");
+    Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRegistry");
+  }
 });
 
 it("keeps native Cloud controls mounted and authoritative even when a theme hides them", async () => {

@@ -11,7 +11,7 @@ vi.mock("@decky/ui", () => ({
     CloudSynching: "native-status-syncing",
     CloudStatusUploading: "native-status-uploading",
   },
-  basicAppDetailsSectionStylerClasses: { PlaySection: "native-play-section" },
+  basicAppDetailsSectionStylerClasses: { AppDetailsRoot: "native-details-root", PlaySection: "native-play-section" },
   appDetailsHeaderClasses: { HeaderBackgroundImage: "native-artwork-background" },
 }));
 
@@ -33,6 +33,8 @@ function gamePage(appID: string, src: string) {
   let metadataOwnsHero = false;
   let earlyReservation = false;
   let cgvMode: "none" | "standard" | "connected" = "none";
+  let resolvedCgvGeometry = false;
+  let matchingHero = true;
   let notifyMutation = () => {};
   let nextFrame = 0;
   const frames = new Map<number, FrameRequestCallback>();
@@ -134,6 +136,7 @@ function gamePage(appID: string, src: string) {
     getAttribute: (name: string) => name === "aria-hidden" && rowSuppressed ? "true"
       : name === "data-sdh-ludusavi-status-row" && rowMarked ? "true"
         : name === "data-sdh-ludusavi-paint-suppressed" && rowSuppressed ? "true" : null,
+    closest: (selector: string) => selector === ".native-details-root" ? content : null,
     getClientRects: () => [rowRect()],
     get offsetHeight() { return rowHeight; },
     getBoundingClientRect: rowRect,
@@ -143,7 +146,7 @@ function gamePage(appID: string, src: string) {
     body,
     head: {},
     documentElement: { clientWidth: 854, clientHeight: 534 },
-    images: [image],
+    get images() { return matchingHero ? [image] : []; },
     querySelector: () => rowMarked || nativeStatusClass ? row : null,
     querySelectorAll: () => rowMarked || nativeStatusClass ? [row] : [],
     elementFromPoint: (x: number, y: number) => {
@@ -166,11 +169,11 @@ function gamePage(appID: string, src: string) {
         if (name === "--sdh-status-band-height") return artworkStyle.getPropertyValue(name);
         if (name === "--CGV-image-height" && element !== content) return contentStyle.getPropertyValue(name)
           || (earlyReservation ? `${naturalHeight}px`
-            : cgvMode === "standard" ? "calc(100vh - var(--CGV-footer-height))"
+            : cgvMode === "standard" ? resolvedCgvGeometry ? "calc(100vh - 40px)" : "calc(100vh - var(--CGV-footer-height))"
               : cgvMode === "connected" ? "100%" : "");
         if (element === content) {
           if (name === "--CGV-top-panel-height") return contentStyle.getPropertyValue(name)
-            || (cgvMode === "standard" ? "calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))"
+            || (cgvMode === "standard" ? resolvedCgvGeometry ? "calc(100vh - 80px - 40px)" : "calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))"
               : cgvMode === "connected" ? "calc(100% - var(--CGV-play-bar-height) - var(--CGV-footer-height))" : "");
           if (name === "--CGV-image-height") return contentStyle.getPropertyValue(name)
             || (cgvMode === "standard" ? "calc(100vh - var(--CGV-footer-height))"
@@ -256,9 +259,12 @@ function gamePage(appID: string, src: string) {
     get topPanelBudgetPriority() { return contentStyle.getPropertyPriority("--CGV-top-panel-height"); },
     get imageBudgetPriority() { return contentStyle.getPropertyPriority("--CGV-image-height"); },
     set cgv(value: "none" | "standard" | "connected") { cgvMode = value; notifyMutation(); flush(); },
-    seedBudgetStyles() {
-      contentStyle.setProperty("--CGV-top-panel-height", "calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))", "important");
-      contentStyle.setProperty("--CGV-image-height", "calc(100vh - var(--CGV-footer-height))", "important");
+    set browserResolvedCgvGeometry(value: boolean) { resolvedCgvGeometry = value; notifyMutation(); flush(); },
+    set matchingHeroAvailable(value: boolean) { matchingHero = value; notifyMutation(); flush(); },
+    seedBudgetStyles(deduction = 0) {
+      const suffix = deduction ? ` - ${deduction}px` : "";
+      contentStyle.setProperty("--CGV-top-panel-height", `calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height)${suffix})`, "important");
+      contentStyle.setProperty("--CGV-image-height", `calc(100vh - var(--CGV-footer-height)${suffix})`, "important");
     },
   };
 }
@@ -489,6 +495,21 @@ it("moves a supported default CGV row into the visible budget without changing i
   expect(page.imageBudget).toBe("");
 });
 
+it("recognizes browser-resolved standard CGV budgets before allocating the visible native band", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  // Browser computed custom properties substitute nested var() references.
+  page.browserResolvedCgvGeometry = true;
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.image.getBoundingClientRect().bottom).toBe(494);
+  expect(page.topPanelBudget).toContain("- 30px)");
+  expect(page.imageBudget).toContain("- 30px)");
+  dispose();
+});
+
 it("restores supported CGV budgets on a theme change and leaves unsupported geometry untouched", () => {
   const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
   page.cgv = "standard";
@@ -521,6 +542,20 @@ it("restores pre-existing CGV budget values and priorities on cleanup", () => {
   expect(page.imageBudgetPriority).toBe("important");
 });
 
+it("keeps a recognized third-party CGV deduction while reserving the measured native band", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.seedBudgetStyles(12);
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.topPanelBudget).toContain("- 42px)");
+  expect(page.imageBudget).toContain("- 42px)");
+  dispose();
+  expect(page.topPanelBudget).toBe("calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height) - 12px)");
+  expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height) - 12px)");
+});
+
 it("does not let stale CGV cleanup erase a newer lifecycle lease", () => {
   const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
   page.cgv = "standard";
@@ -550,4 +585,20 @@ it("keeps CGV allocation available when Metadata owns the trailer without extend
   expect(page.image.getBoundingClientRect().bottom).toBe(464);
   expect(page.height).toBe("");
   dispose();
+});
+
+it("allocates a supported route band for a Metadata trailer view without a matching hero image", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  page.matchingHeroAvailable = false;
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.topPanelBudget).toContain("- 30px)");
+  expect(page.imageBudget).toContain("- 30px)");
+  expect(page.height).toBe("");
+  dispose();
+  expect(page.topPanelBudget).toBe("");
+  expect(page.imageBudget).toBe("");
 });
