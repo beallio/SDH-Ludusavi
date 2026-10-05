@@ -89,11 +89,11 @@ it("lets direct-child, sibling, and descendant Steam theme selectors reach the f
   expect(row?.querySelector("[tabindex],button,a,input")).toBeNull();
 });
 
-it("replaces the retained version-17 wrapper while preserving direct cold-peer overview and details props", async () => {
+it("replaces the retained version-18 wrapper while preserving direct cold-peer overview and details props", async () => {
   const legacyPatch = vi.fn();
   const legacyInstalledPatch = vi.fn();
   globalThis.__sdhLudusaviGameDetailsStatusRoutePatch = {
-    version: 17, patch: legacyPatch, installedPatch: legacyInstalledPatch, removalTimer: null,
+    version: 18, patch: legacyPatch, installedPatch: legacyInstalledPatch, removalTimer: null,
   };
   const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
   const store = createLudusaviStateStore();

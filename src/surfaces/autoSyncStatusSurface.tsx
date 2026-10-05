@@ -7,7 +7,7 @@ import type {
   RpcStatus
 } from "../types";
 import { log } from "../utils/logging";
-import { autoSyncStatusForTerminalResult, autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus, isLudusaviRunningStatus, isSyncthingStatus } from "./autoSyncStatusRenderer";
+import { autoSyncStatusForTerminalResult, autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, iconSvgForAutoSyncStatus, isLudusaviRunningStatus } from "./autoSyncStatusRenderer";
 import type { AutoSyncStatusBrowserViewApi } from "./autoSyncStatusBrowserView";
 import type { LudusaviStateStore } from "../state/ludusaviState";
 
@@ -16,7 +16,6 @@ export { autoSyncStatusText, isSyncthingActiveStatus, shouldAutoHideStatus, icon
 // A three-minute Ludusavi command plus 30 seconds for RPC delivery and cleanup.
 export const RUNNING_STATUS_HIDE_CEILING_MS = 210_000;
 export const RESULT_HIDE_DELAY_MS = 2000;
-export const HAS_BACKUP_MIN_DWELL_MS = 900;
 
 export type AutoSyncStatusPublishOptions = {
   source: AutoSyncStatusSource;
@@ -65,13 +64,9 @@ export function createAutoSyncStatusSurface(
     visible: false,
     source: "hide"
   };
-  let autoSyncStatusShownAt: number | null = null;
-  let deferredAutoSyncStatusState: AutoSyncStatusState | null = null;
-  let deferredAutoSyncStatusTimeoutID: number | null = null;
   let autoSyncStatusTimedOut = false;
   let autoSyncStatusHideTimeoutID: number | null = null;
   let autoSyncStatusSyncTimeoutID: number | null = null;
-  let currentHasBackupLifecycle: "lifecycle_start" | "lifecycle_exit" | null = null;
   let detailsPage: { appID: string; token: number } | null = null;
   let nextDetailsPageToken = 0;
   let detailsOwner: (DetailsStatusOwner & { token: number }) | null = null;
@@ -121,15 +116,6 @@ export function createAutoSyncStatusSurface(
     statusView.sync({ ...state, visible: shouldShowStatusStrip(state) });
     notifyDetailsPresentation();
   }
-
-  function clearDeferredAutoSyncStatus() {
-    if (deferredAutoSyncStatusTimeoutID !== null) {
-      window.clearTimeout(deferredAutoSyncStatusTimeoutID);
-      deferredAutoSyncStatusTimeoutID = null;
-    }
-    deferredAutoSyncStatusState = null;
-  }
-
   function logAutoSyncStatusChange(state: AutoSyncStatusState) {
     log(
       "info",
@@ -246,54 +232,12 @@ export function createAutoSyncStatusSurface(
       }
       syncStatusStrip(state);
       scheduleAutoSyncStatusHide(state);
-      autoSyncStatusShownAt = Date.now();
     }, 0);
   }
 
   const api = {
     publish(status: AutoSyncStatusKind, options: AutoSyncStatusPublishOptions) {
       observationStore?.recordAutoSyncStatus(status, options);
-      if (
-        isSyncthingStatus(status) &&
-        options.source === "lifecycle_exit" &&
-        currentAutoSyncStatusState.status === "has_backup" &&
-        currentAutoSyncStatusState.resultStatus === "backed_up" &&
-        currentHasBackupLifecycle === "lifecycle_exit" &&
-        currentAutoSyncStatusState.visible &&
-        autoSyncStatusShownAt !== null &&
-        Date.now() - autoSyncStatusShownAt < HAS_BACKUP_MIN_DWELL_MS
-      ) {
-        deferredAutoSyncStatusState = {
-          status,
-          visible: true,
-          source: options.source,
-          lifecycle: options.lifecycle,
-          generation: options.generation,
-          gameName: options.gameName,
-          appID: options.appID,
-          tracked: options.tracked,
-          resultStatus: options.resultStatus
-        };
-        if (deferredAutoSyncStatusTimeoutID === null) {
-          const remaining = HAS_BACKUP_MIN_DWELL_MS - (Date.now() - autoSyncStatusShownAt);
-          deferredAutoSyncStatusTimeoutID = window.setTimeout(() => {
-            const stateToApply = deferredAutoSyncStatusState;
-            clearDeferredAutoSyncStatus();
-            if (!stateToApply) return;
-            currentAutoSyncStatusState = stateToApply;
-            currentHasBackupLifecycle = null;
-            statusView.setContext(currentAutoSyncStatusState);
-            logAutoSyncStatusChange(currentAutoSyncStatusState);
-            syncStatusStrip(currentAutoSyncStatusState);
-            scheduleAutoSyncStatusHide(currentAutoSyncStatusState);
-            autoSyncStatusShownAt = Date.now();
-          }, remaining);
-        }
-        return;
-      }
-
-      clearDeferredAutoSyncStatus();
-      currentHasBackupLifecycle = status === "has_backup" ? (options.lifecycle ?? null) : null;
 
       const shouldResetSurface = shouldResetStatusStripSurfaceBeforeVerification(status, options);
       if (isLudusaviRunningStatus(status)) {
@@ -326,12 +270,9 @@ export function createAutoSyncStatusSurface(
       statusView.setContext(currentAutoSyncStatusState);
       syncStatusStrip(currentAutoSyncStatusState);
       scheduleAutoSyncStatusHide(currentAutoSyncStatusState);
-      autoSyncStatusShownAt = Date.now();
     },
 
     hide(options: Partial<AutoSyncStatusPublishOptions> = {}) {
-      clearDeferredAutoSyncStatus();
-      currentHasBackupLifecycle = null;
       clearAutoSyncStatusSyncTimeout();
       clearAutoSyncStatusHideTimeout();
 
@@ -466,8 +407,6 @@ export function createAutoSyncStatusSurface(
     },
 
     dispose() {
-      clearDeferredAutoSyncStatus();
-      currentHasBackupLifecycle = null;
       detailsOwner = null;
       statusView.setContext(currentAutoSyncStatusState);
       currentAutoSyncStatusState = {
@@ -479,10 +418,9 @@ export function createAutoSyncStatusSurface(
 
       clearAutoSyncStatusHideTimeout();
       clearAutoSyncStatusSyncTimeout();
-      
+
       statusView.destroy();
     }
   };
-
   return api;
 }

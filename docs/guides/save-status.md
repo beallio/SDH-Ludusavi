@@ -4,7 +4,7 @@ SDH-Ludusavi shows what it knows about your game saves in two places. The row on
 
 Steam Cloud games keep their Steam Cloud status. The Ludusavi row does not replace Steam Cloud or change which games the plugin can back up.
 
-By default, the Ludusavi row uses the same layout as Steam's Cloud row. Its save-status icons remain easy to tell apart, but use the row's normal size and alignment. If the normal row cannot show the full message or is genuinely covered, the plugin uses the same-page fallback instead. It does not force the page to scroll.
+By default, the Ludusavi row uses the same layout as Steam's Cloud row. Its save-status icons remain easy to tell apart, but use the row's normal size and alignment. If the normal row cannot show the full message or is genuinely covered, the plugin uses the same-page fallback instead. Post-game icons keep the same shape and pulse in both places. The game-launch strip keeps its separate appearance. The plugin does not force the page to scroll.
 
 ## What the game-page row means
 
@@ -37,8 +37,8 @@ The row can include more detail about the **local result** and a **remote observ
 - **LOCAL BACKUP SAVED - SYNCTHING UNAVAILABLE**: The local backup was made, but the plugin could not check Syncthing.
 - **UNABLE TO SYNC**: The save check or operation failed or could not continue safely. Look at **View Logs** if it happens again.
 
-After you quit, leave the affected game page to hide its post-game message. This does not stop a backup or Syncthing observation. If you return while work continues, the page shows the latest state without starting it again. If work finished, the row keeps the latest local result and remote observation even after the short fallback message expires. The fallback does not get a new lifetime when you return.
+After you quit, leave the affected game page to hide its post-game message. This does not stop a backup or Syncthing observation. If you return while work continues, the page shows the latest state without starting it again. Upload activity replaces the local-success message as soon as the plugin observes it. If work finished, the row keeps the latest local result and remote observation even after the short fallback message expires. The fallback does not get a new lifetime when you return.
 
-You can check the latest known result on the game page, but a past message does not replace a check on the other device. If a game page has no Ludusavi row after the plugin reloads, open another page and return. Some layouts may not have room for the full row message; the fallback then stays on that same game page. The normal row was checked at the default scroll position with the footer enabled in Transparent Clean Gameview with Zoom Center, Zoom Left, or Contain, and in Blur with centered alignment. Connected with Body, layouts that ignore the footer, and other untested Clean Gameview choices can keep the fallback. You can still use the plugin from Decky.
+You can check the latest known result on the game page, but a past message does not replace a check on the other device. If a game page has no Ludusavi row after the plugin reloads, open another page and return. Some layouts may not have room for the full row message; the fallback then stays on that same game page. In supported Clean Gameview layouts, the picture and trailer keep their full coverage while the plugin makes room for the row above the footer. This correction was checked with Transparent, Zoom Center, and the footer enabled. Connected with Body, layouts that ignore the footer, and other untested choices can keep the fallback. You can still use the plugin from Decky.
 
 For help with sharing backups, see [Set up Syncthing](syncthing.md). Return to the [main README](../../README.md) for installation and first use.

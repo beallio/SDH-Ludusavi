@@ -238,13 +238,13 @@ Autosync status strip behavior:
 
 During launch, visible `SYNCTHING DOWNLOADING` or `SYNCTHING UPLOADING` activity takes
 precedence over a stale `local_current` result. After observed incoming activity settles,
-the launch flow is observe, settle, recheck, decide, then resume. The 900 ms
-`GAME SAVE UP TO DATE` dwell applies only to a successful post-game `backed_up` result
-before the pending/uploading Syncthing handoff; it does not delay pre-game current or
-restored results. Settled samples received before the post-game handoff cannot consume the
-completion quorum. Once the handoff is confirmed, three new distinct settled samples are
-required before the frontend publishes COMPLETE and calls `stopWatch`, making UPLOADING
-visible even for a very fast peer transfer.
+the launch flow is observe, settle, recheck, decide, then resume. A post-game local result
+does not delay the pending/uploading Syncthing handoff. Native and fallback presentation
+both use the latest accepted phase, while the completed local backup remains a separate fact.
+Settled samples received before the post-game handoff cannot consume the completion quorum.
+Once the handoff is confirmed, three new distinct settled samples are required before the
+frontend publishes COMPLETE and calls `stopWatch`, making UPLOADING visible even for a fast
+peer transfer.
 
 Checking and running states stay visible while their operation runs and are replaced
 when the operation's result is published. A stuck-bar safety ceiling force-hides them
@@ -371,36 +371,48 @@ warning needs an accepted `backed_up` local fact; otherwise it keeps its compact
 local result and a remote observation remain distinct in the row text. Start-side checking,
 restore, and conflict work always use the strip.
 
+The post-game fallback uses the same static 16-pixel native glyphs and the same
+1.5-second color-pulse timing as the native row. It retains the fallback's existing
+status colors. Its busy glyph does not switch to a spinning ring or animated arrow fill
+when ownership moves between surfaces. Start-side and non-post-game BrowserView glyphs,
+motion, and protected presentation remain unchanged.
+
 The mounted game-details header also owns a temporary artwork extension in Steam's native
 Gamepad document. This applies to either a visible Steam Cloud band or a Ludusavi row, including
 when no trailer is playing. It selects only the current app's full-size Steam hero or custom
-shortcut hero and measures a native-class or plugin-marked, full-width, in-flow status band
-at the artwork's lower edge. The band's actual layout height determines the extension;
-transform-scaled screen heights only locate that edge while the game page animates in.
-Compact, moved, and genuinely hidden rows do not reserve artwork space. Temporary
-coverage or clipping during page entry retains a valid row's layout reservation,
-but only a paintable row permits the inline artwork extension. Hit-testing near
-the band's upper edge retains the normal occlusion check; there is no footer exception.
-Initial measurement runs after the native slot's layout-effect commits, not against its
-temporary hidden row. The band itself does not move. Original inline image height,
-CSS-variable values, marker attributes, and priorities return when the extension ends.
-Native DOM, stylesheet, scroll, resize, and band-size changes resync the image.
+shortcut hero. Artwork and the status band must belong to the same native
+`appDetailsClasses.InnerContainer`; simultaneous entering/exiting headers cannot borrow
+another route's row or a shared outer ancestor. Outside recognized Clean Gameview geometry,
+the full-width, in-flow band must meet the artwork's lower edge. Its actual layout height
+determines the extension; transform-scaled screen heights only locate the edge.
+Compact, moved, and genuinely hidden rows do not create a new extension. Hit-testing retains
+normal occlusion rejection; there is no footer exception. Initial measurement runs after
+the native slot's layout effects, not against its temporary hidden row. Image extensions
+share their genuine unextended baseline, original inline styles, and owner token, so
+overlapping mounts cannot add the band twice or let stale cleanup undo a successor.
+Native DOM, stylesheet, scroll, resize, and band-size changes resync the artwork.
 
-For Clean Gameview layouts with recognized standard-equation geometry, the same lifecycle also measures the
-visible band and temporarily deducts it from both the top-panel and image budgets on Decky's
-`appDetailsClasses.InnerContainer`, when it is the common route-content ancestor of the header
-artwork and status body. The nested play/status `AppDetailsRoot` is not a budget target because it
-does not own the header artwork. It records each original property value and priority under a
-lease, so a stale page or document cleanup cannot overwrite a newer owner. The lifecycle removes
-its own properties before checking the current computed geometry, then reapplies them, so a theme
-change can release the deduction. It remeasures after the browser reflows; a clipped, covered, or
-otherwise invalid row releases the deduction and keeps the existing fallback. Decky Metadata can
-own the trailer artwork while this route-local budget remains available; Ludusavi does not extend
-the trailer itself. The checked profiles have the footer enabled and use Transparent with Zoom
-Center, Zoom Left, or Contain, or Blur with centered alignment. Connected with Body, layouts that
-ignore the footer, percentage-based, compact, absolute, hidden, and otherwise unrecognized Clean
-Gameview geometry receives no guessed adjustment. Other Clean Gameview choices and CSS Loader
-versions are not yet verified.
+For Clean Gameview layouts with recognized standard-equation geometry, the same lifecycle
+deducts the measured band from the top-panel budget only. The image budget stays unchanged.
+The exact native route root owns this header lease; the nested play/status `AppDetailsRoot`
+does not own the artwork and is not a budget target. Once allocated, layout room and full
+artwork coverage remain stable when clipping or an overlay makes the row yield to fallback.
+The existing native visibility and complete-label checks still decide paint ownership.
+
+When Metadata owns the trailer, Ludusavi reserves minimum coverage on the native header
+background and matching native image, not on Metadata's target or video. This keeps full
+coverage even when the peer's shared band allowance becomes zero. With no matching image,
+the native background alone retains coverage. Minimum-height, header-budget, and image
+extension leases save genuine values/priorities and use owner tokens; stale owners cannot
+restore over successors. Ordinary resyncs do not remove/reapply owned budget variables.
+Real stylesheet or ancestor class/style changes revalidate the unreserved geometry once,
+and unsupported formulas release the owned adjustments.
+
+The corrected artwork and native availability were live-checked with the footer enabled,
+Transparent and Zoom Center, including a Metadata trailer and no-image control. Previously
+checked Zoom Left, Contain, and Blur-centered choices were not rechecked for this correction.
+Connected with Body, ignored-footer, percentage-based, compact, absolute, hidden, and
+otherwise unrecognized geometry receives no guessed header adjustment.
 The launch-time BrowserView strip remains separate.
 
 ### Optional CSS Loader theme
@@ -426,10 +438,9 @@ subtracted.
 
 Ludusavi and Metadata share a native-window WeakMap keyed by the header background.
 The first owner saves the genuine inline variable value and priority; a handoff changes
-only ownership. Only the current owner restores that value. A separate lease on the common
-route-content ancestor gives the verified Clean Gameview top-panel and image deductions the
-same stale-owner protection. This avoids a second crop change during trailer attachment and
-prevents an old owner from overwriting a new one.
+only ownership. Only the current owner restores that value. Separate route-root header,
+native minimum-coverage, and image-extension leases provide the same stale-owner protection.
+Native minimum coverage does not rewrite Metadata's shared band allowance or trailer styles.
 Steam's page-scale transition remains unchanged. Without CSS Loader or with the theme
 disabled, the mounted header's measured artwork extension remains in use.
 

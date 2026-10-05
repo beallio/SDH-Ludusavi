@@ -5,6 +5,7 @@ import type {
   LifecycleCheckResult,
   OperationResult,
 } from "../types";
+import { nativeIconSvgForAutoSyncStatus } from "./nativeGameDetailsStatusIcon";
 
 export const autoSyncStatusText: Record<AutoSyncStatusKind, string> = {
   checking: "VERIFYING GAME SAVE",
@@ -133,6 +134,11 @@ export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
 }
 
 export function renderAutoSyncStatusHtml(state: AutoSyncStatusState) {
+  const postGame = state.lifecycle === "lifecycle_exit";
+  const iconClass = postGame
+    ? ` icon-native${isLudusaviRunningStatus(state.status) || isSyncthingActiveStatus(state.status) ? " icon-native-syncing" : ""}`
+    : state.status === "checking" ? " icon-spin" : state.status === "syncthing_pending_upload" ? " icon-spin-ring" : "";
+  const icon = postGame ? nativeIconSvgForAutoSyncStatus(state.status, "") : iconSvgForAutoSyncStatus(state.status);
   return `<!doctype html>
 <html>
 <head>
@@ -161,6 +167,11 @@ body {
 .text { display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; min-width: 245px; }
 .icon { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; color: ${state.status === "error" ? "#ef4444" : state.status === "unknown" || state.status === "conflict" || state.status === "conflict_unresolved" || state.status === "game_sync_disabled" || state.status === "syncthing_unavailable" || state.status === "syncthing_folder_not_found" || state.status === "syncthing_no_peers" || state.status === "syncthing_upload_incomplete" ? "#f59e0b" : "#1a9fff"}; }
 .icon svg { width: 100%; height: 100%; display: block; }
+.icon-native { width: 16px; height: 16px; }
+@keyframes native-syncing {
+  50% { color: #3d4450; }
+}
+.icon-native-syncing { animation: native-syncing 1.5s infinite; }
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
@@ -201,7 +212,7 @@ body {
 </head>
 <body>
 <div class="bar">
-  <div class="text"><span class="icon${state.status === "checking" ? " icon-spin" : state.status === "syncthing_pending_upload" ? " icon-spin-ring" : ""}">${iconSvgForAutoSyncStatus(state.status)}</span>${autoSyncStatusText[state.status]}</div>
+  <div class="text"><span class="icon${iconClass}">${icon}</span>${autoSyncStatusText[state.status]}</div>
 </div>
 </body>
 </html>`;

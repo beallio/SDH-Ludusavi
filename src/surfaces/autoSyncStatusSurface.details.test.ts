@@ -46,6 +46,33 @@ describe("details-row status ownership", () => {
     vi.useRealTimers();
   });
 
+  it("keeps native and fallback on the latest remote phase during local completion handoff", () => {
+    const store = trackedStore();
+    const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
+    const surface = createAutoSyncStatusSurface(view, store);
+    const leavePage = surface.registerDetailsPage("100");
+    const releaseOwner = surface.registerDetailsOwner({ appID: "100", visible: true, layoutValid: true });
+    const options = {
+      source: "lifecycle_exit" as const, lifecycle: "lifecycle_exit" as const,
+      generation: 30, gameName: "Fixture", appID: "100", tracked: true,
+    };
+    surface.complete(
+      { status: "backed_up", game: "Fixture" },
+      options,
+    );
+    surface.publish("syncthing_uploading", options);
+    const observation = store.getSnapshot().autoSyncObservations["100"];
+    expect(observation.localOperation?.status).toBe("has_backup");
+    expect(observation.syncObservation?.status).toBe("syncthing_uploading");
+    releaseOwner();
+    expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({
+      status: "syncthing_uploading", visible: true,
+    }));
+    expect(store.getSnapshot().autoSyncObservations["100"]).toBe(observation);
+    leavePage();
+    surface.dispose();
+  });
+
   it("retains a real terminal Syncthing limitation after the strip expires", () => {
     const store = trackedStore();
     const surface = createAutoSyncStatusSurface({
@@ -118,10 +145,10 @@ describe("details-row status ownership", () => {
     const surface = createAutoSyncStatusSurface(view, store);
     const leaveOtherGame = surface.registerDetailsPage("101");
 
-    surface.publish("backing_up", {
-      source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 13,
-      gameName: "Fixture", appID: "100", tracked: true,
-    });
+    surface.complete(
+      { status: "backed_up", game: "Fixture" },
+      { lifecycle: "lifecycle_exit", generation: 13, gameName: "Fixture", appID: "100", tracked: true },
+    );
     surface.publish("syncthing_uploading", {
       source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 13,
       gameName: "Fixture", appID: "100", tracked: true,
@@ -129,14 +156,16 @@ describe("details-row status ownership", () => {
     expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({
       appID: "100", status: "syncthing_uploading", visible: false,
     }));
-    const activeObservation = store.getSnapshot().autoSyncObservations["100"];
+    const observation = store.getSnapshot().autoSyncObservations["100"];
+    expect(observation.localOperation?.status).toBe("has_backup");
+    expect(observation.syncObservation?.status).toBe("syncthing_uploading");
 
     leaveOtherGame();
     const leaveFixture = surface.registerDetailsPage("100");
     expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({
       appID: "100", status: "syncthing_uploading", visible: true,
     }));
-    expect(store.getSnapshot().autoSyncObservations["100"]).toBe(activeObservation);
+    expect(store.getSnapshot().autoSyncObservations["100"]).toBe(observation);
 
     leaveFixture();
   });
@@ -177,7 +206,7 @@ describe("details-row status ownership", () => {
     pageCleanup();
   });
 
-  it("rechecks page scope when delayed verification and local-result dwell work runs", () => {
+  it("rechecks page scope when delayed verification runs", () => {
     const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
     const surface = createAutoSyncStatusSurface(view, trackedStore());
     const pageCleanup = surface.registerDetailsPage("100");
@@ -190,20 +219,6 @@ describe("details-row status ownership", () => {
     vi.advanceTimersByTime(0);
     expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({ status: "checking", visible: false }));
 
-    const dwellPageCleanup = surface.registerDetailsPage("100");
-    surface.complete(
-      { status: "backed_up", game: "Fixture" },
-      { lifecycle: "lifecycle_exit", generation: 16, gameName: "Fixture", appID: "100", tracked: true },
-    );
-    surface.publish("syncthing_uploading", {
-      source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 16,
-      gameName: "Fixture", appID: "100", tracked: true,
-    });
-    dwellPageCleanup();
-    vi.advanceTimersByTime(900);
-    expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({
-      appID: "100", status: "syncthing_uploading", visible: false,
-    }));
   });
 
   it("uses only the remaining result lifetime when the matching page returns", () => {

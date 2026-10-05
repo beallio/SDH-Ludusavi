@@ -75,7 +75,7 @@ Syncthing sends the backups in the background when the devices can connect. Chec
 
 ## Change the look of the status bars (optional)
 
-The Ludusavi bar uses Steam's normal game-page style by default. Its small save-status icons stay distinct, but match the Steam row's size and alignment. A theme that changes the Steam Cloud bar can also change the Ludusavi bar's text, size, position, or visibility. If a theme hides, covers, clips, or cannot fit the full post-game message, that game's page can use the separate status strip. Home and other game pages stay quiet for that work. Protected game-launch messages always use that strip.
+The Ludusavi bar uses Steam's normal game-page style by default. Its small save-status icons stay distinct, but match the Steam row's size and alignment. A theme that changes the Steam Cloud bar can also change the Ludusavi bar's text, size, position, or visibility. If a theme hides, covers, clips, or cannot fit the full post-game message, that game's page can use the separate status strip. Post-game icons keep the same shape and pulse when the message moves between these two places. Home and other game pages stay quiet for that work. Protected game-launch messages always use their separate strip.
 
 If you use [CSS Loader](https://docs.deckthemes.com/CSSLoader/), SDH-Ludusavi adds an **SDH-Ludusavi Status** theme. In CSS Loader, use **Save Status** to choose:
 
@@ -87,7 +87,7 @@ The theme changes how the bars look on game pages, not how saves work. Warning a
 
 On game pages without a save-status bar, the theme leaves a blank row below the play controls before Activity. Clean View and Custom give this space the same background as their status bars; Custom also uses your outline choice. If you use Clean Gameview, the game's picture or trailer can show through the blank row. It does not show a save result. On an uninstalled Steam game, you may need to scroll down to see Activity.
 
-With the footer enabled, the plugin makes one measured row of room above the footer in checked Clean Gameview layouts: Transparent with Zoom Center, Zoom Left, or Contain, and Blur with centered alignment. This moves the picture and Play area up by that row's height so the complete status stays usable at the normal scroll position. A compact, moved, hidden, or covered bar does not get this adjustment and uses the same-page fallback instead. In this checked setup, Connected with Body and layouts that ignore the footer use the existing same-page fallback. Other Clean Gameview choices are not yet verified. Opening a game page or switching from its picture to a trailer does not add a second size change. Steam's normal page animation still plays.
+With the footer enabled, the plugin makes one measured row of room above the footer in supported Clean Gameview layouts. The Play area moves up, but the picture and trailer keep their full coverage. A temporary switch to the fallback does not make the picture smaller. Compact, moved, hidden, or unrecognized layouts can keep the same-page fallback; the plugin does not force the page to scroll. This correction was checked with Transparent, Zoom Center, and the footer enabled. Other Clean Gameview choices have not been rechecked for this correction. Steam's normal page animation still plays.
 
 ## Updates and help
 

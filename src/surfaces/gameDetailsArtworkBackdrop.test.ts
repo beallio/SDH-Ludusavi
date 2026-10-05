@@ -35,6 +35,7 @@ function gamePage(appID: string, src: string, siblingHeader = false) {
   let earlyReservation = false;
   let cgvMode: "none" | "standard" | "connected" = "none";
   let resolvedCgvGeometry = false;
+  let unsupportedHeaderGeometry = false;
   let matchingHero = true;
   let staleRoute = false;
   let nextFrame = 0;
@@ -72,18 +73,27 @@ function gamePage(appID: string, src: string, siblingHeader = false) {
     };
   };
   const imageAttributes = new Map<string, string>([["src", src]]);
+  const staleImageAttributes = new Map<string, string>([["src", "/assets/old-app/library_hero.jpg"]]);
+  const staleImageStyle = makeStyle("stale-image");
+  const staleArtworkStyle = makeStyle("stale-artwork");
   const imageStyle = makeStyle("image");
   const rowStyle = makeStyle("row");
   const artworkStyle = makeStyle("artwork");
   const contentStyle = makeStyle("content");
   const commonContentStyle = siblingHeader ? makeStyle("common-content") : contentStyle;
-  const staleRowStyle = makeStyle("stale-row");
   const staleContentStyle = makeStyle("stale-content");
+  const staleRowStyle = makeStyle("stale-row");
+  const bodyStyle = makeStyle("body");
   const budgetDeduction = (property: string) => {
     const match = commonContentStyle.getPropertyValue(property).match(/-\s*(\d+(?:\.\d+)?)px\)\s*$/);
     return match ? Number(match[1]) : 0;
   };
+  const staleBudgetDeduction = (property: string) => {
+    const match = staleContentStyle.getPropertyValue(property).match(/-\s*(\d+(?:\.\d+)?)px\)\s*$/);
+    return match ? Number(match[1]) : 0;
+  };
   const backgroundAttributes = new Map<string, string>();
+  const staleBackgroundAttributes = new Map<string, string>();
   const image = {
     style: imageStyle,
     get parentElement() { return background; },
@@ -91,11 +101,15 @@ function gamePage(appID: string, src: string, siblingHeader = false) {
     setAttribute(name: string, value: string) { imageAttributes.set(name, value); queueMutation("image", name); },
     removeAttribute(name: string) { imageAttributes.delete(name); queueMutation("image", name); },
     closest: (selector: string) => selector === ".decky-metadata-trailer-target" && metadataOwnsHero ? {}
-      : selector === ".native-artwork-background" ? background : null,
+      : selector === ".native-artwork-background" ? background
+        : selector === ".native-inner-container" ? siblingHeader ? commonContent : content : null,
     get offsetHeight() {
       const reserved = earlyReservation ? Number.parseFloat(artworkStyle.getPropertyValue("--sdh-status-band-height") || "30") : 0;
       const layoutHeight = naturalHeight - budgetDeduction("--CGV-image-height");
-      return Math.max(Number.parseFloat(imageStyle.getPropertyValue("height")) || layoutHeight, layoutHeight + reserved);
+      const minimum = imageStyle.getPropertyValue("min-height");
+      const minimumBand = minimum.match(/\+\s*(\d+(?:\.\d+)?)px\)/);
+      const minimumHeight = minimumBand ? layoutHeight + Number(minimumBand[1]) : Number.parseFloat(minimum) || 0;
+      return Math.max(Number.parseFloat(imageStyle.getPropertyValue("height")) || layoutHeight, layoutHeight + reserved, minimumHeight);
     },
     getBoundingClientRect() {
       const renderedHeight = this.offsetHeight * scale;
@@ -110,6 +124,7 @@ function gamePage(appID: string, src: string, siblingHeader = false) {
     removeAttribute(name: string) { backgroundAttributes.delete(name); queueMutation("artwork", name); },
   };
   const body = {
+    style: bodyStyle,
     parentElement: null,
     hidden: false,
     getAttribute: () => null,
@@ -139,6 +154,31 @@ function gamePage(appID: string, src: string, siblingHeader = false) {
     getAttribute: () => null,
     getBoundingClientRect: () => ({ left: 0, top: 0, right: 854 * scale, bottom: 534 * scale,
       width: 854 * scale, height: 534 * scale }),
+  };
+  const staleBackground = {
+    style: staleArtworkStyle,
+    parentElement: staleContent,
+    getAttribute: (name: string) => staleBackgroundAttributes.get(name) ?? null,
+    setAttribute(name: string, value: string) { staleBackgroundAttributes.set(name, value); queueMutation("stale-artwork", name); },
+    removeAttribute(name: string) { staleBackgroundAttributes.delete(name); queueMutation("stale-artwork", name); },
+  };
+  const staleNaturalHeight = 494;
+  const staleImage = {
+    style: staleImageStyle,
+    get parentElement() { return staleBackground; },
+    getAttribute: (name: string) => staleImageAttributes.get(name) ?? null,
+    setAttribute(name: string, value: string) { staleImageAttributes.set(name, value); queueMutation("stale-image", name); },
+    removeAttribute(name: string) { staleImageAttributes.delete(name); queueMutation("stale-image", name); },
+    closest: (selector: string) => selector === ".native-artwork-background" ? staleBackground
+      : selector === ".native-inner-container" ? staleContent : null,
+    get offsetHeight() {
+      return Number.parseFloat(staleImageStyle.getPropertyValue("height"))
+        || staleNaturalHeight - staleBudgetDeduction("--CGV-image-height");
+    },
+    getBoundingClientRect() {
+      const renderedHeight = this.offsetHeight * scale;
+      return { left: 0, top: 0, width: 854 * scale, height: renderedHeight, right: 854 * scale, bottom: renderedHeight };
+    },
   };
   const rowParent = {
     parentElement: content,
@@ -177,12 +217,15 @@ function gamePage(appID: string, src: string, siblingHeader = false) {
     getBoundingClientRect: rowRect,
   };
   label.parentElement = row;
-  const staleRowTop = 360;
-  const staleRowRect = () => ({ left: 0, top: staleRowTop * scale, width: 854 * scale,
-    height: rowHeight * scale, right: 854 * scale, bottom: (staleRowTop + rowHeight) * scale });
+  let staleRowTop = 360;
+  const staleRowRect = () => {
+    const top = staleRowTop - staleBudgetDeduction("--CGV-top-panel-height");
+    return { left: 0, top: top * scale, width: 854 * scale, height: rowHeight * scale,
+      right: 854 * scale, bottom: (top + rowHeight) * scale };
+  };
   const staleLabel = {
     parentElement: null as object | null,
-    getBoundingClientRect: () => ({ left: 340 * scale, top: (staleRowTop + 4) * scale,
+    getBoundingClientRect: () => ({ left: 340 * scale, top: (staleRowTop - staleBudgetDeduction("--CGV-top-panel-height") + 4) * scale,
       width: 174 * scale, height: Math.max(1, rowHeight - 8) * scale }),
   };
   const staleRowParent = {
@@ -208,17 +251,17 @@ function gamePage(appID: string, src: string, siblingHeader = false) {
     getBoundingClientRect: staleRowRect,
   };
   staleLabel.parentElement = staleRow;
-  const notifyMutation = () => {
-    const record = { type: "attributes", attributeName: "class", target: body } as unknown as MutationRecord;
+  const notifyMutation = (target: object = row) => {
+    const record = { type: "attributes", attributeName: "class", target } as unknown as MutationRecord;
     mutationCallbacks.forEach((callback) => callback([record], null as unknown as MutationObserver));
   };
   const hostDocument = {
     body,
     head: {},
     documentElement: { clientWidth: 854, clientHeight: 534 },
-    get images() { return matchingHero ? [image] : []; },
+    get images() { return matchingHero ? staleRoute ? [image, staleImage] : [image] : staleRoute ? [staleImage] : []; },
     querySelector: () => rowMarked || nativeStatusClass ? row : null,
-    querySelectorAll: () => rowMarked || nativeStatusClass ? staleRoute ? [staleRow, row] : [row] : [],
+    querySelectorAll: () => rowMarked || nativeStatusClass ? staleRoute ? [staleRow, row] : [row] : staleRoute ? [staleRow] : [],
     elementFromPoint: (x: number, y: number) => {
       const staleRect = staleRowRect();
       if (staleRoute && x >= staleRect.left && x <= staleRect.right && y >= staleRect.top && y < staleRect.bottom) return staleLabel;
@@ -251,8 +294,9 @@ function gamePage(appID: string, src: string, siblingHeader = false) {
             : cgvMode === "standard" ? resolvedCgvGeometry ? "calc(100vh - 40px)" : "calc(100vh - var(--CGV-footer-height))"
               : cgvMode === "connected" ? "100%" : "");
         if (name === "--CGV-top-panel-height") return directStyle.getPropertyValue(name)
-          || (cgvMode === "standard" ? resolvedCgvGeometry ? "calc(100vh - 80px - 40px)" : "calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))"
-            : cgvMode === "connected" ? "calc(100% - var(--CGV-play-bar-height) - var(--CGV-footer-height))" : "");
+          || (unsupportedHeaderGeometry ? "calc(100% - 80px - 40px)"
+            : cgvMode === "standard" ? resolvedCgvGeometry ? "calc(100vh - 80px - 40px)" : "calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))"
+              : cgvMode === "connected" ? "calc(100% - var(--CGV-play-bar-height) - var(--CGV-footer-height))" : "");
         if (name === "--CGV-play-bar-height") return cgvMode === "none" ? "" : "80px";
         if (name === "--CGV-footer-height") return cgvMode === "none" ? "" : "40px";
         return "";
@@ -288,6 +332,11 @@ function gamePage(appID: string, src: string, siblingHeader = false) {
   mutationTargets.set("common-content", () => commonContent as unknown as Node);
   mutationTargets.set("stale-row", () => staleRow as unknown as Node);
   mutationTargets.set("stale-content", () => staleContent as unknown as Node);
+  Object.assign(staleImage, { ownerDocument: hostDocument });
+  Object.assign(staleBackground, { ownerDocument: hostDocument });
+  Object.assign(staleRow, { ownerDocument: hostDocument });
+  mutationTargets.set("stale-image", () => staleImage as unknown as Node);
+  mutationTargets.set("stale-artwork", () => staleBackground as unknown as Node);
   function flush() {
     let passes = 0;
     while (frames.size > 0 || pendingMutations.length > 0) {
@@ -345,6 +394,12 @@ function gamePage(appID: string, src: string, siblingHeader = false) {
       artworkStyle.setProperty("--sdh-status-band-height", "14px", "important");
       backgroundAttributes.set("data-sdh-ludusavi-artwork-band", "original-background-marker");
     },
+    seedPeerBand() {
+      artworkStyle.setProperty("--sdh-status-band-height", "0px");
+      Object.assign(hostWindow, {
+        __sdhStatusBandReservations: new WeakMap([[background, { original: "", priority: "", owner: {} }]]),
+      });
+    },
     resize(height: number) { naturalHeight = height; rowTop = height; listeners.get("resize")?.forEach((listener) => listener()); flush(); },
     get backgroundBandVariable() { return artworkStyle.getPropertyValue("--sdh-status-band-height"); },
     get backgroundMarker() { return backgroundAttributes.get("data-sdh-ludusavi-artwork-band") ?? null; },
@@ -352,14 +407,24 @@ function gamePage(appID: string, src: string, siblingHeader = false) {
     get backgroundBandVariablePriority() { return artworkStyle.getPropertyPriority("--sdh-status-band-height"); },
     get topPanelBudget() { return commonContentStyle.getPropertyValue("--CGV-top-panel-height"); },
     get imageBudget() { return commonContentStyle.getPropertyValue("--CGV-image-height"); },
+    get staleTopPanelBudget() { return staleContentStyle.getPropertyValue("--CGV-top-panel-height"); },
+    get staleImageBudget() { return staleContentStyle.getPropertyValue("--CGV-image-height"); },
+    get outerTopPanelBudget() { return bodyStyle.getPropertyValue("--CGV-top-panel-height"); },
     get topPanelBudgetPriority() { return commonContentStyle.getPropertyPriority("--CGV-top-panel-height"); },
     get imageBudgetPriority() { return commonContentStyle.getPropertyPriority("--CGV-image-height"); },
     get playStatusTopPanelBudget() { return contentStyle.getPropertyValue("--CGV-top-panel-height"); },
     get playStatusImageBudget() { return contentStyle.getPropertyValue("--CGV-image-height"); },
-    set cgv(value: "none" | "standard" | "connected") { cgvMode = value; notifyMutation(); flush(); },
-    set browserResolvedCgvGeometry(value: boolean) { resolvedCgvGeometry = value; notifyMutation(); flush(); },
+    set cgv(value: "none" | "standard" | "connected") { cgvMode = value; notifyMutation(hostDocument.head); flush(); },
+    set browserResolvedCgvGeometry(value: boolean) { resolvedCgvGeometry = value; notifyMutation(hostDocument.head); flush(); },
+    set unsupportedHeader(value: boolean) { unsupportedHeaderGeometry = value; notifyMutation(hostDocument.head); flush(); },
     set matchingHeroAvailable(value: boolean) { matchingHero = value; notifyMutation(); flush(); },
     set oldRouteMounted(value: boolean) { staleRoute = value; notifyMutation(); flush(); },
+    set overlappingRoute(value: boolean) {
+      staleRoute = value;
+      staleRowTop = value ? rowTop : 360;
+      notifyMutation();
+      flush();
+    },
     completeEntryAnimation() {
       scale = 1;
       rowVisible = true;
@@ -556,7 +621,7 @@ it("keeps a full-width row reserved while the entering page is temporarily cover
   page.visible = true;
   expect(page.image.offsetHeight).toBe(524);
   page.bandOpacity = "0";
-  expect(page.image.offsetHeight).toBe(494);
+  expect(page.image.offsetHeight).toBe(524);
   dispose();
 });
 
@@ -584,25 +649,25 @@ it("keeps the early reservation until native slot layout effects finish", () => 
   dispose();
 });
 
-it("moves a supported default CGV row into the visible budget without changing its native band", () => {
+it("moves a supported default CGV row into the visible budget without cropping the hero", () => {
   const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
   page.cgv = "standard";
   const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
   page.flush();
 
   expect(page.row.getBoundingClientRect().top).toBe(464);
-  expect(page.image.getBoundingClientRect().bottom).toBe(494);
+  expect(page.image.getBoundingClientRect().bottom).toBe(524);
   expect(page.topPanelBudget).toBe("calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height) - 30px)");
-  expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height) - 30px)");
+  expect(page.imageBudget).toBe("");
   expect(page.topPanelBudgetPriority).toBe("important");
-  expect(page.imageBudgetPriority).toBe("important");
+  expect(page.imageBudgetPriority).toBe("");
 
   dispose();
   expect(page.topPanelBudget).toBe("");
   expect(page.imageBudget).toBe("");
 });
 
-it("allocates both CGV budgets on the route root shared by the header artwork and status body", () => {
+it("allocates only the CGV header budget on the route root shared by artwork and status", () => {
   const page = gamePage("1942280", "/assets/1942280/library_hero.jpg", true);
   page.cgv = "standard";
   page.earlyReservation = true;
@@ -615,15 +680,15 @@ it("allocates both CGV budgets on the route root shared by the header artwork an
   expect(page.playStatusTopPanelBudget).toBe("");
   expect(page.playStatusImageBudget).toBe("");
   expect(page.topPanelBudget).toContain("- 30px)");
-  expect(page.imageBudget).toContain("- 30px)");
+  expect(page.imageBudget).toBe("");
   expect(page.row.getBoundingClientRect().top).toBe(464);
-  expect(page.image.getBoundingClientRect().bottom).toBe(494);
+  expect(page.image.getBoundingClientRect().bottom).toBe(524);
   dispose();
   expect(page.topPanelBudget).toBe("");
   expect(page.imageBudget).toBe("");
 });
 
-it("uses the same shared route root when a Metadata trailer has no matching hero image", () => {
+it("uses the native route root for a Metadata trailer without a matching hero image", () => {
   const page = gamePage("1942280", "/assets/1942280/library_hero.jpg", true);
   page.cgv = "standard";
   page.matchingHeroAvailable = false;
@@ -634,12 +699,81 @@ it("uses the same shared route root when a Metadata trailer has no matching hero
 
   expect(page.row.getBoundingClientRect().top).toBe(464);
   expect(page.topPanelBudget).toContain("- 30px)");
-  expect(page.imageBudget).toContain("- 30px)");
+  expect(page.imageBudget).toBe("");
   expect(page.playStatusTopPanelBudget).toBe("");
   expect(page.playStatusImageBudget).toBe("");
   dispose();
   expect(page.topPanelBudget).toBe("");
   expect(page.imageBudget).toBe("");
+});
+
+it("keeps the CGV hero budget stable while native row ownership is temporarily lost", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  const reservedTop = page.topPanelBudget;
+  expect(reservedTop).toContain("- 30px)");
+  expect(page.imageBudget).toBe("");
+  expect(page.image.getBoundingClientRect().bottom).toBe(524);
+
+  page.visible = false;
+  expect(page.topPanelBudget).toBe(reservedTop);
+  expect(page.imageBudget).toBe("");
+  page.bandOpacity = "0";
+  expect(page.topPanelBudget).toBe(reservedTop);
+  expect(page.imageBudget).toBe("");
+  page.bandWidth = 32;
+  expect(page.topPanelBudget).toBe(reservedTop);
+  expect(page.imageBudget).toBe("");
+
+  page.bandWidth = 854;
+  page.bandOpacity = "1";
+  page.visible = true;
+  expect(page.topPanelBudget).toBe(reservedTop);
+  expect(page.image.getBoundingClientRect().bottom).toBe(524);
+  dispose();
+});
+
+it("keeps full hero coverage when an overlay covers the mounted native row", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  const fullHeight = page.image.getBoundingClientRect().height;
+  page.visible = false;
+  expect(page.image.getBoundingClientRect().height).toBe(fullHeight);
+  page.visible = true;
+  expect(page.image.getBoundingClientRect().height).toBe(fullHeight);
+  dispose();
+});
+
+it("shares one hero extension across overlapping owners and ignores stale cleanup", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  const originalHeight = page.image.getBoundingClientRect().height;
+  const first = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  const fullHeight = page.image.getBoundingClientRect().height;
+  const second = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  expect(page.image.getBoundingClientRect().height).toBe(fullHeight);
+  first();
+  expect(page.image.getBoundingClientRect().height).toBe(fullHeight);
+  second();
+  expect(page.image.getBoundingClientRect().height).toBe(originalHeight);
+});
+
+it("releases an unsupported header theme without changing full hero coverage", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  const fullHeight = page.image.getBoundingClientRect().height;
+  page.unsupportedHeader = true;
+  expect(page.row.getBoundingClientRect().top).toBe(494);
+  expect(page.image.getBoundingClientRect().height).toBe(fullHeight);
+  dispose();
 });
 
 it("recognizes browser-resolved standard CGV budgets before allocating the visible native band", () => {
@@ -653,9 +787,9 @@ it("recognizes browser-resolved standard CGV budgets before allocating the visib
   page.flush();
 
   expect(page.row.getBoundingClientRect().top).toBe(464);
-  expect(page.image.getBoundingClientRect().bottom).toBe(494);
+  expect(page.image.getBoundingClientRect().bottom).toBe(524);
   expect(page.topPanelBudget).toContain("- 30px)");
-  expect(page.imageBudget).toContain("- 30px)");
+  expect(page.imageBudget).toBe("");
   dispose();
 });
 
@@ -683,7 +817,7 @@ it("restores pre-existing CGV budget values and priorities on cleanup", () => {
   page.flush();
 
   expect(page.topPanelBudget).toContain("- 30px)");
-  expect(page.imageBudget).toContain("- 30px)");
+  expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height))");
   dispose();
   expect(page.topPanelBudget).toBe("calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))");
   expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height))");
@@ -699,10 +833,27 @@ it("keeps a recognized third-party CGV deduction while reserving the measured na
   page.flush();
 
   expect(page.topPanelBudget).toContain("- 42px)");
-  expect(page.imageBudget).toContain("- 42px)");
+  expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height) - 12px)");
   dispose();
   expect(page.topPanelBudget).toBe("calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height) - 12px)");
   expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height) - 12px)");
+});
+
+it("preserves third-party CGV values when an owned header reservation is replaced", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
+  page.cgv = "standard";
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+
+  page.seedBudgetStyles(12);
+  page.flush();
+  const thirdPartyTop = "calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height) - 12px)";
+  const thirdPartyImage = "calc(100vh - var(--CGV-footer-height) - 12px)";
+  expect(page.topPanelBudget).toBe(thirdPartyTop);
+  expect(page.imageBudget).toBe(thirdPartyImage);
+  dispose();
+  expect(page.topPanelBudget).toBe(thirdPartyTop);
+  expect(page.imageBudget).toBe(thirdPartyImage);
 });
 
 it("keeps a newer CGV lease after old and new route lifecycles receive repeated events", () => {
@@ -719,13 +870,13 @@ it("keeps a newer CGV lease after old and new route lifecycles receive repeated 
   page.scroll();
   first();
   expect(page.topPanelBudget).toContain("- 30px)");
-  expect(page.imageBudget).toContain("- 30px)");
+  expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height))");
   second();
   expect(page.topPanelBudget).toBe("calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height))");
   expect(page.imageBudget).toBe("calc(100vh - var(--CGV-footer-height))");
 });
 
-it("keeps CGV allocation available when Metadata owns the trailer without extending its artwork", () => {
+it("preserves full native artwork coverage while Metadata owns the trailer", () => {
   const page = gamePage("1942280", "/assets/1942280/library_hero.jpg");
   page.cgv = "standard";
   page.metadataOwnsHero = true;
@@ -733,9 +884,26 @@ it("keeps CGV allocation available when Metadata owns the trailer without extend
   page.flush();
 
   expect(page.row.getBoundingClientRect().top).toBe(464);
-  expect(page.image.getBoundingClientRect().bottom).toBe(464);
+  expect(page.image.getBoundingClientRect().bottom).toBe(524);
   expect(page.height).toBe("");
   dispose();
+});
+
+it("keeps native artwork full-size without changing a peer-owned zero allowance", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg", true);
+  page.cgv = "standard";
+  page.earlyReservation = true;
+  page.metadataOwnsHero = true;
+  page.seedPeerBand();
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  expect(page.image.getBoundingClientRect().height).toBe(524);
+  expect(page.row.getBoundingClientRect().top).toBe(464);
+  expect(page.height).toBe("");
+  expect(page.backgroundBandVariable).toBe("0px");
+  dispose();
+  expect(page.image.getBoundingClientRect().height).toBe(494);
+  expect(page.backgroundBandVariable).toBe("0px");
 });
 
 it("allocates a supported route band for a Metadata trailer view without a matching hero image", () => {
@@ -747,7 +915,7 @@ it("allocates a supported route band for a Metadata trailer view without a match
 
   expect(page.row.getBoundingClientRect().top).toBe(464);
   expect(page.topPanelBudget).toContain("- 30px)");
-  expect(page.imageBudget).toContain("- 30px)");
+  expect(page.imageBudget).toBe("");
   expect(page.height).toBe("");
   dispose();
   expect(page.topPanelBudget).toBe("");
@@ -796,5 +964,45 @@ it("allocates only the mounted app route when an old visible details header rema
 
   expect(page.row.getBoundingClientRect().top).toBe(464);
   expect(page.topPanelBudget).toContain("- 30px)");
+  dispose();
+});
+
+it("keeps overlapping artwork copies on their own native route roots", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg", true);
+  page.cgv = "standard";
+
+  const disposeCurrent = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  expect(page.topPanelBudget).toContain("- 30px)");
+  expect(page.staleTopPanelBudget).toBe("");
+  page.overlappingRoute = true;
+  expect(page.topPanelBudget).toContain("- 30px)");
+  expect(page.staleTopPanelBudget).toBe("");
+  expect(page.outerTopPanelBudget).toBe("");
+
+  const disposeExiting = mountGameDetailsArtworkBackdrop(page.hostWindow, "old-app");
+  page.flush();
+  expect(page.topPanelBudget).toContain("- 30px)");
+  expect(page.staleTopPanelBudget).toContain("- 30px)");
+  expect(page.imageBudget).toBe("");
+  expect(page.staleImageBudget).toBe("");
+  expect(page.outerTopPanelBudget).toBe("");
+
+  disposeCurrent();
+  expect(page.topPanelBudget).toBe("");
+  expect(page.staleTopPanelBudget).toContain("- 30px)");
+  disposeExiting();
+  expect(page.staleTopPanelBudget).toBe("");
+});
+
+it("preserves full hero coverage while allocating a usable native status band", () => {
+  const page = gamePage("1942280", "/assets/1942280/library_hero.jpg", true);
+  page.cgv = "standard";
+  page.earlyReservation = true;
+  const originalCoverage = page.image.getBoundingClientRect().height;
+  const dispose = mountGameDetailsArtworkBackdrop(page.hostWindow, page.appID);
+  page.flush();
+  expect(page.image.getBoundingClientRect().height).toBe(originalCoverage);
+  expect(page.row.getBoundingClientRect().top).toBe(464);
   dispose();
 });
