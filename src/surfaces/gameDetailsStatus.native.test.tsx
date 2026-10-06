@@ -93,7 +93,7 @@ it("replaces a retained prior-renderer wrapper while preserving direct cold-peer
   const legacyPatch = vi.fn();
   const legacyInstalledPatch = vi.fn();
   globalThis.__sdhLudusaviGameDetailsStatusRoutePatch = {
-    version: 19, patch: legacyPatch, installedPatch: legacyInstalledPatch, removalTimer: null,
+    version: 20, patch: legacyPatch, installedPatch: legacyInstalledPatch, removalTimer: null,
   };
   const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
   const store = createLudusaviStateStore();

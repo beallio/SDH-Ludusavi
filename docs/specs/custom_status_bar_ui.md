@@ -377,6 +377,12 @@ status colors. Its busy glyph does not switch to a spinning ring or animated arr
 when ownership moves between surfaces. Start-side and non-post-game BrowserView glyphs,
 motion, and protected presentation remain unchanged.
 
+`Not tracked` and `Unknown` share the save-outline glyph. Its drawing is uniformly
+normalized by 1.2 about the centre of the native 16-pixel canvas, preserving its aspect
+ratio and `currentColor` paint. This brings its painted height to about 14 pixels,
+comparable to the other native status glyphs, without clipping. The icon slot, row,
+label placement, status meaning, and active animation are unchanged.
+
 The mounted game-details header also owns a temporary artwork extension in Steam's native
 Gamepad document. This applies to either a visible Steam Cloud band or a Ludusavi row, including
 when no trailer is playing. It selects only the current app's full-size Steam hero or custom
