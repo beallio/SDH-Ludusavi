@@ -382,9 +382,9 @@ Gamepad document. This applies to either a visible Steam Cloud band or a Ludusav
 when no trailer is playing. It selects only the current app's full-size Steam hero or custom
 shortcut hero. Artwork and the status band must belong to the same native
 `appDetailsClasses.InnerContainer`; simultaneous entering/exiting headers cannot borrow
-another route's row or a shared outer ancestor. Outside recognized Clean Gameview geometry,
-the full-width, in-flow band must meet the artwork's lower edge. Its actual layout height
-determines the extension; transform-scaled screen heights only locate the edge.
+another route's row or a shared outer ancestor. A full-width, in-flow band must meet
+the unextended artwork's lower edge. Its actual layout height determines the extension;
+transform-scaled screen heights only locate the edge.
 Compact, moved, and genuinely hidden rows do not create a new extension. Hit-testing retains
 normal occlusion rejection; there is no footer exception. Initial measurement runs after
 the native slot's layout effects, not against its temporary hidden row. Image extensions
@@ -392,27 +392,28 @@ share their genuine unextended baseline, original inline styles, and owner token
 overlapping mounts cannot add the band twice or let stale cleanup undo a successor.
 Native DOM, stylesheet, scroll, resize, and band-size changes resync the artwork.
 
-For Clean Gameview layouts with recognized standard-equation geometry, the same lifecycle
-deducts the measured band from the top-panel budget only. The image budget stays unchanged.
-The exact native route root owns this header lease; the nested play/status `AppDetailsRoot`
-does not own the artwork and is not a budget target. Once allocated, layout room and full
-artwork coverage remain stable when clipping or an overlay makes the row yield to fallback.
-The existing native visibility and complete-label checks still decide paint ownership.
+The allocator preserves the v0.4.9 native game-view placement. It never writes
+`--CGV-top-panel-height` or `--CGV-image-height`, does not move Play controls or Activity,
+and does not reposition either a Steam Cloud row or a Ludusavi row to pass visibility checks.
+The existing native visibility and complete-label checks still decide paint ownership;
+footer-obscured rows can yield to the same-page fallback without a layout adjustment.
 
-When Metadata owns the trailer, Ludusavi reserves minimum coverage on the native header
-background and matching native image, not on Metadata's target or video. This keeps full
-coverage even when the peer's shared band allowance becomes zero. With no matching image,
-the native background alone retains coverage. Minimum-height, header-budget, and image
-extension leases save genuine values/priorities and use owner tokens; stale owners cannot
-restore over successors. Ordinary resyncs do not remove/reapply owned budget variables.
-Real stylesheet or ancestor class/style changes revalidate the unreserved geometry once,
-and unsupported formulas release the owned adjustments.
+For recognized Clean Gameview artwork equations, minimum coverage on the native header
+background and matching native image can keep a Metadata trailer full-size without changing
+Metadata's target/video or its shared band allowance. With no matching image, the
+app-attributed native background alone can retain coverage. These are paint reservations,
+not native layout-budget reservations.
 
-The corrected artwork and native availability were live-checked with the footer enabled,
-Transparent and Zoom Center, including a Metadata trailer and no-image control. Previously
-checked Zoom Left, Contain, and Blur-centered choices were not rechecked for this correction.
-Connected with Body, ignored-footer, percentage-based, compact, absolute, hidden, and
-otherwise unrecognized geometry receives no guessed header adjustment.
+Minimum-height and image-extension leases save genuine values/priorities and owner tokens.
+A new lifecycle can adopt them, but a stale lifecycle cannot reacquire a successor's lease
+through a late callback and then remove it during cleanup. External stylesheet or ancestor
+geometry changes invalidate owned natural-height snapshots and remeasure coverage in the
+same scheduled frame. No native budget is temporarily removed or rewritten.
+
+Steam and non-Steam placement, selected theme appearance, Metadata coverage, a no-image
+control, same-game fallback, away-page silence, and retained results were live-checked.
+Other theme layouts can still hide or clip the normal row; they are not changed to force
+native availability.
 The launch-time BrowserView strip remains separate.
 
 ### Optional CSS Loader theme
@@ -426,21 +427,17 @@ the assets to be deployed: without it, no theme CSS is injected. CSS Loader's Re
 control discovers a new theme when it was already running and did not observe directory
 creation.
 
-`layout.css` is injected in every selection while the theme is enabled. It reserves a
-30-pixel empty panel immediately after the play section. With Clean Gameview, the native
-header image and background reserve `--CGV-image-height + 30px` before the status children
-mount. The `--sdh-status-band-reserved` flag identifies this allowance; runtimes subtract
-it before deriving the original artwork height, then set the measured
-`--sdh-status-band-height`. Hidden, compact, and relocated indicators reduce that
-allowance to zero after layout settles. No row leaves the theme's early blank-slot
-allowance intact. Without Clean Gameview's image-height variable, no allowance is
-subtracted.
+`layout.css` retains the v0.4.9 empty-slot selectors. It reserves a 30-pixel direct empty
+panel immediately after the Play section, before Activity. Only a native route containing
+that empty panel receives the `--CGV-image-height + 30px` artwork minimum. Populated Steam
+Cloud or Ludusavi rows do not create another spacer, and the stylesheet does not move
+native controls or status rows.
 
-Ludusavi and Metadata share a native-window WeakMap keyed by the header background.
-The first owner saves the genuine inline variable value and priority; a handoff changes
-only ownership. Only the current owner restores that value. Separate route-root header,
-native minimum-coverage, and image-extension leases provide the same stale-owner protection.
-Native minimum coverage does not rewrite Metadata's shared band allowance or trailer styles.
+Ludusavi and Metadata can share a native-window WeakMap for an external measured-band
+allowance. The first owner saves the genuine inline variable value/priority, and only the
+current owner restores it. Native minimum-coverage and image-extension leases provide the
+same stale-owner protection independently of that shared allowance. Native coverage does
+not rewrite Metadata's trailer styles or native layout budgets.
 Steam's page-scale transition remains unchanged. Without CSS Loader or with the theme
 disabled, the mounted header's measured artwork extension remains in use.
 

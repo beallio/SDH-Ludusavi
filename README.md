@@ -87,7 +87,7 @@ The theme changes how the bars look on game pages, not how saves work. Warning a
 
 On game pages without a save-status bar, the theme leaves a blank row below the play controls before Activity. Clean View and Custom give this space the same background as their status bars; Custom also uses your outline choice. If you use Clean Gameview, the game's picture or trailer can show through the blank row. It does not show a save result. On an uninstalled Steam game, you may need to scroll down to see Activity.
 
-With the footer enabled, the plugin makes one measured row of room above the footer in supported Clean Gameview layouts. The Play area moves up, but the picture and trailer keep their full coverage. A temporary switch to the fallback does not make the picture smaller. Compact, moved, hidden, or unrecognized layouts can keep the same-page fallback; the plugin does not force the page to scroll. This correction was checked with Transparent, Zoom Center, and the footer enabled. Other Clean Gameview choices have not been rechecked for this correction. Steam's normal page animation still plays.
+The plugin keeps Steam's original Play controls, status rows, and Activity positions when you open a game page. With Clean Gameview, artwork can extend behind the status area without moving those controls. A temporary switch to the fallback does not make the picture smaller. If a footer or theme hides, covers, or clips the normal row, the message uses the same-page fallback instead; the plugin does not move the row or force the page to scroll. Steam's normal page animation still plays.
 
 ## Updates and help
 

@@ -37,139 +37,41 @@ type SharedBandReservation = {
   owner: object;
   reservedValue?: string;
   reservedPriority?: string;
-  reservedBaseDeduction?: number;
+  naturalHeight?: number;
 };
 type ReservationWindow = Window & {
   __sdhStatusBandReservations?: WeakMap<HTMLElement, SharedBandReservation>;
-  __sdhCgvBudgetReservations?: WeakMap<HTMLElement, Map<string, SharedBandReservation>>;
   __sdhArtworkExtensions?: WeakMap<HTMLImageElement, ExtendedArtwork>;
   __sdhNativeArtworkMinHeightReservations?: WeakMap<HTMLElement, SharedBandReservation>;
 };
 
-const CGV_TOP_PANEL_HEIGHT = "--CGV-top-panel-height";
-const CGV_IMAGE_HEIGHT = "--CGV-image-height";
-const CGV_BUDGET_PROPERTIES = [CGV_TOP_PANEL_HEIGHT] as const;
-const managedCgvBudgetStyles = new WeakSet<Node>();
+const managedArtworkStyles = new WeakSet<Node>();
 
-function isManagedCgvBudgetStyle(record: MutationRecord): boolean {
-  return record.type === "attributes" && record.attributeName === "style" && managedCgvBudgetStyles.has(record.target);
+function isManagedArtworkStyle(record: MutationRecord): boolean {
+  return record.type === "attributes" && record.attributeName === "style" && managedArtworkStyles.has(record.target);
 }
 
-function manageCgvBudgetStyle(element: HTMLElement, update: () => void): void {
-  managedCgvBudgetStyles.add(element);
+function manageArtworkStyle(element: HTMLElement, update: () => void): void {
+  managedArtworkStyles.add(element);
   update();
-  queueMicrotask(() => managedCgvBudgetStyles.delete(element));
+  queueMicrotask(() => managedArtworkStyles.delete(element));
 }
 
-function cgvBudgetReservations(element: HTMLElement): Map<string, SharedBandReservation> | null {
-  const host = element.ownerDocument.defaultView as ReservationWindow | null;
-  if (!host) return null;
-  const roots = host.__sdhCgvBudgetReservations ??= new WeakMap();
-  let reservations = roots.get(element);
-  if (!reservations) {
-    reservations = new Map();
-    roots.set(element, reservations);
-  }
-  return reservations;
-}
-
-function cgvBudgetValue(bandHeight: number, existingDeduction: number): string {
-  const deduction = bandHeight + existingDeduction;
-  return `calc(100vh - var(--CGV-play-bar-height) - var(--CGV-footer-height) - ${deduction}px)`;
-}
-
-function reserveCgvBudgets(root: HTMLElement, owner: object, bandHeight: number, existingDeduction: number): void {
-  const reservations = cgvBudgetReservations(root);
-  if (!reservations) return;
-  manageCgvBudgetStyle(root, () => {
-    const property = CGV_TOP_PANEL_HEIGHT;
-    let reservation = reservations.get(property);
-    if (!reservation) {
-      reservation = {
-        original: root.style.getPropertyValue(property),
-        priority: root.style.getPropertyPriority(property),
-        owner,
-      };
-      reservations.set(property, reservation);
-    }
-    const value = cgvBudgetValue(bandHeight, existingDeduction);
-    reservation.owner = owner;
-    reservation.reservedValue = value;
-    reservation.reservedPriority = "important";
-    reservation.reservedBaseDeduction = existingDeduction;
-    if (root.style.getPropertyValue(property) !== value || root.style.getPropertyPriority(property) !== "important") {
-      root.style.setProperty(property, value, "important");
-    }
-  });
-}
-function isSupportedCgvGeometry(root: HTMLElement, host: Window): number | null {
+function supportsCgvArtworkCoverage(root: HTMLElement, host: Window): boolean {
   const style = host.getComputedStyle(root);
   const compact = (property: string) => style.getPropertyValue(property).replace(/\s+/g, "");
   const playBar = compact("--CGV-play-bar-height");
   const footer = compact("--CGV-footer-height");
-  const image = compact(CGV_IMAGE_HEIGHT);
-  if (!/^\d+(?:\.\d+)?px$/.test(playBar) || !/^\d+(?:\.\d+)?px$/.test(footer)) return null;
-  const topBases = [
+  if (!/^\d+(?:\.\d+)?px$/.test(playBar) || !/^\d+(?:\.\d+)?px$/.test(footer)) return false;
+  const topDeduction = knownCgvDeduction(compact("--CGV-top-panel-height"), [
     `calc(100vh-${playBar}-${footer}`,
     "calc(100vh-var(--CGV-play-bar-height)-var(--CGV-footer-height)",
-  ];
-  const imageBases = [
+  ]);
+  const imageDeduction = knownCgvDeduction(compact("--CGV-image-height"), [
     `calc(100vh-${footer}`,
     "calc(100vh-var(--CGV-footer-height)",
-  ];
-  const imageDeduction = knownCgvDeduction(image, imageBases);
-  if (imageDeduction === null) return null;
-  const reservation = cgvBudgetReservations(root)?.get(CGV_TOP_PANEL_HEIGHT);
-  if (reservation) {
-    const stillReserved = root.style.getPropertyValue(CGV_TOP_PANEL_HEIGHT) === reservation.reservedValue
-      && root.style.getPropertyPriority(CGV_TOP_PANEL_HEIGHT) === reservation.reservedPriority;
-    if (!stillReserved || reservation.reservedBaseDeduction !== imageDeduction) return null;
-    const originalTop = reservation.original.replace(/\s+/g, "");
-    const originalDeduction = originalTop ? knownCgvDeduction(originalTop, topBases) : null;
-    return originalDeduction === null || originalDeduction === imageDeduction ? imageDeduction : null;
-  }
-  const topDeduction = knownCgvDeduction(compact(CGV_TOP_PANEL_HEIGHT), topBases);
-  return topDeduction !== null && topDeduction === imageDeduction ? topDeduction : null;
-}
-
-function hasCgvBudgetReservation(root: HTMLElement): boolean {
-  const reservation = (root.ownerDocument.defaultView as ReservationWindow | null)
-    ?.__sdhCgvBudgetReservations?.get(root)?.get(CGV_TOP_PANEL_HEIGHT);
-  return Boolean(reservation
-    && root.style.getPropertyValue(CGV_TOP_PANEL_HEIGHT) === reservation.reservedValue
-    && root.style.getPropertyPriority(CGV_TOP_PANEL_HEIGHT) === reservation.reservedPriority);
-}
-
-function releaseCgvBudgets(root: HTMLElement | null, owner: object): boolean {
-  if (!root) return false;
-  const reservations = (root.ownerDocument.defaultView as ReservationWindow | null)
-    ?.__sdhCgvBudgetReservations?.get(root);
-  if (!reservations || !CGV_BUDGET_PROPERTIES.some((property) => reservations.get(property)?.owner === owner)) return false;
-  manageCgvBudgetStyle(root, () => {
-    for (const property of CGV_BUDGET_PROPERTIES) {
-      const reservation = reservations.get(property);
-      if (!reservation || reservation.owner !== owner) continue;
-      const stillOwned = root.style.getPropertyValue(property) === reservation.reservedValue
-        && root.style.getPropertyPriority(property) === reservation.reservedPriority;
-      if (stillOwned) {
-        if (reservation.original) root.style.setProperty(property, reservation.original, reservation.priority);
-        else root.style.removeProperty(property);
-      }
-      reservations.delete(property);
-    }
-  });
-  return true;
-}
-
-function ownsCgvBudgets(root: HTMLElement, owner: object): boolean {
-  const reservations = (root.ownerDocument.defaultView as ReservationWindow | null)
-    ?.__sdhCgvBudgetReservations?.get(root);
-  return Boolean(reservations && CGV_BUDGET_PROPERTIES.every((property) => {
-    const reservation = reservations.get(property);
-    return reservation?.owner === owner
-      && root.style.getPropertyValue(property) === reservation.reservedValue
-      && root.style.getPropertyPriority(property) === reservation.reservedPriority;
-  }));
+  ]);
+  return topDeduction !== null && topDeduction === imageDeduction;
 }
 
 function knownCgvDeduction(value: string, bases: readonly string[]): number | null {
@@ -264,17 +166,13 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
   let frame: number | null = null;
   let frameWindow: HostWindow | null = null;
   let restoreBeforeSync = false;
-  let revalidateCgvGeometry = false;
+  let refreshBaseline = false;
+  let artworkRoot: HTMLElement | null = null;
   const artworkOwner = {};
   const reservationOwner = {};
   let reservationBackground: HTMLElement | null = null;
   let coverageBackground: HTMLElement | null = null;
   let coverageImage: HTMLImageElement | null = null;
-  const cgvBudgetOwner = {};
-  let cgvBudgetRoot: HTMLElement | null = null;
-  let cgvLayoutRoot: HTMLElement | null = null;
-  let cgvLayoutRow: HTMLElement | null = null;
-  let cgvLayoutBandHeight = 0;
   const backgroundClass = (appDetailsHeaderClasses as Record<string, string | undefined> | undefined)?.HeaderBackgroundImage;
 
   function cancelFrame(): void {
@@ -290,13 +188,11 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     frame = currentWindow.requestAnimationFrame(() => {
       frame = null;
       frameWindow = null;
-      if (revalidateCgvGeometry) {
-        revalidateCgvGeometry = false;
-        releaseCgvBudgetCompensation();
-      }
-      if (restoreBeforeSync) {
+      if (restoreBeforeSync || refreshBaseline) {
         restoreBeforeSync = false;
+        refreshBaseline = false;
         restore();
+        releaseNativeCoverage();
       }
       sync();
     });
@@ -318,7 +214,7 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       currentWindow.removeEventListener("resize", resize);
       currentDocument.removeEventListener("animationend", schedule, true);
       currentDocument.removeEventListener("transitionend", schedule, true);
-      releaseCgvBudgetCompensation();
+      releaseNativeCoverage();
     }
     if (restoreBeforeSync) {
       restoreBeforeSync = false;
@@ -331,7 +227,7 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     mutationObserver = HostMutationObserver ? new HostMutationObserver((records) => {
       const managedStyles = extended?.managedStyles;
       const isOwnedMutation = (record: MutationRecord) => isStatusPaintMeasurement(record)
-        || isManagedCgvBudgetStyle(record)
+        || isManagedArtworkStyle(record)
         || Boolean(managedStyles && record.type === "attributes"
           && (record.attributeName === "style" || record.attributeName === ARTWORK_MARKER)
           && managedStyles.some(({ element }) => element === record.target));
@@ -340,8 +236,8 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
         record.target === document.head || document.head?.contains?.(record.target)
         || (record.type === "attributes" && (record.attributeName === "class" || record.attributeName === "style")
           && (record.target === document.body || record.target === document.documentElement
-            || record.target === cgvBudgetRoot || (cgvBudgetRoot !== null && record.target.contains?.(cgvBudgetRoot))))
-      ))) revalidateCgvGeometry = true;
+            || record.target === artworkRoot || (artworkRoot !== null && record.target.contains?.(artworkRoot))))
+      ))) refreshBaseline = true;
       schedule();
     }) : null;
     const HostResizeObserver = currentWindow.ResizeObserver;
@@ -378,10 +274,10 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
   function restore(): void {
     if (!extended) return;
     const previous = extended;
-    extended = null;
     const { image, inlineHeight, priority } = previous;
     const reservations = ((image.ownerDocument.defaultView ?? currentWindow) as ReservationWindow).__sdhArtworkExtensions;
     if (previous.owner !== artworkOwner || reservations?.get(image) !== previous) return;
+    extended = null;
     reservations.delete(image);
     if (inlineHeight) image.style.setProperty("height", inlineHeight, priority);
     else image.style.removeProperty("height");
@@ -391,95 +287,58 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     }
   }
 
-  function releaseMinimumCoverage(element: HTMLElement | null): void {
-    if (!element) return;
+  function releaseMinimumCoverage(element: HTMLElement | null): boolean {
+    if (!element) return true;
     const leases = ((element.ownerDocument.defaultView ?? currentWindow) as ReservationWindow).__sdhNativeArtworkMinHeightReservations;
     const lease = leases?.get(element);
-    if (!lease || lease.owner !== cgvBudgetOwner) return;
+    if (!lease) return true;
+    if (lease.owner !== artworkOwner) return false;
     if (element.style.getPropertyValue("min-height") === lease.reservedValue
       && element.style.getPropertyPriority("min-height") === "important") {
-      manageCgvBudgetStyle(element, () => {
+      manageArtworkStyle(element, () => {
         if (lease.original) element.style.setProperty("min-height", lease.original, lease.priority);
         else element.style.removeProperty("min-height");
       });
     }
     leases?.delete(element);
+    return true;
   }
 
   function releaseNativeCoverage(): void {
-    releaseMinimumCoverage(coverageImage);
-    releaseMinimumCoverage(coverageBackground);
-    coverageImage = null;
-    coverageBackground = null;
+    if (releaseMinimumCoverage(coverageImage)) coverageImage = null;
+    if (releaseMinimumCoverage(coverageBackground)) coverageBackground = null;
   }
 
-  function reserveMinimumCoverage(element: HTMLElement, bandHeight: number): void {
+  function reserveMinimumCoverage(element: HTMLElement, bandHeight: number, naturalHeight?: number): void {
     const host = (element.ownerDocument.defaultView ?? currentWindow) as ReservationWindow;
     const leases = host.__sdhNativeArtworkMinHeightReservations ??= new WeakMap();
     let lease = leases.get(element);
     if (!lease) {
       lease = { original: element.style.getPropertyValue("min-height"),
-        priority: element.style.getPropertyPriority("min-height"), owner: cgvBudgetOwner };
+        priority: element.style.getPropertyPriority("min-height"), owner: artworkOwner, naturalHeight };
       leases.set(element, lease);
     }
-    lease.owner = cgvBudgetOwner;
+    lease.owner = artworkOwner;
     const value = `calc(var(--CGV-image-height) + ${bandHeight}px)`;
     lease.reservedValue = value;
     if (element.style.getPropertyValue("min-height") !== value
       || element.style.getPropertyPriority("min-height") !== "important") {
-      manageCgvBudgetStyle(element, () => element.style.setProperty("min-height", value, "important"));
+      manageArtworkStyle(element, () => element.style.setProperty("min-height", value, "important"));
     }
   }
 
-  function reserveNativeCoverage(background: HTMLElement | null, image: HTMLImageElement | null, bandHeight: number): void {
+  function reserveNativeCoverage(background: HTMLElement | null, image: HTMLImageElement | null, bandHeight: number, naturalHeight?: number): void {
+    const host = (image?.ownerDocument.defaultView ?? background?.ownerDocument.defaultView ?? currentWindow) as ReservationWindow;
+    const leases = host.__sdhNativeArtworkMinHeightReservations;
+    const backgroundOwner = background && coverageBackground === background ? leases?.get(background)?.owner : undefined;
+    const imageOwner = image && coverageImage === image ? leases?.get(image)?.owner : undefined;
+    if ((backgroundOwner !== undefined && backgroundOwner !== artworkOwner)
+      || (imageOwner !== undefined && imageOwner !== artworkOwner)) return;
     if (coverageBackground !== background || coverageImage !== image) releaseNativeCoverage();
     coverageBackground = background;
     coverageImage = image;
     if (background) reserveMinimumCoverage(background, bandHeight);
-    if (image) reserveMinimumCoverage(image, bandHeight);
-  }
-
-  function releaseCgvBudgetCompensation(): void {
-    const root = cgvBudgetRoot;
-    if (!releaseCgvBudgets(root, cgvBudgetOwner)) return;
-    releaseNativeCoverage();
-    cgvBudgetRoot = null;
-    if (cgvLayoutRoot === root) {
-      cgvLayoutRoot = null;
-      cgvLayoutRow = null;
-      cgvLayoutBandHeight = 0;
-    }
-    restore();
-  }
-
-  function applyCgvBudgetCompensation(root: HTMLElement, bandHeight: number): boolean {
-    const alreadyOwnsRoot = cgvBudgetRoot === root && ownsCgvBudgets(root, cgvBudgetOwner);
-    if (cgvBudgetRoot === root && !alreadyOwnsRoot) return false;
-    const existingDeduction = isSupportedCgvGeometry(root, currentWindow);
-    if (existingDeduction === null) {
-      releaseCgvBudgetCompensation();
-      return false;
-    }
-    if (cgvBudgetRoot !== root) {
-      releaseCgvBudgetCompensation();
-      cgvBudgetRoot = root;
-    }
-    reserveCgvBudgets(root, cgvBudgetOwner, bandHeight, existingDeduction);
-    return true;
-  }
-
-  function stableLayoutBandHeight(root: HTMLElement, row: HTMLElement, image?: HTMLElement): number {
-    if (cgvLayoutRoot !== root) {
-      cgvLayoutRoot = root;
-      cgvLayoutRow = null;
-      cgvLayoutBandHeight = 0;
-    }
-    if (row.offsetHeight > 0) {
-      cgvLayoutRow = row;
-      cgvLayoutBandHeight = row.offsetHeight;
-    }
-    if (cgvLayoutRow === row && cgvLayoutBandHeight > 0) return cgvLayoutBandHeight;
-    return image ? reservedBandHeight(image, currentWindow) : 0;
+    if (image) reserveMinimumCoverage(image, bandHeight, naturalHeight);
   }
 
   function findArtwork(): HTMLImageElement | null {
@@ -513,7 +372,7 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
   function findRouteStatusRow(document: Document, root: HTMLElement): HTMLElement | null {
     const candidates = routeStatusRows(document, root);
     const rootWidth = root.getBoundingClientRect().width;
-    const visible = candidates.find((row) => visibleBandHeight(row, document, { width: rootWidth }) !== null);
+    const visible = candidates.find((row) => measureBandHeight(row, document, { width: rootWidth }) !== null);
     return visible ?? candidates.find((row) => row === observedBand) ?? candidates[0] ?? null;
   }
 
@@ -533,18 +392,17 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       return;
     }
     const rect = row.getBoundingClientRect();
-    const height = row.offsetHeight > 0 ? row.offsetHeight
-      : cgvLayoutRoot === root && cgvLayoutRow === row ? cgvLayoutBandHeight : 0;
-    const hasExpectedGeometry = Math.abs(rect.width - artwork.width) <= 2
-      && (cgvBudgetRoot === root || Math.abs(rect.top - edge) <= 1);
+    const height = Math.max(0, row.offsetHeight);
+    const hasExpectedGeometry = Math.abs(rect.width - artwork.width) <= 2 && Math.abs(rect.top - edge) <= 1;
     reservationBackground = background;
     reserveBand(background, reservationOwner, hasExpectedGeometry ? height : 0);
   }
 
-  function visibleBandHeight(
+  function measureBandHeight(
     element: HTMLElement,
     document: Document,
     expectedGeometry: Readonly<{ width: number; edge?: number }> | null,
+    requirePaint = true,
   ): number | null {
     const ownSuppression = element.getAttribute(PAINT_SUPPRESSED_MARKER) === "true"
       && element.style.getPropertyValue("opacity") === "0";
@@ -561,9 +419,9 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
         if (ancestor.hidden || (ancestor.getAttribute("aria-hidden") === "true" && !(ancestor === element && ownSuppression))) return null;
         const style = currentWindow.getComputedStyle(ancestor);
         if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse"
-          || (style.opacity !== "" && Number(style.opacity) <= 0)) return null;
+          || ((requirePaint || ancestor === element) && style.opacity !== "" && Number(style.opacity) <= 0)) return null;
         if (ancestor === element && (style.position === "absolute" || style.position === "fixed" || style.position === "sticky")) return null;
-        if (ancestor !== element) {
+        if (requirePaint && ancestor !== element) {
           const bounds = ancestor.getBoundingClientRect();
           const clipsX = CLIPPING_OVERFLOW[style.overflowX || style.overflow || "visible"] === true;
           const clipsY = CLIPPING_OVERFLOW[style.overflowY || style.overflow || "visible"] === true;
@@ -572,9 +430,9 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
         }
       }
 
-      if ((root.clientWidth > 0 && (band.left < 0 || band.right > root.clientWidth))
-        || (root.clientHeight > 0 && (band.bottom <= 0 || band.top >= root.clientHeight))) return null;
-      if (typeof document.elementFromPoint === "function") {
+      if (requirePaint && ((root.clientWidth > 0 && (band.left < 0 || band.right > root.clientWidth))
+        || (root.clientHeight > 0 && (band.bottom <= 0 || band.top >= root.clientHeight)))) return null;
+      if (requirePaint && typeof document.elementFromPoint === "function") {
         const hit = document.elementFromPoint(band.left + band.width / 2, band.top + Math.min(4, band.height / 2));
         if (!hit || (hit !== element && !element.contains(hit))) return null;
       }
@@ -588,10 +446,9 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     return element.closest(`.${innerContainerClass}`) as HTMLElement | null;
   }
 
-  function visibleRouteBand(document: Document): Readonly<{
+  function findRouteBand(document: Document): Readonly<{
     element: HTMLElement;
     contentRoot: HTMLElement;
-    visible: boolean;
   }> | null {
     const candidates = [...document.querySelectorAll<HTMLElement>(
       `[${STATUS_ROW_MARKER}="true"]${nativeClasses ? `,.${nativeClasses.row}` : ""}`,
@@ -602,20 +459,16 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       return [{ element, contentRoot }];
     });
     const visible = candidates.find(({ element, contentRoot }) =>
-      visibleBandHeight(element, document, { width: contentRoot.getBoundingClientRect().width }) !== null);
-    const reserved = candidates.find(({ contentRoot }) =>
-      contentRoot === cgvBudgetRoot || hasCgvBudgetReservation(contentRoot));
-    const selected = visible ?? reserved ?? (candidates.length === 1 ? candidates[0] : null);
-    return selected ? {
-      ...selected,
-      visible: selected === visible,
-    } : null;
+      measureBandHeight(element, document, { width: contentRoot.getBoundingClientRect().width }) !== null);
+    return visible ?? candidates.find(({ element }) => element === observedBand)
+      ?? (candidates.length === 1 ? candidates[0] : null);
   }
 
   function applyExtension(bandHeight: number, image: HTMLImageElement, naturalHeight: number): void {
     const host = (image.ownerDocument.defaultView ?? currentWindow) as ReservationWindow;
     const reservations = host.__sdhArtworkExtensions ??= new WeakMap();
     let reservation = reservations.get(image);
+    if (reservation && reservation.owner !== artworkOwner && extended?.image === image) return;
     if (!reservation) {
       const background = image.parentElement;
       const elements = background && background !== image ? [background, image] : [image];
@@ -651,96 +504,63 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       reservationBackground = null;
     }
     if (!image) {
-      const routeBand = visibleRouteBand(currentDocument);
-      if (!routeBand) {
-        releaseCgvBudgetCompensation();
-        observeBand(null);
-        restore();
-        releaseBand(reservationBackground, reservationOwner);
-        reservationBackground = null;
-        return;
-      }
-      const hasExistingReservation = routeBand.contentRoot === cgvBudgetRoot
-        || hasCgvBudgetReservation(routeBand.contentRoot);
-      if (!routeBand.visible && !hasExistingReservation) {
-        releaseCgvBudgetCompensation();
-        observeBand(routeBand.element);
-        restore();
-        return;
-      }
-      const layoutHeight = stableLayoutBandHeight(routeBand.contentRoot, routeBand.element);
-      if (layoutHeight > 0 && applyCgvBudgetCompensation(routeBand.contentRoot, layoutHeight)) {
+      const routeBand = findRouteBand(currentDocument);
+      artworkRoot = routeBand?.contentRoot ?? null;
+      const height = routeBand ? measureBandHeight(routeBand.element, currentDocument, {
+        width: routeBand.contentRoot.getBoundingClientRect().width,
+      }, false) : null;
+      if (routeBand && height !== null && supportsCgvArtworkCoverage(routeBand.contentRoot, currentWindow)) {
         const routeBackground = backgroundClass
           ? routeBand.contentRoot.querySelector?.<HTMLElement>(`.${backgroundClass}`) ?? null : null;
-        reserveNativeCoverage(routeBackground, null, layoutHeight);
-      } else releaseCgvBudgetCompensation();
-      const currentBand = visibleRouteBand(currentDocument) ?? routeBand;
-      observeBand(currentBand.element);
+        reserveNativeCoverage(routeBackground, null, height);
+      } else releaseNativeCoverage();
+      observeBand(routeBand?.element ?? null);
       restore();
-      releaseBand(reservationBackground, reservationOwner);
-      reservationBackground = null;
       return;
     }
     const ownerDocument = image.ownerDocument ?? currentDocument;
     if (ownerDocument !== currentDocument) bindDocument(ownerDocument);
     const contentRoot = routeContentAncestor(image);
+    artworkRoot = contentRoot;
     const trailerOwnsArtwork = image.closest(".decky-metadata-trailer-target") !== null;
-    const measureGeometry = () => {
-      const artwork = image.getBoundingClientRect();
-      const imageHeight = image.offsetHeight;
-      if (imageHeight <= 0) return null;
-      const scaleY = artwork.height / imageHeight;
-      const reservation = ((ownerDocument.defaultView ?? currentWindow) as ReservationWindow).__sdhArtworkExtensions?.get(image);
-      const naturalHeight = reservation?.naturalHeight ?? imageHeight - reservedBandHeight(image, currentWindow);
-      return { artwork, naturalHeight, edge: artwork.top + naturalHeight * scaleY };
-    };
-    let geometry = measureGeometry();
-    if (!contentRoot || !geometry) {
-      releaseCgvBudgetCompensation();
+    const artwork = image.getBoundingClientRect();
+    const imageHeight = image.offsetHeight;
+    if (!contentRoot || imageHeight <= 0) {
+      releaseNativeCoverage();
       observeBand(null);
       restore();
       return;
     }
+    const host = (ownerDocument.defaultView ?? currentWindow) as ReservationWindow;
+    const naturalHeight = host.__sdhArtworkExtensions?.get(image)?.naturalHeight
+      ?? host.__sdhNativeArtworkMinHeightReservations?.get(image)?.naturalHeight
+      ?? imageHeight - reservedBandHeight(image, currentWindow);
+    const edge = artwork.top + naturalHeight * artwork.height / imageHeight;
     const statusRow = findRouteStatusRow(ownerDocument, contentRoot);
     if (!statusRow) {
-      releaseCgvBudgetCompensation();
+      releaseNativeCoverage();
       observeBand(null);
       restore();
-      reserveLayoutBand(background, contentRoot, geometry.artwork, geometry.edge);
+      reserveLayoutBand(background, contentRoot, artwork, edge);
       return;
     }
-    const alreadyReserved = hasCgvBudgetReservation(contentRoot);
-    const initiallyVisible = visibleBandHeight(statusRow, ownerDocument, {
-      width: geometry.artwork.width,
-      edge: geometry.edge,
-    }) !== null;
-    const layoutHeight = stableLayoutBandHeight(contentRoot, statusRow, image);
-    const compensated = layoutHeight > 0 && (initiallyVisible || alreadyReserved)
-      && applyCgvBudgetCompensation(contentRoot, layoutHeight);
-    if (!compensated && !alreadyReserved) releaseCgvBudgetCompensation();
-    if (compensated && trailerOwnsArtwork) reserveNativeCoverage(background, image, layoutHeight);
+    const expected = { width: artwork.width, edge };
+    const layoutHeight = measureBandHeight(statusRow, ownerDocument, expected, false);
+    const paintHeight = measureBandHeight(statusRow, ownerDocument, expected);
+    const canCover = layoutHeight !== null && supportsCgvArtworkCoverage(contentRoot, currentWindow);
+    if (canCover && trailerOwnsArtwork) reserveNativeCoverage(background, image, layoutHeight, naturalHeight);
     else releaseNativeCoverage();
-    geometry = measureGeometry();
-    if (!geometry) {
-      observeBand(statusRow);
-      restore();
-      return;
-    }
-    const bandHeight = visibleBandHeight(statusRow, ownerDocument, {
-      width: geometry.artwork.width,
-      ...(compensated ? {} : { edge: geometry.edge }),
-    });
     observeBand(statusRow);
-    if (bandHeight === null) {
-      if (compensated && !trailerOwnsArtwork) applyExtension(layoutHeight, image, geometry.naturalHeight);
+    if (paintHeight === null) {
+      if (canCover && !trailerOwnsArtwork) applyExtension(layoutHeight, image, naturalHeight);
       else restore();
-      reserveLayoutBand(background, contentRoot, geometry.artwork, geometry.edge);
+      reserveLayoutBand(background, contentRoot, artwork, edge);
       return;
     }
     if (!trailerOwnsArtwork && background
       && currentWindow.getComputedStyle(image).getPropertyValue?.("--sdh-status-band-reserved") === "1") {
       reservationBackground = background;
-      reserveBand(background, reservationOwner, bandHeight);
+      reserveBand(background, reservationOwner, paintHeight);
     }
     if (trailerOwnsArtwork) {
       restore();
@@ -748,8 +568,8 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
       reservationBackground = null;
       return;
     }
-    if (extended?.bandHeight === bandHeight) return;
-    applyExtension(bandHeight, image, extended?.naturalHeight ?? geometry.naturalHeight);
+    if (extended?.bandHeight === paintHeight) return;
+    applyExtension(paintHeight, image, naturalHeight);
   }
 
   bindDocument(initialDocument);
@@ -768,6 +588,5 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
     restore();
     releaseBand(reservationBackground, reservationOwner);
     releaseNativeCoverage();
-    releaseCgvBudgets(cgvBudgetRoot, cgvBudgetOwner);
   };
 }

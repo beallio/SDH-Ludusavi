@@ -5,12 +5,15 @@
   height: 30px !important;
 }
 
-/* The native header can paint before its play/status children mount. Reserve
-   the normal band immediately; the geometry owners supply the actual height. */
-:is(
+/* Clean Gameview stops the hero at the play bar. Extend its existing artwork
+   behind an empty status row without moving the play controls or Activity. */
+.appdetails_InnerContainer_1Svpj:has(
+  .basicappdetailssectionstyler_AppDetailsRoot_3fp5y
+    > .basicappdetailssectionstyler_PlaySection_3scbH
+    + .Panel:empty
+) :is(
   .sharedappdetailsheader_HeaderBackgroundImage_1sarA,
   .sharedappdetailsheader_ImgSrc__dije
 ) {
-  --sdh-status-band-reserved: 1;
-  min-height: calc(var(--CGV-image-height, 0px) + var(--sdh-status-band-height, 30px)) !important;
+  min-height: calc(var(--CGV-image-height, 0px) + 30px) !important;
 }
