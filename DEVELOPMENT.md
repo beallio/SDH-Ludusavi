@@ -40,6 +40,12 @@ The repository uses `pnpm-lock.yaml` as the canonical frontend lockfile. Do not 
 
 The project-owned `rollup.config.js` uses direct, build-only Rollup plugins for TypeScript, JSON, CommonJS, browser resolution, replacements, Decky globals, and bundled assets. It also removes only the generated `dist/` directory at the start of each build. Keep these direct dependencies and the configuration together when the build pipeline changes; they are not bundled runtime dependencies.
 
+The exact `source-map-js` 1.2.2 override fixes indexed source-map denial of service
+([GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q)).
+Its matching quarantine exception is limited to that audited version; the normal
+14-day release-age policy remains in force for other versions. This transitive
+PostCSS/Vite dependency is development tooling, not plugin runtime code.
+
 `react-dom` 18.3.1 and `linkedom` 0.18.12 are development-only dependencies for native status-row behavior tests. React DOM renders the row, and LinkeDOM supplies the DOM for selector and visibility checks. They are not bundled as Decky runtime dependencies. Live Deck checks are still required for computed Steam styles, native clipping, and MutationObserver behavior.
 
 Native DOM fixture waits use standard timer callbacks wrapped in promises, not Node-specific promise timer APIs. Keep these fixtures compatible with the locked dependency graph on a clean install.

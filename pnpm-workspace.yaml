@@ -9,6 +9,8 @@ minimumReleaseAgeExclude:
   # suppressing the advisory.
   - postcss@8.5.23
   - nanoid@3.3.18
+  # Exact audited fix for indexed source-map denial of service.
+  - source-map-js@1.2.2
 storeDir: /tmp/sdh_ludusavi/.pnpm-store
 virtualStoreDir: /tmp/sdh_ludusavi/pnpm-virtual-store
 sideEffectsCache: false
@@ -30,3 +32,5 @@ overrides:
   # GHSA-2v37-7h3g-55p8 (custom generators loop) in 3.3.18 — the advisory
   # originally named 3.3.17 and was later widened to <3.3.18.
   nanoid@<3.3.18: 3.3.18
+  # GHSA-68fv-2mgg-jv7q: indexed source-map section offsets can exhaust resources.
+  source-map-js@<1.2.2: 1.2.2
