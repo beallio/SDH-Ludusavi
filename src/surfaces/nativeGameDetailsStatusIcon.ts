@@ -60,7 +60,5 @@ export function nativeIconSvgForAutoSyncStatus(status: AutoSyncStatusKind, class
     const direction = status === "restoring" ? ' transform="rotate(180 8 8)"' : "";
     return svg(className, `<g${direction}><path d="M13.25 8a5.25 5.25 0 1 1-1.6-3.76" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/><path d="M10.25 2.8h2.95v2.95M8 11.5V5.2m0 0L5.85 7.35M8 5.2l2.15 2.15" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></g>`);
   }
-  // The narrow save outline needs the same optical height as the other native
-  // glyphs; normalize its drawing, not Steam's 16px slot or row dimensions.
-  return svg(className, '<g transform="translate(8 8) scale(1.2) translate(-8 -8)"><path d="M4.1 2.9h6.1l1.7 1.7v8.5H4.1zM6 2.9v3h3M6.4 10.25h3.2M8 7.75v1.35" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/></g>');
+  return svg(className, '<circle cx="8" cy="8" r="6.1" stroke="currentColor" stroke-width="1.5"/><path d="M5.9 5.8a2.1 2.1 0 0 1 4.2 0c0 1.2-1.5 1.55-2.1 2.45v.65" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.3" r=".8" fill="currentColor"/>');
 }
