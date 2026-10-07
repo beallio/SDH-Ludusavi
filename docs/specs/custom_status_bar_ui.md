@@ -377,6 +377,18 @@ status colors. Its busy glyph does not switch to a spinning ring or animated arr
 when ownership moves between surfaces. Start-side and non-post-game BrowserView glyphs,
 motion, and protected presentation remain unchanged.
 
+The cloud family uses the native 36-unit drawing and cutouts in the same coordinate
+system. Steam renders that square canvas uniformly into its 16-pixel icon slot;
+there is no separate vertical stretch or outline over the cutout. Shared completion
+uses the native cloud-check proportions. Preparing uses a clock inside the cloud,
+and upload, download, and remote warnings retain clear directional or cross marks.
+Local checking uses a magnifier. Local backup and restore use filled circular badges
+with transparent up/down arrows rather than a crowded ring plus arrow. Disabled
+uses a circle with a diagonal slash. These drawings keep inherited `currentColor`,
+transparent negative space, the existing native pulse and blue active text, and the
+unchanged status meanings. Busy transitions retain their native animation phase;
+terminal states stop the pulse. The icon slot and bar placement do not change.
+
 `Not tracked` and `Unknown` share a simple question mark inside an outlined circular
 badge. The vector drawing inherits `currentColor` and fits the native 16-pixel canvas,
 using the same optical envelope as the other status icons. The save-outline drawing
