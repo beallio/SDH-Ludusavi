@@ -133,12 +133,41 @@ export function iconSvgForAutoSyncStatus(status: AutoSyncStatusKind): string {
   return `<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"${rotation}><circle cx="10" cy="10" r="8.8" fill="currentColor"/><path d="M10 5.3v8.3" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round"/><path d="M6.8 8.4 10 5.2l3.2 3.2" fill="none" stroke="#0b151f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 
-export function renderAutoSyncStatusHtml(state: AutoSyncStatusState) {
+export type NativePostGameAppearance = Readonly<{
+  fontDataUrl: string | null;
+  backgroundColor: string;
+}>;
+
+export function renderAutoSyncStatusHtml(
+  state: AutoSyncStatusState,
+  appearance?: NativePostGameAppearance
+) {
   const postGame = state.lifecycle === "lifecycle_exit";
+  if (postGame && !appearance) throw new Error("Post-game fallback appearance is required");
+  const active = isLudusaviRunningStatus(state.status) || isSyncthingActiveStatus(state.status);
   const iconClass = postGame
-    ? ` icon-native${isLudusaviRunningStatus(state.status) || isSyncthingActiveStatus(state.status) ? " icon-native-syncing" : ""}`
+    ? ` icon-native${active ? " icon-native-syncing" : ""}`
     : state.status === "checking" ? " icon-spin" : state.status === "syncthing_pending_upload" ? " icon-spin-ring" : "";
   const icon = postGame ? nativeIconSvgForAutoSyncStatus(state.status, "") : iconSvgForAutoSyncStatus(state.status);
+  const fontFace = postGame && appearance?.fontDataUrl != null
+    ? `@font-face { font-family: "Motiva Sans"; font-style: normal; font-weight: 700; src: url("${appearance.fontDataUrl}"); }`
+    : "";
+  const postGameStyles = postGame && appearance
+    ? `
+body { color: rgba(255, 255, 255, 0.7); font-family: "Motiva Sans", Arial, sans-serif; font-size: 12px; font-weight: 700; line-height: 22px; letter-spacing: 0.5px; }
+.bar { background: ${appearance.backgroundColor}; border: 0; padding: 4px 0; gap: 0; }
+.bar::before, .bar::after { content: ""; flex: 1; height: 2px; background: rgba(61, 68, 80, 0.54); }
+.text { min-width: 0; gap: 0; }
+.post-game-prefix { color: rgba(255, 255, 255, 0.7); }
+.post-game-value { color: ${active ? "#1a9fff" : "inherit"}; }
+.icon { width: 16px; height: 16px; color: #dcdedf; margin: 0 8px; flex: 0 0 16px; }
+.icon-native { width: 16px; height: 16px; }
+@keyframes native-syncing { 0%, 100% { color: #dcdedf; } 50% { color: #3d4450; } }
+`
+    : "";
+  const statusContent = postGame
+    ? `<span class="post-game-label"><span class="post-game-prefix">Ludusavi: </span><span class="post-game-value">${autoSyncStatusText[state.status]}</span></span>`
+    : autoSyncStatusText[state.status];
   return `<!doctype html>
 <html>
 <head>
@@ -208,11 +237,13 @@ body {
 .download-arrow-fill {
   animation: arrow-fill-down 1.6s ease-out infinite;
 }
+${fontFace}
+${postGameStyles}
 </style>
 </head>
 <body>
 <div class="bar">
-  <div class="text"><span class="icon${iconClass}">${icon}</span>${autoSyncStatusText[state.status]}</div>
+  <div class="text"><span class="icon${iconClass}">${icon}</span>${statusContent}</div>
 </div>
 </body>
 </html>`;

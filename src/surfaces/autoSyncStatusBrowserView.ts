@@ -1,9 +1,11 @@
 
-import type { AutoSyncStatusBrowserView, AutoSyncStatusBrowserViewOwner, AutoSyncStatusKind, AutoSyncStatusState } from "../types";
+import type { AutoSyncStatusBrowserView, AutoSyncStatusBrowserViewOwner, AutoSyncStatusState } from "../types";
 import { getAutoSyncStatusBounds } from "../utils/steam";
 import { log } from "../utils/logging";
-import { renderAutoSyncStatusHtml } from "./autoSyncStatusRenderer";
-import { getSteamClient, asRecord, getGamepadUIMainWindowInstance } from "../utils/steamRuntime";
+import { renderAutoSyncStatusHtml, type NativePostGameAppearance } from "./autoSyncStatusRenderer";
+import { getSteamClient, asRecord, getGamepadMainWindow, getGamepadUIMainWindowInstance } from "../utils/steamRuntime";
+
+const NATIVE_BOLD_FONT_URL = "https://steamloopback.host/custom_fonts/clientui.uifont?MotivaSans-Bold";
 
 export type AutoSyncStatusBrowserViewApi = {
   setContext(state: AutoSyncStatusState): void;
@@ -14,10 +16,13 @@ export type AutoSyncStatusBrowserViewApi = {
 
 export function createAutoSyncStatusBrowserView(): AutoSyncStatusBrowserViewApi {
   let currentAutoSyncStatusState: AutoSyncStatusState = { status: "has_backup", visible: false, source: "hide" };
-  let loadedAutoSyncStatus: AutoSyncStatusKind | null = null;
+  let currentPresentationKey = presentationKey(currentAutoSyncStatusState);
+  let loadedAutoSyncStatusKey: string | null = null;
+  let pendingAutoSyncStatusKey: string | null = null;
+  let nativeBoldFontDataUrlPromise: Promise<string | null> | null = null;
 
   let autoSyncStatusShowTimeoutID: number | null = null;
-  let autoSyncStatusShowGeneration = 0;
+  let presentationGeneration = 0;
   let autoSyncStatusBrowserView: AutoSyncStatusBrowserView | null = null;
   let autoSyncStatusBrowserViewOwner: AutoSyncStatusBrowserViewOwner | null = null;
   const AUTO_SYNC_STATUS_SHOW_DELAY = 100;
@@ -28,6 +33,116 @@ export function createAutoSyncStatusBrowserView(): AutoSyncStatusBrowserViewApi 
     }
     window.clearTimeout(autoSyncStatusShowTimeoutID);
     autoSyncStatusShowTimeoutID = null;
+  }
+
+  function presentationKey(state: AutoSyncStatusState): string {
+    return `${state.lifecycle === "lifecycle_exit" ? "exit" : "startup"}:${state.status}:${state.appID ?? ""}`;
+  }
+
+  function updateContext(state: AutoSyncStatusState) {
+    const key = presentationKey(state);
+    const changedPresentation = key !== currentPresentationKey
+      || state.visible !== currentAutoSyncStatusState.visible;
+    currentAutoSyncStatusState = state;
+    currentPresentationKey = key;
+    if (!changedPresentation) {
+      return;
+    }
+
+    presentationGeneration += 1;
+    pendingAutoSyncStatusKey = null;
+    clearAutoSyncStatusShowTimeout();
+    try {
+      autoSyncStatusBrowserView?.SetVisible?.(false);
+    } catch (err) {
+      log("debug", `Could not hide changed BrowserView presentation: ${err}`, "autosync_status");
+    }
+  }
+
+  function loadNativeBoldFontDataUrl(): Promise<string | null> {
+    if (nativeBoldFontDataUrlPromise) {
+      return nativeBoldFontDataUrlPromise;
+    }
+
+    const request = (async () => {
+      const response = await fetch(NATIVE_BOLD_FONT_URL);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === "string") {
+            resolve(reader.result);
+          } else {
+            reject(new Error("Font data URL was not produced"));
+          }
+        };
+        reader.onerror = () => reject(reader.error ?? new Error("Font data URL encoding failed"));
+        reader.onabort = () => reject(new Error("Font data URL encoding was aborted"));
+        try {
+          reader.readAsDataURL(blob);
+        } catch (err) {
+          reject(err);
+        }
+      });
+    })().catch((err: unknown) => {
+      log("warning", `Could not load native MotivaSans-Bold font: ${err}`, "autosync_status");
+      if (nativeBoldFontDataUrlPromise === request) {
+        nativeBoldFontDataUrlPromise = null;
+      }
+      return null;
+    });
+    nativeBoldFontDataUrlPromise = request;
+    return request;
+  }
+
+  function nativeRowBackgroundColor(state: AutoSyncStatusState): string {
+    if (!state.appID) {
+      return "transparent";
+    }
+    try {
+      const document = getGamepadMainWindow()?.document;
+      if (!document) {
+        return "transparent";
+      }
+      for (const row of document.querySelectorAll<HTMLElement>("[data-sdh-ludusavi-status-row]")) {
+        if (row.getAttribute("data-sdh-ludusavi-status-appid") !== state.appID) continue;
+        const color = row.ownerDocument?.defaultView?.getComputedStyle?.(row).backgroundColor;
+        return typeof color === "string" && color ? color : "transparent";
+      }
+      return "transparent";
+    } catch {
+      return "transparent";
+    }
+  }
+
+  function isCurrentPresentation(
+    browserView: AutoSyncStatusBrowserView,
+    key: string,
+    generation: number,
+  ): boolean {
+    return generation === presentationGeneration
+      && autoSyncStatusBrowserView === browserView
+      && currentAutoSyncStatusState.visible
+      && currentPresentationKey === key;
+  }
+
+  function scheduleAutoSyncStatusReveal(
+    browserView: AutoSyncStatusBrowserView,
+    key: string,
+    generation: number,
+  ) {
+    autoSyncStatusShowTimeoutID = window.setTimeout(() => {
+      autoSyncStatusShowTimeoutID = null;
+      if (!isCurrentPresentation(browserView, key, generation)) {
+        return;
+      }
+      browserView.SetVisible?.(true);
+      browserView.SetWindowStackingOrder?.(50);
+      browserView.SetFocus?.(false);
+    }, AUTO_SYNC_STATUS_SHOW_DELAY);
   }
 
 
@@ -175,13 +290,15 @@ export function createAutoSyncStatusBrowserView(): AutoSyncStatusBrowserViewApi 
 
   return {
     setContext(state: AutoSyncStatusState) {
-      currentAutoSyncStatusState = state;
+      updateContext(state);
     },
 
     sync(state: AutoSyncStatusState) {
+      updateContext(state);
       if (!state.visible && !autoSyncStatusBrowserView) {
         clearAutoSyncStatusShowTimeout();
-        loadedAutoSyncStatus = null;
+        loadedAutoSyncStatusKey = null;
+        pendingAutoSyncStatusKey = null;
         return;
       }
       const browserView = ensureAutoSyncStatusBrowserView();
@@ -197,17 +314,29 @@ export function createAutoSyncStatusBrowserView(): AutoSyncStatusBrowserViewApi 
 
       if (!state.visible) {
         clearAutoSyncStatusShowTimeout();
+        pendingAutoSyncStatusKey = null;
         browserView.SetVisible(false);
         try {
-          browserView.LoadURL?.("about:blank");
+          browserView.LoadURL("about:blank");
         } catch (err) {
           log("debug", `Could not navigate BrowserView to blank: ${err}`, "autosync_status");
         }
-        loadedAutoSyncStatus = null;
+        loadedAutoSyncStatusKey = null;
         return;
       }
 
-      if (state.status === loadedAutoSyncStatus) {
+      const key = currentPresentationKey;
+      if (pendingAutoSyncStatusKey === key) {
+        try {
+          browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);
+          browserView.SetWindowStackingOrder?.(50);
+          browserView.SetFocus?.(false);
+        } catch (err) {
+          log("warning", `Could not update bounds for existing BrowserView: ${err}`, "autosync_status");
+        }
+        return;
+      }
+      if (key === loadedAutoSyncStatusKey) {
         try {
           browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);
           browserView.SetWindowStackingOrder?.(50);
@@ -221,37 +350,56 @@ export function createAutoSyncStatusBrowserView(): AutoSyncStatusBrowserViewApi 
         return;
       }
 
-      // Changed status or initially unloaded
       clearAutoSyncStatusShowTimeout();
-      const showGeneration = ++autoSyncStatusShowGeneration;
+      const generation = presentationGeneration;
+      const presentationState = { ...state };
 
       try {
-        const html = renderAutoSyncStatusHtml(state);
-        const url = "data:text/html;charset=utf-8," + encodeURIComponent(html);
-
         log("debug", `Syncing BrowserView (changed status): bounds=${JSON.stringify(bounds)}`, "autosync_status");
-
         browserView.SetVisible(false);
         browserView.SetBounds(bounds.x, bounds.y, bounds.width, bounds.height);
-        browserView.LoadURL(url);
-        loadedAutoSyncStatus = state.status;
+        loadedAutoSyncStatusKey = null;
 
-        autoSyncStatusShowTimeoutID = window.setTimeout(() => {
-          autoSyncStatusShowTimeoutID = null;
-          if (showGeneration !== autoSyncStatusShowGeneration || !currentAutoSyncStatusState.visible) {
-            return;
-          }
-          browserView.SetVisible?.(true);
-          browserView.SetWindowStackingOrder?.(50);
-          browserView.SetFocus?.(false);
-        }, AUTO_SYNC_STATUS_SHOW_DELAY);
+        if (state.lifecycle === "lifecycle_exit") {
+          pendingAutoSyncStatusKey = key;
+          void loadNativeBoldFontDataUrl().then((fontDataUrl) => {
+            if (!isCurrentPresentation(browserView, key, generation)) {
+              return;
+            }
+            const appearance: NativePostGameAppearance = {
+              fontDataUrl,
+              backgroundColor: nativeRowBackgroundColor(presentationState),
+            };
+            const html = renderAutoSyncStatusHtml(presentationState, appearance);
+            browserView.LoadURL?.("data:text/html;charset=utf-8," + encodeURIComponent(html));
+            loadedAutoSyncStatusKey = key;
+            pendingAutoSyncStatusKey = null;
+            scheduleAutoSyncStatusReveal(browserView, key, generation);
+          }).catch((err: unknown) => {
+            if (!isCurrentPresentation(browserView, key, generation)) {
+              return;
+            }
+            pendingAutoSyncStatusKey = null;
+            loadedAutoSyncStatusKey = null;
+            log("warning", `Could not update status strip BrowserView: ${err}`, "autosync_status");
+          });
+          return;
+        }
+
+        const html = renderAutoSyncStatusHtml(presentationState);
+        browserView.LoadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+        loadedAutoSyncStatusKey = key;
+        scheduleAutoSyncStatusReveal(browserView, key, generation);
       } catch (err) {
-        loadedAutoSyncStatus = null;
+        pendingAutoSyncStatusKey = null;
+        loadedAutoSyncStatusKey = null;
         log("warning", `Could not update status strip BrowserView: ${err}`, "autosync_status");
       }
     },
 
     destroy() {
+      presentationGeneration += 1;
+      pendingAutoSyncStatusKey = null;
       clearAutoSyncStatusShowTimeout();
       try {
         const browserView = autoSyncStatusBrowserView;
@@ -283,11 +431,13 @@ export function createAutoSyncStatusBrowserView(): AutoSyncStatusBrowserViewApi 
       } finally {
         autoSyncStatusBrowserView = null;
         autoSyncStatusBrowserViewOwner = null;
-        loadedAutoSyncStatus = null;
+        loadedAutoSyncStatusKey = null;
       }
     },
 
     clearShowTimeout() {
+      presentationGeneration += 1;
+      pendingAutoSyncStatusKey = null;
       clearAutoSyncStatusShowTimeout();
     }
   };

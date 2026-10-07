@@ -4,7 +4,7 @@ SDH-Ludusavi helps you back up and restore game saves from Gaming Mode on your S
 
 ![SDH-Ludusavi in Gaming Mode](assets/demo.webp?cacheBuster=18)
 
-You can see the latest save result on supported non-Steam game pages without opening the Decky menu. After automatic work when you quit a game, that game's page shows the full save message, such as local backup, upload, or upload-warning progress. If you leave the page, the post-game message hides but the work continues. Returning shows the latest active state or retained result. Steam Cloud pages keep their usual Steam Cloud status.
+You can see the latest save result on supported non-Steam game pages without opening the Decky menu. After automatic work when you quit a game, that game's page shows the full save message, such as local backup, upload, or upload-warning progress. If a theme or the footer covers the normal row, a Steam-style fallback shows the message on that same page. If you leave the page, the post-game message hides but the work continues. Returning shows the latest active state or retained result. Steam Cloud pages keep their usual Steam Cloud status.
 
 ![Ludusavi showing Up to date on a non-Steam game page](assets/native-status-row.webp?cacheBuster=18)
 

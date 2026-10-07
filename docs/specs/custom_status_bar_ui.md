@@ -371,11 +371,28 @@ warning needs an accepted `backed_up` local fact; otherwise it keeps its compact
 local result and a remote observation remain distinct in the row text. Start-side checking,
 restore, and conflict work always use the strip.
 
-The post-game fallback uses the same static 16-pixel native glyphs and the same
-1.5-second color-pulse timing as the native row. It retains the fallback's existing
-status colors. Its busy glyph does not switch to a spinning ring or animated arrow fill
-when ownership moves between surfaces. Start-side and non-post-game BrowserView glyphs,
-motion, and protected presentation remain unchanged.
+The post-game fallback uses the same static 16-pixel native glyphs, 12-pixel bold
+Motiva Sans text, 22-pixel line height, 0.5-pixel tracking, and two-pixel horizontal
+side dividers as the native row. Its muted `Ludusavi:` prefix remains gray; only an
+active status value turns blue. Idle and problem icons inherit native gray. Busy
+icons use the native 1.5-second gray-to-dark-gray-to-gray pulse, not a spinning ring
+or animated arrow fill. The same-app native row's current background is sampled
+from its owner document when a post-game document is prepared; absent rows use a
+transparent native background. Full messages and existing ownership, clipping,
+same-page, and lifetime rules remain unchanged.
+
+The separate BrowserView cannot inherit the main Steam document's font faces.
+It fetches `https://steamloopback.host/custom_fonts/clientui.uifont?MotivaSans-Bold`
+from the plugin's Steam origin and embeds the font data in each post-game document.
+One successful or in-flight font request is cached per view API instance; the font
+is not shipped in the plugin or fetched from a public font service. If that local
+request fails, the message remains readable through the font stack and the failure
+is logged; a later normal publication can request the font again, without a retry
+loop. Pending font completion cannot replace a newer status, revive a hidden or
+destroyed view, or overwrite protected startup presentation. Identical pending or
+loaded presentations do not reload the document or replay its reveal delay.
+Start-side and non-post-game BrowserView fonts, colors, glyphs, motion, and protected
+presentation remain unchanged and do not wait for the post-game font.
 
 The cloud family uses the native 36-unit drawing and cutouts in the same coordinate
 system. Steam renders that square canvas uniformly into its 16-pixel icon slot;

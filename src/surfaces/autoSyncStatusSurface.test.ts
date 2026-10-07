@@ -23,6 +23,9 @@ describe("Auto-sync status presentation policy", () => {
       visible: true,
       source: "lifecycle_exit",
       lifecycle: "lifecycle_exit",
+    }, {
+      fontDataUrl: "data:font/woff2;base64,Zm9udA==",
+      backgroundColor: "rgb(14, 20, 27)",
     }));
     const icon = document.querySelector(".icon svg")!;
     for (const element of icon.querySelectorAll("[fill], [stroke]")) {
