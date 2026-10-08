@@ -2,11 +2,11 @@
 
 SDH-Ludusavi helps you back up and restore game saves from Gaming Mode on your Steam Deck. It uses Ludusavi to keep copies of your saves. If you turn on **Automatic Sync**, it checks for a newer backup before a game starts and backs up your saves when you quit.
 
-![SDH-Ludusavi in Gaming Mode](assets/demo.webp?cacheBuster=18)
+![SDH-Ludusavi in Gaming Mode](assets/demo.webp?cacheBuster=19)
 
 You can see the latest save result on supported non-Steam game pages without opening the Decky menu. After automatic work when you quit a game, that game's page shows the full save message, such as local backup, upload, or upload-warning progress. Readable messages stay in the normal row even when a transparent footer area overlaps it. If a theme or the footer actually covers the message, a Steam-style fallback shows it on that same page. If you leave the page, the post-game message hides but the work continues. Returning shows the latest active state or retained result. Steam Cloud pages keep their usual Steam Cloud status.
 
-![Ludusavi showing Up to date on a non-Steam game page](assets/native-status-row.webp?cacheBuster=18)
+![Ludusavi showing Up to date on a non-Steam game page](assets/native-status-row.webp?cacheBuster=19)
 
 ## Before you install
 
