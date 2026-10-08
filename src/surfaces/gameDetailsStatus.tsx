@@ -8,6 +8,7 @@ import { selectGameDetailsStatus, getSteamCloudEligibility, type GameDetailsStat
 import { isStatusPaintMeasurement, measureStatusBandPaint, mountGameDetailsArtworkBackdrop } from "./gameDetailsArtworkBackdrop";
 import { nativeIconSvgForAutoSyncStatus } from "./nativeGameDetailsStatusIcon";
 import type { DetailsStatusPresentationSurface } from "./autoSyncStatusSurface";
+import { isNativeStatusMessageUnoccluded } from "./nativeStatusMessageVisibility";
 import { getNativeGameDetailsStatusClasses, type NativeGameDetailsStatusClasses } from "./gameDetailsStatusClasses";
 
 const GAME_DETAILS_ROUTE = "/library/app/:appid";
@@ -16,7 +17,11 @@ const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // update an already-mounted details page without a navigation.
 const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
 // Bump when an existing route wrapper cannot render the newest status-row contract.
-const GAME_DETAILS_ROUTE_RENDER_VERSION = 23;
+const GAME_DETAILS_ROUTE_RENDER_VERSION = 24;
+const EXTERNAL_PAINT_EVENTS = [
+  "transitionstart", "transitionend", "transitioncancel",
+  "animationstart", "animationend", "animationcancel",
+] as const;
 export type GameDetailsStatusSurface = Readonly<{
   dispose(): void;
 }>;
@@ -480,8 +485,19 @@ function useVisibleLayout(element: HTMLDivElement | null, label: string): boolea
         subtree: true,
       });
       for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
-        mutationObserver?.observe(ancestor, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
+        if (ancestor !== element.ownerDocument.body) mutationObserver?.observe(ancestor, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
       }
+      // Footer and overlay branches can paint over a readable message without
+      // changing the row or its ancestors. Observe body descendants so their
+      // paint changes release or reacquire ownership without a label update.
+      const body = element.ownerDocument.body;
+      if (body) mutationObserver?.observe(body, {
+        attributes: true,
+        attributeFilter: ["class", "style", "hidden"],
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
       if (element.ownerDocument.head) mutationObserver?.observe(element.ownerDocument.head, { childList: true, characterData: true, subtree: true, attributes: true });
     };
     const update = () => {
@@ -495,6 +511,15 @@ function useVisibleLayout(element: HTMLDivElement | null, label: string): boolea
     const schedule = () => {
       if (frame !== null) return;
       frame = hostWindow.requestAnimationFrame(update);
+    };
+    const scheduleExternalPaint = (event: Event) => {
+      const target = event.target;
+      if (target && "nodeType" in target && typeof target.nodeType === "number") {
+        // CSS paint events carry nodes from this owner document.
+        const nodeTarget = target as Node;
+        if (element.contains(nodeTarget)) return;
+      }
+      schedule();
     };
     scheduleVisibilityCheck.current = schedule;
     const HostMutationObserver = hostWindow.MutationObserver;
@@ -513,6 +538,7 @@ function useVisibleLayout(element: HTMLDivElement | null, label: string): boolea
     resizeObserver?.observe(element);
     hostWindow.addEventListener("resize", schedule);
     hostWindow.addEventListener("scroll", schedule, true);
+    for (const event of EXTERNAL_PAINT_EVENTS) element.ownerDocument.addEventListener(event, scheduleExternalPaint, true);
     watchStyles();
     update();
     return () => {
@@ -520,6 +546,7 @@ function useVisibleLayout(element: HTMLDivElement | null, label: string): boolea
       observer?.disconnect(); resizeObserver?.disconnect(); mutationObserver?.disconnect();
       if (frame !== null) hostWindow.cancelAnimationFrame(frame);
       hostWindow.removeEventListener("resize", schedule); hostWindow.removeEventListener("scroll", schedule, true);
+      for (const event of EXTERNAL_PAINT_EVENTS) element.ownerDocument.removeEventListener(event, scheduleExternalPaint, true);
     };
   }, [element]);
   useLayoutEffect(() => { scheduleVisibilityCheck.current?.(); }, [label]);
@@ -555,6 +582,14 @@ export function isVisibleStatusBand(element: HTMLDivElement, intersecting: boole
   return measureStatusBandPaint(element, () => isThemedStatusBandVisible(element));
 }
 
+
+function hasCompleteNativeStatusMessage(element: HTMLElement): boolean {
+  if (element.getAttribute("data-sdh-ludusavi-status-row") !== "true") return false;
+  const label = element.querySelector<HTMLElement>('[data-sdh-ludusavi-status-label="true"]');
+  const icon = element.querySelector<HTMLElement>('[data-sdh-ludusavi-status-icon="true"]');
+  return Boolean(label?.textContent?.trim() && icon?.querySelector("svg"));
+}
+
 function isThemedStatusBandVisible(element: HTMLDivElement): boolean {
   const ownerDocument = element.ownerDocument;
   const hostDocument = ownerDocument ?? document;
@@ -580,7 +615,8 @@ function isThemedStatusBandVisible(element: HTMLDivElement): boolean {
   if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= root.clientHeight || rect.left >= root.clientWidth) return false;
   if (typeof hostDocument.elementFromPoint === "function") {
     const top = hostDocument.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-    if (top && !element.contains(top)) return false;
+    if (top && !element.contains(top)
+      && (!hasCompleteNativeStatusMessage(element) || !isNativeStatusMessageUnoccluded(element, top))) return false;
   }
   return true;
 }

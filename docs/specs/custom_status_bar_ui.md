@@ -346,6 +346,27 @@ inline opacity temporarily removed, then restored with its original priority. Vi
 slot, and artwork observers share a mutation-batch guard so these measurements do not
 cause an observer feedback loop.
 
+For a complete plugin-owned message, a foreign hit-test result is not by itself
+proof of visual obstruction. The native row can own presentation when conservative
+owner-document paint measurement proves that the full text-node Range rectangles
+and SVG canvas are clear. Transparent interaction containers are inspected together
+with their overflowing descendants and overlay siblings up to the document body.
+Actual background, border, text, image, native/replaced, and generated paint over
+any message part rejects ownership, including paint with `pointer-events: none`.
+Contained border images and generated paint clipped on both axes can be excluded
+only when their known paint box lies outside the message. Unknown or potentially
+spilling effects remain conservative, and active foreign paint animations do not
+establish a clear message until they settle. Unsupported or empty message geometry
+also yields to the fallback. There is no footer-class or theme-name exemption.
+
+The existing row intersection, theme visibility, ancestor clipping, and full-label
+overflow guards remain in force. Footer and overlay body mutations plus external
+transition/animation start, end, and cancel events recheck availability through the
+existing coalesced frame scheduler. Paint measurement does not move the row, change
+artwork allocation, alter active observations, or call a status hide/settlement path.
+Startup protection and native Steam Cloud controls remain unchanged.
+
+
 Visible inventory, durable-history, and pre-game row text uses short Steam-style states: `Checking...`, `Backing up...`, `Restoring...`,
 `Uploading...`, `Downloading...`, `Up to date`, `Out of sync`, `File conflict`, `Disabled`,
 `Unable to sync`, and `Unknown`. The accessible description keeps the precise local-result and
@@ -430,8 +451,10 @@ Native DOM, stylesheet, scroll, resize, and band-size changes resync the artwork
 The allocator preserves the v0.4.9 native game-view placement. It never writes
 `--CGV-top-panel-height` or `--CGV-image-height`, does not move Play controls or Activity,
 and does not reposition either a Steam Cloud row or a Ludusavi row to pass visibility checks.
-The existing native visibility and complete-label checks still decide paint ownership;
-footer-obscured rows can yield to the same-page fallback without a layout adjustment.
+Native visibility, complete-label, and conservative message-paint checks decide
+ownership. Footer interaction padding alone does not reject a readable message;
+genuinely footer-covered or clipped messages still yield to the same-page fallback
+without a layout adjustment.
 
 For recognized Clean Gameview artwork equations, minimum coverage on the native header
 background and matching native image can keep a Metadata trailer full-size without changing

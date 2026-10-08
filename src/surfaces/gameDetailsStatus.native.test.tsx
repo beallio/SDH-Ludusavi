@@ -93,7 +93,7 @@ it("replaces a retained prior-renderer wrapper while preserving direct cold-peer
   const legacyPatch = vi.fn();
   const legacyInstalledPatch = vi.fn();
   globalThis.__sdhLudusaviGameDetailsStatusRoutePatch = {
-    version: 22, patch: legacyPatch, installedPatch: legacyInstalledPatch, removalTimer: null,
+    version: 23, patch: legacyPatch, installedPatch: legacyInstalledPatch, removalTimer: null,
   };
   const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
   const store = createLudusaviStateStore();
@@ -172,6 +172,190 @@ it("rejects theme-hidden opacity while allowing only our own temporary paint sup
   themeOpacity = "1";
   expect(isVisibleStatusBand(row, true)).toBe(true);
   expect(row.style.opacity).toBe("0");
+});
+
+it("keeps foreign-center rejection for nonplugin and incomplete status rows", () => {
+  const row = document.createElement("div");
+  const hit = document.createElement("div");
+  document.body.append(row, hit);
+  document.elementFromPoint = () => hit;
+  expect(isVisibleStatusBand(row, true)).toBe(false);
+
+  row.dataset.sdhLudusaviStatusRow = "true";
+  row.innerHTML = '<span data-sdh-ludusavi-status-label="true">Readable status</span><span data-sdh-ludusavi-status-icon="true"></span>';
+  expect(isVisibleStatusBand(row, true)).toBe(false);
+});
+
+function footerPaintFixture() {
+  const box = (left: number, top: number, right: number, bottom: number) =>
+    ({ left, top, right, bottom, width: right - left, height: bottom - top } as DOMRect);
+  const container = document.createElement("section");
+  const row = document.createElement("div");
+  row.dataset.sdhLudusaviStatusRow = "true";
+  row.innerHTML = '<span data-sdh-ludusavi-status-icon="true"><svg viewBox="0 0 16 16"></svg></span><span data-sdh-ludusavi-status-label="true">Readable status</span>';
+  const label = row.querySelector<HTMLElement>("[data-sdh-ludusavi-status-label]")!;
+  const svg = row.querySelector("svg")!;
+  const footer = document.createElement("div");
+  const hit = document.createElement("div");
+  footer.append(hit);
+  container.append(row, footer);
+  document.body.append(container);
+  const colors = new Map<Element, string>([[footer, "rgba(0, 0, 0, 0.5)"]]);
+  const opacities = new Map<Element, string>();
+  container.getBoundingClientRect = () => box(0, 0, 854, 534);
+  row.getBoundingClientRect = () => box(0, 494, 854, 524);
+  label.getBoundingClientRect = () => box(300, 498, 600, 520);
+  svg.getBoundingClientRect = () => box(276, 501, 292, 517);
+  let paintTop = 519;
+  footer.getBoundingClientRect = () => box(0, paintTop, 854, 534);
+  hit.getBoundingClientRect = () => box(16, 508, 838, 546);
+  document.elementFromPoint = () => hit;
+  document.elementsFromPoint = () => [hit, label, row, container];
+  document.createRange = (() => ({
+    selectNodeContents() {},
+    getClientRects: () => [box(300, 500, 600, 516)],
+    detach() {},
+  })) as unknown as typeof document.createRange;
+  window.getComputedStyle = ((element: HTMLElement, pseudo?: string) => ({
+    display: "block", visibility: "visible", opacity: opacities.get(element) ?? (element.style.opacity || "1"),
+    overflow: "visible", overflowX: "visible", overflowY: "visible",
+    backgroundColor: pseudo ? "rgba(0, 0, 0, 0)" : colors.get(element) ?? "rgba(0, 0, 0, 0)",
+    backgroundImage: "none", color: "rgb(220, 222, 223)", content: "none",
+    boxShadow: "none", textShadow: "none", filter: "none", backdropFilter: "none",
+    maskImage: "none", clipPath: "none", mixBlendMode: "normal",
+    borderTopWidth: "0px", borderRightWidth: "0px", borderBottomWidth: "0px", borderLeftWidth: "0px",
+    borderTopColor: "rgba(0, 0, 0, 0)", borderRightColor: "rgba(0, 0, 0, 0)",
+    borderBottomColor: "rgba(0, 0, 0, 0)", borderLeftColor: "rgba(0, 0, 0, 0)",
+    pointerEvents: element.style.pointerEvents || "auto",
+  })) as typeof window.getComputedStyle;
+  return { container, row, footer, hit, colors, opacities, box, set paintTop(value: number) { paintTop = value; } };
+}
+
+it("admits a complete message behind a transparent hit layer when footer paint is below its text and icon", () => {
+  const fixture = footerPaintFixture();
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(true);
+});
+
+it("rejects footer paint that intersects the message rather than exempting the whole footer", () => {
+  const fixture = footerPaintFixture();
+  fixture.paintTop = 513;
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(false);
+});
+
+it("admits a contained footer border image below the message but rejects potentially spilling paint", () => {
+  const fixture = footerPaintFixture();
+  const computedStyle = window.getComputedStyle;
+  let outset = "0";
+  window.getComputedStyle = ((element: HTMLElement, pseudo?: string) => ({
+    ...computedStyle(element, pseudo),
+    borderImageSource: element === fixture.footer && !pseudo ? "linear-gradient(white, transparent)" : "none",
+    borderImageOutset: element === fixture.footer && !pseudo ? outset : "0",
+  })) as typeof window.getComputedStyle;
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(true);
+  outset = "4px";
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(false);
+});
+
+it("rejects a painted noninteractive child inside an otherwise transparent covering branch", () => {
+  const fixture = footerPaintFixture();
+  const paint = document.createElement("div");
+  paint.style.pointerEvents = "none";
+  paint.getBoundingClientRect = () => fixture.box(450, 503, 470, 512);
+  fixture.colors.set(paint, "rgb(0, 0, 0)");
+  fixture.hit.append(paint);
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(false);
+});
+
+it("keeps painted overlay siblings authoritative even when they do not receive pointer hits", () => {
+  const fixture = footerPaintFixture();
+  const backdrop = document.createElement("div");
+  backdrop.style.pointerEvents = "none";
+  backdrop.getBoundingClientRect = () => fixture.box(0, 0, 854, 534);
+  fixture.colors.set(backdrop, "rgba(0, 0, 0, 0.7)");
+  fixture.container.append(backdrop);
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(false);
+  fixture.opacities.set(backdrop, "0");
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(true);
+});
+
+it("rejects painted overlays outside the nearest shared footer ancestor", () => {
+  const fixture = footerPaintFixture();
+  const backdrop = document.createElement("div");
+  backdrop.style.pointerEvents = "none";
+  backdrop.getBoundingClientRect = () => fixture.box(0, 0, 854, 534);
+  fixture.colors.set(backdrop, "rgba(0, 0, 0, 0.7)");
+  document.body.append(backdrop);
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(false);
+  fixture.opacities.set(backdrop, "0");
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(true);
+});
+
+it("does not admit a zero-opacity covering layer while a paint animation is still active", () => {
+  const fixture = footerPaintFixture();
+  const backdrop = document.createElement("div");
+  backdrop.getBoundingClientRect = () => fixture.box(0, 0, 854, 534);
+  fixture.colors.set(backdrop, "rgba(0, 0, 0, 0.7)");
+  fixture.opacities.set(backdrop, "0");
+  document.body.append(backdrop);
+  let running = true;
+  backdrop.getAnimations = () => running ? [{ playState: "running", pending: false } as Animation] : [];
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(false);
+  running = false;
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(true);
+});
+
+it("keeps moving painted layers conservative until their animation settles", () => {
+  const fixture = footerPaintFixture();
+  const moving = document.createElement("div");
+  moving.getBoundingClientRect = () => fixture.box(0, -30, 854, -10);
+  fixture.colors.set(moving, "rgba(0, 0, 0, 0.7)");
+  document.body.append(moving);
+  let running = true;
+  moving.getAnimations = () => running ? [{ playState: "running", pending: false } as Animation] : [];
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(false);
+  running = false;
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(true);
+});
+
+it("does not treat non-rendered text in an offscreen overlay as message-covering paint", () => {
+  const fixture = footerPaintFixture();
+  const tooltip = document.createElement("div");
+  const text = document.createTextNode("Offscreen title");
+  tooltip.append(text);
+  tooltip.getBoundingClientRect = () => fixture.box(8, -43, 276, -9);
+  fixture.colors.set(tooltip, "rgb(35, 38, 46)");
+  document.body.append(tooltip);
+  let selected: Node | null = null;
+  document.createRange = (() => ({
+    selectNodeContents(node: Node) { selected = node; },
+    getClientRects: () => selected === text ? [] : [fixture.box(300, 500, 600, 516)],
+    detach() {},
+  })) as unknown as typeof document.createRange;
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(true);
+});
+
+it("admits offscreen generated paint only when its positioned host clips it on both axes", () => {
+  const fixture = footerPaintFixture();
+  const track = document.createElement("div");
+  track.getBoundingClientRect = () => fixture.box(55, -29, 259, -23);
+  document.body.append(track);
+  const computedStyle = window.getComputedStyle;
+  let pseudoPosition = "absolute";
+  let clips = true;
+  window.getComputedStyle = ((element: HTMLElement, pseudo?: string) => ({
+    ...computedStyle(element, pseudo),
+    position: element === track ? pseudo ? pseudoPosition : "relative" : "static",
+    overflowX: element === track && clips ? "hidden" : "visible",
+    overflowY: element === track && clips ? "hidden" : "visible",
+    content: element === track && pseudo === "::before" ? '""' : "none",
+    backgroundColor: element === track && pseudo === "::before" ? "rgb(26, 159, 255)" : "rgba(0, 0, 0, 0)",
+  })) as typeof window.getComputedStyle;
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(true);
+  clips = false;
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(false);
+  clips = true;
+  pseudoPosition = "fixed";
+  expect(isVisibleStatusBand(fixture.row, true)).toBe(false);
 });
 
 it("rejects a clipped full label until its available content width recovers", () => {
@@ -281,6 +465,120 @@ it("rechecks row ownership when a full post-game label changes", async () => {
   label.getBoundingClientRect = () => ({ width: 854, height: 22, left: 0, top: 256, right: 854, bottom: 278 } as DOMRect);
   await render(createElement(GameDetailsStatusRow, { appID: "100", model: { ...clippedModel, label: `${clippedModel.label}  ` }, statusSurface: surface, suppressed: false }));
   expect(owners).toEqual(new Set(["100"]));
+});
+
+it("releases and reacquires native ownership for footer and overlay paint changes without replacing active facts", async () => {
+  const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
+  const store = createLudusaviStateStore();
+  store.applyRefreshResult({
+    games: [{ name: "Fixture", steam_id: "100", configured: true, has_backup: true, needs_first_backup: false, error: null, status: "has_backup" }],
+    aliases: {}, history: {}, dependency_error: null,
+  });
+  const statusSurface = createAutoSyncStatusSurface(view, store);
+  const releasePage = statusSurface.registerDetailsPage("100");
+  const box = (left: number, top: number, right: number, bottom: number) =>
+    ({ left, top, right, bottom, width: right - left, height: bottom - top } as DOMRect);
+  const footer = document.createElement("div");
+  const hit = document.createElement("div");
+  footer.append(hit);
+  document.body.append(footer);
+  let paintTop = 519;
+  footer.getBoundingClientRect = () => box(0, paintTop, 854, 534);
+  hit.getBoundingClientRect = () => box(16, 508, 838, 546);
+  let row: HTMLDivElement | null = null;
+  let label: HTMLElement | null = null;
+  let icon: HTMLElement | null = null;
+  let menu: HTMLElement | null = null;
+  let centerHit: Element | null = null;
+  document.elementFromPoint = () => centerHit ?? row;
+  document.elementsFromPoint = () => [hit, ...(menu ? [menu] : []), ...(label ? [label] : []), ...(row ? [row] : []), host];
+  document.createRange = (() => ({
+    selectNodeContents() {},
+    getClientRects: () => [box(300, 500, 600, 516)],
+    detach() {},
+  })) as unknown as typeof document.createRange;
+  window.getComputedStyle = ((element: HTMLElement, pseudo?: string) => ({
+    display: element.style.display || "block", visibility: element.style.visibility || "visible",
+    opacity: element.style.opacity || "1", overflow: "visible", overflowX: "visible", overflowY: "visible",
+    backgroundColor: pseudo ? "rgba(0, 0, 0, 0)" : element.style.backgroundColor || "rgba(0, 0, 0, 0)",
+    backgroundImage: "none", color: "rgb(220, 222, 223)", content: "none",
+    boxShadow: "none", textShadow: "none", filter: "none", backdropFilter: "none",
+    maskImage: "none", clipPath: "none", mixBlendMode: "normal",
+    borderTopWidth: "0px", borderRightWidth: "0px", borderBottomWidth: "0px", borderLeftWidth: "0px",
+    borderTopColor: "rgba(0, 0, 0, 0)", borderRightColor: "rgba(0, 0, 0, 0)",
+    borderBottomColor: "rgba(0, 0, 0, 0)", borderLeftColor: "rgba(0, 0, 0, 0)",
+    pointerEvents: element.style.pointerEvents || "auto",
+  })) as typeof getComputedStyle;
+  const setBounds = (element: Element, bounds: DOMRect) => {
+    Object.defineProperty(element, "getBoundingClientRect", { configurable: true, value: () => bounds });
+  };
+  const settlePaintMutations = async () => {
+    await act(async () => { await new Promise<void>((resolve) => setTimeout(resolve, 20)); });
+  };
+
+  try {
+    statusSurface.publish("backing_up", {
+      source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 22,
+      gameName: "Fixture", appID: "100", tracked: true,
+    });
+    const observation = store.getSnapshot().autoSyncObservations["100"];
+    expect(observation).toMatchObject({ status: "backing_up", activity: "active", generation: 22 });
+    await render(createElement(GameDetailsStatusRow, { appID: "100", model, statusSurface, suppressed: false }));
+    row = host.querySelector('[data-sdh-ludusavi-status-row="true"]') as HTMLDivElement;
+    label = row.querySelector<HTMLElement>('[data-sdh-ludusavi-status-label="true"]');
+    icon = row.querySelector<HTMLElement>('[data-sdh-ludusavi-status-icon="true"]');
+    setBounds(row, box(0, 494, 854, 524));
+    setBounds(label!, box(300, 498, 600, 520));
+    setBounds(icon!, box(276, 501, 292, 517));
+    setBounds(icon!.querySelector("svg")!, box(276, 501, 292, 517));
+    centerHit = hit;
+    footer.style.backgroundColor = "rgba(0, 0, 0, 0)";
+    await settlePaintMutations();
+    expect(statusSurface.shouldDetailsRowYield("100")).toBe(false);
+
+    paintTop = 513;
+    footer.setAttribute("style", "background-color: rgba(0, 0, 0, 0.5)");
+    await settlePaintMutations();
+    expect(statusSurface.shouldDetailsRowYield("100")).toBe(true);
+    expect(store.getSnapshot().autoSyncObservations["100"]).toBe(observation);
+
+    paintTop = 519;
+    footer.setAttribute("style", "background-color: rgba(0, 0, 0, 0)");
+    menu = document.createElement("div");
+    menu.style.pointerEvents = "none";
+    menu.style.backgroundColor = "rgba(0, 0, 0, 0.7)";
+    menu.getBoundingClientRect = () => box(0, 503, 854, 512);
+    document.body.append(menu);
+    await settlePaintMutations();
+    expect(statusSurface.shouldDetailsRowYield("100")).toBe(true);
+    expect(store.getSnapshot().autoSyncObservations["100"]).toBe(observation);
+
+    menu.setAttribute("style", "pointer-events: none; background-color: rgba(0, 0, 0, 0.7); opacity: 0");
+    await settlePaintMutations();
+    expect(statusSurface.shouldDetailsRowYield("100")).toBe(false);
+    expect(store.getSnapshot().autoSyncObservations["100"]).toBe(observation);
+
+    // Linkedom exposes the matching Event constructor through its DOM window.
+    const domWindow = window as unknown as { Event: typeof Event };
+    const DOMEvent = domWindow.Event;
+    footer.setAttribute("style", "background-color: rgba(0, 0, 0, 0.5)");
+    await settlePaintMutations();
+    expect(statusSurface.shouldDetailsRowYield("100")).toBe(false);
+    paintTop = 513;
+    footer.dispatchEvent(new DOMEvent("transitionend", { bubbles: true }));
+    await settlePaintMutations();
+    expect(statusSurface.shouldDetailsRowYield("100")).toBe(true);
+    paintTop = 519;
+    footer.dispatchEvent(new DOMEvent("transitioncancel", { bubbles: true }));
+    await settlePaintMutations();
+    expect(statusSurface.shouldDetailsRowYield("100")).toBe(false);
+    expect(store.getSnapshot().autoSyncObservations["100"]).toBe(observation);
+  } finally {
+    menu?.remove();
+    footer.remove();
+    releasePage();
+    statusSurface.dispose();
+  }
 });
 
 it("keeps same-page fallback active through an unsupported header and runtime replacement", async () => {

@@ -4,7 +4,7 @@ SDH-Ludusavi shows what it knows about your game saves in two places. The row on
 
 Steam Cloud games keep their Steam Cloud status. The Ludusavi row does not replace Steam Cloud or change which games the plugin can back up.
 
-By default, the Ludusavi row uses the same layout as Steam's Cloud row. Its save-status icons remain easy to tell apart, but use the row's normal size and alignment. If the normal row cannot show the full message or is genuinely covered, the plugin uses the same-page fallback instead. The post-game fallback also uses Steam-style text, colors, side lines, and icon pulse, while keeping the full message. The game-launch strip keeps its separate appearance. The plugin does not force the page to scroll.
+By default, the Ludusavi row uses the same layout as Steam's Cloud row. Its save-status icons remain easy to tell apart, but use the row's normal size and alignment. A transparent area of the footer does not hide a message that remains readable in the normal row. If the full message is genuinely covered or clipped, the plugin uses the same-page fallback instead. The post-game fallback also uses Steam-style text, colors, side lines, and icon pulse, while keeping the full message. The game-launch strip keeps its separate appearance. The plugin does not move the row or force the page to scroll.
 
 ## What the game-page row means
 
