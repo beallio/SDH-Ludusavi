@@ -276,9 +276,11 @@ Frontend static tests must verify:
   Decky route hook only at `/library/app/:appid` and composes the verified provider value.
   The inert wrapper survives the bounded same-contract reload handoff so an already-mounted
   page can receive the replacement store; if no replacement attaches, it removes the exact
-  installed patch. A new row-render contract replaces only an older retained plugin patch,
-  so subsequent native route renders use the current row without removing other plugins'
-  patches. It never changes Steam Cloud data, controls, or classes.
+  installed patch. A new row-render contract replaces only an older retained plugin patch.
+  It takes effect on the next native route render or manual page visit, without a forced
+  history refresh, Fiber change, or error-boundary reset. An already-open prior-contract
+  page may retain the older integration until the user leaves and returns. Other plugins'
+  patches remain installed. It never changes Steam Cloud data, controls, or classes.
 - Autosync lifecycle handlers publish strip states around existing RPC calls.
 - Autosync start/result success toasts are removed.
 - Autosync failure still routes through the `failures_errors` notification category.
@@ -307,17 +309,27 @@ The row appears only after the selected library entry has loaded matching detail
 Cloud enable flags. It is hidden when both flags are enabled, which is a display rule only and
 does not change backup or restore eligibility. It reads the selected entry through the native
 app-details subscription and does not substitute a catalog match or mutate Steam Cloud data.
-Unknown details leave the native row unchanged, but the mounted route still claims the details page
-so a same-page post-game fallback remains possible. Unsupported native provider shapes leave Steam
-unchanged and cannot mount the route contribution, so post-game BrowserView presentation stays
-hidden; protected launch presentation remains available.
+Unknown details leave the native row unchanged, but a supported mounted route still claims the
+details page so a same-page post-game fallback remains possible. Page presence accepts a valid
+React element root with renderable children, including loading text inside an element, empty
+roots, and multiple children. An absent or unsupported header value leaves native content
+unchanged without disabling that page claim. Bare null, text, arrays, and malformed root
+results remain unchanged and do not claim the page; protected launch presentation remains available.
 
-The route contribution clones Decky's React route child and composes at its deferred native
-Cloud-status component boundary. The Cloud component stays mounted. The row appears only when that
-component renders no native status band, so it never creates a second band or replaces native
-controls. The row releases ownership when it is hidden, clipped, offscreen, or covered. Its status
-icon and transfer animation are
-presentation only and it adds no controller focus stop.
+The route contribution clones Decky's React dispatcher element while preserving its key and ref.
+A stable adapter retains only the first delegated dispatcher type for each mounted/keyed instance,
+because Decky creates a new forwarding type on route replay. It forwards every current native prop
+and invokes the latest peer-patched `renderFunc` with the original receiver and arguments. Peers
+therefore receive the native Provider and its direct native child, not a copied-prop replacement.
+HLTB can patch that child's real render output, and PlayTime can still read and update its direct
+overview/details props. Only after the peer callback returns does the adapter add the independently
+mounted page-presence component and clone a supported Provider's header value. It never rewrites
+the Provider's native children.
+
+Composition remains at the deferred native Cloud-status boundary. The Cloud component stays
+mounted. The row appears only when that component renders no native status band, so it never
+creates a second band or replaces native controls. It releases ownership when hidden, clipped,
+offscreen, or covered. Its icon and transfer animation are presentation only and add no focus stop.
 
 A separate route-lifecycle component registers the mounted `/library/app/:appid` page with the
 active details presentation surface. The registration is tokenized: cleanup releases only the

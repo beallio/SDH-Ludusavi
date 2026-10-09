@@ -22,7 +22,9 @@ export default {
         rmSync(distDirectory, { recursive: true, force: true });
       },
     },
-    typescript(),
+    // Tests are typechecked separately; their peer-library source imports must
+    // not widen this production compiler program's emitted file paths.
+    typescript({ exclude: ["**/*.test.ts", "**/*.test.tsx"] }),
     json(),
     commonjs(),
     nodeResolve({ browser: true }),

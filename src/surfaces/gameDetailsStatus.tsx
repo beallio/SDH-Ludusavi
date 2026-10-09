@@ -1,5 +1,6 @@
 import { routerHook, type RoutePatch } from "@decky/api";
-import { Fragment, cloneElement, createElement, isValidElement, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { Fragment, cloneElement, createElement, forwardRef, isValidElement, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { CSSProperties, ReactElement, ReactNode } from "react";
 
 import type { LudusaviStateStore } from "../state/ludusaviState";
 import { sessionFromAppOverview } from "../utils/steam";
@@ -17,7 +18,7 @@ const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // update an already-mounted details page without a navigation.
 const GAME_DETAILS_ROUTE_REPLACEMENT_GRACE_MS = 2_500;
 // Bump when an existing route wrapper cannot render the newest status-row contract.
-const GAME_DETAILS_ROUTE_RENDER_VERSION = 24;
+const GAME_DETAILS_ROUTE_RENDER_VERSION = 25;
 const EXTERNAL_PAINT_EVENTS = [
   "transitionstart", "transitionend", "transitioncancel",
   "animationstart", "animationend", "animationcancel",
@@ -48,6 +49,11 @@ type NativeRouteRenderFunction = (...args: unknown[]) => unknown;
 type NativeRouteChildProps = RouteRecord & { renderFunc: NativeRouteRenderFunction };
 type NativeProviderProps = RouteRecord & { value: unknown };
 type NativeHeaderElementProps = RouteRecord & { children?: unknown };
+type DetailsPageRouteDispatcherProps = Readonly<{
+  renderFunc: NativeRouteRenderFunction;
+  sdhNativeType: ReactElement<NativeRouteChildProps>["type"];
+  sdhRouteRecord: RouteRecord;
+}>;
 type ManagedGameDetailsRoutePatch = {
   version?: number;
   patch: RoutePatch;
@@ -122,54 +128,73 @@ function retainGameDetailsRoutePatch(contributionRegistry: GameDetailsStatusCont
   }
 
   const wrappedHeaders = new WeakMap<NativeHeader, Map<string, NativeHeader>>();
+  const DetailsPageRouteDispatcher = forwardRef<unknown, DetailsPageRouteDispatcherProps>(function DetailsPageRouteDispatcher({
+    sdhNativeType,
+    sdhRouteRecord,
+    ...nativeProps
+  }, ref) {
+    // Decky supplies a fresh forwarding type on replay. Pin only its type for
+    // this mounted/keyed instance; every prop and peer callback stays current.
+    const nativeType = useRef(sdhNativeType).current;
+    const nativeRenderFunc = nativeProps.renderFunc;
+    const renderFunc = useMemo(() => function (this: unknown, ...args: unknown[]) {
+      const rendered = Reflect.apply(nativeRenderFunc, this, args);
+      const appID = routeAppID(args) ?? routeAppID([sdhRouteRecord]);
+      const routeResult = asRouteResultElement(rendered);
+      if (!appID || !routeResult || !isRenderableRouteChildren(routeResult.props.children)) return rendered;
+      let result = routeResult;
+      const provider = asNativeProviderElement(routeResult);
+      const nativeHeader = provider && asNativeHeader(provider.props.value);
+      if (provider && nativeHeader) {
+        let wrappersForHeader = wrappedHeaders.get(nativeHeader);
+        if (!wrappersForHeader) {
+          wrappersForHeader = new Map();
+          wrappedHeaders.set(nativeHeader, wrappersForHeader);
+        }
+        let wrappedHeader = wrappersForHeader.get(appID);
+        if (!wrappedHeader) {
+          wrappedHeader = (headerProps: unknown) => {
+            const contribution = contributionRegistry.getSnapshot();
+            return createElement(Fragment, null,
+              createElement(GameDetailsStatusHeader, {
+                appID,
+                header: nativeHeader,
+                headerProps,
+                contributionSource: contributionRegistry,
+                store: contribution?.store ?? null,
+                statusSurface: contribution?.statusSurface ?? null,
+              }),
+            );
+          };
+          wrappersForHeader.set(appID, wrappedHeader);
+        }
+        result = cloneElement(provider, { ...provider.props, value: wrappedHeader });
+      }
+      // Compose only after the final peer callback. HLTB selects the real
+      // native child's render boundary; PlayTime still sees its direct props.
+      return createElement(Fragment, null,
+        createElement(DetailsPagePresence, {
+          appID,
+          contributionSource: contributionRegistry,
+          key: "sdh-ludusavi-details-page-presence",
+        }),
+        result,
+      );
+    }, [nativeRenderFunc, sdhRouteRecord]);
+    return createElement(nativeType, { ...nativeProps, renderFunc, ref });
+  });
   const patch: RoutePatch = (route) => {
     const record = asRecord(route);
     const child = asNativeRouteChild(record?.children);
     if (!record || !child) return route;
-    const renderFunc = child.props.renderFunc;
-    const wrappedRenderFunc = (...args: unknown[]) => {
-      const rendered = renderFunc(...args);
-      const appID = routeAppID(args) ?? routeAppID([record]);
-      if (!appID) return rendered;
-      const withDetailsPagePresence = wrapRouteResultWithDetailsPagePresence(
-        rendered,
-        appID,
-        contributionRegistry,
-      );
-      const provider = asNativeProviderElement(withDetailsPagePresence);
-      if (!provider) return withDetailsPagePresence;
-      const nativeHeader = asNativeHeader(provider.props.value);
-      if (!nativeHeader) return provider;
-      let wrappersForHeader = wrappedHeaders.get(nativeHeader);
-      if (!wrappersForHeader) {
-        wrappersForHeader = new Map();
-        wrappedHeaders.set(nativeHeader, wrappersForHeader);
-      }
-      let wrappedHeader = wrappersForHeader.get(appID);
-      if (!wrappedHeader) {
-        wrappedHeader = (headerProps: unknown) => {
-          const contribution = contributionRegistry.getSnapshot();
-          // Keep the native Provider and its direct route child intact for
-          // downstream route patches. The independently mounted child
-          // boundary reports page presence even when this header is absent.
-          return createElement(Fragment, null,
-            createElement(GameDetailsStatusHeader, {
-              appID,
-              header: nativeHeader,
-              headerProps,
-              contributionSource: contributionRegistry,
-              store: contribution?.store ?? null,
-              statusSurface: contribution?.statusSurface ?? null,
-            }),
-          );
-        };
-        wrappersForHeader.set(appID, wrappedHeader);
-      }
-      return cloneElement(provider, { ...provider.props, value: wrappedHeader });
-    };
-    // Decky's dispatcher consumes the React child's props. Preserve every native
-    // prop and replace only the route callback.
-    return { ...route, children: cloneElement(child, { ...child.props, renderFunc: wrappedRenderFunc }) };
+    // Cloning keeps key/ref metadata intact in both React 18 and Steam's React
+    // 19 without turning an absent key into the string "null".
+    const dispatcher = cloneElement(child, {
+      ...child.props,
+      sdhNativeType: child.type,
+      sdhRouteRecord: record,
+    });
+    return { ...route, children: { ...dispatcher, type: DetailsPageRouteDispatcher } };
   };
   const installedPatch = routerHook.addPatch(GAME_DETAILS_ROUTE, patch);
   globalThis.__sdhLudusaviGameDetailsStatusRoutePatch = {
@@ -237,62 +262,6 @@ function DetailsPagePresence({ appID, contributionSource }: Pick<GameDetailsStat
   return null;
 }
 
-type DetailsPageRouteChildProps = RouteRecord & Readonly<{
-  appID: string;
-  contributionSource: GameDetailsStatusContributionSource;
-  routeChild: ReactElement<RouteRecord>;
-}>;
-
-// This boundary is the mounted route lifecycle owner. It forwards the native
-// route child's real props to the real child, while its outer element keeps
-// those props directly available to peer route patches.
-function DetailsPageRouteChild({
-  appID,
-  contributionSource,
-  routeChild,
-  ...routeChildProps
-}: DetailsPageRouteChildProps): ReactNode {
-  return createElement(Fragment, null,
-    createElement(DetailsPagePresence, { appID, contributionSource }),
-    cloneElement(routeChild, routeChildProps),
-  );
-}
-
-function wrapRouteResultWithDetailsPagePresence(
-  rendered: unknown,
-  appID: string,
-  contributionSource: GameDetailsStatusContributionSource,
-): unknown {
-  const routeResult = asRouteResultElement(rendered);
-  if (!routeResult) return rendered;
-  const routeChild = asRouteResultElement(routeResult.props.children);
-  const routeChildProps = routeChild && asRecord(routeChild.props);
-  if (routeChild && routeChildProps) {
-    const pageBoundary = createElement(DetailsPageRouteChild, {
-      ...routeChildProps,
-      appID,
-      contributionSource,
-      routeChild,
-      key: routeChild.key,
-    });
-    return cloneElement(routeResult, { ...routeResult.props, children: pageBoundary });
-  }
-  const routeChildren = routeResult.props.children;
-  if (!isRenderableRouteChildren(routeChildren)) return rendered;
-  // Loading, empty, and multi-child route roots have no direct element whose
-  // props peers can consume. Keep those native children in order and append
-  // only the lifecycle owner so page presence stays independent of row/header.
-  return cloneElement(
-    routeResult,
-    { ...routeResult.props },
-    routeChildren,
-    createElement(DetailsPagePresence, {
-      appID,
-      contributionSource,
-      key: "sdh-ludusavi-details-page-presence",
-    }),
-  );
-}
 
 type ActiveGameDetailsStatusHeaderProps = Pick<
   GameDetailsStatusHeaderProps,

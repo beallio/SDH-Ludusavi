@@ -93,6 +93,8 @@ The plugin keeps Steam's original Play controls, status rows, and Activity posit
 
 Open **Updates** in SDH-Ludusavi to check for a new release or enable automatic checks. The plugin offers stable releases by default. **Receive development releases** is optional; those builds are for testing and may have bugs. When an update is available, Decky asks you to confirm the installation.
 
+If a game's page was open during an update and HLTB's times are missing, press **B** to return to Home or your library, then open the same game's page again. The updated display appears on that next visit; SDH-Ludusavi does not force the page to redraw. You do not need to launch a game or restart Steam.
+
 If an update from the plugin does not work, use the [desktop installer](#option-2-desktop-installer) or a [release ZIP](#option-3-install-a-release-zip-through-decky). Open **View Logs** in the plugin if you need to report a problem on the [issue page](https://github.com/beallio/SDH-Ludusavi/issues).
 
 ## License

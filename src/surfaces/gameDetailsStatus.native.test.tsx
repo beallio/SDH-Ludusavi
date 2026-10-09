@@ -1,5 +1,7 @@
-import { act, cloneElement, createContext, createElement, useEffect, type ReactElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act, cloneElement, createContext, createElement, useEffect } from "react";
+import type { ReactElement, ReactNode } from "react";
+import { createRoot } from "react-dom/client";
+import type { Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -24,6 +26,7 @@ vi.mock("../utils/logging", () => ({ log: vi.fn() }));
 vi.mock("../utils/steam", () => ({ normalize: (name: string) => name.toLowerCase(), sessionFromAppOverview: () => null }));
 vi.mock("../utils/steamRuntime", () => ({ getAppDetailsForAppID: () => null, getAppOverviewForAppID: () => null, getGamepadMainWindow: () => null, subscribeToAppDetails: () => () => {} }));
 import { createGameDetailsStatusSurface, composeInNativeStatusSlot, GameDetailsStatusRow, isStatusLabelFullyVisible, isVisibleStatusBand } from "./gameDetailsStatus";
+import type { GameDetailsStatusSurface } from "./gameDetailsStatus";
 import type { GameDetailsStatusViewModel } from "./gameDetailsStatusModel";
 import { createLudusaviStateStore } from "../state/ludusaviState";
 import { createAutoSyncStatusSurface } from "./autoSyncStatusSurface";
@@ -76,6 +79,9 @@ const header = (nativeStatus: ReactElement) => createElement("div", { className:
   createElement("div", { key: "feedback" }), createElement("div", { key: "activity" }, "Activity"),
 ]);
 const render = async (node: ReactElement) => { await act(async () => { root.render(node); await new Promise<void>((resolve) => setTimeout(resolve, 20)); }); };
+function NativeRoute({ renderFunc }: { renderFunc: (args: { params: { appid: string } }) => ReactNode }): ReactNode {
+  return renderFunc({ params: { appid: "100" } });
+}
 
 it("lets direct-child, sibling, and descendant Steam theme selectors reach the fallback row", async () => {
   await render(composeInNativeStatusSlot(header(createElement(() => null)), pluginRow()) as ReactElement);
@@ -89,47 +95,6 @@ it("lets direct-child, sibling, and descendant Steam theme selectors reach the f
   expect(row?.querySelector("[tabindex],button,a,input")).toBeNull();
 });
 
-it("replaces a retained prior-renderer wrapper while preserving direct cold-peer overview and details props", async () => {
-  const legacyPatch = vi.fn();
-  const legacyInstalledPatch = vi.fn();
-  globalThis.__sdhLudusaviGameDetailsStatusRoutePatch = {
-    version: 23, patch: legacyPatch, installedPatch: legacyInstalledPatch, removalTimer: null,
-  };
-  const view = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
-  const store = createLudusaviStateStore();
-  const statusSurface = createAutoSyncStatusSurface(view, store);
-  const gameDetailsSurface = createGameDetailsStatusSurface(store, statusSurface);
-
-  try {
-    expect(routeMock.removePatch).toHaveBeenCalledWith("/library/app/:appid", legacyInstalledPatch);
-    const patch = routeMock.addPatch.mock.calls.at(-1)?.[1] as (route: any) => any;
-    const context = createContext<unknown>(null);
-    const routeChild = createElement("native-route-body", {
-      overview: { appid: 100 }, details: { nPlaytimeForever: 12 },
-    }, "Cold peer content");
-    const nativeRoute = createElement("native-route", {
-      renderFunc: () => createElement(context.Provider, { value: {} }, routeChild),
-    });
-    const patched = patch({ path: "/library/app/:appid", children: nativeRoute });
-    type ColdPeerProps = { overview: { appid: number }; details: { nPlaytimeForever: number } };
-    const result = patched.children.props.renderFunc({ params: { appid: "100" } }) as ReactElement<{
-      children: ReactElement<ColdPeerProps>;
-    }>;
-    const peerChild = result.props.children;
-
-    expect(peerChild.props.overview.appid).toBe(100);
-    expect(peerChild.props.details.nPlaytimeForever).toBe(12);
-    await render(result);
-    expect(host.querySelector("native-route-body")?.textContent).toBe("Cold peer content");
-  } finally {
-    gameDetailsSurface.dispose();
-    statusSurface.dispose();
-    const routePatch = globalThis.__sdhLudusaviGameDetailsStatusRoutePatch;
-    if (routePatch?.removalTimer !== null && routePatch?.removalTimer !== undefined) clearTimeout(routePatch.removalTimer);
-    Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRoutePatch");
-    Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRegistry");
-  }
-});
 
 it("keeps native Cloud controls mounted and authoritative even when a theme hides them", async () => {
   const activate = vi.fn(); let mounts = 0; let unmounts = 0;
@@ -588,11 +553,11 @@ it("keeps same-page fallback active through an unsupported header and runtime re
   const first = createGameDetailsStatusSurface(firstStore, firstStatusSurface);
   const patch = routeMock.addPatch.mock.calls.at(-1)?.[1] as (route: any) => any;
   const context = createContext<unknown>(null);
-  const child = createElement("native-route", {
+  const child = createElement(NativeRoute, {
     renderFunc: () => createElement(context.Provider, { value: {} }, createElement("native-children")),
   });
   const patched = patch({ path: "/library/app/:appid", children: child });
-  await render(patched.children.props.renderFunc({ params: { appid: "100" } }));
+  await render(patched.children);
   expect(host.querySelector("native-children")).not.toBeNull();
   firstStatusSurface.publish("backing_up", {
     source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 22,
@@ -603,8 +568,8 @@ it("keeps same-page fallback active through an unsupported header and runtime re
   const replacementView = { setContext: vi.fn(), sync: vi.fn(), destroy: vi.fn(), clearShowTimeout: vi.fn() };
   const replacementStore = createLudusaviStateStore();
   const replacementStatusSurface = createAutoSyncStatusSurface(replacementView, replacementStore);
-  const replacement = createGameDetailsStatusSurface(replacementStore, replacementStatusSurface);
-  await act(async () => { await new Promise<void>((resolve) => setTimeout(resolve, 20)); });
+  let replacement!: GameDetailsStatusSurface;
+  await act(async () => { replacement = createGameDetailsStatusSurface(replacementStore, replacementStatusSurface); });
   expect(firstView.sync).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
   replacementStatusSurface.publish("syncthing_uploading", {
     source: "lifecycle_exit", lifecycle: "lifecycle_exit", generation: 23,
@@ -612,7 +577,7 @@ it("keeps same-page fallback active through an unsupported header and runtime re
   });
   expect(replacementView.sync).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
 
-  first.dispose(); replacement.dispose(); firstStatusSurface.dispose(); replacementStatusSurface.dispose();
+  await act(async () => { first.dispose(); replacement.dispose(); firstStatusSurface.dispose(); replacementStatusSurface.dispose(); });
   const routePatch = globalThis.__sdhLudusaviGameDetailsStatusRoutePatch;
   if (routePatch?.removalTimer !== null && routePatch?.removalTimer !== undefined) clearTimeout(routePatch.removalTimer);
   Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRoutePatch");
@@ -635,7 +600,7 @@ it("keeps same-page fallback active when the mounted route body never renders it
   const routeBody = ({ details }: RouteBodyProps) => createElement("native-children", {
     "data-sdh-playtime": "true",
   }, details.nPlaytimeForever);
-  const child = createElement("native-route", {
+  const child = createElement(NativeRoute, {
     renderFunc: () => createElement(
       context.Provider,
       { value: nativeHeader },
@@ -644,7 +609,7 @@ it("keeps same-page fallback active when the mounted route body never renders it
   });
   const patched = patch({ path: "/library/app/:appid", children: child });
 
-  await render(patched.children.props.renderFunc({ params: { appid: "100" } }));
+  await render(patched.children);
   expect(host.querySelector("native-children")?.textContent).toBe("12");
   expect(nativeHeader).not.toHaveBeenCalled();
 
@@ -657,7 +622,7 @@ it("keeps same-page fallback active when the mounted route body never renders it
   expect(view.sync).toHaveBeenLastCalledWith(expect.objectContaining({ status: "backing_up", visible: true }));
   expect(store.getSnapshot().autoSyncObservations["100"]).toBe(observation);
 
-  gameDetailsSurface.dispose(); statusSurface.dispose();
+  await act(async () => { gameDetailsSurface.dispose(); statusSurface.dispose(); });
   const routePatch = globalThis.__sdhLudusaviGameDetailsStatusRoutePatch;
   if (routePatch?.removalTimer !== null && routePatch?.removalTimer !== undefined) clearTimeout(routePatch.removalTimer);
   Reflect.deleteProperty(globalThis, "__sdhLudusaviGameDetailsStatusRoutePatch");
@@ -702,9 +667,9 @@ it("keeps the same-page fallback through loading, multi-child, and empty route r
     const statusSurface = createAutoSyncStatusSurface(view, store);
     const gameDetailsSurface = createGameDetailsStatusSurface(store, statusSurface);
     const patch = routeMock.addPatch.mock.calls.at(-1)?.[1] as (route: any) => any;
-    const child = createElement("native-route", { renderFunc: testCase.renderResult });
+    const child = createElement(NativeRoute, { renderFunc: testCase.renderResult });
     const patched = patch({ path: "/library/app/:appid", children: child });
-    const renderKnownPage = () => patched.children.props.renderFunc({ params: { appid: "100" } });
+    const renderKnownPage = () => patched.children;
 
     try {
       await render(renderKnownPage());
