@@ -153,9 +153,10 @@ transaction so concurrent updater instances cannot overwrite a newer install han
 
 ### Create the Decky plugin zip locally:
 
-Install a musl cross-linker first. If it is not on the normal target-specific
-compiler path, set `CC_x86_64_unknown_linux_musl` and
-`CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER` to the musl compiler executable.
+Install `musl-gcc` first: the package is `musl-gcc` on Fedora and `musl-tools`
+on Debian/Ubuntu. `run.sh` selects it for the musl target and reports a missing
+compiler clearly. An explicitly configured `CC_x86_64_unknown_linux_musl` or
+`CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER` takes precedence.
 
 ```bash
 (cd backend && ../run.sh cargo build --target x86_64-unknown-linux-musl --release --locked)

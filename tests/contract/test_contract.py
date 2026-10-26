@@ -1015,6 +1015,124 @@ def test_successful_operations_keep_history_when_followup_refresh_fails(
     assert history["last_restore"]["status"] == "restored"
 
 
+@pytest.mark.contract_lifecycle
+def test_ignored_refresh_entries_and_missing_backup_are_safe(backend: ContractHarness) -> None:
+    preview = _load_fixture("backup-preview.json")
+    ignored = dict(preview["games"][GAME])
+    ignored["decision"] = "Ignored"
+    preview["games"]["Ignored Fixture"] = ignored
+    backend.set_scenario(
+        {
+            "flatpak": {
+                "responses": {
+                    "backup_preview": {"json": preview},
+                    "backups": {"json": {"games": {}}},
+                }
+            }
+        }
+    )
+    refreshed = rpc(backend, "refresh_games", True, APP_ID)
+    assert all(game["name"] != "Ignored Fixture" for game in refreshed["games"])
+    assert any(game["name"] == GAME and not game["has_backup"] for game in refreshed["games"])
+    rpc(backend, "update_settings", {"kind": "auto_sync", "enabled": True})
+    assert rpc(backend, "check_game_start", GAME, APP_ID)["reason"] == "no_backup"
+
+
+@pytest.mark.contract_lifecycle
+def test_disabled_sync_blocks_all_automatic_operations(backend: ContractHarness) -> None:
+    rpc(backend, "refresh_games", True, APP_ID)
+    calls = [
+        ("check_game_start", (GAME, APP_ID)),
+        ("restore_game_on_start", (GAME, APP_ID)),
+        ("resolve_game_start_conflict", (GAME, APP_ID, "restore_backup")),
+        ("check_game_exit", (GAME, APP_ID)),
+        ("backup_game_on_exit", (GAME, APP_ID)),
+    ]
+    for method, args in calls:
+        assert rpc(backend, method, *args)["reason"] == "auto_sync_disabled"
+    rpc(backend, "update_settings", {"kind": "auto_sync", "enabled": True})
+    rpc(backend, "update_settings", {"kind": "game_sync", "game_name": GAME, "enabled": False})
+    for method, args in calls:
+        assert rpc(backend, method, *args)["reason"] == "game_sync_disabled"
+    assert not any(
+        len(record["argv"]) > 2
+        and record["argv"][2] in {"backup", "restore"}
+        and "--preview" not in record["argv"]
+        for record in backend.fake_processes()
+    )
+
+
+@pytest.mark.contract_lifecycle
+@pytest.mark.parametrize("decision", ["Ignored", "Cancelled"])
+def test_exit_preview_not_processed_never_requests_backup(
+    backend: ContractHarness, decision: str
+) -> None:
+    rpc(backend, "refresh_games", True, APP_ID)
+    rpc(backend, "update_settings", {"kind": "auto_sync", "enabled": True})
+    preview = _load_fixture("backup-preview.json")
+    preview["games"][GAME]["decision"] = decision
+    backend.set_scenario({"flatpak": {"responses": {"backup_preview": {"json": preview}}}})
+    assert rpc(backend, "check_game_exit", GAME, APP_ID)["reason"] == "not_processed"
+    assert not any(
+        len(record["argv"]) > 2
+        and record["argv"][2] == "backup"
+        and "--preview" not in record["argv"]
+        for record in backend.fake_processes()
+    )
+
+
+@pytest.mark.contract_operations
+def test_no_change_operations_record_skips(backend: ContractHarness) -> None:
+    rpc(backend, "refresh_games", True, APP_ID)
+    unchanged = {"games": {GAME: {"decision": "Processed", "change": "Same", "files": {}}}}
+    backend.set_scenario(
+        {"flatpak": {"responses": {"backup": {"json": unchanged}, "restore": {"json": unchanged}}}}
+    )
+    for method, args in [
+        ("force_backup", (GAME,)),
+        ("force_restore", (GAME,)),
+        ("restore_backup_version", (GAME, "backup.zip")),
+    ]:
+        result = rpc(backend, method, *args)
+        assert result["status"] == "skipped" and result["reason"] == "local_current"
+        assert rpc(backend, "get_game_history")[GAME]["last_skip"]["reason"] == "local_current"
+
+
+@pytest.mark.contract_lifecycle
+def test_auto_exit_history_survives_failed_followup_refresh(backend: ContractHarness) -> None:
+    rpc(backend, "refresh_games", True, APP_ID)
+    rpc(backend, "update_settings", {"kind": "auto_sync", "enabled": True})
+    backend.set_scenario(
+        {"flatpak": {"responses": {"backup_preview": {"exit_code": 23, "stderr": "offline"}}}}
+    )
+    assert rpc(backend, "backup_game_on_exit", GAME, APP_ID)["status"] == "backed_up"
+    history = rpc(backend, "get_game_history")[GAME]["last_backup"]
+    assert history["status"] == "backed_up" and history["trigger"] == "auto_exit"
+    backend.restart()
+    assert rpc(backend, "get_game_history")[GAME]["last_backup"]["trigger"] == "auto_exit"
+
+
+@pytest.mark.contract_core
+@pytest.mark.parametrize("bad_id", [None, "not-an-id"])
+def test_malformed_legacy_notification_and_shortcut_values(bad_id: Any) -> None:
+    harness = ContractHarness()
+    (harness.settings_dir / "settings.json").write_text(
+        json.dumps({"notifications": {"manual_operations": "invalid", "failures_errors": False}})
+    )
+    (harness.runtime_dir / "cache.json").write_text(
+        json.dumps({"ludusaviLauncherShortcutAppId": bad_id})
+    )
+    try:
+        harness.start()
+        settings = rpc(harness, "get_settings")
+        assert settings["notifications"]["manual_operations"] is True
+        assert settings["notifications"]["failures_errors"] is False
+        assert settings["notifications"]["update_available"] is True
+        assert rpc(harness, "get_ludusavi_launcher_shortcut_id") == -1
+    finally:
+        harness.close()
+
+
 @pytest.mark.contract_operations
 def test_restore_backup_version_rejects_unsafe_id(backend: ContractHarness) -> None:
     backup = rpc(backend, "refresh_games", True, APP_ID)

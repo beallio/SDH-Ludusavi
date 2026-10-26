@@ -870,6 +870,7 @@ fn bounded_reason(message: &str) -> String {
 mod tests {
     use std::{
         fs,
+        os::unix::fs::symlink,
         os::unix::process::CommandExt,
         path::Path,
         process::{Command, Stdio},
@@ -881,9 +882,52 @@ mod tests {
     use tempfile::tempdir_in;
 
     use super::{
-        LaunchScopeAcquirer, SteamAppScope, SystemdScopeController, read_process_identity,
-        same_process_identity, thread_group_stopped,
+        LaunchScopeAcquirer, SteamAppScope, SystemdScopeController, has_children,
+        read_process_identity, same_process_identity, thread_group_stopped, validate_scope_parts,
     };
+
+    #[test]
+    fn scope_validation_rejects_traversal_and_symlink_escape() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let uid = unsafe { libc::geteuid() };
+        let prefix = format!("/user.slice/user-{uid}.slice/user@{uid}.service/app.slice");
+        for suffix in [
+            "/../app-steam-app123-456.scope",
+            "/app-steam-app123-456.scope/child",
+            "/other.scope",
+        ] {
+            assert!(validate_scope_parts(&format!("{prefix}{suffix}"), uid).is_err());
+        }
+        let cgroup_root = temporary.path().join("cgroup");
+        let parent = cgroup_root.join(prefix.trim_start_matches('/'));
+        fs::create_dir_all(&parent).unwrap();
+        let outside = temporary.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        symlink(&outside, parent.join("app-steam-app123-456.scope")).unwrap();
+        let controller =
+            SystemdScopeController::new(temporary.path().join("proc"), &cgroup_root, uid);
+        let parts =
+            validate_scope_parts(&format!("{prefix}/app-steam-app123-456.scope"), uid).unwrap();
+        assert!(controller.resolved_scope_dir(&parts).is_err());
+    }
+
+    #[test]
+    fn prescope_requires_every_thread_stopped_and_no_children() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let task = temporary.path().join("42/task");
+        for tid in [42, 43] {
+            let directory = task.join(tid.to_string());
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(directory.join("stat"), format!("{tid} (worker) T")).unwrap();
+            fs::write(directory.join("children"), "").unwrap();
+        }
+        assert!(thread_group_stopped(temporary.path(), 42));
+        assert!(!has_children(temporary.path(), 42));
+        fs::write(task.join("43/stat"), "43 (worker) S").unwrap();
+        assert!(!thread_group_stopped(temporary.path(), 42));
+        fs::write(task.join("43/children"), "99").unwrap();
+        assert!(has_children(temporary.path(), 42));
+    }
 
     #[test]
     fn vanished_scope_is_an_idempotent_thaw() {

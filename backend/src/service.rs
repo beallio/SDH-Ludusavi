@@ -1665,6 +1665,42 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_service_instances_merge_settings_patches() {
+        let directory = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let env = Env {
+            plugin_settings_dir: directory.path().join("settings"),
+            plugin_runtime_dir: directory.path().join("runtime"),
+            ..Env::default()
+        };
+        let first = Arc::new(BackendService::new(&env).unwrap());
+        let second = Arc::new(BackendService::new(&env).unwrap());
+        let barrier = Arc::new(Barrier::new(3));
+        let mut workers = Vec::new();
+        for (service, name) in [(first, "First"), (second, "Second")] {
+            let barrier = Arc::clone(&barrier);
+            workers.push(thread::spawn(move || {
+                barrier.wait();
+                service
+                    .update_settings(
+                        json!({"kind":"game_sync","game_name":name,"enabled":false})
+                            .as_object()
+                            .unwrap(),
+                    )
+                    .unwrap();
+            }));
+        }
+        barrier.wait();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        let saved: Value = serde_json::from_slice(
+            &fs::read(env.plugin_settings_dir.join("settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved["sync_disabled_games"], json!(["First", "Second"]));
+    }
+
+    #[test]
     fn update_check_does_not_hold_settings_during_client_request() {
         let (_directory, mut service) = test_service();
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
