@@ -310,8 +310,9 @@ impl BackendService {
                 let current_version = args[0]
                     .as_str()
                     .ok_or_else(|| "current version must be a string".to_owned())?;
+                let settings = lock(&self.settings).clone();
                 self.updater.check_for_update(
-                    &lock(&self.settings),
+                    &settings,
                     current_version,
                     args.get(1).is_some_and(python_truthy),
                 )
@@ -1661,6 +1662,57 @@ mod tests {
         };
         let service = Arc::new(BackendService::new(&env).unwrap());
         (directory, service)
+    }
+
+    #[test]
+    fn update_check_does_not_hold_settings_during_client_request() {
+        let (_directory, mut service) = test_service();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = std::sync::Mutex::new(release_rx);
+        Arc::get_mut(&mut service)
+            .unwrap()
+            .updater
+            .set_test_list_releases(Arc::new(move || {
+                entered_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(3))
+                    .unwrap();
+            }));
+        let checking = Arc::clone(&service);
+        let (check_tx, check_rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let _ = check_tx
+                .send(checking.invoke("check_for_plugin_update", &[json!("0.5.0"), json!(true)]));
+        });
+        entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("update check did not reach client");
+        let updating = Arc::clone(&service);
+        let (update_tx, update_rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let _ = update_tx.send(updating.invoke(
+                "update_settings",
+                &[json!({"kind":"selected_game","game_name":"Changed"})],
+            ));
+        });
+        let updated = update_rx.recv_timeout(Duration::from_secs(1));
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            updated
+                .expect("settings update blocked behind update check")
+                .unwrap()["selected_game"],
+            "Changed"
+        );
+        assert_eq!(
+            check_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("update check did not complete")
+                .unwrap()["status"],
+            "current"
+        );
     }
     #[tokio::test]
     async fn list_backups_cancellation_returns_skipped_through_dispatch() {

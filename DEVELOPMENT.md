@@ -130,6 +130,8 @@ makes a missing binary an error. The two network updater RPCs, `check_for_plugin
 `revalidate_plugin_update`, are intentionally outside this contract suite.
 Their discovery and validation decisions are checked without network access by Python and Rust
 tests using the same JSON data in `tests/contract/fixtures/github/recorded.json`.
+Updater checks snapshot settings before contacting the release client; concurrent settings changes,
+unmatched install handoffs, and expired rate-limit cooldowns must not block updater calls.
 
 ### Build the Decky frontend:
 

@@ -507,6 +507,27 @@ impl PluginUpdater {
             client,
         ))
     }
+    #[cfg(test)]
+    pub(crate) fn set_test_list_releases(&mut self, hook: Arc<dyn Fn() + Send + Sync>) {
+        struct TestClient(Arc<dyn Fn() + Send + Sync>);
+        impl ReleaseClient for TestClient {
+            fn list_releases(&self) -> JsonResponse {
+                (self.0)();
+                JsonResponse {
+                    status: 200,
+                    headers: BTreeMap::new(),
+                    body: json!([]),
+                }
+            }
+            fn get_release(&self, _tag: &str) -> JsonResponse {
+                panic!("unexpected release lookup")
+            }
+            fn get_manifest(&self, _url: &str) -> JsonResponse {
+                panic!("unexpected manifest lookup")
+            }
+        }
+        self.client = Arc::new(TestClient(hook));
+    }
 
     fn with_client(
         state_lock: Arc<StateLock>,
@@ -707,13 +728,21 @@ impl PluginUpdater {
     pub fn revalidate(&self, candidate: &Value) -> Result<Value, String> {
         let started = Instant::now();
         let now = OffsetDateTime::now_utc();
-        if let Some(until) = *lock(&self.rate_limited_until) {
-            if now < until {
-                return Ok(
-                    json!({"status":"failed", "checked_at":format_time(now), "message":"Rate limit cooldown active", "retry_after":format_time(until)}),
-                );
+        let expired = {
+            let mut cooldown = lock(&self.rate_limited_until);
+            if let Some(until) = *cooldown {
+                if now < until {
+                    return Ok(
+                        json!({"status":"failed", "checked_at":format_time(now), "message":"Rate limit cooldown active", "retry_after":format_time(until)}),
+                    );
+                }
+                *cooldown = None;
+                true
+            } else {
+                false
             }
-            *lock(&self.rate_limited_until) = None;
+        };
+        if expired {
             self.save()?;
         }
         let Some(tag) = candidate.get("tag").and_then(Value::as_str) else {
@@ -818,18 +847,24 @@ impl PluginUpdater {
         version: &str,
         settings: &Map<String, Value>,
     ) -> Result<Value, String> {
-        let mut cache = lock(&self.cache);
-        if let Some(pending) = cache
-            .get_mut("pending_update_install")
-            .and_then(Value::as_object_mut)
-            .filter(|pending| pending.get("version").and_then(Value::as_str) == Some(version))
-        {
-            pending.insert(
-                "handoff_confirmed_at".to_owned(),
-                json!(format_time(OffsetDateTime::now_utc())),
-            );
-            clear_stale_cache(&mut cache);
-            drop(cache);
+        let changed = {
+            let mut cache = lock(&self.cache);
+            if let Some(pending) = cache
+                .get_mut("pending_update_install")
+                .and_then(Value::as_object_mut)
+                .filter(|pending| pending.get("version").and_then(Value::as_str) == Some(version))
+            {
+                pending.insert(
+                    "handoff_confirmed_at".to_owned(),
+                    json!(format_time(OffsetDateTime::now_utc())),
+                );
+                clear_stale_cache(&mut cache);
+                true
+            } else {
+                false
+            }
+        };
+        if changed {
             self.save()?;
         }
         Ok(self.context(settings))
@@ -846,17 +881,23 @@ impl PluginUpdater {
         version: Option<&str>,
         settings: &Map<String, Value>,
     ) -> Result<Value, String> {
-        let mut cache = lock(&self.cache);
-        let pending_version = cache
-            .get("pending_update_install")
-            .and_then(|pending| pending.get("version"))
-            .and_then(Value::as_str);
-        if cache.get("pending_update_install").is_some()
-            && (version.is_none() || pending_version == version)
-        {
-            cache.remove("pending_update_install");
-            clear_stale_cache(&mut cache);
-            drop(cache);
+        let changed = {
+            let mut cache = lock(&self.cache);
+            let pending_version = cache
+                .get("pending_update_install")
+                .and_then(|pending| pending.get("version"))
+                .and_then(Value::as_str);
+            if cache.get("pending_update_install").is_some()
+                && (version.is_none() || pending_version == version)
+            {
+                cache.remove("pending_update_install");
+                clear_stale_cache(&mut cache);
+                true
+            } else {
+                false
+            }
+        };
+        if changed {
             self.save()?;
         }
         Ok(self.context(settings))
@@ -1054,6 +1095,59 @@ mod tests {
             client.clone(),
         );
         (directory, updater, client)
+    }
+    #[test]
+    fn unchanged_pending_install_calls_return_without_blocking() {
+        for present in [false, true] {
+            for confirm in [false, true] {
+                let (_directory, updater, _) = updater(&fixture(), &Value::Null);
+                if present {
+                    updater.cache.lock().unwrap().insert(
+                        "pending_update_install".to_owned(),
+                        json!({"version":"0.5.1","tag":"v0.5.1"}),
+                    );
+                }
+                let (sender, receiver) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let settings = serde_json::Map::new();
+                    let result = if confirm {
+                        updater.confirm_install_handoff("0.5.2", &settings)
+                    } else {
+                        updater.clear_pending_install(Some("0.5.2"), &settings)
+                    };
+                    let _ = sender.send(result);
+                });
+                let context = receiver
+                    .recv_timeout(std::time::Duration::from_secs(1))
+                    .expect("unchanged pending install call deadlocked")
+                    .unwrap();
+                if present {
+                    assert_eq!(context["pending_update_install"]["version"], "0.5.1");
+                } else {
+                    assert!(context["pending_update_install"].is_null());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn expired_cooldown_allows_revalidation_without_blocking() {
+        let data = fixture();
+        let (_directory, updater, _) = updater(&data, &Value::Null);
+        *updater.rate_limited_until.lock().unwrap() =
+            Some(OffsetDateTime::now_utc() - time::Duration::seconds(1));
+        let candidate = data["revalidation"]["candidate"].clone();
+        let expected = data["revalidation"]["expected"].clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = updater.revalidate(&candidate);
+            let _ = sender.send(result);
+        });
+        let actual = receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("expired cooldown revalidation deadlocked")
+            .unwrap();
+        assert_eq!(actual, expected);
     }
 
     #[test]
