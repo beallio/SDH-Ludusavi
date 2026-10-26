@@ -199,13 +199,15 @@ jobs:
           SETUPTOOLS_SCM_PRETEND_VERSION="$PKG_VER" ./run.sh uv sync
 
       - name: Run Rust Gates
+        working-directory: backend
         run: |
-          ./run.sh cargo fmt --manifest-path backend/Cargo.toml --check
-          ./run.sh cargo clippy --manifest-path backend/Cargo.toml --all-targets --locked -- -D warnings
-          ./run.sh cargo test --manifest-path backend/Cargo.toml --locked
+          ../run.sh cargo fmt --manifest-path Cargo.toml --check
+          ../run.sh cargo clippy --manifest-path Cargo.toml --all-targets --locked -- -D warnings
+          ../run.sh cargo test --manifest-path Cargo.toml --locked
 
       - name: Build SteamOS Backend
-        run: ./run.sh cargo build --manifest-path backend/Cargo.toml --release --locked --target x86_64-unknown-linux-musl
+        working-directory: backend
+        run: ../run.sh cargo build --manifest-path Cargo.toml --release --locked --target x86_64-unknown-linux-musl
 
       - name: Run Native Core RPC Contract
         run: |

@@ -372,9 +372,12 @@ Before any commit, agents must execute:
 ./run.sh uv run ty check py_modules/sdh_ludusavi/
 ./run.sh uv run pytest
 ./run.sh pnpm run verify
-./run.sh cargo fmt --manifest-path backend/Cargo.toml --check
-./run.sh cargo clippy --manifest-path backend/Cargo.toml --all-targets --locked -- -D warnings
-./run.sh cargo test --manifest-path backend/Cargo.toml --locked
+(
+cd backend
+../run.sh cargo fmt --manifest-path Cargo.toml --check
+../run.sh cargo clippy --manifest-path Cargo.toml --all-targets --locked -- -D warnings
+../run.sh cargo test --manifest-path Cargo.toml --locked
+)
 ```
 
 All checks must pass. The generated pre-commit hook runs these checks plus

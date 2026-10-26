@@ -15,12 +15,16 @@ Python tooling state lives under `/tmp/sdh_ludusavi`. Rust build output is the e
 `CARGO_TARGET_DIR=/var/tmp/sdh_ludusavi/cargo-target`. Keep Rust target artifacts out of
 Dropbox and the quota-limited `/tmp`.
 
-The Rust backend foundation is built and checked locally with:
+Run Rust commands from `backend/` so Rustup discovers the pinned
+`backend/rust-toolchain.toml` (including the toolchain and targets):
 
 ```bash
-./run.sh cargo fmt --manifest-path backend/Cargo.toml --check
-./run.sh cargo clippy --manifest-path backend/Cargo.toml --all-targets --locked -- -D warnings
-./run.sh cargo test --manifest-path backend/Cargo.toml --locked
+(
+  cd backend
+  ../run.sh cargo fmt --manifest-path Cargo.toml --check
+  ../run.sh cargo clippy --manifest-path Cargo.toml --all-targets --locked -- -D warnings
+  ../run.sh cargo test --manifest-path Cargo.toml --locked
+)
 ```
 
 ## Project Structure

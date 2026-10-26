@@ -339,6 +339,32 @@ def test_workflows_use_quality_gates_and_pin_uv() -> None:
     assert 'version: "latest"' not in action_content, "setup-uv version must be pinned, not latest"
 
 
+def test_rust_gates_use_backend_toolchain_directory() -> None:
+    quality_gates = Path("scripts/quality_gates.sh").read_text(encoding="utf-8")
+    rust_gates = quality_gates.split('echo "Checking Rust formatting..."', 1)[1].split(
+        'echo "Checking types..."', 1
+    )[0]
+    assert "cd backend" in rust_gates
+    assert "../run.sh cargo fmt --manifest-path Cargo.toml --check" in rust_gates
+    assert "../run.sh cargo clippy --manifest-path Cargo.toml" in rust_gates
+    assert "../run.sh cargo test --manifest-path Cargo.toml" in rust_gates
+
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    rust_job = workflow.split("  rust-backend:", 1)[1]
+    rust_gates = rust_job.split("      - name: Run Rust Gates", 1)[1].split(
+        "      - name: Build SteamOS Backend", 1
+    )[0]
+    release_build = rust_job.split("      - name: Build SteamOS Backend", 1)[1].split(
+        "      - name: Run Native Core RPC Contract", 1
+    )[0]
+    assert "working-directory: backend" in rust_gates
+    assert "../run.sh cargo fmt --manifest-path Cargo.toml --check" in rust_gates
+    assert "../run.sh cargo clippy --manifest-path Cargo.toml" in rust_gates
+    assert "../run.sh cargo test --manifest-path Cargo.toml" in rust_gates
+    assert "working-directory: backend" in release_build
+    assert "../run.sh cargo build --manifest-path Cargo.toml" in release_build
+
+
 def test_post_release_sync_script_content() -> None:
     script_path = Path("scripts/post_release_sync.sh")
     assert script_path.exists()
