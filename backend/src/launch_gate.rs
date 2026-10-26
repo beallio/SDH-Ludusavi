@@ -870,7 +870,7 @@ fn bounded_reason(message: &str) -> String {
 mod tests {
     use std::{
         fs,
-        os::unix::fs::symlink,
+        os::unix::fs::{MetadataExt, PermissionsExt, symlink},
         os::unix::process::CommandExt,
         path::Path,
         process::{Command, Stdio},
@@ -909,6 +909,82 @@ mod tests {
         let parts =
             validate_scope_parts(&format!("{prefix}/app-steam-app123-456.scope"), uid).unwrap();
         assert!(controller.resolved_scope_dir(&parts).is_err());
+    }
+
+    #[test]
+    fn freeze_timeout_rolls_back_partial_transition() {
+        let uid = unsafe { libc::geteuid() };
+        let relative = format!(
+            "user.slice/user-{uid}.slice/user@{uid}.service/app.slice/app-steam-app123-456.scope"
+        );
+        if let Some(root) = std::env::var_os("SDH_TEST_FREEZE_ROOT") {
+            let root = Path::new(&root);
+            let scope_dir = root.join("cgroup").join(&relative);
+            let metadata = fs::metadata(&scope_dir).unwrap();
+            let scope = SteamAppScope {
+                unit: "app-steam-app123-456.scope".to_owned(),
+                cgroup_path: format!("/{relative}"),
+                device: metadata.dev(),
+                inode: metadata.ino(),
+                root_pid: 456,
+            };
+            let controller =
+                SystemdScopeController::new(root.join("proc"), root.join("cgroup"), uid);
+            let result = controller.freeze(&scope);
+            assert!(!result.success);
+            assert!(result.reason.contains("timed out"), "{}", result.reason);
+            assert_eq!(
+                fs::read_to_string(root.join("calls")).unwrap(),
+                "freeze\nthaw\n"
+            );
+            assert_eq!(
+                fs::read_to_string(scope_dir.join("cgroup.freeze")).unwrap(),
+                "0\n"
+            );
+            assert_eq!(
+                fs::read_to_string(scope_dir.join("cgroup.events")).unwrap(),
+                "frozen 0\n"
+            );
+            return;
+        }
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let scope_dir = temporary.path().join("cgroup").join(relative);
+        fs::create_dir_all(&scope_dir).unwrap();
+        fs::write(scope_dir.join("cgroup.freeze"), "0\n").unwrap();
+        fs::write(scope_dir.join("cgroup.events"), "frozen 0\n").unwrap();
+        let systemctl = temporary.path().join("systemctl");
+        fs::write(
+            &systemctl,
+            r#"#!/bin/sh
+printf '%s\n' "$2" >> "$SDH_TEST_FREEZE_ROOT/calls"
+if [ "$2" = freeze ]; then
+    printf '1\n' > "$SDH_TEST_SCOPE_DIR/cgroup.freeze"
+    printf 'frozen 0\n' > "$SDH_TEST_SCOPE_DIR/cgroup.events"
+else
+    printf '0\n' > "$SDH_TEST_SCOPE_DIR/cgroup.freeze"
+    printf 'frozen 0\n' > "$SDH_TEST_SCOPE_DIR/cgroup.events"
+fi
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&systemctl, fs::Permissions::from_mode(0o755)).unwrap();
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "launch_gate::tests::freeze_timeout_rolls_back_partial_transition",
+                "--nocapture",
+            ])
+            .env("SDH_TEST_FREEZE_ROOT", temporary.path())
+            .env("SDH_TEST_SCOPE_DIR", &scope_dir)
+            .env("PATH", temporary.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "child test failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]

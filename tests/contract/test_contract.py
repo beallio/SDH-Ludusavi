@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import fcntl
@@ -193,14 +194,18 @@ class _Child:
     tick_file: Path
 
 
-def _start_systemd_child(root: Path, unit: str, systemd_args: list[str]) -> _Child:
+def _start_systemd_child(
+    root: Path, unit: str, systemd_args: list[str], *, thread_count: int = 0
+) -> _Child:
     systemd_run = shutil.which("systemd-run")
     if systemd_run is None:
         pytest.fail("systemd-run is required to create an isolated child")
     pid_file = root / f"{unit}.pid"
     tick_file = root / f"{unit}.tick"
     code = (
-        "import os,sys,time\n"
+        "import os,sys,time,threading\n"
+        f"for _ in range({thread_count}):\n"
+        "    threading.Thread(target=time.sleep, args=(600,), daemon=True).start()\n"
         "pid_file, tick_file = sys.argv[1:]\n"
         "temporary_file = tick_file + '.tmp'\n"
         "open(pid_file, 'w').write(str(os.getpid()))\n"
@@ -275,7 +280,7 @@ def _start_scoped_child(root: Path) -> _Child:
     )
 
 
-def _start_prescope_child(root: Path) -> _Child:
+def _start_prescope_child(root: Path, *, thread_count: int = 0) -> _Child:
     systemctl = shutil.which("systemctl")
     if systemctl is None:
         pytest.fail("systemctl is required to verify the exact pre-scope path")
@@ -308,6 +313,7 @@ def _start_prescope_child(root: Path) -> _Child:
             "--collect",
             "--quiet",
         ],
+        thread_count=thread_count,
     )
 
 
@@ -390,6 +396,7 @@ class _SyncthingServer:
         self.release_watch_event = threading.Event()
         self._events_request_count = 0
         self.requests: list[str] = []
+        self.response_overrides: dict[str, Any] = {}
         self._request_lock = threading.Lock()
         self._status_request_count = 0
         self._system_status_count = 0
@@ -467,6 +474,7 @@ class _SyncthingServer:
                     },
                     "/rest/events": [],
                 }
+                responses.update(owner.response_overrides)
                 if owner.hold_second_status:
                     responses["/rest/db/status"]["sequence"] = 0 if status_request_count == 1 else 2
                 elif not owner.refresh_on_config:
@@ -1038,6 +1046,139 @@ def test_ignored_refresh_entries_and_missing_backup_are_safe(backend: ContractHa
     assert rpc(backend, "check_game_start", GAME, APP_ID)["reason"] == "no_backup"
 
 
+@pytest.mark.contract_operations
+def test_refresh_omits_backup_only_and_empty_preview_games(backend: ContractHarness) -> None:
+    preview = _load_fixture("backup-preview.json")
+    preview["games"]["Empty Preview"] = {"files": {}, "registry": {}}
+    preview["games"]["Registry Only"] = {"files": {}, "registry": {"HKCU/example": {}}}
+    backups = _load_fixture("backups.json")
+    backups["games"]["Backup Only"] = {"backups": [{"name": "old"}]}
+    backups["games"]["Empty Preview"] = {"backups": [{"name": "old"}]}
+    backend.set_scenario(
+        {
+            "flatpak": {
+                "responses": {"backup_preview": {"json": preview}, "backups": {"json": backups}}
+            }
+        }
+    )
+
+    result = rpc(backend, "refresh_games", True, APP_ID)
+    assert {game["name"] for game in result["games"]} == {GAME, "Registry Only"}
+
+
+@pytest.mark.contract_operations
+def test_list_backups_sorts_and_prefers_api_sizes(backend: ContractHarness) -> None:
+    backup_path = backend.backup_root / GAME
+    for name in ("older", "newer", "disk"):
+        (backup_path / name).mkdir(parents=True)
+        (backup_path / name / "save").write_bytes(b"abc")
+    backups = {
+        "games": {
+            GAME: {
+                "backupPath": str(backup_path),
+                "backups": [
+                    {"name": "older", "when": "2000-01-01T00:00:00Z", "size": 900, "file_count": 9},
+                    {
+                        "name": "newer",
+                        "when": "2020-01-01T00:00:00Z",
+                        "size": 12345,
+                        "file_count": 42,
+                    },
+                    {"name": "disk", "when": "2010-01-01T00:00:00Z"},
+                ],
+            }
+        }
+    }
+    backend.set_scenario({"flatpak": {"responses": {"backups": {"json": backups}}}})
+    rpc(backend, "refresh_games", True, APP_ID)
+    result = rpc(backend, "list_backups", GAME)
+    assert result["backup_path"] == str(backup_path)
+    assert [item["id"] for item in result["backups"]] == ["newer", "disk", "older"]
+    assert [(item["size_bytes"], item["file_count"]) for item in result["backups"]] == [
+        (12345, 42),
+        (3, 1),
+        (900, 9),
+    ]
+    assert result["total_size_bytes"] == 13248
+
+
+@pytest.mark.contract_operations
+def test_aliases_refresh_on_config_change_and_drop_stale_on_failure(
+    backend: ContractHarness,
+) -> None:
+    alias, other = "Unique Shortcut", "Another Game"
+    preview = _load_fixture("backup-preview.json")
+    preview["games"][other] = dict(preview["games"][GAME])
+
+    def scenario(target: str | None) -> dict[str, Any]:
+        config = (
+            {"json": {"customGames": [{"name": alias, "alias": target}]}}
+            if target is not None
+            else {"exit_code": 23, "stderr": "config unavailable"}
+        )
+        return {
+            "flatpak": {"responses": {"backup_preview": {"json": preview}, "config_show": config}}
+        }
+
+    def change_config() -> None:
+        config = backend.config_dir / "config.yaml"
+        modified = config.stat().st_mtime_ns + 1_000_000_000
+        os.utime(config, ns=(modified, modified))
+
+    backend.set_scenario(scenario(GAME))
+    assert rpc(backend, "refresh_games", True, APP_ID)["aliases"] == {alias: GAME}
+    assert rpc(backend, "list_backups", alias)["game"] == GAME
+    assert rpc(backend, "refresh_games", False, APP_ID)["aliases"] == {alias: GAME}
+
+    change_config()
+    backend.set_scenario(scenario(other))
+    assert rpc(backend, "refresh_games", False, APP_ID)["aliases"] == {alias: other}
+    assert rpc(backend, "list_backups", alias)["game"] == other
+
+    change_config()
+    backend.set_scenario(scenario(None))
+    assert rpc(backend, "refresh_games", False, APP_ID)["aliases"] == {}
+    assert rpc(backend, "list_backups", alias)["reason"] == "unmatched_game"
+
+
+@pytest.mark.contract_lifecycle
+@pytest.mark.parametrize("fallback", ["originalPath", "redirectedPath"])
+def test_conflict_metadata_falls_back_to_original_and_redirected_paths(
+    backend: ContractHarness, fallback: str
+) -> None:
+    save = backend.root / f"{fallback}.sav"
+    save.write_bytes(b"local")
+    os.utime(save, (1_800_000_000, 1_800_000_000))
+    preview = _load_fixture("backup-preview.json")
+    preview["games"][GAME]["files"] = {
+        str(backend.root / "missing.sav"): {
+            "originalPath": str(save) if fallback == "originalPath" else "relative.sav",
+            "redirectedPath": str(save) if fallback == "redirectedPath" else "/missing.sav",
+        }
+    }
+    backups = _load_fixture("backups.json")
+    for item in backups["games"][GAME]["backups"]:
+        item["when"] = "2000-01-01T00:00:00Z"
+    backend.set_scenario(
+        {
+            "flatpak": {
+                "responses": {"backup_preview": {"json": preview}, "backups": {"json": backups}}
+            }
+        }
+    )
+    rpc(backend, "update_settings", {"kind": "auto_sync", "enabled": True})
+    rpc(backend, "refresh_games", True, APP_ID)
+    result = rpc(backend, "check_game_start", GAME, APP_ID)
+    assert result["status"] == "conflict"
+    assert datetime.fromisoformat(result["localModifiedAt"]) == datetime.fromtimestamp(
+        1_800_000_000, tz=timezone.utc
+    )
+    assert result["backupModifiedAt"] == "2000-01-01T00:00:00Z"
+    assert result["backupPath"] == str(backend.backup_root / GAME)
+    assert result["localLabel"] == "Keep Local Save"
+    assert result["backupLabel"] == "Restore Backup Save"
+
+
 @pytest.mark.contract_lifecycle
 def test_disabled_sync_blocks_all_automatic_operations(backend: ContractHarness) -> None:
     rpc(backend, "refresh_games", True, APP_ID)
@@ -1386,6 +1527,13 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHa
     )
     start_check = rpc(backend, "check_game_start", GAME, APP_ID)
     assert start_check["status"] == "conflict"
+    assert datetime.fromisoformat(start_check["localModifiedAt"]).timestamp() == pytest.approx(
+        (backend.root / "save.dat").stat().st_mtime
+    )
+    assert start_check["backupModifiedAt"] == "2000-01-01T00:00:00Z"
+    assert start_check["backupPath"] == str(backend.backup_root / GAME)
+    assert start_check["localLabel"] == "Keep Local Save"
+    assert start_check["backupLabel"] == "Restore Backup Save"
     after_restore = sum(
         record["argv"][2] == "restore" and "--preview" not in record["argv"]
         for record in backend.fake_processes()
@@ -1494,6 +1642,121 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHa
     )
     foreign = rpc(backend, "pause_game_process", foreign_pid)
     assert foreign["status"] in {"skipped", "failed"}
+
+
+@pytest.mark.contract_gate
+def test_prescope_gate_stops_every_thread_in_real_multithreaded_child(
+    backend: ContractHarness,
+) -> None:
+    child = _start_prescope_child(backend.root, thread_count=4)
+    try:
+        threads = [int(path.name) for path in Path(f"/proc/{child.pid}/task").iterdir()]
+        assert len(threads) >= 5
+        paused = rpc(backend, "pause_game_process", child.pid)
+        assert paused["status"] == "paused", paused
+        assert all(_proc_state(tid) == "T" for tid in threads)
+        frozen_ticks = _tick_count(child)
+        time.sleep(0.1)
+        assert _tick_count(child) == frozen_ticks
+        assert (
+            rpc(backend, "resume_game_process", child.pid, paused["lease_id"])["status"]
+            == "resumed"
+        )
+        assert _wait_for(lambda: _tick_count(child) > frozen_ticks, 2, "child did not resume")
+    finally:
+        _stop_child(child)
+
+
+@pytest.mark.contract_gate
+def test_pause_fails_closed_when_scope_discovery_fails(backend: ContractHarness) -> None:
+    unit = f"non-steam-{time.time_ns() % 1_000_000_000}.scope"
+    child = _start_systemd_child(
+        backend.root, unit, ["--user", "--scope", "--slice=app.slice", f"--unit={unit}", "--quiet"]
+    )
+    try:
+        paused = rpc(backend, "pause_game_process", child.pid)
+        assert paused["status"] == "failed"
+        assert "exact Steam app scope" in paused["message"]
+        assert "lease_id" not in paused
+        ticks = _tick_count(child)
+        assert _wait_for(
+            lambda: _tick_count(child) > ticks, 2, "failed discovery left child stopped"
+        )
+        assert not backend.systemctl_calls()
+    finally:
+        _stop_child(child)
+
+
+@pytest.mark.contract_gate
+def test_partial_freeze_failure_thaws_and_pause_fails_closed(
+    backend: ContractHarness,
+) -> None:
+    child = _start_scoped_child(backend.root)
+    backend.set_scenario(
+        {
+            "systemctl": {
+                "simulate_scope_freeze": True,
+                "scope_unit": child.unit,
+                "partial_freeze_failure": True,
+            }
+        }
+    )
+    try:
+        failed = rpc(backend, "pause_game_process", child.pid)
+        assert failed["status"] == "failed", failed
+        assert "freeze" in failed["message"]
+        assert "lease_id" not in failed
+        assert not _scope_frozen(child)
+        assert [call["argv"][1] for call in backend.systemctl_calls()] == ["freeze", "thaw"]
+        ticks = _tick_count(child)
+        assert _wait_for(lambda: _tick_count(child) > ticks, 2, "failed freeze left child stopped")
+
+        backend.set_scenario(
+            {"systemctl": {"simulate_scope_freeze": True, "scope_unit": child.unit}}
+        )
+        paused = rpc(backend, "pause_game_process", child.pid)
+        assert paused["status"] == "paused", paused
+        assert _scope_frozen(child)
+        assert (
+            rpc(backend, "resume_game_process", child.pid, paused["lease_id"])["status"]
+            == "resumed"
+        )
+    finally:
+        _force_scope_thaw(backend, child)
+        _stop_child(child)
+
+
+@pytest.mark.contract_syncthing
+def test_syncthing_watch_start_classifies_configuration_and_peer_failures(
+    backend: ContractHarness,
+) -> None:
+    def start() -> dict[str, Any]:
+        return rpc(backend, "start_syncthing_activity_watch", "pre_game", GAME, APP_ID)
+
+    assert start()["reason"] == "not_configured"
+    config = backend.xdg_state / "syncthing" / "config.xml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("<configuration><gui><address>127.0.0.1:8384</address></gui></configuration>")
+    assert start()["reason"] == "api_unavailable"
+
+    with _syncthing(backend) as server:
+        folder = {
+            "id": "contract-folder",
+            "path": str(backend.backup_root),
+            "devices": [{"deviceID": "CONTRACT-LOCAL-DEVICE"}],
+        }
+        server.response_overrides["/rest/config/folders"] = [folder]
+        assert start()["reason"] == "folder_not_shared"
+        folder["devices"].append({"deviceID": DEVICE_ID})
+        server.response_overrides["/rest/system/connections"] = {
+            "connections": {DEVICE_ID: {"connected": False}, "UNRELATED": {"connected": True}}
+        }
+        result = start()
+        assert result["reason"] == "no_connected_peers"
+        assert DEVICE_ID not in result["message"]
+        assert "UNRELATED" not in result["message"]
+
+    assert start()["reason"] == "api_unavailable"
 
 
 @pytest.mark.contract_syncthing

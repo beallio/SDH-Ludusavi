@@ -197,6 +197,8 @@ def _simulate_scope_transition(argv: list[str], config: dict[str, Any]) -> tuple
             return "contract scope has no cgroup freezer controls\n", 1
         expected = "1" if argv[1] == "freeze" else "0"
         freezer.write_text(expected, encoding="ascii")
+        if argv[1] == "freeze" and config.get("partial_freeze_failure") is True:
+            return "simulated failure after requesting freeze\n", 1
         deadline = time.monotonic() + 1.0
         while time.monotonic() < deadline:
             frozen = [
