@@ -69,3 +69,23 @@ def test_recorded_github_release_decisions_match_expected_results() -> None:
     rejected = updater.revalidate(mismatch)
     assert rejected["status"] == "failed"
     assert rejected["message"] == "SHA-256 mismatch during revalidation"
+
+
+def test_recorded_invalid_manifests_fail_discovery_and_revalidation() -> None:
+    fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    revalidation = fixture["revalidation"]
+    release = revalidation["release"]
+    manifest_url = release["assets"][0]["browser_download_url"]
+    for case in fixture["invalid_manifests"]:
+        client = RecordedGitHub(
+            {
+                "releases": [release],
+                "manifests": {manifest_url: case["manifest"]},
+                "revalidation": {"release": release, "manifest": case["manifest"]},
+            }
+        )
+        updater = _updater(client)
+        assert updater.check_for_update("0.5.0", force=True)["status"] == "current", case["name"]
+        rejected = updater.revalidate(revalidation["candidate"])
+        assert rejected["status"] == "failed", case["name"]
+        assert rejected["message"] == "Release validation failed during revalidation", case["name"]

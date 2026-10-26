@@ -130,6 +130,8 @@ makes a missing binary an error. The two network updater RPCs, `check_for_plugin
 `revalidate_plugin_update`, are intentionally outside this contract suite.
 Their discovery and validation decisions are checked without network access by Python and Rust
 tests using the same JSON data in `tests/contract/fixtures/github/recorded.json`.
+Malformed manifests with missing or non-string source-version and generation-time fields are
+rejected in both discovery and revalidation.
 Updater checks snapshot settings before contacting the release client; concurrent settings changes,
 unmatched install handoffs, and expired rate-limit cooldowns must not block updater calls.
 Rust updater cache mutations reload the latest persisted state under the shared state lock, then
@@ -371,6 +373,8 @@ backup path. The `/rest/system/connections` endpoint is used only to intersect c
 connected device IDs with the remote devices configured for that folder. Its global and
 per-device byte counters are intentionally ignored because a single connection can carry
 traffic for multiple folders.
+Configured loopback API path prefixes are retained for every REST request, and a watch removes
+itself from manager ownership when its TTL expires even if the frontend never sends a stop call.
 
 BrowserView activity and transfer direction instead come from folder-scoped sources:
 `/rest/db/status?folder=<folder-id>` and events whose `folder` matches the resolved

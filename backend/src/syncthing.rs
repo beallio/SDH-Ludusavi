@@ -4,7 +4,7 @@ use std::{
     net::IpAddr,
     path::{Component, Path, PathBuf},
     sync::{
-        Arc, Condvar, Mutex, MutexGuard,
+        Arc, Condvar, Mutex, MutexGuard, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread::{self, JoinHandle},
@@ -81,10 +81,11 @@ impl SyncthingApi {
         timeout: Duration,
     ) -> Result<Value, String> {
         validate_api_url(&self.base_url)?;
-        let url = self
-            .base_url
-            .join(path.trim_start_matches('/'))
-            .map_err(|_| "Invalid local Syncthing API path".to_owned())?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|_| "Invalid local Syncthing API path".to_owned())?
+            .pop_if_empty()
+            .extend(path.trim_start_matches('/').split('/'));
         let request = self
             .client
             .get(url)
@@ -671,6 +672,10 @@ struct WatchShared {
 }
 
 impl WatchShared {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "watch creation receives its owned runtime state"
+    )]
     fn start(
         watch_id: String,
         phase: String,
@@ -679,6 +684,8 @@ impl WatchShared {
         folder: FolderSelection,
         api: SyncthingApi,
         connected: HashSet<String>,
+        ttl: Duration,
+        owner: Weak<Mutex<ManagerState>>,
     ) -> Result<Self, String> {
         let latest = Arc::new(Mutex::new(Value::Null));
         let stop = Arc::new(AtomicBool::new(false));
@@ -695,6 +702,8 @@ impl WatchShared {
                     connected,
                     worker_latest,
                     worker_stop,
+                    ttl,
+                    owner,
                 );
             })
             .map_err(|_| "Could not start Syncthing activity watch".to_owned())?;
@@ -743,7 +752,7 @@ struct ManagerState {
 
 #[derive(Default)]
 pub struct SyncthingWatchManager {
-    state: Mutex<ManagerState>,
+    state: Arc<Mutex<ManagerState>>,
     changed: Condvar,
 }
 
@@ -831,27 +840,31 @@ impl SyncthingWatchManager {
             std::process::id(),
             NEXT_WATCH_ID.fetch_add(1, Ordering::Relaxed)
         );
-        let watch = match WatchShared::start(
-            watch_id.clone(),
-            phase.to_owned(),
-            game_name,
-            app_id,
-            folder.clone(),
-            api,
-            connected,
-        ) {
-            Ok(watch) => watch,
-            Err(error) => {
-                return json!({"status":"skipped","reason":"watch_start_failed","message":error});
-            }
-        };
         let old = {
             let mut state = lock(&self.state);
             if state.stopping {
-                drop(state);
-                watch.stop_until(Instant::now() + Duration::from_secs(2));
                 return json!({"status":"skipped","reason":"unloading","message":"Plugin unload is in progress."});
             }
+            let watch = match WatchShared::start(
+                watch_id.clone(),
+                phase.to_owned(),
+                game_name,
+                app_id,
+                folder.clone(),
+                api,
+                connected,
+                if phase == "post_game" {
+                    POST_GAME_TTL
+                } else {
+                    PRE_GAME_TTL
+                },
+                Arc::downgrade(&self.state),
+            ) {
+                Ok(watch) => watch,
+                Err(error) => {
+                    return json!({"status":"skipped","reason":"watch_start_failed","message":error});
+                }
+            };
             let old_ids = state
                 .watches
                 .iter()
@@ -919,6 +932,10 @@ impl SyncthingWatchManager {
 
 static NEXT_WATCH_ID: AtomicU64 = AtomicU64::new(1);
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "watch task receives its owned runtime state"
+)]
 fn run_watch(
     watch_id: String,
     phase: String,
@@ -927,14 +944,11 @@ fn run_watch(
     mut connected: HashSet<String>,
     latest: Arc<Mutex<Value>>,
     stop: Arc<AtomicBool>,
+    ttl: Duration,
+    owner: Weak<Mutex<ManagerState>>,
 ) {
     let started = Instant::now();
     let post_game = phase == "post_game";
-    let ttl = if post_game {
-        POST_GAME_TTL
-    } else {
-        PRE_GAME_TTL
-    };
     let mut state = "unknown".to_owned();
     let mut runtime = FolderRuntime::default();
     let mut cursor = 0_u64;
@@ -1031,6 +1045,9 @@ fn run_watch(
         if now.duration_since(started) >= ttl {
             *lock(&latest) =
                 json!({"status":"stopped","watch_id":watch_id,"reason":"watch_ttl_expired"});
+            if let Some(owner) = owner.upgrade() {
+                lock(&owner).watches.remove(&watch_id);
+            }
             break;
         }
         if let Ok(snapshot) = get_connection_snapshot(&api) {
@@ -1523,6 +1540,120 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rest_requests_keep_configured_loopback_url_prefix() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request)
+                .unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                .unwrap();
+            let _ = sender.send(request);
+        });
+        let api = SyncthingApi::new(&format!("http://{address}/syncthing"), "fixture-key").unwrap();
+        assert_eq!(
+            api.get_json("/rest/system/status", &[], Duration::from_secs(2))
+                .unwrap(),
+            json!({})
+        );
+        let request = receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("API request not received");
+        assert!(
+            request.starts_with("GET /syncthing/rest/system/status "),
+            "{request}"
+        );
+    }
+
+    #[test]
+    fn ttl_expiry_removes_owned_watch_without_a_stop_call() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request = String::new();
+                reader.read_line(&mut request).unwrap();
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                }
+                let body = if request.starts_with("GET /rest/db/status") {
+                    r#"{"state":"idle","sequence":1}"#
+                } else {
+                    "[]"
+                };
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .unwrap();
+            }
+        });
+        let api = SyncthingApi::new(&format!("http://{address}"), "fixture-key").unwrap();
+        let folder = FolderSelection {
+            id: "folder".to_owned(),
+            label: "Folder".to_owned(),
+            path: PathBuf::from("/tmp"),
+            device_ids: vec!["peer".to_owned()],
+            watcher_enabled: None,
+            watcher_delay: None,
+            rescan_interval: None,
+        };
+        let manager = SyncthingWatchManager::default();
+        let id = "expired-watch".to_owned();
+        {
+            let mut state = lock(&manager.state);
+            let watch = WatchShared::start(
+                id.clone(),
+                "pre_game".to_owned(),
+                None,
+                None,
+                folder,
+                api,
+                HashSet::from(["peer".to_owned()]),
+                Duration::ZERO,
+                Arc::downgrade(&manager.state),
+            )
+            .unwrap();
+            state.watches.insert(id.clone(), watch);
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while lock(&manager.state).watches.contains_key(&id) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let retained = lock(&manager.state).watches.contains_key(&id);
+        assert!(
+            !retained,
+            "expired watch remained owned: {}",
+            manager.get_activity(&id)
+        );
+    }
 
     #[test]
     fn gui_addresses_and_loopback_validation_match_python_tables() {

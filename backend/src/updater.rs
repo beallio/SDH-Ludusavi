@@ -317,6 +317,8 @@ fn parse_manifest(value: &Value) -> Option<ReleaseManifest> {
     if record.get("schemaVersion").and_then(Value::as_u64) != Some(1) {
         return None;
     }
+    record.get("sourceVersion")?.as_str()?;
+    record.get("generatedAt")?.as_str()?;
     let channel = record.get("channel")?.as_str()?;
     if !matches!(channel, "stable" | "dev") {
         return None;
@@ -1074,6 +1076,34 @@ mod tests {
             "../../tests/contract/fixtures/github/recorded.json"
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn recorded_invalid_manifest_metadata_is_rejected() {
+        let data = fixture();
+        let revalidation = &data["revalidation"];
+        let release = &revalidation["release"];
+        let manifest_url = release["assets"][0]["browser_download_url"]
+            .as_str()
+            .unwrap();
+        for case in data["invalid_manifests"].as_array().unwrap() {
+            let mut case_data = data.clone();
+            case_data["revalidation"]["manifest"] = case["manifest"].clone();
+            let mut check_case = json!({"releases":[release], "manifests":{}});
+            check_case["manifests"][manifest_url] = case["manifest"].clone();
+            let (_directory, updater, _) = updater(&case_data, &check_case);
+            let result = updater
+                .check_for_update(&serde_json::Map::new(), "0.5.0", true)
+                .unwrap();
+            assert_eq!(result["status"], "current", "{}", case["name"]);
+            let rejected = updater.revalidate(&revalidation["candidate"]).unwrap();
+            assert_eq!(rejected["status"], "failed", "{}", case["name"]);
+            assert_eq!(
+                rejected["message"], "Release validation failed during revalidation",
+                "{}",
+                case["name"]
+            );
+        }
     }
 
     fn updater(
