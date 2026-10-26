@@ -374,8 +374,16 @@ impl BackendService {
         if !self.auto_sync_enabled() {
             return Ok(self.skip_lifecycle("start", &game_name, "auto_sync_disabled"));
         }
-        let Some(game) = self.operations.matching_lifecycle_game(&game_name, app_id) else {
-            return Ok(self.skip_lifecycle("start", &game_name, "unmatched_game"));
+        let game = match self.operations.matching_lifecycle_game(&game_name, app_id) {
+            Ok(Some(game)) => game,
+            Ok(None) => return Ok(self.skip_lifecycle("start", &game_name, "unmatched_game")),
+            Err(OperationError::Locked(_)) => {
+                return Ok(self.skip_lifecycle("start", &game_name, "operation_running"));
+            }
+            Err(OperationError::Cancelled) => {
+                return Ok(self.skip_lifecycle("start", &game_name, "cancelled"));
+            }
+            Err(OperationError::Failed(message)) => return Err(message),
         };
         let game_name = game["name"].as_str().unwrap_or(&game_name);
         if !self.game_sync_enabled(game_name) {
@@ -493,8 +501,15 @@ impl BackendService {
         if !self.auto_sync_enabled() {
             return Ok(self.skip_lifecycle("exit", &game_name, "auto_sync_disabled"));
         }
-        let Some(game) = self.operations.matching_lifecycle_game(&game_name, app_id) else {
-            return Ok(self.skip_lifecycle("exit", &game_name, "unmatched_game"));
+        let game = match self.operations.matching_lifecycle_game(&game_name, app_id) {
+            Ok(Some(game)) => game,
+            Ok(None) => return Ok(self.skip_lifecycle("exit", &game_name, "unmatched_game")),
+            Err(OperationError::Locked(_)) => {
+                return Ok(self.skip_lifecycle("exit", &game_name, "operation_running"));
+            }
+            Err(OperationError::Cancelled | OperationError::Failed(_)) => {
+                return Ok(self.skip_lifecycle("exit", &game_name, "preview_failed"));
+            }
         };
         let game_name = game["name"].as_str().unwrap_or(&game_name);
         if !self.game_sync_enabled(game_name) {
@@ -564,8 +579,18 @@ impl BackendService {
         if !self.auto_sync_enabled() {
             return self.skip_lifecycle("start", &game_name, "auto_sync_disabled");
         }
-        let Some(game) = self.operations.matching_lifecycle_game(&game_name, app_id) else {
-            return self.skip_lifecycle("start", &game_name, "unmatched_game");
+        let game = match self.operations.matching_lifecycle_game(&game_name, app_id) {
+            Ok(Some(game)) => game,
+            Ok(None) => return self.skip_lifecycle("start", &game_name, "unmatched_game"),
+            Err(OperationError::Locked(_)) => {
+                return self.skip_lifecycle("start", &game_name, "operation_running");
+            }
+            Err(OperationError::Cancelled) => {
+                return self.skip_lifecycle("start", &game_name, "cancelled");
+            }
+            Err(OperationError::Failed(message)) => {
+                return json!({"status":"failed","game":game_name,"message":message});
+            }
         };
         let game_name = game["name"].as_str().unwrap_or(&game_name);
         if !self.game_sync_enabled(game_name) {
@@ -612,8 +637,18 @@ impl BackendService {
         if !self.auto_sync_enabled() {
             return self.skip_lifecycle("start", &game_name, "auto_sync_disabled");
         }
-        let Some(game) = self.operations.matching_lifecycle_game(&game_name, app_id) else {
-            return self.skip_lifecycle("start", &game_name, "unmatched_game");
+        let game = match self.operations.matching_lifecycle_game(&game_name, app_id) {
+            Ok(Some(game)) => game,
+            Ok(None) => return self.skip_lifecycle("start", &game_name, "unmatched_game"),
+            Err(OperationError::Locked(_)) => {
+                return self.skip_lifecycle("start", &game_name, "operation_running");
+            }
+            Err(OperationError::Cancelled) => {
+                return self.skip_lifecycle("start", &game_name, "cancelled");
+            }
+            Err(OperationError::Failed(message)) => {
+                return json!({"status":"failed","game":game_name,"message":message});
+            }
         };
         let game_name = game["name"].as_str().unwrap_or(&game_name);
         if !self.game_sync_enabled(game_name) {
@@ -740,8 +775,18 @@ impl BackendService {
         if !self.auto_sync_enabled() {
             return self.skip_lifecycle("exit", &game_name, "auto_sync_disabled");
         }
-        let Some(game) = self.operations.matching_lifecycle_game(&game_name, app_id) else {
-            return self.skip_lifecycle("exit", &game_name, "unmatched_game");
+        let game = match self.operations.matching_lifecycle_game(&game_name, app_id) {
+            Ok(Some(game)) => game,
+            Ok(None) => return self.skip_lifecycle("exit", &game_name, "unmatched_game"),
+            Err(OperationError::Locked(_)) => {
+                return self.skip_lifecycle("exit", &game_name, "operation_running");
+            }
+            Err(OperationError::Cancelled) => {
+                return self.skip_lifecycle("exit", &game_name, "cancelled");
+            }
+            Err(OperationError::Failed(message)) => {
+                return json!({"status":"failed","game":game_name,"message":message});
+            }
         };
         let game_name = game["name"].as_str().unwrap_or(&game_name);
         if !self.game_sync_enabled(game_name) {
@@ -1421,6 +1466,7 @@ impl Drop for ActiveCall {
 mod tests {
     use std::{
         fs,
+        os::unix::fs::PermissionsExt,
         sync::{Arc, Barrier},
         thread,
         time::{Duration, Instant},
@@ -1454,6 +1500,88 @@ mod tests {
                 json!({"status":"skipped","reason":"cancelled"})
             );
         }
+    }
+
+    #[test]
+    fn lifecycle_match_lazily_refreshes_an_empty_registry() {
+        let (directory, service) = test_service();
+        let config_path = directory.path().join("config.yaml");
+        fs::write(&config_path, "fixture").unwrap();
+        let flatpak = directory.path().join("flatpak");
+        let script = r#"#!/bin/sh
+case "$3" in
+    backup) printf '%s\n' '{"games":{"Hades":{"files":{"save":{}},"decision":"Same","steamId":"300"}}}' ;;
+    backups) printf '%s\n' '{"games":{"Hades":{"backups":[{"name":"latest"}]}}}' ;;
+    restore) printf '%s\n' '{"games":{"Hades":{"change":"Same"}}}' ;;
+    config)
+        if [ "$4" = path ]; then
+            printf '%s\n' '@CONFIG_PATH@'
+        else
+            printf '%s\n' '{"customGames":[]}'
+        fi
+        ;;
+esac
+"#
+        .replace("@CONFIG_PATH@", &config_path.display().to_string());
+        fs::write(&flatpak, script).unwrap();
+        fs::set_permissions(&flatpak, fs::Permissions::from_mode(0o755)).unwrap();
+        service.operations.use_ludusavi_test_command(flatpak);
+        service
+            .update_settings(
+                json!({"kind":"auto_sync","enabled":true})
+                    .as_object()
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let result = service.check_game_start("Hades", Some("300")).unwrap();
+
+        assert_eq!(
+            result,
+            json!({"status":"skipped","game":"Hades","reason":"local_current"})
+        );
+    }
+
+    #[test]
+    fn lifecycle_registry_refresh_failure_is_not_unmatched() {
+        let (directory, service) = test_service();
+        let flatpak = directory.path().join("flatpak");
+        fs::write(&flatpak, "#!/bin/sh\nexit 7\n").unwrap();
+        fs::set_permissions(&flatpak, fs::Permissions::from_mode(0o755)).unwrap();
+        service.operations.use_ludusavi_test_command(flatpak);
+        service
+            .update_settings(
+                json!({"kind":"auto_sync","enabled":true})
+                    .as_object()
+                    .unwrap(),
+            )
+            .unwrap();
+
+        let error = service.check_game_start("Hades", None).unwrap_err();
+
+        assert!(!error.is_empty());
+    }
+
+    #[test]
+    fn lifecycle_registry_lock_failure_is_operation_running() {
+        let (directory, service) = test_service();
+        let flatpak = directory.path().join("flatpak");
+        fs::write(&flatpak, "#!/bin/sh\nexit 7\n").unwrap();
+        fs::set_permissions(&flatpak, fs::Permissions::from_mode(0o755)).unwrap();
+        service.operations.use_ludusavi_test_command(flatpak);
+        service
+            .update_settings(
+                json!({"kind":"auto_sync","enabled":true})
+                    .as_object()
+                    .unwrap(),
+            )
+            .unwrap();
+        let _operation = service.operations.hold_operation_lock_for_test();
+
+        assert_eq!(
+            service.check_game_start("Hades", None).unwrap(),
+            json!({"status":"skipped","game":"Hades","reason":"operation_running"})
+        );
     }
 
     #[test]

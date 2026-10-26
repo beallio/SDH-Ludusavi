@@ -288,6 +288,19 @@ impl LudusaviOperations {
         }));
         self.cancel_processes();
     }
+    #[cfg(test)]
+    pub(crate) fn use_ludusavi_test_command(&self, flatpak: PathBuf) {
+        *lock(&self.client) = Some(Arc::new(LudusaviClient {
+            processes: Arc::clone(&self.processes),
+            flatpak,
+            config_path: Mutex::new(None),
+            version: Mutex::new(None),
+        }));
+    }
+    #[cfg(test)]
+    pub(crate) fn hold_operation_lock_for_test(&self) -> std::sync::MutexGuard<'_, ()> {
+        lock(&self.operation_lock)
+    }
 
     pub fn processes_exited(&self) -> bool {
         self.processes.groups_exited()
@@ -300,10 +313,15 @@ impl LudusaviOperations {
     pub fn get_game_history(&self) -> Value {
         lock(&self.history).clone()
     }
-    pub fn matching_lifecycle_game(&self, name: &str, app_id: Option<&str>) -> Option<Value> {
-        lock(&self.registry)
+    pub(crate) fn matching_lifecycle_game(
+        &self,
+        name: &str,
+        app_id: Option<&str>,
+    ) -> Result<Option<Value>, OperationError> {
+        self.ensure_registry()?;
+        Ok(lock(&self.registry)
             .matching_game(name, app_id)
-            .map(|game| game.to_value())
+            .map(|game| game.to_value()))
     }
 
     pub(crate) fn start_recency(&self, name: &str) -> Result<Value, OperationError> {
