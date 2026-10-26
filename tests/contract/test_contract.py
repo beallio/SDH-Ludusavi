@@ -555,6 +555,17 @@ def test_core_settings_and_logging_contract(backend: ContractHarness) -> None:
     )
     assert "debug while enabled" in plugin_logs
 
+    if backend.backend == "python":
+        # Startup reconciliation runs concurrently with the Python contract socket.
+        startup_deadline = time.monotonic() + 3
+        while time.monotonic() < startup_deadline:
+            logs = rpc(backend, "get_recent_logs")
+            if any(entry["message"].startswith("Startup reconciliation:") for entry in logs):
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("Python startup reconciliation did not complete")
+
     for index in range(105):
         rpc(backend, "log", "info", f"ring-{index}")
     logs = rpc(backend, "get_recent_logs")

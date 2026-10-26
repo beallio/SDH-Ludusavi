@@ -112,7 +112,7 @@ impl BackendService {
 
     pub async fn dispatch(self: &Arc<Self>, method: &'static str, args: Vec<Value>) -> Value {
         let Some(call) = self.calls.enter() else {
-            return unloading_reply();
+            return unloading_reply(method);
         };
         let service = Arc::clone(self);
         match tokio::task::spawn_blocking(move || {
@@ -122,13 +122,17 @@ impl BackendService {
         .await
         {
             Ok(Ok(result)) => result,
-            Ok(Err(message)) => failed_reply(message),
-            Err(error) => failed_reply(format!("{method} failed: {error}")),
+            Ok(Err(message)) => failed_dispatch_reply(method, message),
+            Err(error) => failed_dispatch_reply(method, format!("{method} failed: {error}")),
         }
     }
 
     pub async fn shutdown(&self) -> bool {
         self.calls.stop_and_wait(DRAIN_BUDGET).await
+    }
+    pub fn unavailable_reply(method: &str) -> Value {
+        python_wrapper_fallback(method)
+            .unwrap_or_else(|| failed_reply("Backend has not completed startup".to_owned()))
     }
 
     fn invoke(&self, method: &str, args: &[Value]) -> Result<Value, String> {
@@ -183,13 +187,7 @@ impl BackendService {
             }
             "get_operation_status" => {
                 expect_args(method, args, 0)?;
-                Ok(json!({
-                    "is_running": false,
-                    "name": null,
-                    "game_name": null,
-                    "last_result": null,
-                    "last_error": null,
-                }))
+                Ok(idle_operation_status())
             }
             "get_game_history" => {
                 expect_args(method, args, 0)?;
@@ -334,11 +332,37 @@ fn failed_reply(message: String) -> Value {
     json!({"status": "failed", "message": message})
 }
 
-fn unloading_reply() -> Value {
+fn failed_dispatch_reply(method: &str, message: String) -> Value {
+    python_wrapper_fallback(method).unwrap_or_else(|| failed_reply(message))
+}
+
+fn python_wrapper_fallback(method: &str) -> Option<Value> {
+    match method {
+        "get_recent_logs" => Some(json!([])),
+        "get_operation_status" => Some(idle_operation_status()),
+        "get_ludusavi_launcher_shortcut_id" => Some(json!(-1)),
+        "log" => Some(Value::Null),
+        _ => None,
+    }
+}
+
+fn idle_operation_status() -> Value {
     json!({
-        "status": "skipped",
-        "reason": "unloading",
-        "message": "Plugin unload is in progress.",
+        "is_running": false,
+        "name": null,
+        "game_name": null,
+        "last_result": null,
+        "last_error": null,
+    })
+}
+
+fn unloading_reply(method: &str) -> Value {
+    python_wrapper_fallback(method).unwrap_or_else(|| {
+        json!({
+            "status": "skipped",
+            "reason": "unloading",
+            "message": "Plugin unload is in progress.",
+        })
     })
 }
 
@@ -779,6 +803,74 @@ mod tests {
         let unreadable_cache = fs::read(&service.cache_path).unwrap();
         assert!(service.set_shortcut_id(456).is_err());
         assert_eq!(fs::read(&service.cache_path).unwrap(), unreadable_cache);
+    }
+
+    #[tokio::test]
+    async fn dispatcher_errors_use_python_getter_fallbacks() {
+        let (_directory, service) = test_service();
+        assert_eq!(
+            service.dispatch("get_recent_logs", vec![Value::Null]).await,
+            json!([])
+        );
+        assert_eq!(
+            service
+                .dispatch("get_operation_status", vec![Value::Null])
+                .await,
+            json!({
+                "is_running": false,
+                "name": null,
+                "game_name": null,
+                "last_result": null,
+                "last_error": null,
+            })
+        );
+        assert_eq!(
+            service
+                .dispatch("get_ludusavi_launcher_shortcut_id", vec![Value::Null])
+                .await,
+            json!(-1)
+        );
+        assert_eq!(service.dispatch("log", Vec::new()).await, Value::Null);
+        assert_eq!(
+            BackendService::unavailable_reply("get_recent_logs"),
+            json!([])
+        );
+        assert_eq!(
+            BackendService::unavailable_reply("get_operation_status"),
+            json!({
+                "is_running": false,
+                "name": null,
+                "game_name": null,
+                "last_result": null,
+                "last_error": null,
+            })
+        );
+        assert_eq!(
+            BackendService::unavailable_reply("get_ludusavi_launcher_shortcut_id"),
+            json!(-1)
+        );
+        assert_eq!(BackendService::unavailable_reply("log"), Value::Null);
+    }
+
+    #[tokio::test]
+    async fn unloading_uses_python_getter_fallbacks() {
+        let (_directory, service) = test_service();
+        assert!(service.shutdown().await);
+        assert_eq!(
+            service.dispatch("get_recent_logs", Vec::new()).await,
+            json!([])
+        );
+        assert_eq!(
+            service.dispatch("get_operation_status", Vec::new()).await,
+            super::idle_operation_status()
+        );
+        assert_eq!(
+            service
+                .dispatch("get_ludusavi_launcher_shortcut_id", Vec::new())
+                .await,
+            json!(-1)
+        );
+        assert_eq!(service.dispatch("log", Vec::new()).await, Value::Null);
     }
 
     #[tokio::test]
