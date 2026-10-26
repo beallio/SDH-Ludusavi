@@ -1363,9 +1363,26 @@ impl ProcessGroupCompletion {
 struct ProcessManager {
     stopping: AtomicBool,
     groups: Arc<Mutex<BTreeSet<i32>>>,
+    #[cfg(test)]
+    fail_reader_at: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    reader_attempt: std::sync::atomic::AtomicUsize,
 }
 
 impl ProcessManager {
+    fn spawn_output_reader(
+        &self,
+        pipe: impl Read + Send + 'static,
+    ) -> io::Result<ProcessOutputReader> {
+        #[cfg(test)]
+        {
+            let attempt = self.reader_attempt.fetch_add(1, Ordering::AcqRel) + 1;
+            if self.fail_reader_at.load(Ordering::Acquire) == attempt {
+                return Err(io::Error::other("fixture output reader creation failure"));
+            }
+        }
+        thread::Builder::new().spawn(move || read_pipe(pipe))
+    }
     fn run_at(
         &self,
         program: &Path,
@@ -1433,8 +1450,28 @@ impl ProcessManager {
         }
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
-        completion.set_stdout_reader(thread::spawn(move || read_pipe(stdout)));
-        completion.set_stderr_reader(thread::spawn(move || read_pipe(stderr)));
+        let stdout_reader = match self.spawn_output_reader(stdout) {
+            Ok(reader) => reader,
+            Err(error) => {
+                if terminate_group(pid, &mut child) {
+                    completion.confirm_exit();
+                    completion.wait(None);
+                }
+                return Err(format!("Could not start Ludusavi stdout reader: {error}"));
+            }
+        };
+        completion.set_stdout_reader(stdout_reader);
+        let stderr_reader = match self.spawn_output_reader(stderr) {
+            Ok(reader) => reader,
+            Err(error) => {
+                if terminate_group(pid, &mut child) {
+                    completion.confirm_exit();
+                    completion.wait(None);
+                }
+                return Err(format!("Could not start Ludusavi stderr reader: {error}"));
+            }
+        };
+        completion.set_stderr_reader(stderr_reader);
         let started = Instant::now();
         let mut status = None;
         let mut outcome = None;
@@ -2148,6 +2185,40 @@ mod tests {
             .unwrap();
         assert!(!group_exists(process_group));
         assert!(processes.groups_exited());
+    }
+    #[test]
+    fn output_reader_creation_failure_terminates_the_owned_process_group() {
+        for failure_index in [1, 2] {
+            let args = [
+                "-c".to_owned(),
+                "trap '' TERM; sleep 30 & wait".to_owned(),
+                "sh".to_owned(),
+            ];
+            let processes = ProcessManager::default();
+            processes
+                .fail_reader_at
+                .store(failure_index, std::sync::atomic::Ordering::Release);
+            let mut completion = super::ProcessGroupCompletion::confirmed();
+            let error = processes
+                .run_at_cancellable(
+                    Path::new("/bin/sh"),
+                    &args,
+                    Duration::from_secs(2),
+                    true,
+                    None,
+                    &mut completion,
+                )
+                .unwrap_err();
+            completion.wait(None);
+            let process_group = completion.pid.unwrap();
+            assert!(completion.confirmed);
+            assert!(!group_exists(process_group));
+            assert!(processes.groups_exited());
+            assert!(
+                error.contains("reader"),
+                "failure at reader {failure_index} returned {error}"
+            );
+        }
     }
     #[test]
     fn successful_leader_waits_for_writer_descendant_before_returning() {

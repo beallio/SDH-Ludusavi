@@ -1,7 +1,7 @@
 use std::{
     fs,
     io::{self, Read},
-    os::unix::fs::MetadataExt,
+    os::unix::{fs::MetadataExt, process::CommandExt},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
@@ -285,8 +285,9 @@ impl SystemdScopeController {
         command
             .args(["--user", action, unit])
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .process_group(0);
         let runtime = format!("/run/user/{}", self.uid);
         let bus = format!("unix:path=/run/user/{}/bus", self.uid);
         if std::env::var_os("XDG_RUNTIME_DIR").is_none() {
@@ -305,32 +306,35 @@ impl SystemdScopeController {
                 ));
             }
         };
-        let stdout = child.stdout.take().expect("piped systemctl stdout");
         let stderr = child.stderr.take().expect("piped systemctl stderr");
-        let stdout_reader = thread::spawn(move || read_pipe(stdout));
-        let stderr_reader = thread::spawn(move || read_pipe(stderr));
+        let stderr_reader = match thread::Builder::new()
+            .name("sdh-ludusavi-systemctl-stderr".to_owned())
+            .spawn(move || read_pipe(stderr))
+        {
+            Ok(reader) => reader,
+            Err(error) => {
+                terminate_command_group(&mut child);
+                return ScopeTransitionResult::failed(format!(
+                    "systemctl {action} failed to start output reader: {}",
+                    bounded_reason(&error.to_string())
+                ));
+            }
+        };
         let deadline = Instant::now() + SYSTEMCTL_TIMEOUT;
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break Some(status),
                 Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
                 Ok(None) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    terminate_command_group(&mut child);
                     break None;
                 }
                 Err(_) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    terminate_command_group(&mut child);
                     break None;
                 }
             }
         };
-        let stdout = stdout_reader
-            .join()
-            .ok()
-            .and_then(Result::ok)
-            .unwrap_or_default();
         let stderr = stderr_reader
             .join()
             .ok()
@@ -355,7 +359,6 @@ impl SystemdScopeController {
                 format!("systemctl {action} failed: {detail}")
             });
         }
-        let _ = stdout;
         ScopeTransitionResult::ok()
     }
 
@@ -380,6 +383,38 @@ pub struct LaunchScopeAcquirer {
     controller: SystemdScopeController,
     proc_root: PathBuf,
     uid: u32,
+    #[cfg(test)]
+    panic_after_stop: Option<std::sync::Arc<(std::sync::Barrier, std::sync::Barrier)>>,
+}
+struct BootstrapStopGuard<'a> {
+    controller: &'a SystemdScopeController,
+    proc_root: &'a Path,
+    identity: LaunchProcessIdentity,
+    stopped: bool,
+    acquired_scope: Option<SteamAppScope>,
+    handed_off: bool,
+}
+
+impl BootstrapStopGuard<'_> {
+    fn handoff(&mut self) {
+        self.stopped = false;
+        self.acquired_scope = None;
+        self.handed_off = true;
+    }
+}
+
+impl Drop for BootstrapStopGuard<'_> {
+    fn drop(&mut self) {
+        if self.handed_off {
+            return;
+        }
+        if self.stopped && same_process_identity(self.proc_root, &self.identity) {
+            let _ = send_signal(self.identity.pid, libc::SIGCONT);
+        }
+        if let Some(scope) = &self.acquired_scope {
+            self.controller.best_effort_thaw(scope);
+        }
+    }
 }
 
 impl Default for LaunchScopeAcquirer {
@@ -399,6 +434,8 @@ impl LaunchScopeAcquirer {
             controller,
             proc_root: proc_root.into(),
             uid,
+            #[cfg(test)]
+            panic_after_stop: None,
         }
     }
 
@@ -417,8 +454,20 @@ impl LaunchScopeAcquirer {
         if let Err(error) = send_signal(pid, libc::SIGSTOP) {
             return acquisition_failure(&format!("Unable to stop launch PID: {error}"));
         }
-        let mut stopped = true;
-        let mut acquired_scope = None;
+        let mut cleanup = BootstrapStopGuard {
+            controller: &self.controller,
+            proc_root: &self.proc_root,
+            identity: identity.clone(),
+            stopped: true,
+            acquired_scope: None,
+            handed_off: false,
+        };
+        #[cfg(test)]
+        if let Some(barriers) = &self.panic_after_stop {
+            barriers.0.wait();
+            barriers.1.wait();
+            panic!("fixture acquisition unwind after SIGSTOP");
+        }
         let result: Result<(), String> = match self.controller.discover(pid) {
             Err(message) if message == "Exact Steam app scope is not ready" => {
                 let state = wait_until_stopped(&self.proc_root, pid, SIGSTOP_TIMEOUT, SIGSTOP_POLL);
@@ -435,6 +484,7 @@ impl LaunchScopeAcquirer {
                             .to_owned(),
                     )
                 } else {
+                    cleanup.handoff();
                     return ScopeAcquisitionResult {
                         success: true,
                         scope: None,
@@ -457,7 +507,8 @@ impl LaunchScopeAcquirer {
                     if !verified.success {
                         Err(verified.reason)
                     } else {
-                        acquired_scope = (existing_scope != Some(&scope)).then_some(scope.clone());
+                        cleanup.acquired_scope =
+                            (existing_scope != Some(&scope)).then_some(scope.clone());
                         if !same_process_identity(&self.proc_root, &identity)
                             || self.controller.discover(pid).ok().as_ref() != Some(&scope)
                         {
@@ -465,9 +516,10 @@ impl LaunchScopeAcquirer {
                         } else if let Err(error) = send_signal(pid, libc::SIGCONT) {
                             Err(format!("Unable to release bootstrap PID: {error}"))
                         } else {
-                            stopped = false;
+                            cleanup.stopped = false;
                             let handed_off = self.verify_frozen(&scope, true);
                             if handed_off.success {
+                                cleanup.handoff();
                                 return ScopeAcquisitionResult {
                                     success: true,
                                     scope: Some(scope),
@@ -482,12 +534,6 @@ impl LaunchScopeAcquirer {
                 }
             }
         };
-        if stopped && same_process_identity(&self.proc_root, &identity) {
-            let _ = send_signal(pid, libc::SIGCONT);
-        }
-        if let Some(scope) = acquired_scope {
-            let _ = self.controller.thaw(&scope);
-        }
         acquisition_failure(&result.unwrap_err())
     }
 
@@ -702,6 +748,17 @@ fn parse_frozen(events: &str) -> Option<i32> {
     (matches!(value, 0 | 1) && frozen.next().is_none()).then_some(value)
 }
 
+fn terminate_command_group(child: &mut std::process::Child) {
+    if let Ok(pid) = i32::try_from(child.id())
+        && pid > 1
+    {
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
 fn read_pipe(mut pipe: impl Read) -> io::Result<Vec<u8>> {
     let mut output = Vec::new();
     pipe.read_to_end(&mut output)?;
@@ -720,11 +777,22 @@ fn bounded_reason(message: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{
+        fs,
+        os::unix::process::CommandExt,
+        path::Path,
+        process::{Command, Stdio},
+        sync::{Arc, Barrier},
+        thread,
+        time::{Duration, Instant},
+    };
 
     use tempfile::tempdir_in;
 
-    use super::{read_process_identity, same_process_identity};
+    use super::{
+        LaunchScopeAcquirer, SystemdScopeController, read_process_identity, same_process_identity,
+        thread_group_stopped,
+    };
 
     #[test]
     fn launch_pid_identity_rejects_reused_pid_with_new_start_ticks() {
@@ -748,5 +816,74 @@ mod tests {
         .unwrap();
 
         assert!(!same_process_identity(proc_root, &identity));
+    }
+    #[test]
+    fn bootstrap_stop_is_released_when_scope_acquisition_unwinds() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let proc_root = temporary.path().join("proc");
+        let cgroup_root = temporary.path().join("cgroup");
+        fs::create_dir_all(&proc_root).unwrap();
+        fs::create_dir_all(&cgroup_root).unwrap();
+        let uid = unsafe { libc::geteuid() };
+        let mut child = Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = i32::try_from(child.id()).unwrap();
+        let proc_dir = proc_root.join(pid.to_string());
+        fs::create_dir(&proc_dir).unwrap();
+        let fields = std::iter::repeat_n("1", 18).collect::<Vec<_>>().join(" ");
+        fs::write(
+            proc_dir.join("stat"),
+            format!("{pid} (fixture process) S {fields} 991"),
+        )
+        .unwrap();
+        let barriers = Arc::new((Barrier::new(2), Barrier::new(2)));
+        let mut acquirer = LaunchScopeAcquirer::new(
+            SystemdScopeController::new(&proc_root, &cgroup_root, uid),
+            &proc_root,
+            uid,
+        );
+        acquirer.panic_after_stop = Some(Arc::clone(&barriers));
+        let worker = thread::spawn(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| acquirer.acquire(pid, None)))
+                .is_err()
+        });
+        barriers.0.wait();
+        let stop_deadline = Instant::now() + Duration::from_secs(1);
+        while !thread_group_stopped(Path::new("/proc"), pid) && Instant::now() < stop_deadline {
+            thread::sleep(Duration::from_millis(2));
+        }
+        let stopped_during_acquisition = thread_group_stopped(Path::new("/proc"), pid);
+        barriers.1.wait();
+        let panicked = worker.join().unwrap();
+        let resume_deadline = Instant::now() + Duration::from_secs(1);
+        while thread_group_stopped(Path::new("/proc"), pid) && Instant::now() < resume_deadline {
+            thread::sleep(Duration::from_millis(2));
+        }
+        let resumed_after_unwind = !thread_group_stopped(Path::new("/proc"), pid);
+        if !resumed_after_unwind {
+            unsafe {
+                libc::kill(pid, libc::SIGCONT);
+            }
+        }
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(
+            panicked,
+            "fixture did not unwind after stopping the bootstrap PID"
+        );
+        assert!(
+            stopped_during_acquisition,
+            "fixture never observed the bootstrap PID stopped"
+        );
+        assert!(
+            resumed_after_unwind,
+            "bootstrap PID remained stopped after acquisition unwound"
+        );
     }
 }
