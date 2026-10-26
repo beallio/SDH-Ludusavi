@@ -5,7 +5,7 @@ use std::{
     path::Path,
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -16,8 +16,8 @@ use std::os::unix::fs::MetadataExt;
 use serde_json::{Value, json};
 
 use crate::launch_gate::{
-    LaunchProcessIdentity, LaunchScopeAcquirer, ScopeTransitionResult, SteamAppScope,
-    SystemdScopeController, parse_start_ticks, thread_group_stopped,
+    LaunchProcessIdentity, LaunchScopeAcquirer, ScopeAcquisitionResult, ScopeTransitionResult,
+    SteamAppScope, SystemdScopeController, parse_start_ticks, thread_group_stopped,
 };
 use crate::operations::GuardedOperationResult;
 
@@ -36,6 +36,8 @@ struct PauseLease {
     deadline: Instant,
     lease_id: String,
     identity: Option<LaunchProcessIdentity>,
+    generation: u64,
+    guarded_generation: u64,
     guarded_active: bool,
     cancellation: Option<Arc<AtomicBool>>,
     release_requested: bool,
@@ -46,15 +48,26 @@ struct PauseLease {
 struct State {
     leases: BTreeMap<i32, PauseLease>,
 }
-
 struct Inner {
     state: Mutex<State>,
     changed: Condvar,
     controller: SystemdScopeController,
-    acquirer: LaunchScopeAcquirer,
+    acquirer: Arc<dyn ScopeAcquirer>,
     proc_root: std::path::PathBuf,
+    transition_locks: Mutex<BTreeMap<i32, Arc<Mutex<()>>>>,
+    next_generation: AtomicU64,
     stopping: AtomicBool,
     thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+trait ScopeAcquirer: Send + Sync {
+    fn acquire(&self, pid: i32, existing_scope: Option<&SteamAppScope>) -> ScopeAcquisitionResult;
+}
+
+impl ScopeAcquirer for LaunchScopeAcquirer {
+    fn acquire(&self, pid: i32, existing_scope: Option<&SteamAppScope>) -> ScopeAcquisitionResult {
+        LaunchScopeAcquirer::acquire(self, pid, existing_scope)
+    }
 }
 
 #[derive(Clone)]
@@ -67,7 +80,11 @@ impl Default for ProcessWatchdog {
         let controller = SystemdScopeController::default();
         let proc_root = Path::new("/proc").to_path_buf();
         let uid = unsafe { libc::geteuid() };
-        let acquirer = LaunchScopeAcquirer::new(controller.clone(), proc_root.clone(), uid);
+        let acquirer: Arc<dyn ScopeAcquirer> = Arc::new(LaunchScopeAcquirer::new(
+            controller.clone(),
+            proc_root.clone(),
+            uid,
+        ));
         Self {
             inner: Arc::new(Inner {
                 state: Mutex::new(State::default()),
@@ -75,6 +92,8 @@ impl Default for ProcessWatchdog {
                 controller,
                 acquirer,
                 proc_root,
+                transition_locks: Mutex::new(BTreeMap::new()),
+                next_generation: AtomicU64::new(1),
                 stopping: AtomicBool::new(false),
                 thread: Mutex::new(None),
             }),
@@ -90,6 +109,8 @@ impl ProcessWatchdog {
         if self.inner.stopping.load(Ordering::Acquire) {
             return gate_failure(pid, "Plugin shutdown is in progress");
         }
+        let transition = self.inner.transition_lock(pid);
+        let _transition = lock(&transition);
         let existing = lock(&self.inner.state).leases.get(&pid).cloned();
         if existing.as_ref().is_some_and(|lease| {
             lease.guarded_active || lease.release_requested || lease.release_in_progress
@@ -143,7 +164,7 @@ impl ProcessWatchdog {
                         if let Some(new_scope) = scope {
                             let mut state = lock(&self.inner.state);
                             if let Some(current) = state.leases.get_mut(&pid)
-                                && current.lease_id == previous.lease_id
+                                && current.generation == previous.generation
                             {
                                 current.recovery_scopes.push(new_scope);
                             }
@@ -152,13 +173,21 @@ impl ProcessWatchdog {
                     return gate_failure(pid, &reason);
                 }
             }
-            lock(&self.inner.state).leases.remove(&pid);
+            let mut state = lock(&self.inner.state);
+            if state
+                .leases
+                .get(&pid)
+                .is_some_and(|current| current.generation == previous.generation)
+            {
+                state.leases.remove(&pid);
+            }
         }
         let now = Instant::now();
         let started = existing
             .as_ref()
             .filter(|lease| lease.scope == scope)
             .map_or(now, |lease| lease.started);
+        let generation = self.inner.next_generation.fetch_add(1, Ordering::Relaxed);
         lock(&self.inner.state).leases.insert(
             pid,
             PauseLease {
@@ -168,6 +197,8 @@ impl ProcessWatchdog {
                 deadline: now + LEASE_TTL,
                 lease_id: lease_id.clone(),
                 identity: acquired.identity,
+                generation,
+                guarded_generation: 0,
                 guarded_active: false,
                 cancellation: None,
                 release_requested: false,
@@ -183,6 +214,8 @@ impl ProcessWatchdog {
         if let Err(message) = validate_pid(pid) {
             return json!({"status":"failed", "message":message});
         }
+        let transition = self.inner.transition_lock(pid);
+        let _transition = lock(&transition);
         let mut state = lock(&self.inner.state);
         let Some(lease) = state.leases.get_mut(&pid) else {
             return gate_failure(pid, "Process not paused");
@@ -210,6 +243,8 @@ impl ProcessWatchdog {
         if validate_pid(pid).is_err() {
             return false;
         }
+        let transition = self.inner.transition_lock(pid);
+        let _transition = lock(&transition);
         let state = lock(&self.inner.state);
         let Some(lease) = state.leases.get(&pid) else {
             return false;
@@ -232,7 +267,9 @@ impl ProcessWatchdog {
         if let Err(message) = validate_pid(pid) {
             return json!({"status":"failed", "message":message});
         }
+        let transition = self.inner.transition_lock(pid);
         let lease = {
+            let _transition = lock(&transition);
             let mut state = lock(&self.inner.state);
             let Some(lease) = state.leases.get_mut(&pid) else {
                 return gate_failure(pid, "Process not paused");
@@ -250,41 +287,43 @@ impl ProcessWatchdog {
             }
             lease.clone()
         };
+        let generation = lease.generation;
         let mut state = lock(&self.inner.state);
         let deadline = Instant::now() + GUARDED_COMPLETION_TIMEOUT;
         while state
             .leases
             .get(&pid)
-            .is_some_and(|current| current.guarded_active)
+            .is_some_and(|current| current.generation == generation && current.guarded_active)
         {
             let now = Instant::now();
             if now >= deadline {
-                if let Some(current) = state.leases.get_mut(&pid) {
+                drop(state);
+                let _transition = lock(&transition);
+                let mut state = lock(&self.inner.state);
+                if let Some(current) = state.leases.get_mut(&pid)
+                    && current.generation == generation
+                {
                     current.release_in_progress = false;
                 }
                 self.inner.changed.notify_all();
                 return gate_failure(pid, "Guarded operation completion was not confirmed");
             }
-            let (next, timeout) = self
+            let (next, _) = self
                 .inner
                 .changed
                 .wait_timeout(state, deadline - now)
                 .unwrap_or_else(|error| error.into_inner());
             state = next;
-            if timeout.timed_out()
-                && state
-                    .leases
-                    .get(&pid)
-                    .is_some_and(|current| current.guarded_active)
-            {
-                if let Some(current) = state.leases.get_mut(&pid) {
-                    current.release_in_progress = false;
-                }
-                self.inner.changed.notify_all();
-                return gate_failure(pid, "Guarded operation completion was not confirmed");
-            }
         }
         drop(state);
+        let _transition = lock(&transition);
+        if !lock(&self.inner.state)
+            .leases
+            .get(&pid)
+            .is_some_and(|current| current.generation == generation)
+        {
+            return gate_failure(pid, "Lease changed during release");
+        }
         self.release_lease(pid, &lease)
     }
 
@@ -298,7 +337,9 @@ impl ProcessWatchdog {
             return None;
         }
         let cancel = Arc::new(AtomicBool::new(false));
-        {
+        let transition = self.inner.transition_lock(pid);
+        let (generation, guarded_generation) = {
+            let _transition = lock(&transition);
             let mut state = lock(&self.inner.state);
             let lease = state.leases.get(&pid)?;
             if lease.lease_id != lease_id
@@ -317,14 +358,21 @@ impl ProcessWatchdog {
                 return None;
             }
             let lease = state.leases.get_mut(&pid)?;
+            lease.guarded_generation += 1;
             lease.guarded_active = true;
             lease.cancellation = Some(Arc::clone(&cancel));
-        }
+            (lease.generation, lease.guarded_generation)
+        };
         let mut result = callback(Arc::clone(&cancel));
         result.completion.wait(Some(&cancel));
         let release_requested = {
+            let _transition = lock(&transition);
             let mut state = lock(&self.inner.state);
             let lease = state.leases.get_mut(&pid)?;
+            if lease.generation != generation || lease.guarded_generation != guarded_generation {
+                self.inner.changed.notify_all();
+                return None;
+            }
             lease.guarded_active = false;
             lease.cancellation = None;
             let requested = lease.release_requested;
@@ -374,7 +422,9 @@ impl ProcessWatchdog {
             for owned in std::iter::once(scope).chain(lease.recovery_scopes.iter()) {
                 let result = self.inner.controller.thaw(owned);
                 if !result.success {
-                    if let Some(current) = lock(&self.inner.state).leases.get_mut(&pid) {
+                    if let Some(current) = lock(&self.inner.state).leases.get_mut(&pid)
+                        && current.generation == lease.generation
+                    {
                         current.release_in_progress = false;
                     }
                     return gate_failure(pid, &result.reason);
@@ -383,7 +433,9 @@ impl ProcessWatchdog {
         } else if let Err(message) =
             release_stop_only(&self.inner.proc_root, lease.identity.as_ref())
         {
-            if let Some(current) = lock(&self.inner.state).leases.get_mut(&pid) {
+            if let Some(current) = lock(&self.inner.state).leases.get_mut(&pid)
+                && current.generation == lease.generation
+            {
                 current.release_in_progress = false;
             }
             return gate_failure(pid, &message);
@@ -392,7 +444,7 @@ impl ProcessWatchdog {
         if state
             .leases
             .get(&pid)
-            .is_some_and(|current| current.lease_id == lease.lease_id)
+            .is_some_and(|current| current.generation == lease.generation)
         {
             state.leases.remove(&pid);
         }
@@ -401,6 +453,14 @@ impl ProcessWatchdog {
 }
 
 impl Inner {
+    fn transition_lock(&self, pid: i32) -> Arc<Mutex<()>> {
+        Arc::clone(
+            lock(&self.transition_locks)
+                .entry(pid)
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        )
+    }
+
     fn ensure_watchdog(self: &Arc<Self>) -> io::Result<()> {
         let mut thread_slot = lock(&self.thread);
         if thread_slot.as_ref().is_some_and(JoinHandle::is_finished) {
@@ -571,18 +631,41 @@ mod tests {
         fs,
         os::unix::process::CommandExt,
         process::{Command, Stdio},
-        sync::mpsc,
+        sync::{Arc, Barrier, mpsc},
         thread,
         time::Duration,
     };
 
     use tempfile::tempdir_in;
 
-    use super::{Inner, LEASE_TTL, PauseLease, ProcessWatchdog, State, lock};
+    use super::{Inner, LEASE_TTL, PauseLease, ProcessWatchdog, ScopeAcquirer, State, lock};
     use crate::{
-        launch_gate::{LaunchProcessIdentity, LaunchScopeAcquirer, SystemdScopeController},
+        launch_gate::{
+            LaunchProcessIdentity, LaunchScopeAcquirer, ScopeAcquisitionResult,
+            SystemdScopeController,
+        },
         operations::{GuardedOperationResult, ProcessGroupCompletion},
     };
+
+    fn test_watchdog(
+        controller: SystemdScopeController,
+        proc_root: std::path::PathBuf,
+        acquirer: Arc<dyn ScopeAcquirer>,
+    ) -> ProcessWatchdog {
+        ProcessWatchdog {
+            inner: Arc::new(Inner {
+                state: std::sync::Mutex::new(State::default()),
+                changed: std::sync::Condvar::new(),
+                controller,
+                acquirer,
+                proc_root,
+                transition_locks: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+                next_generation: std::sync::atomic::AtomicU64::new(2),
+                stopping: std::sync::atomic::AtomicBool::new(false),
+                thread: std::sync::Mutex::new(None),
+            }),
+        }
+    }
 
     #[test]
     fn guarded_lease_stays_pinned_until_process_group_exit_is_confirmed() {
@@ -593,18 +676,12 @@ mod tests {
         fs::create_dir_all(&cgroup_root).unwrap();
         let uid = unsafe { libc::geteuid() };
         let controller = SystemdScopeController::new(&proc_root, &cgroup_root, uid);
-        let acquirer = LaunchScopeAcquirer::new(controller.clone(), &proc_root, uid);
-        let watchdog = ProcessWatchdog {
-            inner: std::sync::Arc::new(Inner {
-                state: std::sync::Mutex::new(State::default()),
-                changed: std::sync::Condvar::new(),
-                controller,
-                acquirer,
-                proc_root: proc_root.clone(),
-                stopping: std::sync::atomic::AtomicBool::new(false),
-                thread: std::sync::Mutex::new(None),
-            }),
-        };
+        let acquirer: Arc<dyn ScopeAcquirer> = Arc::new(LaunchScopeAcquirer::new(
+            controller.clone(),
+            &proc_root,
+            uid,
+        ));
+        let watchdog = test_watchdog(controller, proc_root.clone(), acquirer);
         let mut child = Command::new("/bin/sleep")
             .arg("30")
             .stdin(Stdio::null())
@@ -634,6 +711,8 @@ mod tests {
                     owner_uid: uid,
                     start_ticks: 991,
                 }),
+                generation: 1,
+                guarded_generation: 0,
                 guarded_active: false,
                 cancellation: None,
                 release_requested: false,
@@ -671,5 +750,133 @@ mod tests {
         child.wait().unwrap();
         done_receiver.recv_timeout(Duration::from_secs(1)).unwrap();
         worker.unwrap().join().unwrap();
+    }
+    struct BlockingAcquirer {
+        barriers: Arc<(Barrier, Barrier)>,
+        identity: LaunchProcessIdentity,
+    }
+
+    impl ScopeAcquirer for BlockingAcquirer {
+        fn acquire(
+            &self,
+            _pid: i32,
+            _existing_scope: Option<&super::SteamAppScope>,
+        ) -> ScopeAcquisitionResult {
+            self.barriers.0.wait();
+            self.barriers.1.wait();
+            ScopeAcquisitionResult {
+                success: true,
+                scope: None,
+                stop_only: true,
+                reason: String::new(),
+                identity: Some(self.identity.clone()),
+            }
+        }
+    }
+
+    #[test]
+    fn pause_serializes_replacement_against_guarded_lease_pinning() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let proc_root = temporary.path().join("proc");
+        let cgroup_root = temporary.path().join("cgroup");
+        fs::create_dir_all(&proc_root).unwrap();
+        fs::create_dir_all(&cgroup_root).unwrap();
+        let uid = unsafe { libc::geteuid() };
+        let mut child = Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = i32::try_from(child.id()).unwrap();
+        let proc_dir = proc_root.join(pid.to_string());
+        let task_dir = proc_dir.join("task").join(pid.to_string());
+        fs::create_dir_all(&task_dir).unwrap();
+        let fields = std::iter::repeat_n("1", 18).collect::<Vec<_>>().join(" ");
+        let stat = format!("{pid} (fixture process) T {fields} 991");
+        fs::write(proc_dir.join("stat"), &stat).unwrap();
+        fs::write(task_dir.join("stat"), &stat).unwrap();
+        fs::write(task_dir.join("children"), "").unwrap();
+        let identity = LaunchProcessIdentity {
+            pid,
+            owner_uid: uid,
+            start_ticks: 991,
+        };
+        let barriers = Arc::new((Barrier::new(2), Barrier::new(2)));
+        let controller = SystemdScopeController::new(&proc_root, &cgroup_root, uid);
+        let acquirer: Arc<dyn ScopeAcquirer> = Arc::new(BlockingAcquirer {
+            barriers: Arc::clone(&barriers),
+            identity: identity.clone(),
+        });
+        let watchdog = test_watchdog(controller, proc_root, acquirer);
+        lock(&watchdog.inner.state).leases.insert(
+            pid,
+            PauseLease {
+                scope: None,
+                recovery_scopes: Vec::new(),
+                started: std::time::Instant::now(),
+                deadline: std::time::Instant::now() + LEASE_TTL,
+                lease_id: "old-lease".to_owned(),
+                identity: Some(identity),
+                generation: 1,
+                guarded_generation: 0,
+                guarded_active: false,
+                cancellation: None,
+                release_requested: false,
+                release_in_progress: false,
+            },
+        );
+
+        let pause_watchdog = watchdog.clone();
+        let pause_thread = thread::spawn(move || pause_watchdog.pause(pid));
+        barriers.0.wait();
+        let (attempt_sender, attempt_receiver) = mpsc::channel();
+        let (started_sender, started_receiver) = mpsc::channel();
+        let (finish_sender, finish_receiver) = mpsc::channel();
+        let (result_sender, result_receiver) = mpsc::channel();
+        let guarded_watchdog = watchdog.clone();
+        let guarded_thread = thread::spawn(move || {
+            attempt_sender.send(()).unwrap();
+            let result = guarded_watchdog.run_guarded(pid, "old-lease", move |_| {
+                started_sender.send(()).unwrap();
+                finish_receiver.recv().unwrap();
+                GuardedOperationResult {
+                    result: (),
+                    completion: ProcessGroupCompletion::confirmed(),
+                }
+            });
+            result_sender.send(result.is_some()).unwrap();
+        });
+        attempt_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        let started_before_replacement = started_receiver
+            .recv_timeout(Duration::from_millis(200))
+            .is_ok();
+
+        barriers.1.wait();
+        let pause_result = pause_thread.join().unwrap();
+        let _ = finish_sender.send(());
+        let guarded_succeeded = result_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        guarded_thread.join().unwrap();
+        if pause_result["status"] == "paused" {
+            assert_eq!(watchdog.resume(pid, None)["status"], "resumed");
+        }
+        assert!(watchdog.stop());
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        assert!(
+            !started_before_replacement,
+            "guarded operation pinned the old lease during a replacement transition"
+        );
+        assert!(
+            !guarded_succeeded,
+            "old guarded lease completion applied to a replacement lease"
+        );
     }
 }
