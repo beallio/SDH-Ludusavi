@@ -565,21 +565,57 @@ impl ProcessWatchdog {
         lease: &PauseLease,
         shutdown_deadline: Option<Instant>,
     ) -> Value {
-        let shutdown_deadline = shutdown_deadline.or_else(|| *lock(&self.inner.shutdown_deadline));
+        let mut shutdown_deadline =
+            shutdown_deadline.or_else(|| *lock(&self.inner.shutdown_deadline));
         if shutdown_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             self.reset_release(pid, lease.generation);
             return gate_failure(pid, "Shutdown deadline expired; launch gate retained");
         }
         if let Some(scope) = &lease.scope {
-            for owned in std::iter::once(scope).chain(lease.recovery_scopes.iter()) {
+            let mut failed_scopes = Vec::new();
+            let mut failure_reason = None;
+            let mut scopes = std::iter::once(scope)
+                .chain(lease.recovery_scopes.iter())
+                .peekable();
+            while let Some(owned) = scopes.next() {
+                shutdown_deadline =
+                    shutdown_deadline.or_else(|| *lock(&self.inner.shutdown_deadline));
+                if shutdown_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                    failure_reason.get_or_insert_with(|| {
+                        "Shutdown deadline expired; launch gate retained".to_owned()
+                    });
+                    failed_scopes.push(owned.clone());
+                    failed_scopes.extend(scopes.cloned());
+                    break;
+                }
                 let result = shutdown_deadline.map_or_else(
                     || self.inner.controller.thaw(owned),
                     |deadline| self.inner.controller.thaw_until(owned, deadline),
                 );
                 if !result.success {
-                    self.reset_release(pid, lease.generation);
-                    return gate_failure(pid, &result.reason);
+                    failure_reason.get_or_insert(result.reason);
+                    failed_scopes.push(owned.clone());
                 }
+            }
+            if !failed_scopes.is_empty() {
+                let mut state = lock(&self.inner.state);
+                if let Some(current) = state
+                    .leases
+                    .get_mut(&pid)
+                    .filter(|current| current.generation == lease.generation)
+                {
+                    current.scope = failed_scopes.first().cloned();
+                    current.recovery_scopes = failed_scopes.into_iter().skip(1).collect();
+                    current.release_in_progress = false;
+                }
+                drop(state);
+                self.inner.changed.notify_all();
+                return gate_failure(
+                    pid,
+                    failure_reason
+                        .as_deref()
+                        .unwrap_or("Scope release failed; launch gate retained"),
+                );
             }
         } else if let Err(message) =
             release_stop_only(&self.inner.proc_root, lease.identity.as_ref())
@@ -808,7 +844,7 @@ mod tests {
     use crate::{
         launch_gate::{
             LaunchProcessIdentity, LaunchScopeAcquirer, ScopeAcquisitionResult,
-            SystemdScopeController,
+            ScopeTransitionResult, SteamAppScope, SystemdScopeController,
         },
         operations::ProcessGroupCompletion,
     };
@@ -834,6 +870,99 @@ mod tests {
                 shutdown_deadline: std::sync::Mutex::new(None),
             }),
         }
+    }
+
+    #[test]
+    fn release_attempts_every_scope_and_retains_only_failures() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let proc_root = temporary.path().join("proc");
+        fs::create_dir_all(&proc_root).unwrap();
+        let cgroup_root = temporary.path().join("cgroup");
+        fs::create_dir_all(&cgroup_root).unwrap();
+        let controller =
+            SystemdScopeController::new(&proc_root, &cgroup_root, unsafe { libc::geteuid() });
+        let attempted = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let attempted_by_hook = Arc::clone(&attempted);
+        let failed_unit = "app-steam-app1-2.scope".to_owned();
+        let failed_recovery_unit = "app-steam-app5-6.scope".to_owned();
+        let failed_unit_by_hook = failed_unit.clone();
+        let failed_recovery_by_hook = failed_recovery_unit.clone();
+        controller.set_thaw_hook(Arc::new(move |scope| {
+            lock(&attempted_by_hook).push(scope.unit.clone());
+            let failed = scope.unit == failed_unit_by_hook || scope.unit == failed_recovery_by_hook;
+            ScopeTransitionResult {
+                success: !failed,
+                reason: if failed {
+                    "scope remains frozen".to_owned()
+                } else {
+                    String::new()
+                },
+                disappeared: false,
+            }
+        }));
+        let uid = unsafe { libc::geteuid() };
+        let acquirer = Arc::new(LaunchScopeAcquirer::new(
+            controller.clone(),
+            proc_root.clone(),
+            uid,
+        ));
+        let watchdog = test_watchdog(controller, proc_root, acquirer);
+        let pid = 42;
+        let primary = SteamAppScope {
+            unit: failed_unit.clone(),
+            cgroup_path: "/user.slice/app-steam-app1-2.scope".to_owned(),
+            root_pid: pid,
+            device: 1,
+            inode: 2,
+        };
+        let recovery = SteamAppScope {
+            unit: "app-steam-app3-4.scope".to_owned(),
+            cgroup_path: "/user.slice/app-steam-app3-4.scope".to_owned(),
+            root_pid: pid,
+            device: 1,
+            inode: 3,
+        };
+        let failed_recovery = SteamAppScope {
+            unit: failed_recovery_unit.clone(),
+            cgroup_path: "/user.slice/app-steam-app5-6.scope".to_owned(),
+            root_pid: pid,
+            device: 1,
+            inode: 4,
+        };
+        lock(&watchdog.inner.state).leases.insert(
+            pid,
+            PauseLease {
+                scope: Some(primary),
+                recovery_scopes: vec![recovery, failed_recovery.clone()],
+                started: std::time::Instant::now(),
+                deadline: std::time::Instant::now() + LEASE_TTL,
+                lease_id: "multi-scope-release".to_owned(),
+                identity: None,
+                generation: 1,
+                guarded_generation: 0,
+                guarded_active: false,
+                cancellation: None,
+                release_requested: false,
+                release_in_progress: false,
+            },
+        );
+
+        let result = watchdog.resume(pid, None);
+
+        assert_eq!(result["status"], "failed");
+        assert_eq!(
+            *lock(&attempted),
+            [
+                "app-steam-app1-2.scope",
+                "app-steam-app3-4.scope",
+                "app-steam-app5-6.scope"
+            ]
+        );
+        let state = lock(&watchdog.inner.state);
+        let lease = state.leases.get(&pid).unwrap();
+        assert_eq!(lease.scope.as_ref().unwrap().unit, failed_unit);
+        assert_eq!(lease.recovery_scopes, vec![failed_recovery]);
+        assert!(!lease.release_in_progress);
     }
 
     #[test]

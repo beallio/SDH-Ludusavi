@@ -67,11 +67,16 @@ pub struct ScopeAcquisitionResult {
     pub identity: Option<LaunchProcessIdentity>,
 }
 
+#[cfg(test)]
+type ThawHook = std::sync::Arc<dyn Fn(&SteamAppScope) -> ScopeTransitionResult + Send + Sync>;
+
 #[derive(Clone)]
 pub struct SystemdScopeController {
     proc_root: PathBuf,
     cgroup_root: PathBuf,
     uid: u32,
+    #[cfg(test)]
+    thaw_hook: std::sync::Arc<std::sync::Mutex<Option<ThawHook>>>,
 }
 
 impl Default for SystemdScopeController {
@@ -86,7 +91,16 @@ impl SystemdScopeController {
             proc_root: proc_root.into(),
             cgroup_root: cgroup_root.into(),
             uid,
+            #[cfg(test)]
+            thaw_hook: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
+    }
+    #[cfg(test)]
+    pub(crate) fn set_thaw_hook(&self, hook: ThawHook) {
+        *self
+            .thaw_hook
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(hook);
     }
 
     pub fn discover(&self, pid: i32) -> Result<SteamAppScope, String> {
@@ -157,6 +171,15 @@ impl SystemdScopeController {
         scope: &SteamAppScope,
         deadline: Option<Instant>,
     ) -> ScopeTransitionResult {
+        #[cfg(test)]
+        if let Some(hook) = self
+            .thaw_hook
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+        {
+            return hook(scope);
+        }
         let (state, reason) = self.scope_state(scope);
         if state == ScopeState::Missing {
             return ScopeTransitionResult {
