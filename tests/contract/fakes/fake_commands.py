@@ -103,11 +103,24 @@ def _hang_if_configured(config: dict[str, Any]) -> None:
     if config.get("ignore_term") is True:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
     if config.get("spawn_child") is True:
-        child_code = (
-            "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(600)"
-        )
-        child = subprocess.Popen([sys.executable, "-c", child_code])
-        config["child_pid"] = child.pid
+        ready_file = config.get("child_ready_file")
+        if isinstance(ready_file, str):
+            child_code = (
+                "import os,signal,sys,time; "
+                "signal.signal(signal.SIGTERM,signal.SIG_IGN); "
+                "open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(600)"
+            )
+            subprocess.Popen([sys.executable, "-c", child_code, ready_file])
+            deadline = time.monotonic() + 5
+            while not Path(ready_file).is_file() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            if not Path(ready_file).is_file():
+                raise RuntimeError("fake child failed to report readiness")
+        else:
+            child_code = (
+                "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(600)"
+            )
+            subprocess.Popen([sys.executable, "-c", child_code])
     if isinstance(delay, int | float) and delay > 0:
         time.sleep(float(delay))
 

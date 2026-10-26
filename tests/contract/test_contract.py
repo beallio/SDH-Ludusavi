@@ -808,19 +808,23 @@ def test_ludusavi_child_environment_is_sanitized() -> None:
 
 @pytest.mark.contract_operations
 def test_unload_cancels_and_reaps_ludusavi_process_group() -> None:
-    harness = ContractHarness(
-        scenario={
+    harness = ContractHarness()
+    ready_file = harness.root / "fake-child-ready"
+    harness.set_scenario(
+        {
             "flatpak": {
                 "responses": {
                     "backup": {
                         "delay_seconds": 600,
                         "ignore_term": True,
                         "spawn_child": True,
+                        "child_ready_file": str(ready_file),
                     },
                 }
             }
         }
-    ).start()
+    )
+    harness.start()
     operations = ThreadPoolExecutor(max_workers=1)
     try:
         result = operations.submit(harness.call, "force_backup", GAME, timeout=30)
@@ -838,11 +842,27 @@ def test_unload_cancels_and_reaps_ludusavi_process_group() -> None:
             10,
             "slow backup did not start",
         )
+        child_pid = int(
+            _wait_for(
+                lambda: ready_file.read_text(encoding="utf-8") if ready_file.is_file() else None,
+                10,
+                "fake child did not become ready",
+            )
+        )
+        assert os.getpgid(child_pid) == record["pgid"]
+        assert record["pgid"] != os.getpgid(harness.process.pid)
         started = time.monotonic()
         harness.stop()
         stop_seconds = time.monotonic() - started
         assert stop_seconds < 5, f"backend shutdown took {stop_seconds:.3f}s"
         assert not _process_group_exists(record["pgid"])
+        if harness.backend != "python":
+            cache = json.loads((harness.runtime_dir / "cache.json").read_text(encoding="utf-8"))
+            entry = cache["game_history"][GAME]
+            assert entry["last_skip"]["status"] == "skipped"
+            assert entry["last_skip"]["reason"] == "cancelled"
+            assert entry["last_failure"] is None
+            assert entry["last_operation"]["status"] == "skipped"
         with pytest.raises(ConnectionError, match="backend is shutting down"):
             result.result(timeout=1)
     finally:
@@ -866,6 +886,36 @@ def test_force_backup_skips_unknown_game_without_starting_backup(
         and "--preview" not in record["argv"]
         for record in backend.fake_processes()
     )
+
+
+@pytest.mark.contract_operations
+def test_lazy_game_lookup_propagates_refresh_failures(backend: ContractHarness) -> None:
+    backend.set_scenario(
+        {
+            "flatpak": {
+                "responses": {"backup_preview": {"exit_code": 23, "stderr": "preview failed"}}
+            }
+        }
+    )
+    for method in ("force_backup", "list_backups"):
+        result = rpc(backend, method, GAME)
+        assert result["status"] == "failed"
+        assert "exit code 23" in result["message"]
+
+
+@pytest.mark.contract_operations
+@pytest.mark.parametrize("payload", [None, []])
+def test_non_object_ludusavi_roots_preserve_the_existing_registry(
+    backend: ContractHarness, payload: Any
+) -> None:
+    before = rpc(backend, "refresh_games", True, APP_ID)
+    assert any(game["name"] == GAME for game in before["games"])
+    backend.set_scenario({"flatpak": {"responses": {"backup_preview": {"json": payload}}}})
+
+    refreshed = rpc(backend, "refresh_games", True, APP_ID)
+
+    assert refreshed["dependency_error"]
+    assert any(game["name"] == GAME for game in refreshed["games"])
 
 
 @pytest.mark.contract_operations
@@ -990,6 +1040,9 @@ def test_operations_logs_status_lock_and_local_update_state(backend: ContractHar
         locked = rpc(backend, "force_restore", GAME)
         assert locked["status"] == "skipped"
         assert locked["reason"] == "operation_running"
+        locked_list = rpc(backend, "list_backups", GAME)
+        assert locked_list["status"] == "skipped"
+        assert locked_list["reason"] == "operation_running"
         status = rpc(backend, "get_operation_status")
         assert status["is_running"] is True
         assert status["name"] == "backup"

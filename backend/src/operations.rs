@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
     io::{self, Read},
-    os::unix::process::CommandExt,
+    os::unix::{ffi::OsStrExt, process::CommandExt},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
@@ -16,6 +16,7 @@ use std::{
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use unicode_casefold::UnicodeCaseFold;
 
 use crate::persistence::{StateLock, read_object, write_json_atomic};
 
@@ -27,6 +28,7 @@ const TERMINATE_GRACE: Duration = Duration::from_millis(200);
 const KILL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_INSTALLED_APP_IDS_BYTES: usize = 16_384;
 const MAX_BACKUP_STAT_ENTRIES: usize = 1_000;
+const OPERATION_CANCELLED: &str = "Ludusavi operation cancelled";
 
 #[derive(Clone, Debug)]
 struct Game {
@@ -350,6 +352,9 @@ impl LudusaviOperations {
             Ok(_) => self.refresh_result(None),
             Err(OperationError::Locked(message)) => self.refresh_result(Some(message)),
             Err(OperationError::Failed(message)) => self.refresh_result(Some(message)),
+            Err(OperationError::Cancelled) => {
+                self.refresh_result(Some(OPERATION_CANCELLED.to_owned()))
+            }
         }
     }
 
@@ -372,6 +377,14 @@ impl LudusaviOperations {
         self.force_operation(name, true, Some(backup_id))
     }
 
+    fn ensure_registry(&self) -> Result<(), OperationError> {
+        if lock(&self.registry).games.is_empty() {
+            let marker = self.config_marker().ok();
+            self.run_operation("refresh", None, || self.refresh_statuses(None, marker))?;
+        }
+        Ok(())
+    }
+
     fn force_operation(
         &self,
         name: &str,
@@ -379,8 +392,20 @@ impl LudusaviOperations {
         backup_id: Option<&str>,
     ) -> Result<Value, String> {
         let name = sanitize_game_name(name);
-        if lock(&self.registry).games.is_empty() {
-            let _ = self.refresh_games(false, None);
+        if let Err(error) = self.ensure_registry() {
+            return match error {
+                OperationError::Locked(message) => Ok(json!({
+                    "status":"skipped",
+                    "reason":"operation_running",
+                    "message":message,
+                })),
+                OperationError::Failed(message) => Err(message),
+                OperationError::Cancelled => Ok(json!({
+                    "status":"skipped",
+                    "reason":"cancelled",
+                    "game":name,
+                })),
+            };
         }
         let Some(game) = lock(&self.registry).matching_game(&name, None) else {
             return Ok(skip_result(&name, "unmatched_game"));
@@ -420,6 +445,21 @@ impl LudusaviOperations {
                 return Ok(
                     json!({"status":"skipped", "reason":"operation_running", "message":message}),
                 );
+            }
+            Err(OperationError::Cancelled) => {
+                self.record_history(
+                    &game.name,
+                    operation,
+                    trigger,
+                    "skipped",
+                    Some("cancelled"),
+                    None,
+                )?;
+                return Ok(json!({
+                    "status":"skipped",
+                    "reason":"cancelled",
+                    "game":game.name,
+                }));
             }
             Err(OperationError::Failed(message)) => {
                 self.record_history(
@@ -477,18 +517,32 @@ impl LudusaviOperations {
 
     pub fn list_backups(&self, name: &str) -> Result<Value, String> {
         let name = sanitize_game_name(name);
-        if lock(&self.registry).games.is_empty() {
-            let _ = self.refresh_games(false, None);
+        if let Err(error) = self.ensure_registry() {
+            return match error {
+                OperationError::Locked(message) => Ok(json!({
+                    "status":"skipped",
+                    "reason":"operation_running",
+                    "message":message,
+                })),
+                OperationError::Failed(message) => Err(message),
+                OperationError::Cancelled => Err(OPERATION_CANCELLED.to_owned()),
+            };
         }
         let Some(game) = lock(&self.registry).matching_game(&name, None) else {
             return Ok(skip_result(&name, "unmatched_game"));
         };
-        self.run_operation("backups_list", Some(&game.name), || {
+        match self.run_operation("backups_list", Some(&game.name), || {
             self.client()?.list_backups(&game.name)
-        })
-        .map_err(|error| match error {
-            OperationError::Locked(message) | OperationError::Failed(message) => message,
-        })
+        }) {
+            Ok(result) => Ok(result),
+            Err(OperationError::Locked(message)) => Ok(json!({
+                "status":"skipped",
+                "reason":"operation_running",
+                "message":message,
+            })),
+            Err(OperationError::Failed(message)) => Err(message),
+            Err(OperationError::Cancelled) => Err(OPERATION_CANCELLED.to_owned()),
+        }
     }
 
     fn run_operation<T>(
@@ -525,6 +579,9 @@ impl LudusaviOperations {
             status.game_name = None;
             match &result {
                 Ok(_) => status.last_result = Some("ok".to_owned()),
+                Err(message) if message == OPERATION_CANCELLED => {
+                    status.last_result = Some("cancelled".to_owned())
+                }
                 Err(message) => {
                     status.last_result = Some("failed".to_owned());
                     status.last_error = Some(message.clone());
@@ -532,7 +589,13 @@ impl LudusaviOperations {
             }
         }
         drop(guard);
-        result.map_err(OperationError::Failed)
+        result.map_err(|message| {
+            if message == OPERATION_CANCELLED {
+                OperationError::Cancelled
+            } else {
+                OperationError::Failed(message)
+            }
+        })
     }
 
     fn refresh_statuses(
@@ -548,8 +611,8 @@ impl LudusaviOperations {
         });
         let preview = preview.map_err(|_| "Ludusavi preview worker panicked".to_owned())??;
         let backups = backups.map_err(|_| "Ludusavi backups worker panicked".to_owned())??;
-        let preview_games = game_objects(&preview);
-        let backup_games = game_objects(&backups);
+        let preview_games = game_objects(&preview)?;
+        let backup_games = game_objects(&backups)?;
         let mut games = Vec::new();
         for (name, output) in preview_games {
             let files = output.get("files").and_then(Value::as_object);
@@ -617,8 +680,8 @@ impl LudusaviOperations {
         });
         let preview = preview.map_err(|_| "Ludusavi preview worker panicked".to_owned())??;
         let backups = backups.map_err(|_| "Ludusavi backups worker panicked".to_owned())??;
-        let backup_games = game_objects(&backups);
-        let Some((found_name, output)) = game_objects(&preview).into_iter().next() else {
+        let backup_games = game_objects(&backups)?;
+        let Some((found_name, output)) = game_objects(&preview)?.into_iter().next() else {
             return Ok(());
         };
         let has_backup = backup_games
@@ -746,10 +809,10 @@ impl LudusaviOperations {
     }
 
     fn save_cache(&self) -> Result<(), String> {
-        let registry = lock(&self.registry).cache_payload();
-        let history = self.get_game_history();
         self.state_lock
             .with_lock(|| {
+                let registry = lock(&self.registry).cache_payload();
+                let history = self.get_game_history();
                 let mut cache = read_object(&self.cache_path)?.unwrap_or_default();
                 for (key, value) in registry {
                     cache.insert(key, value);
@@ -765,6 +828,7 @@ impl LudusaviOperations {
 enum OperationError {
     Locked(String),
     Failed(String),
+    Cancelled,
 }
 
 struct LudusaviClient {
@@ -903,11 +967,7 @@ impl LudusaviClient {
         let mut cached = lock(&self.config_path);
         if cached.is_none() {
             let path = self.text(&["config".to_owned(), "path".to_owned()], BACKUPS_TIMEOUT)?;
-            *cached = Some(
-                PathBuf::from(path.trim())
-                    .canonicalize()
-                    .map_err(|error| error.to_string())?,
-            );
+            *cached = Some(PathBuf::from(path.trim()));
         }
         cached
             .as_ref()
@@ -916,7 +976,10 @@ impl LudusaviClient {
     }
 
     fn config_marker(&self) -> Result<i64, String> {
-        let config_path = self.config_path()?;
+        let config_path = self
+            .config_path()?
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
         let config_metadata = fs::metadata(&config_path).map_err(|error| error.to_string())?;
         let mut mtimes = vec![
             config_metadata
@@ -952,7 +1015,7 @@ impl LudusaviClient {
 
     fn list_backups(&self, game: &str) -> Result<Value, String> {
         let output = self.backups(Some(game))?;
-        let games = game_objects(&output);
+        let games = game_objects(&output)?;
         let game_output = games.get(game).or_else(|| games.values().next());
         let Some(game_output) = game_output else {
             return Ok(
@@ -1224,17 +1287,24 @@ fn find_executable(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
             }
         })
         .map(|directory| directory.join(name))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| {
+            candidate.is_file()
+                && std::ffi::CString::new(candidate.as_os_str().as_bytes())
+                    .is_ok_and(|path| unsafe { libc::access(path.as_ptr(), libc::X_OK) == 0 })
+        })
 }
 
-fn game_objects(value: &Value) -> BTreeMap<String, Value> {
-    value
+fn game_objects(value: &Value) -> Result<BTreeMap<String, Value>, String> {
+    let root = value
+        .as_object()
+        .ok_or_else(|| "Ludusavi output root is not an object".to_owned())?;
+    Ok(root
         .get("games")
         .and_then(Value::as_object)
         .into_iter()
         .flatten()
         .filter_map(|(name, game)| game.as_object().map(|_| (name.clone(), game.clone())))
-        .collect()
+        .collect())
 }
 
 fn parse_ludusavi_json(output: &str) -> Result<Value, String> {
@@ -1329,8 +1399,7 @@ fn python_repr(value: &Value) -> String {
 }
 
 fn normalize_game_name(name: &str) -> String {
-    name.to_lowercase()
-        .chars()
+    name.case_fold()
         .map(|character| {
             if character.is_ascii_alphanumeric() || matches!(character, '.' | '-') {
                 character
@@ -1393,26 +1462,41 @@ fn escape_pointer(value: &str) -> String {
 
 fn backup_disk_stats(path: &str, name: &str) -> Option<(u64, Option<usize>)> {
     let target = Path::new(path).join(name);
-    if target.is_file() {
-        return Some((fs::metadata(&target).ok()?.len(), None));
-    }
     if !target.is_dir() {
-        return None;
+        let target = if target.is_file() {
+            target
+        } else {
+            let mut fallback = target.as_os_str().to_os_string();
+            fallback.push(".zip");
+            let fallback = PathBuf::from(fallback);
+            fallback.is_file().then_some(fallback)?
+        };
+        return backup_file_stats(&target);
     }
-    let mut stack = vec![target];
+    let simple_layout = name == ".";
+    let mut stack = vec![(target, true)];
     let mut size = 0u64;
     let mut count = 0usize;
     let mut scanned = 0usize;
-    while let Some(directory) = stack.pop() {
+    while let Some((directory, is_root)) = stack.pop() {
         for entry in fs::read_dir(directory).ok()? {
             let entry = entry.ok()?;
+            let metadata = entry.metadata().ok()?;
+            let file_name = entry.file_name();
+            if simple_layout
+                && is_root
+                && ((metadata.is_dir() && file_name.to_string_lossy().starts_with("backup-"))
+                    || (!metadata.is_dir()
+                        && file_name.as_os_str() == std::ffi::OsStr::new("mapping.yaml")))
+            {
+                continue;
+            }
             scanned += 1;
             if scanned > MAX_BACKUP_STAT_ENTRIES {
                 return None;
             }
-            let metadata = entry.metadata().ok()?;
             if metadata.is_dir() {
-                stack.push(entry.path());
+                stack.push((entry.path(), false));
             } else if metadata.is_file() {
                 size = size.saturating_add(metadata.len());
                 count += 1;
@@ -1420,6 +1504,21 @@ fn backup_disk_stats(path: &str, name: &str) -> Option<(u64, Option<usize>)> {
         }
     }
     Some((size, Some(count)))
+}
+fn backup_file_stats(path: &Path) -> Option<(u64, Option<usize>)> {
+    let size = fs::metadata(path).ok()?.len();
+    let count = match zip::ZipArchive::new(fs::File::open(path).ok()?) {
+        Ok(archive) if archive.len() <= MAX_BACKUP_STAT_ENTRIES => Some(
+            archive
+                .file_names()
+                .filter(|entry| !entry.ends_with('/'))
+                .count(),
+        ),
+        Ok(_) => return None,
+        Err(zip::result::ZipError::Io(_)) => return None,
+        Err(_) => None,
+    };
+    Some((size, count))
 }
 
 fn valid_history_entry(value: &Value) -> Option<Value> {
@@ -1478,13 +1577,22 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ProcessManager, Registry, fuzzy_match_allowed, game_error, game_objects, group_exists,
+        Game, LudusaviClient, LudusaviOperations, ProcessManager, Registry, backup_disk_stats,
+        find_executable, fuzzy_match_allowed, game_error, game_objects, group_exists, lock,
         normalize_game_name, normalize_installed_app_ids, parse_ludusavi_json, sanitize_game_name,
         valid_history_entry,
     };
+    use crate::persistence::{StateLock, read_object};
     use serde_json::json;
-    use std::{path::Path, time::Duration};
-
+    use std::{
+        fs,
+        io::Write,
+        os::unix::fs::{PermissionsExt, symlink},
+        path::{Path, PathBuf},
+        sync::{Arc, Barrier},
+        time::Duration,
+    };
+    use zip::{CompressionMethod, ZipWriter, write::FileOptions};
     #[test]
     fn game_name_sanitization_table_matches_python() {
         for (input, expected) in [
@@ -1572,9 +1680,11 @@ mod tests {
                 1,
             ),
             (json!({"games":null}), 0),
-            (json!([]), 0),
         ] {
-            assert_eq!(game_objects(&input).len(), expected);
+            assert_eq!(game_objects(&input).unwrap().len(), expected);
+        }
+        for invalid_root in [json!(null), json!([])] {
+            assert!(game_objects(&invalid_root).is_err());
         }
         for (output, expected) in [
             (
@@ -1584,7 +1694,9 @@ mod tests {
             (r#"{"games":null}"#, 0),
         ] {
             assert_eq!(
-                game_objects(&parse_ludusavi_json(output).unwrap()).len(),
+                game_objects(&parse_ludusavi_json(output).unwrap())
+                    .unwrap()
+                    .len(),
                 expected
             );
         }
@@ -1681,5 +1793,214 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(marker).unwrap(), "child-finished");
         assert!(processes.groups_exited());
+    }
+    fn write_zip(path: &Path, entries: &[&str]) -> u64 {
+        let file = fs::File::create(path).unwrap();
+        let mut archive = ZipWriter::new(file);
+        for entry in entries {
+            let options = FileOptions::default().compression_method(CompressionMethod::Stored);
+            if entry.ends_with('/') {
+                archive.add_directory(*entry, options).unwrap();
+            } else {
+                archive.start_file(*entry, options).unwrap();
+                archive.write_all(b"x").unwrap();
+            }
+        }
+        archive.finish().unwrap();
+        fs::metadata(path).unwrap().len()
+    }
+
+    #[test]
+    fn cache_snapshot_waits_for_the_state_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache_path = directory.path().join("cache.json");
+        let state_lock = Arc::new(StateLock::new(&cache_path).unwrap());
+        let operations = Arc::new(LudusaviOperations::new(
+            cache_path.clone(),
+            Arc::clone(&state_lock),
+            &serde_json::Map::new(),
+            json!({"snapshot":"old"}),
+        ));
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        state_lock.set_test_after_acquire(Arc::new({
+            let entered = Arc::clone(&entered);
+            let release = Arc::clone(&release);
+            move || {
+                entered.wait();
+                release.wait();
+            }
+        }));
+
+        let save = {
+            let operations = Arc::clone(&operations);
+            std::thread::spawn(move || operations.save_cache().unwrap())
+        };
+        entered.wait();
+        *lock(&operations.history) = json!({"snapshot":"new"});
+        release.wait();
+        save.join().unwrap();
+
+        let cache = read_object(&cache_path).unwrap().unwrap();
+        assert_eq!(cache.get("game_history"), Some(&json!({"snapshot":"new"})));
+    }
+
+    #[test]
+    fn cancelled_backup_is_skipped_and_recorded_as_cancelled() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache_path = directory.path().join("cache.json");
+        let operations = LudusaviOperations::new(
+            cache_path,
+            Arc::new(StateLock::new(&directory.path().join("cache.json")).unwrap()),
+            &serde_json::Map::new(),
+            json!({}),
+        );
+        lock(&operations.registry).games.insert(
+            "Hades".to_owned(),
+            Game {
+                name: "Hades".to_owned(),
+                configured: true,
+                has_backup: true,
+                needs_first_backup: false,
+                steam_id: None,
+                error: None,
+            },
+        );
+        *lock(&operations.client) = Some(Arc::new(LudusaviClient {
+            processes: Arc::clone(&operations.processes),
+            flatpak: PathBuf::new(),
+            config_path: std::sync::Mutex::new(None),
+            version: std::sync::Mutex::new(None),
+        }));
+        operations.cancel_processes();
+
+        assert_eq!(
+            operations.force_backup("Hades").unwrap(),
+            json!({"status":"skipped","reason":"cancelled","game":"Hades"})
+        );
+        let status = operations.get_operation_status();
+        assert_eq!(status["last_result"], "cancelled");
+        assert_eq!(status["last_error"], json!(null));
+        let history = operations.get_game_history();
+        assert_eq!(history["Hades"]["last_skip"]["status"], "skipped");
+        assert_eq!(history["Hades"]["last_skip"]["reason"], "cancelled");
+        assert_eq!(history["Hades"]["last_failure"], json!(null));
+    }
+
+    #[test]
+    fn executable_lookup_skips_non_executable_path_entries() {
+        let directory = tempfile::tempdir().unwrap();
+        let blocked = directory.path().join("blocked");
+        let allowed = directory.path().join("allowed");
+        fs::create_dir(&blocked).unwrap();
+        fs::create_dir(&allowed).unwrap();
+        let blocked_file = blocked.join("flatpak");
+        let allowed_file = allowed.join("flatpak");
+        fs::write(&blocked_file, "").unwrap();
+        fs::write(&allowed_file, "").unwrap();
+        fs::set_permissions(&blocked_file, fs::Permissions::from_mode(0o644)).unwrap();
+        fs::set_permissions(&allowed_file, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::join_paths([blocked, allowed]).unwrap();
+
+        assert_eq!(
+            find_executable("flatpak", &path).as_deref(),
+            Some(allowed_file.as_path())
+        );
+    }
+
+    #[test]
+    fn backup_disk_stats_matches_python_snapshot_layouts() {
+        let directory = tempfile::tempdir().unwrap();
+        let archive_path = directory.path().join("snap1.zip");
+        let archive_size = write_zip(&archive_path, &["f1.txt", "f2.txt", "folder/"]);
+        assert_eq!(
+            backup_disk_stats(directory.path().to_str().unwrap(), "snap1.zip"),
+            Some((archive_size, Some(2)))
+        );
+        assert_eq!(
+            backup_disk_stats(directory.path().to_str().unwrap(), "snap1"),
+            Some((archive_size, Some(2)))
+        );
+
+        fs::remove_file(&archive_path).unwrap();
+        fs::write(directory.path().join("f1.txt"), "a").unwrap();
+        fs::write(directory.path().join("f2.txt"), "bc").unwrap();
+        fs::write(directory.path().join("mapping.yaml"), "ignore").unwrap();
+        fs::create_dir(directory.path().join("backup-123")).unwrap();
+        assert_eq!(
+            backup_disk_stats(directory.path().to_str().unwrap(), "."),
+            Some((3, Some(2)))
+        );
+        assert_eq!(
+            backup_disk_stats(directory.path().to_str().unwrap(), "missing"),
+            None
+        );
+    }
+
+    #[test]
+    fn backup_disk_stats_observes_entry_budget_for_directories_and_archives() {
+        let directory = tempfile::tempdir().unwrap();
+        let snapshot = directory.path().join("snapshot");
+        fs::create_dir(&snapshot).unwrap();
+        for index in 0..=1000 {
+            fs::write(snapshot.join(format!("file-{index}")), "").unwrap();
+        }
+        assert_eq!(
+            backup_disk_stats(directory.path().to_str().unwrap(), "snapshot"),
+            None
+        );
+        let names = (0..=1000)
+            .map(|index| format!("file-{index}"))
+            .collect::<Vec<_>>();
+        let entries = names.iter().map(String::as_str).collect::<Vec<_>>();
+        write_zip(&directory.path().join("large.zip"), &entries);
+        assert_eq!(
+            backup_disk_stats(directory.path().to_str().unwrap(), "large.zip"),
+            None
+        );
+    }
+
+    #[test]
+    fn config_logs_keep_the_discovered_symlink_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("original");
+        let resolved = directory.path().join("resolved");
+        fs::create_dir_all(&original).unwrap();
+        fs::create_dir_all(&resolved).unwrap();
+        let original_config = original.join("config.yaml");
+        let resolved_config = resolved.join("config.yaml");
+        fs::write(&resolved_config, "config").unwrap();
+        symlink(&resolved_config, &original_config).unwrap();
+        fs::write(original.join("ludusavi_rCURRENT.log"), "original path").unwrap();
+        fs::write(resolved.join("ludusavi_rCURRENT.log"), "resolved path").unwrap();
+        fs::write(original.join("cache.yaml"), "original cache").unwrap();
+        fs::write(resolved.join("cache.yaml"), "resolved cache").unwrap();
+        let fake = directory.path().join("flatpak");
+        fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' '{}'\n",
+                original_config.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        let client = LudusaviClient {
+            processes: Arc::new(ProcessManager::default()),
+            flatpak: fake,
+            config_path: std::sync::Mutex::new(None),
+            version: std::sync::Mutex::new(None),
+        };
+
+        assert_eq!(client.logs().unwrap(), "original path");
+        let marker = client.config_marker().unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        fs::write(resolved.join("cache.yaml"), "updated resolved cache").unwrap();
+        assert_ne!(client.config_marker().unwrap(), marker);
+    }
+
+    #[test]
+    fn normalization_uses_full_unicode_case_folding() {
+        assert_eq!(normalize_game_name("Straße"), "strasse");
     }
 }

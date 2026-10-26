@@ -103,6 +103,9 @@ Native operation tests exclude scenarios that also require phase-4 lifecycle RPC
 SDH_CONTRACT_BACKEND=/path/to/backend \
   ./run.sh uv run pytest -o addopts='' tests/contract/ -m 'contract_operations and not contract_lifecycle'
 ```
+Native operations preserve cache/history snapshots across saves, distinguish cancellation from
+failure, reject malformed Ludusavi roots without replacing the registry, and mirror Python's
+executable, log-path, game-name, and backup-stat behavior.
 
 The subsystem markers are `contract_core`, `contract_operations`, `contract_lifecycle`,
 `contract_gate`, `contract_syncthing`, `contract_updater`, and `contract_theme`. Python
