@@ -141,6 +141,22 @@ impl SystemdScopeController {
     }
 
     pub fn thaw(&self, scope: &SteamAppScope) -> ScopeTransitionResult {
+        self.thaw_with_deadline(scope, None)
+    }
+
+    pub(crate) fn thaw_until(
+        &self,
+        scope: &SteamAppScope,
+        deadline: Instant,
+    ) -> ScopeTransitionResult {
+        self.thaw_with_deadline(scope, Some(deadline))
+    }
+
+    fn thaw_with_deadline(
+        &self,
+        scope: &SteamAppScope,
+        deadline: Option<Instant>,
+    ) -> ScopeTransitionResult {
         let (state, reason) = self.scope_state(scope);
         if state == ScopeState::Missing {
             return ScopeTransitionResult {
@@ -152,7 +168,7 @@ impl SystemdScopeController {
         if state != ScopeState::Live {
             return ScopeTransitionResult::failed(reason);
         }
-        let command = self.run_unit_command("thaw", &scope.unit);
+        let command = self.run_unit_command_until("thaw", &scope.unit, deadline);
         if !command.success {
             return if self.scope_state(scope).0 == ScopeState::Missing {
                 ScopeTransitionResult {
@@ -164,7 +180,7 @@ impl SystemdScopeController {
                 command
             };
         }
-        self.wait_for_frozen(scope, false)
+        self.wait_for_frozen_with_deadline(scope, false, deadline)
     }
 
     pub fn freeze_requested(&self, scope: &SteamAppScope) -> bool {
@@ -175,8 +191,20 @@ impl SystemdScopeController {
     }
 
     pub fn wait_for_frozen(&self, scope: &SteamAppScope, expected: bool) -> ScopeTransitionResult {
+        self.wait_for_frozen_with_deadline(scope, expected, None)
+    }
+
+    fn wait_for_frozen_with_deadline(
+        &self,
+        scope: &SteamAppScope,
+        expected: bool,
+        shutdown_deadline: Option<Instant>,
+    ) -> ScopeTransitionResult {
         let expected = i32::from(expected);
-        let deadline = Instant::now() + FREEZER_TIMEOUT;
+        let now = Instant::now();
+        let deadline = shutdown_deadline.map_or(now + FREEZER_TIMEOUT, |external| {
+            external.min(now + FREEZER_TIMEOUT)
+        });
         loop {
             let (state, reason) = self.scope_state(scope);
             if state == ScopeState::Missing && expected == 0 {
@@ -278,9 +306,25 @@ impl SystemdScopeController {
     }
 
     fn run_unit_command(&self, action: &str, unit: &str) -> ScopeTransitionResult {
+        self.run_unit_command_until(action, unit, None)
+    }
+
+    fn run_unit_command_until(
+        &self,
+        action: &str,
+        unit: &str,
+        shutdown_deadline: Option<Instant>,
+    ) -> ScopeTransitionResult {
         if !matches!(action, "freeze" | "thaw") || !valid_unit(unit) {
             return ScopeTransitionResult::failed("Refusing invalid scope transition");
         }
+        let started = Instant::now();
+        if shutdown_deadline.is_some_and(|deadline| started >= deadline) {
+            return ScopeTransitionResult::failed("Shutdown deadline expired");
+        }
+        let deadline = shutdown_deadline.map_or(started + SYSTEMCTL_TIMEOUT, |external| {
+            external.min(started + SYSTEMCTL_TIMEOUT)
+        });
         let mut command = Command::new("systemctl");
         command
             .args(["--user", action, unit])
@@ -320,7 +364,6 @@ impl SystemdScopeController {
                 ));
             }
         };
-        let deadline = Instant::now() + SYSTEMCTL_TIMEOUT;
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break Some(status),

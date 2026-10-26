@@ -6,7 +6,7 @@ use std::{
         Arc, LazyLock, Mutex,
         atomic::{AtomicBool, AtomicI64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use decky_plugin::Env;
@@ -137,9 +137,14 @@ impl BackendService {
     }
 
     pub async fn shutdown(&self) -> bool {
+        self.shutdown_until(Instant::now() + DRAIN_BUDGET).await
+    }
+
+    async fn shutdown_until(&self, deadline: Instant) -> bool {
         self.calls.stop_admission();
         self.operations.cancel_processes();
-        let calls_stopped = self.calls.wait_for_drain(DRAIN_BUDGET).await;
+        let tokio_deadline = tokio::time::Instant::from_std(deadline);
+        let calls_stopped = self.calls.wait_for_drain_until(tokio_deadline).await;
         if !calls_stopped || !self.operations.processes_exited() {
             self.log(
                 "error",
@@ -149,7 +154,15 @@ impl BackendService {
             );
             return false;
         }
-        if !self.watchdog.stop() {
+        let watchdog = self.watchdog.clone();
+        if !matches!(
+            tokio::time::timeout_at(
+                tokio_deadline,
+                tokio::task::spawn_blocking(move || watchdog.stop_until(deadline))
+            )
+            .await,
+            Ok(Ok(true))
+        ) {
             self.log(
                 "error",
                 "Launch-gate shutdown could not confirm guarded callbacks; retaining launch gates (reason=cancellation_unconfirmed retained_gate=true)",
@@ -1378,8 +1391,7 @@ impl CallTracker {
         lock(&self.state).stopping = true;
     }
 
-    async fn wait_for_drain(&self, budget: Duration) -> bool {
-        let deadline = tokio::time::Instant::now() + budget;
+    async fn wait_for_drain_until(&self, deadline: tokio::time::Instant) -> bool {
         loop {
             let notified = self.changed.notified();
             tokio::pin!(notified);
@@ -1407,7 +1419,12 @@ impl Drop for ActiveCall {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, sync::Arc, time::Duration};
+    use std::{
+        fs,
+        sync::{Arc, Barrier},
+        thread,
+        time::{Duration, Instant},
+    };
 
     use decky_plugin::Env;
     use serde_json::{Value, json};
@@ -1622,11 +1639,74 @@ mod tests {
         assert!(tracker.enter().is_none());
         let waiting = tokio::spawn({
             let tracker = Arc::clone(&tracker);
-            async move { tracker.wait_for_drain(Duration::from_secs(1)).await }
+            async move {
+                tracker
+                    .wait_for_drain_until(tokio::time::Instant::now() + Duration::from_secs(1))
+                    .await
+            }
         });
         tokio::time::sleep(Duration::from_millis(10)).await;
         assert!(!waiting.is_finished());
         drop(call);
         assert!(waiting.await.unwrap());
+    }
+    #[tokio::test]
+    async fn shutdown_keeps_the_tokio_runtime_responsive_during_watchdog_cleanup() {
+        let (_directory, service) = test_service();
+        let barrier = Arc::new(Barrier::new(2));
+        let hook_barrier = Arc::clone(&barrier);
+        service.watchdog.set_stop_hook(Arc::new(move || {
+            hook_barrier.wait();
+        }));
+        let release_barrier = Arc::clone(&barrier);
+        let releaser = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(150));
+            release_barrier.wait();
+        });
+        let started = Instant::now();
+        let (shutdown_ok, heartbeat_elapsed) = tokio::join!(service.shutdown(), async {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            started.elapsed()
+        });
+        releaser.join().unwrap();
+        assert!(shutdown_ok);
+        assert!(
+            heartbeat_elapsed < Duration::from_millis(100),
+            "watchdog cleanup blocked the async runtime for {heartbeat_elapsed:?}"
+        );
+    }
+    #[tokio::test]
+    async fn shutdown_deadline_reports_retained_gates_without_blocking_runtime() {
+        let (_directory, service) = test_service();
+        let barrier = Arc::new(Barrier::new(2));
+        let hook_barrier = Arc::clone(&barrier);
+        service.watchdog.set_stop_hook(Arc::new(move || {
+            hook_barrier.wait();
+        }));
+        let release_barrier = Arc::clone(&barrier);
+        let releaser = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(150));
+            release_barrier.wait();
+        });
+        let started = Instant::now();
+        let deadline = started + Duration::from_millis(30);
+        let (shutdown_ok, heartbeat_elapsed) =
+            tokio::join!(service.shutdown_until(deadline), async {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                started.elapsed()
+            });
+        releaser.join().unwrap();
+        assert!(!shutdown_ok);
+        assert!(
+            heartbeat_elapsed < Duration::from_millis(100),
+            "shutdown deadline blocked the async runtime for {heartbeat_elapsed:?}"
+        );
+        assert!(
+            service
+                .get_recent_logs()
+                .to_string()
+                .contains("retained_gate=true"),
+            "shutdown deadline was not reported as retaining launch gates"
+        );
     }
 }

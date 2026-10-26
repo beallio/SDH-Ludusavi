@@ -58,6 +58,9 @@ struct Inner {
     next_generation: AtomicU64,
     stopping: AtomicBool,
     thread: Mutex<Option<JoinHandle<()>>>,
+    shutdown_deadline: Mutex<Option<Instant>>,
+    #[cfg(test)]
+    stop_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 trait ScopeAcquirer: Send + Sync {
@@ -147,6 +150,9 @@ impl Default for ProcessWatchdog {
                 next_generation: AtomicU64::new(1),
                 stopping: AtomicBool::new(false),
                 thread: Mutex::new(None),
+                #[cfg(test)]
+                stop_hook: Mutex::new(None),
+                shutdown_deadline: Mutex::new(None),
             }),
         }
     }
@@ -315,12 +321,32 @@ impl ProcessWatchdog {
     }
 
     pub fn resume(&self, pid: i32, lease_id: Option<&str>) -> Value {
+        self.resume_until(pid, lease_id, None)
+    }
+
+    fn resume_until(
+        &self,
+        pid: i32,
+        lease_id: Option<&str>,
+        mut shutdown_deadline: Option<Instant>,
+    ) -> Value {
+        shutdown_deadline = shutdown_deadline.or_else(|| *lock(&self.inner.shutdown_deadline));
         if let Err(message) = validate_pid(pid) {
             return json!({"status":"failed", "message":message});
         }
+        if shutdown_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return gate_failure(pid, "Shutdown deadline expired; launch gate retained");
+        }
         let transition = self.inner.transition_lock(pid);
         let lease = {
-            let _transition = lock(&transition);
+            let _transition = if let Some(deadline) = shutdown_deadline {
+                let Some(transition) = lock_until(&transition, deadline) else {
+                    return gate_failure(pid, "Shutdown deadline expired; launch gate retained");
+                };
+                transition
+            } else {
+                lock(&transition)
+            };
             let mut state = lock(&self.inner.state);
             let Some(lease) = state.leases.get_mut(&pid) else {
                 return gate_failure(pid, "Process not paused");
@@ -339,35 +365,52 @@ impl ProcessWatchdog {
             lease.clone()
         };
         let generation = lease.generation;
+        let now = Instant::now();
+        let mut guarded_deadline = shutdown_deadline
+            .map_or(now + GUARDED_COMPLETION_TIMEOUT, |deadline| {
+                deadline.min(now + GUARDED_COMPLETION_TIMEOUT)
+            });
         let mut state = lock(&self.inner.state);
-        let deadline = Instant::now() + GUARDED_COMPLETION_TIMEOUT;
         while state
             .leases
             .get(&pid)
             .is_some_and(|current| current.generation == generation && current.guarded_active)
         {
+            shutdown_deadline = shutdown_deadline.or_else(|| *lock(&self.inner.shutdown_deadline));
+            if let Some(deadline) = shutdown_deadline {
+                guarded_deadline = guarded_deadline.min(deadline);
+            }
             let now = Instant::now();
-            if now >= deadline {
+            if now >= guarded_deadline {
                 drop(state);
-                let _transition = lock(&transition);
-                let mut state = lock(&self.inner.state);
-                if let Some(current) = state.leases.get_mut(&pid)
-                    && current.generation == generation
-                {
-                    current.release_in_progress = false;
-                }
-                self.inner.changed.notify_all();
-                return gate_failure(pid, "Guarded operation completion was not confirmed");
+                self.reset_release(pid, generation);
+                return gate_failure(
+                    pid,
+                    "Guarded operation completion was not confirmed; launch gate retained",
+                );
             }
             let (next, _) = self
                 .inner
                 .changed
-                .wait_timeout(state, deadline - now)
+                .wait_timeout(state, guarded_deadline - now)
                 .unwrap_or_else(|error| error.into_inner());
             state = next;
         }
         drop(state);
-        let _transition = lock(&transition);
+        shutdown_deadline = shutdown_deadline.or_else(|| *lock(&self.inner.shutdown_deadline));
+        if shutdown_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            self.reset_release(pid, generation);
+            return gate_failure(pid, "Shutdown deadline expired; launch gate retained");
+        }
+        let _transition = if let Some(deadline) = shutdown_deadline {
+            let Some(transition) = lock_until(&transition, deadline) else {
+                self.reset_release(pid, generation);
+                return gate_failure(pid, "Shutdown deadline expired; launch gate retained");
+            };
+            transition
+        } else {
+            lock(&transition)
+        };
         if !lock(&self.inner.state)
             .leases
             .get(&pid)
@@ -375,7 +418,16 @@ impl ProcessWatchdog {
         {
             return gate_failure(pid, "Lease changed during release");
         }
-        self.release_lease(pid, &lease)
+        self.release_lease(pid, &lease, shutdown_deadline)
+    }
+
+    fn reset_release(&self, pid: i32, generation: u64) {
+        if let Some(current) = lock(&self.inner.state).leases.get_mut(&pid)
+            && current.generation == generation
+        {
+            current.release_in_progress = false;
+        }
+        self.inner.changed.notify_all();
     }
 
     pub(crate) fn run_guarded<T>(
@@ -428,62 +480,111 @@ impl ProcessWatchdog {
         (!release_requested).then_some(result)
     }
 
-    pub fn resume_all(&self) {
-        let pids = lock(&self.inner.state)
-            .leases
-            .keys()
-            .copied()
-            .collect::<Vec<_>>();
-        for pid in pids {
-            let _ = self.resume(pid, None);
-        }
+    #[cfg(test)]
+    pub(crate) fn set_stop_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+        *lock(&self.inner.stop_hook) = Some(hook);
     }
 
-    pub fn stop(&self) -> bool {
+    pub(crate) fn stop_until(&self, deadline: Instant) -> bool {
+        let mut stored_deadline = lock(&self.inner.shutdown_deadline);
+        *stored_deadline =
+            Some((*stored_deadline).map_or(deadline, |current| current.min(deadline)));
+        drop(stored_deadline);
         self.inner.stopping.store(true, Ordering::Release);
         self.inner.changed.notify_all();
-        if let Some(thread) = lock(&self.inner.thread).take()
-            && thread.thread().id() != thread::current().id()
-        {
-            let _ = thread.join();
+        #[cfg(test)]
+        if let Some(hook) = lock(&self.inner.stop_hook).clone() {
+            hook();
+        }
+        loop {
+            let current = thread::current().id();
+            let mut slot = lock(&self.inner.thread);
+            match slot.as_ref() {
+                None => break,
+                Some(thread) if thread.thread().id() == current => {
+                    drop(slot);
+                    return self.report_unconfirmed_leases();
+                }
+                Some(thread) if thread.is_finished() => {
+                    let finished = slot.take().unwrap();
+                    drop(slot);
+                    let _ = finished.join();
+                    break;
+                }
+                Some(_) if Instant::now() >= deadline => {
+                    drop(slot);
+                    return self.report_unconfirmed_leases();
+                }
+                Some(_) => {
+                    drop(slot);
+                    thread::sleep(
+                        Duration::from_millis(10)
+                            .min(deadline.saturating_duration_since(Instant::now())),
+                    );
+                }
+            }
         }
         for attempt in 0..SHUTDOWN_THAW_ATTEMPTS {
-            self.resume_all();
+            if Instant::now() >= deadline {
+                break;
+            }
+            let pids = lock(&self.inner.state)
+                .leases
+                .keys()
+                .copied()
+                .collect::<Vec<_>>();
+            for pid in pids {
+                if Instant::now() >= deadline {
+                    break;
+                }
+                let _ = self.resume_until(pid, None, Some(deadline));
+            }
             if lock(&self.inner.state).leases.is_empty() {
                 return true;
             }
-            if attempt + 1 < SHUTDOWN_THAW_ATTEMPTS {
-                thread::sleep(SHUTDOWN_THAW_RETRY);
+            if attempt + 1 < SHUTDOWN_THAW_ATTEMPTS && Instant::now() < deadline {
+                thread::sleep(
+                    SHUTDOWN_THAW_RETRY.min(deadline.saturating_duration_since(Instant::now())),
+                );
             }
         }
+        self.report_unconfirmed_leases()
+    }
+
+    fn report_unconfirmed_leases(&self) -> bool {
         let count = lock(&self.inner.state).leases.len();
         log::error!(
-            "Shutdown left {count} launch-gate lease(s) unconfirmed after {SHUTDOWN_THAW_ATTEMPTS} thaw attempts"
+            "Shutdown left {count} launch-gate lease(s) unconfirmed; retaining remaining gates"
         );
         false
     }
 
-    fn release_lease(&self, pid: i32, lease: &PauseLease) -> Value {
+    fn release_lease(
+        &self,
+        pid: i32,
+        lease: &PauseLease,
+        shutdown_deadline: Option<Instant>,
+    ) -> Value {
+        let shutdown_deadline = shutdown_deadline.or_else(|| *lock(&self.inner.shutdown_deadline));
+        if shutdown_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            self.reset_release(pid, lease.generation);
+            return gate_failure(pid, "Shutdown deadline expired; launch gate retained");
+        }
         if let Some(scope) = &lease.scope {
             for owned in std::iter::once(scope).chain(lease.recovery_scopes.iter()) {
-                let result = self.inner.controller.thaw(owned);
+                let result = shutdown_deadline.map_or_else(
+                    || self.inner.controller.thaw(owned),
+                    |deadline| self.inner.controller.thaw_until(owned, deadline),
+                );
                 if !result.success {
-                    if let Some(current) = lock(&self.inner.state).leases.get_mut(&pid)
-                        && current.generation == lease.generation
-                    {
-                        current.release_in_progress = false;
-                    }
+                    self.reset_release(pid, lease.generation);
                     return gate_failure(pid, &result.reason);
                 }
             }
         } else if let Err(message) =
             release_stop_only(&self.inner.proc_root, lease.identity.as_ref())
         {
-            if let Some(current) = lock(&self.inner.state).leases.get_mut(&pid)
-                && current.generation == lease.generation
-            {
-                current.release_in_progress = false;
-            }
+            self.reset_release(pid, lease.generation);
             return gate_failure(pid, &message);
         }
         let mut state = lock(&self.inner.state);
@@ -671,11 +772,27 @@ fn new_lease_id() -> io::Result<String> {
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
 }
+fn lock_until<T>(mutex: &Mutex<T>, deadline: Instant) -> Option<std::sync::MutexGuard<'_, T>> {
+    loop {
+        match mutex.try_lock() {
+            Ok(guard) => return Some(guard),
+            Err(std::sync::TryLockError::Poisoned(error)) => return Some(error.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                let now = Instant::now();
+                if now >= deadline {
+                    return None;
+                }
+                thread::sleep(Duration::from_millis(1).min(deadline - now));
+            }
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use std::{
         fs,
         os::unix::process::CommandExt,
+        path::Path,
         process::{Command, Stdio},
         sync::{Arc, Barrier, mpsc},
         thread,
@@ -684,7 +801,10 @@ mod tests {
 
     use tempfile::tempdir_in;
 
-    use super::{Inner, LEASE_TTL, PauseLease, ProcessWatchdog, ScopeAcquirer, State, lock};
+    use super::{
+        Inner, LEASE_TTL, PauseLease, ProcessWatchdog, ScopeAcquirer, State, lock,
+        thread_group_stopped,
+    };
     use crate::{
         launch_gate::{
             LaunchProcessIdentity, LaunchScopeAcquirer, ScopeAcquisitionResult,
@@ -709,8 +829,101 @@ mod tests {
                 next_generation: std::sync::atomic::AtomicU64::new(2),
                 stopping: std::sync::atomic::AtomicBool::new(false),
                 thread: std::sync::Mutex::new(None),
+                #[cfg(test)]
+                stop_hook: std::sync::Mutex::new(None),
+                shutdown_deadline: std::sync::Mutex::new(None),
             }),
         }
+    }
+
+    #[test]
+    fn shutdown_deadline_retains_stop_only_gate() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let proc_root = temporary.path().join("proc");
+        let cgroup_root = temporary.path().join("cgroup");
+        fs::create_dir_all(&proc_root).unwrap();
+        fs::create_dir_all(&cgroup_root).unwrap();
+        let uid = unsafe { libc::geteuid() };
+        let mut child = Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = i32::try_from(child.id()).unwrap();
+        let proc_dir = proc_root.join(pid.to_string());
+        let task_dir = proc_dir.join("task").join(pid.to_string());
+        fs::create_dir_all(&task_dir).unwrap();
+        let fields = std::iter::repeat_n("1", 18).collect::<Vec<_>>().join(" ");
+        let stat = format!("{pid} (fixture process) T {fields} 991");
+        fs::write(proc_dir.join("stat"), &stat).unwrap();
+        fs::write(task_dir.join("stat"), &stat).unwrap();
+        unsafe {
+            libc::kill(pid, libc::SIGSTOP);
+        }
+        let stop_deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !thread_group_stopped(Path::new("/proc"), pid)
+            && std::time::Instant::now() < stop_deadline
+        {
+            thread::sleep(Duration::from_millis(2));
+        }
+
+        let controller = SystemdScopeController::new(&proc_root, &cgroup_root, uid);
+        let acquirer: Arc<dyn ScopeAcquirer> = Arc::new(LaunchScopeAcquirer::new(
+            controller.clone(),
+            &proc_root,
+            uid,
+        ));
+        let watchdog = test_watchdog(controller, proc_root, acquirer);
+        lock(&watchdog.inner.state).leases.insert(
+            pid,
+            PauseLease {
+                scope: None,
+                recovery_scopes: Vec::new(),
+                started: std::time::Instant::now(),
+                deadline: std::time::Instant::now() + LEASE_TTL,
+                lease_id: "shutdown-lease".to_owned(),
+                identity: Some(LaunchProcessIdentity {
+                    pid,
+                    owner_uid: uid,
+                    start_ticks: 991,
+                }),
+                generation: 1,
+                guarded_generation: 0,
+                guarded_active: false,
+                cancellation: None,
+                release_requested: false,
+                release_in_progress: false,
+            },
+        );
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let hook_entered = Arc::clone(&entered);
+        let hook_release = Arc::clone(&release);
+        watchdog.set_stop_hook(Arc::new(move || {
+            hook_entered.wait();
+            hook_release.wait();
+        }));
+        let shutdown_watchdog = watchdog.clone();
+        let deadline = std::time::Instant::now() + Duration::from_millis(30);
+        let worker = thread::spawn(move || shutdown_watchdog.stop_until(deadline));
+        entered.wait();
+        thread::sleep(Duration::from_millis(50));
+        release.wait();
+        let completed = worker.join().unwrap();
+        let gate_retained = lock(&watchdog.inner.state).leases.contains_key(&pid);
+        let process_stopped = thread_group_stopped(Path::new("/proc"), pid);
+        let _ = watchdog.resume(pid, None);
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(!completed, "shutdown succeeded beyond its deadline");
+        assert!(gate_retained, "shutdown discarded an unthawed launch lease");
+        assert!(
+            process_stopped,
+            "shutdown released a gate after its deadline"
+        );
     }
 
     #[test]
@@ -907,7 +1120,7 @@ mod tests {
         if pause_result["status"] == "paused" {
             assert_eq!(watchdog.resume(pid, None)["status"], "resumed");
         }
-        assert!(watchdog.stop());
+        assert!(watchdog.stop_until(std::time::Instant::now() + Duration::from_secs(1)));
         child.kill().unwrap();
         child.wait().unwrap();
 
