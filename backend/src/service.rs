@@ -15,10 +15,12 @@ use time::{OffsetDateTime, format_description, format_description::well_known::R
 use tokio::sync::Notify;
 
 use crate::{
-    operations::LudusaviOperations,
+    lifecycle::{TimestampDirection, timestamp_direction},
+    operations::{LudusaviOperations, OperationError},
     persistence::{
         StateLock, ensure_private_directory, existing_mode, read_object, write_json_atomic,
     },
+    watchdog::ProcessWatchdog,
 };
 
 const LOG_LIMIT: usize = 100;
@@ -40,6 +42,7 @@ pub struct BackendService {
     settings: Mutex<Map<String, Value>>,
     shortcut_id: AtomicI64,
     operations: LudusaviOperations,
+    watchdog: ProcessWatchdog,
     debug_logging: AtomicBool,
     logs: Mutex<VecDeque<Value>>,
     calls: Arc<CallTracker>,
@@ -102,6 +105,7 @@ impl BackendService {
             settings: Mutex::new(settings),
             shortcut_id: AtomicI64::new(shortcut_id),
             operations,
+            watchdog: ProcessWatchdog::default(),
             debug_logging: AtomicBool::new(debug_logging),
             logs: Mutex::new(VecDeque::with_capacity(LOG_LIMIT)),
             calls: Arc::new(CallTracker::default()),
@@ -133,9 +137,28 @@ impl BackendService {
     }
 
     pub async fn shutdown(&self) -> bool {
+        self.calls.stop_admission();
         self.operations.cancel_processes();
-        let calls_stopped = self.calls.stop_and_wait(DRAIN_BUDGET).await;
-        calls_stopped && self.operations.processes_exited()
+        let calls_stopped = self.calls.wait_for_drain(DRAIN_BUDGET).await;
+        if !calls_stopped || !self.operations.processes_exited() {
+            self.log(
+                "error",
+                "Managed Ludusavi shutdown could not confirm process exit; retaining launch gates (reason=cancellation_unconfirmed retained_gate=true)",
+                Some("launch_gate"),
+                None,
+            );
+            return false;
+        }
+        if !self.watchdog.stop() {
+            self.log(
+                "error",
+                "Launch-gate shutdown could not confirm guarded callbacks; retaining launch gates (reason=cancellation_unconfirmed retained_gate=true)",
+                Some("launch_gate"),
+                None,
+            );
+            return false;
+        }
+        true
     }
     pub fn unavailable_reply(method: &str) -> Value {
         python_wrapper_fallback(method)
@@ -200,6 +223,75 @@ impl BackendService {
                 expect_args(method, args, 0)?;
                 Ok(self.operations.get_game_history())
             }
+            "check_game_start" => {
+                expect_range(method, args, 1, 2)?;
+                self.check_game_start(required_game_name(method, args)?, optional_app_id(args, 1))
+            }
+            "restore_game_on_start" => {
+                expect_range(method, args, 1, 4)?;
+                Ok(self.restore_game_on_start(
+                    required_game_name(method, args)?,
+                    optional_app_id(args, 1),
+                    args.get(2).and_then(strict_pid),
+                    args.get(3).and_then(Value::as_str),
+                ))
+            }
+            "resolve_game_start_conflict" => {
+                expect_range(method, args, 3, 5)?;
+                let resolution = args[2]
+                    .as_str()
+                    .ok_or_else(|| "resolution must be a string".to_owned())?;
+                Ok(self.resolve_game_start_conflict(
+                    required_game_name(method, args)?,
+                    optional_app_id(args, 1),
+                    resolution,
+                    args.get(3).and_then(strict_pid),
+                    args.get(4).and_then(Value::as_str),
+                ))
+            }
+            "check_game_exit" => {
+                expect_range(method, args, 1, 2)?;
+                self.check_game_exit(required_game_name(method, args)?, optional_app_id(args, 1))
+            }
+            "backup_game_on_exit" => {
+                expect_range(method, args, 1, 2)?;
+                Ok(self.backup_game_on_exit(
+                    required_game_name(method, args)?,
+                    optional_app_id(args, 1),
+                ))
+            }
+            "pause_game_process" => {
+                expect_args(method, args, 1)?;
+                let pid = args[0]
+                    .as_i64()
+                    .and_then(|pid| i32::try_from(pid).ok())
+                    .ok_or_else(|| "PID must be an integer".to_owned())?;
+                Ok(self.watchdog.pause(pid))
+            }
+            "renew_game_process_pause" => {
+                expect_args(method, args, 2)?;
+                let pid = args[0]
+                    .as_i64()
+                    .and_then(|pid| i32::try_from(pid).ok())
+                    .ok_or_else(|| "PID must be an integer".to_owned())?;
+                let lease_id = args[1]
+                    .as_str()
+                    .ok_or_else(|| "lease ID must be a string".to_owned())?;
+                Ok(self.watchdog.renew(pid, lease_id))
+            }
+            "resume_game_process" => {
+                expect_range(method, args, 1, 2)?;
+                let pid = args[0]
+                    .as_i64()
+                    .and_then(|pid| i32::try_from(pid).ok())
+                    .ok_or_else(|| "PID must be an integer".to_owned())?;
+                let lease_id = match args.get(1) {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(lease_id)) => Some(lease_id.as_str()),
+                    Some(_) => return Err("lease ID must be a string or null".to_owned()),
+                };
+                Ok(self.watchdog.resume(pid, lease_id))
+            }
             "refresh_games" => {
                 if args.len() > 2 {
                     return Err(format!(
@@ -256,6 +348,508 @@ impl BackendService {
                 Ok(self.operations.get_ludusavi_command())
             }
             _ => Err(format!("Plugin has no method {method}")),
+        }
+    }
+    fn check_game_start(&self, name: &str, app_id: Option<&str>) -> Result<Value, String> {
+        let game_name = sanitize_game_name(name);
+        self.log(
+            "info",
+            &format!("check_game_start triggered for game='{game_name}', app_id='{app_id:?}'"),
+            Some("start"),
+            Some(&game_name),
+        );
+        if !self.auto_sync_enabled() {
+            return Ok(self.skip_lifecycle("start", &game_name, "auto_sync_disabled"));
+        }
+        let Some(game) = self.operations.matching_lifecycle_game(&game_name, app_id) else {
+            return Ok(self.skip_lifecycle("start", &game_name, "unmatched_game"));
+        };
+        let game_name = game["name"].as_str().unwrap_or(&game_name);
+        if !self.game_sync_enabled(game_name) {
+            return Ok(self.skip_lifecycle("start", game_name, "game_sync_disabled"));
+        }
+        if !game["has_backup"].as_bool().unwrap_or(false) {
+            return Ok(self.skip_lifecycle("start", game_name, "no_backup"));
+        }
+        if game["error"]
+            .as_str()
+            .is_some_and(|error| !error.is_empty())
+        {
+            return Ok(self.skip_lifecycle("start", game_name, "game_error"));
+        }
+
+        let recency = match self.operations.start_recency(game_name) {
+            Ok(result) => result,
+            Err(OperationError::Locked(_)) => {
+                return Ok(self.skip_lifecycle("start", game_name, "operation_running"));
+            }
+            Err(OperationError::Cancelled) => {
+                return Ok(self.skip_lifecycle("start", game_name, "cancelled"));
+            }
+            Err(OperationError::Failed(message)) => return Err(message),
+        };
+        let direction = recency
+            .get("recency")
+            .and_then(Value::as_str)
+            .unwrap_or("ambiguous");
+        let metadata = recency
+            .get("metadata")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        if direction == "backup_newer" {
+            self.log(
+                "info",
+                &format!("Restore needed for {game_name}: backup is newer than the local save"),
+                Some("start"),
+                Some(game_name),
+            );
+            return Ok(json!({"status":"needed","operation":"restore","game":game_name}));
+        }
+        if direction == "local_current" {
+            return Ok(self.skip_lifecycle("start", game_name, "local_current"));
+        }
+
+        let local_modified_at = metadata.get("localModifiedAt").and_then(Value::as_str);
+        let backup_modified_at = metadata.get("backupModifiedAt").and_then(Value::as_str);
+        if direction == "backup_differs" {
+            match timestamp_direction(local_modified_at, backup_modified_at) {
+                TimestampDirection::BackupNewer => {
+                    self.log(
+                        "info",
+                        &format!(
+                            "Backup for {game_name} differs and is newer by timestamp; proceeding with restore (local={local_modified_at:?}, backup={backup_modified_at:?})"
+                        ),
+                        Some("start"),
+                        Some(game_name),
+                    );
+                    return Ok(json!({"status":"needed","operation":"restore","game":game_name}));
+                }
+                direction => self.log(
+                    "info",
+                    &format!(
+                        "Backup for {game_name} differs but direction is {direction:?}; deferring to conflict resolution (local={local_modified_at:?}, backup={backup_modified_at:?})"
+                    ),
+                    Some("start"),
+                    Some(game_name),
+                ),
+            }
+        }
+
+        self.log(
+            "info",
+            &format!(
+                "Recency for {game_name} is {direction}; prompting user to resolve conflict (local={local_modified_at:?}, backup={backup_modified_at:?})"
+            ),
+            Some("start"),
+            Some(game_name),
+        );
+        self.record_lifecycle_history(
+            game_name,
+            "start",
+            "auto_start",
+            "skipped",
+            Some("ambiguous_recency"),
+            None,
+        );
+        let mut result = json!({
+            "status":"conflict",
+            "operation":"restore",
+            "game":game_name,
+            "reason":"ambiguous_recency",
+            "localLabel":"Keep Local Save",
+            "backupLabel":"Restore Backup Save",
+        });
+        if let (Some(output), Some(input)) = (result.as_object_mut(), metadata.as_object()) {
+            output.extend(
+                input
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
+        }
+        Ok(result)
+    }
+
+    fn check_game_exit(&self, name: &str, app_id: Option<&str>) -> Result<Value, String> {
+        let game_name = sanitize_game_name(name);
+        self.log(
+            "info",
+            &format!("check_game_exit triggered for game='{game_name}', app_id='{app_id:?}'"),
+            Some("exit"),
+            Some(&game_name),
+        );
+        if !self.auto_sync_enabled() {
+            return Ok(self.skip_lifecycle("exit", &game_name, "auto_sync_disabled"));
+        }
+        let Some(game) = self.operations.matching_lifecycle_game(&game_name, app_id) else {
+            return Ok(self.skip_lifecycle("exit", &game_name, "unmatched_game"));
+        };
+        let game_name = game["name"].as_str().unwrap_or(&game_name);
+        if !self.game_sync_enabled(game_name) {
+            return Ok(self.skip_lifecycle("exit", game_name, "game_sync_disabled"));
+        }
+        if game["error"]
+            .as_str()
+            .is_some_and(|error| !error.is_empty())
+        {
+            return Ok(self.skip_lifecycle("exit", game_name, "game_error"));
+        }
+        let preview = match self.operations.exit_preview(game_name) {
+            Ok(preview) => preview,
+            Err(OperationError::Locked(_)) => {
+                return Ok(self.skip_lifecycle("exit", game_name, "operation_running"));
+            }
+            Err(OperationError::Cancelled | OperationError::Failed(_)) => {
+                return Ok(self.skip_lifecycle("exit", game_name, "preview_failed"));
+            }
+        };
+        let games = preview.get("games").and_then(Value::as_object);
+        let Some(output) = games.and_then(|games| games.get(game_name)) else {
+            return Ok(self.skip_lifecycle("exit", game_name, "not_in_preview"));
+        };
+        let decision = output.get("decision").and_then(Value::as_str);
+        let files = output.get("files");
+        let registry = output.get("registry");
+        let change = output.get("change").and_then(Value::as_str);
+        let file_count = files.and_then(Value::as_object).map_or(0, Map::len);
+        let registry_count = registry.and_then(Value::as_object).map_or(0, Map::len);
+        self.log(
+            "info",
+            &format!(
+                "Exit preview for {game_name}: decision={decision:?} change={change:?} files={file_count} registry={registry_count}"
+            ),
+            Some("exit"),
+            Some(game_name),
+        );
+        if matches!(decision, Some("Ignored" | "Cancelled")) {
+            return Ok(self.skip_lifecycle("exit", game_name, "not_processed"));
+        }
+        if !python_truthy(files.unwrap_or(&Value::Null))
+            && !python_truthy(registry.unwrap_or(&Value::Null))
+        {
+            return Ok(self.skip_lifecycle("exit", game_name, "no_files_found"));
+        }
+        if change == Some("Same") {
+            return Ok(self.skip_lifecycle("exit", game_name, "local_current"));
+        }
+        Ok(json!({"status":"needed","operation":"backup","game":game_name}))
+    }
+
+    fn restore_game_on_start(
+        &self,
+        name: &str,
+        app_id: Option<&str>,
+        gate_pid: Option<i32>,
+        gate_lease_id: Option<&str>,
+    ) -> Value {
+        let game_name = sanitize_game_name(name);
+        self.log(
+            "info",
+            &format!("restore_game_on_start triggered for game='{game_name}', app_id='{app_id:?}'"),
+            Some("restore"),
+            Some(&game_name),
+        );
+        if !self.auto_sync_enabled() {
+            return self.skip_lifecycle("start", &game_name, "auto_sync_disabled");
+        }
+        let Some(game) = self.operations.matching_lifecycle_game(&game_name, app_id) else {
+            return self.skip_lifecycle("start", &game_name, "unmatched_game");
+        };
+        let game_name = game["name"].as_str().unwrap_or(&game_name);
+        if !self.game_sync_enabled(game_name) {
+            return self.skip_lifecycle("start", game_name, "game_sync_disabled");
+        }
+        if !game["has_backup"].as_bool().unwrap_or(false) {
+            return self.skip_lifecycle("start", game_name, "no_backup");
+        }
+        if game["error"]
+            .as_str()
+            .is_some_and(|error| !error.is_empty())
+        {
+            return self.skip_lifecycle("start", game_name, "game_error");
+        }
+        let (Some(pid), Some(lease_id)) = (gate_pid, gate_lease_id.filter(|id| !id.is_empty()))
+        else {
+            return self.skip_lifecycle("start", game_name, "gate_lost");
+        };
+        if !self.watchdog.verify_gate(pid, lease_id) {
+            return self.skip_lifecycle("start", game_name, "gate_lost");
+        }
+        self.execute_start_mutation(
+            game_name,
+            "restore",
+            pid,
+            lease_id,
+            false,
+            "Restored {game_name} before launch",
+        )
+    }
+
+    fn resolve_game_start_conflict(
+        &self,
+        name: &str,
+        app_id: Option<&str>,
+        resolution: &str,
+        gate_pid: Option<i32>,
+        gate_lease_id: Option<&str>,
+    ) -> Value {
+        let game_name = sanitize_game_name(name);
+        if !matches!(resolution, "keep_local" | "restore_backup") {
+            return self.skip_lifecycle("start", &game_name, "invalid_resolution");
+        }
+        if !self.auto_sync_enabled() {
+            return self.skip_lifecycle("start", &game_name, "auto_sync_disabled");
+        }
+        let Some(game) = self.operations.matching_lifecycle_game(&game_name, app_id) else {
+            return self.skip_lifecycle("start", &game_name, "unmatched_game");
+        };
+        let game_name = game["name"].as_str().unwrap_or(&game_name);
+        if !self.game_sync_enabled(game_name) {
+            return self.skip_lifecycle("start", game_name, "game_sync_disabled");
+        }
+        if game["error"]
+            .as_str()
+            .is_some_and(|error| !error.is_empty())
+        {
+            return self.skip_lifecycle("start", game_name, "game_error");
+        }
+        let (Some(pid), Some(lease_id)) = (gate_pid, gate_lease_id.filter(|id| !id.is_empty()))
+        else {
+            return self.skip_lifecycle("start", game_name, "gate_lost");
+        };
+        if !self.watchdog.verify_gate(pid, lease_id) {
+            return self.skip_lifecycle("start", game_name, "gate_lost");
+        }
+        let restore = resolution == "restore_backup";
+        if restore && !game["has_backup"].as_bool().unwrap_or(false) {
+            return self.skip_lifecycle("start", game_name, "no_backup");
+        }
+        self.execute_start_mutation(
+            game_name,
+            if restore { "restore" } else { "backup" },
+            pid,
+            lease_id,
+            true,
+            if restore {
+                "Restored backup save for {game_name}"
+            } else {
+                "Kept local save for {game_name}"
+            },
+        )
+    }
+
+    fn execute_start_mutation(
+        &self,
+        game_name: &str,
+        operation: &str,
+        pid: i32,
+        lease_id: &str,
+        record_before_log: bool,
+        success_message: &str,
+    ) -> Value {
+        let watchdog = self.watchdog.clone();
+        let guarded_lease = lease_id.to_owned();
+        let result =
+            self.operations
+                .start_mutation(
+                    game_name,
+                    operation == "restore",
+                    move |command| match watchdog.run_guarded(pid, &guarded_lease, command) {
+                        Some(result) => result,
+                        None => Err("launch_gate_lost".to_owned()),
+                    },
+                );
+        let (status, trigger) = if operation == "restore" {
+            ("restored", "auto_start")
+        } else {
+            ("backed_up", "auto_start")
+        };
+        match result {
+            Ok(value) => {
+                if record_before_log {
+                    self.record_lifecycle_history(
+                        game_name, operation, trigger, status, None, None,
+                    );
+                }
+                let message = success_message.replace("{game_name}", game_name);
+                self.log("info", &message, Some(operation), Some(game_name));
+                if !record_before_log {
+                    self.record_lifecycle_history(
+                        game_name, operation, trigger, status, None, None,
+                    );
+                }
+                json!({"status":status,"game":game_name,"result":value})
+            }
+            Err(OperationError::Locked(_)) => {
+                self.skip_lifecycle("start", game_name, "operation_running")
+            }
+            Err(OperationError::Cancelled) => {
+                self.record_lifecycle_history(
+                    game_name,
+                    operation,
+                    trigger,
+                    "skipped",
+                    Some("cancelled"),
+                    None,
+                );
+                self.log(
+                    "info",
+                    &format!("{operation} cancelled for {game_name}"),
+                    Some(operation),
+                    Some(game_name),
+                );
+                json!({"status":"skipped","reason":"cancelled","game":game_name})
+            }
+            Err(OperationError::Failed(message)) if message == "launch_gate_lost" => {
+                self.skip_lifecycle("start", game_name, "gate_lost")
+            }
+            Err(OperationError::Failed(message)) => {
+                self.record_lifecycle_history(
+                    game_name,
+                    operation,
+                    trigger,
+                    "failed",
+                    None,
+                    Some(&message),
+                );
+                json!({"status":"failed","game":game_name,"message":message})
+            }
+        }
+    }
+
+    fn backup_game_on_exit(&self, name: &str, app_id: Option<&str>) -> Value {
+        let game_name = sanitize_game_name(name);
+        self.log(
+            "info",
+            &format!("backup_game_on_exit triggered for game='{game_name}', app_id='{app_id:?}'"),
+            Some("backup"),
+            Some(&game_name),
+        );
+        if !self.auto_sync_enabled() {
+            return self.skip_lifecycle("exit", &game_name, "auto_sync_disabled");
+        }
+        let Some(game) = self.operations.matching_lifecycle_game(&game_name, app_id) else {
+            return self.skip_lifecycle("exit", &game_name, "unmatched_game");
+        };
+        let game_name = game["name"].as_str().unwrap_or(&game_name);
+        if !self.game_sync_enabled(game_name) {
+            return self.skip_lifecycle("exit", game_name, "game_sync_disabled");
+        }
+        if game["error"]
+            .as_str()
+            .is_some_and(|error| !error.is_empty())
+        {
+            return self.skip_lifecycle("exit", game_name, "game_error");
+        }
+        match self.operations.backup_on_exit(game_name) {
+            Ok(result) => {
+                self.record_lifecycle_history(
+                    game_name,
+                    "backup",
+                    "auto_exit",
+                    "backed_up",
+                    None,
+                    None,
+                );
+                self.operations.refresh_after_lifecycle(game_name);
+                self.log(
+                    "info",
+                    &format!("Backed up {game_name} after exit"),
+                    Some("backup"),
+                    Some(game_name),
+                );
+                json!({"status":"backed_up","game":game_name,"result":result})
+            }
+            Err(OperationError::Locked(_)) => {
+                self.skip_lifecycle("exit", game_name, "operation_running")
+            }
+            Err(OperationError::Cancelled) => {
+                self.record_lifecycle_history(
+                    game_name,
+                    "backup",
+                    "auto_exit",
+                    "skipped",
+                    Some("cancelled"),
+                    None,
+                );
+                self.log(
+                    "info",
+                    &format!("backup cancelled for {game_name}"),
+                    Some("backup"),
+                    Some(game_name),
+                );
+                json!({"status":"skipped","reason":"cancelled","game":game_name})
+            }
+            Err(OperationError::Failed(message)) => {
+                self.record_lifecycle_history(
+                    game_name,
+                    "backup",
+                    "auto_exit",
+                    "failed",
+                    None,
+                    Some(&message),
+                );
+                json!({"status":"failed","game":game_name,"message":message})
+            }
+        }
+    }
+
+    fn auto_sync_enabled(&self) -> bool {
+        setting_bool(&lock(&self.settings), "auto_sync_enabled", false)
+    }
+
+    fn game_sync_enabled(&self, game_name: &str) -> bool {
+        !lock(&self.settings)
+            .get("sync_disabled_games")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(sanitize_game_name)
+            .any(|disabled| disabled == game_name)
+    }
+
+    fn skip_lifecycle(&self, operation: &str, game_name: &str, reason: &str) -> Value {
+        self.log(
+            "info",
+            &format!("Skipped {operation} for {game_name}: {reason}"),
+            Some(operation),
+            Some(game_name),
+        );
+        if !matches!(
+            reason,
+            "auto_sync_disabled" | "game_sync_disabled" | "operation_running" | "unmatched_game"
+        ) {
+            let (history_operation, trigger) = match operation {
+                "start" => ("start", "auto_start"),
+                "exit" => ("exit", "auto_exit"),
+                _ => (operation, "unknown"),
+            };
+            self.record_lifecycle_history(
+                game_name,
+                history_operation,
+                trigger,
+                "skipped",
+                Some(reason),
+                None,
+            );
+        }
+        json!({"status":"skipped","game":game_name,"reason":reason})
+    }
+
+    fn record_lifecycle_history(
+        &self,
+        game_name: &str,
+        operation: &str,
+        trigger: &str,
+        status: &str,
+        reason: Option<&str>,
+        message: Option<&str>,
+    ) {
+        if let Err(error) = self
+            .operations
+            .record_lifecycle_history(game_name, operation, trigger, status, reason, message)
+        {
+            log::error!("Could not record lifecycle history for {game_name}: {error}");
         }
     }
 
@@ -377,6 +971,36 @@ fn required_path(path: &Path, name: &str) -> io::Result<PathBuf> {
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+fn expect_range(
+    method: &str,
+    args: &[Value],
+    minimum: usize,
+    maximum: usize,
+) -> Result<(), String> {
+    if (minimum..=maximum).contains(&args.len()) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Plugin.{method}() expected between {minimum} and {maximum} arguments, got {}",
+            args.len()
+        ))
+    }
+}
+
+fn required_game_name<'a>(method: &str, args: &'a [Value]) -> Result<&'a str, String> {
+    args.first()
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{method} requires a game name string"))
+}
+
+fn optional_app_id(args: &[Value], index: usize) -> Option<&str> {
+    args.get(index).and_then(Value::as_str)
+}
+
+fn strict_pid(value: &Value) -> Option<i32> {
+    value.as_i64().and_then(|pid| i32::try_from(pid).ok())
 }
 
 fn expect_args(method: &str, args: &[Value], expected: usize) -> Result<(), String> {
@@ -750,11 +1374,11 @@ impl CallTracker {
         Some(ActiveCall(Arc::clone(self)))
     }
 
-    async fn stop_and_wait(&self, budget: Duration) -> bool {
-        {
-            let mut state = lock(&self.state);
-            state.stopping = true;
-        }
+    fn stop_admission(&self) {
+        lock(&self.state).stopping = true;
+    }
+
+    async fn wait_for_drain(&self, budget: Duration) -> bool {
         let deadline = tokio::time::Instant::now() + budget;
         loop {
             let notified = self.changed.notified();
@@ -994,9 +1618,11 @@ mod tests {
     async fn shutdown_waits_for_tracked_calls() {
         let tracker = Arc::new(super::CallTracker::default());
         let call = tracker.enter().unwrap();
+        tracker.stop_admission();
+        assert!(tracker.enter().is_none());
         let waiting = tokio::spawn({
             let tracker = Arc::clone(&tracker);
-            async move { tracker.stop_and_wait(Duration::from_secs(1)).await }
+            async move { tracker.wait_for_drain(Duration::from_secs(1)).await }
         });
         tokio::time::sleep(Duration::from_millis(10)).await;
         assert!(!waiting.is_finished());

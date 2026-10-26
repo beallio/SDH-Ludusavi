@@ -96,20 +96,18 @@ SDH_CONTRACT_BACKEND=/path/to/backend \
   ./run.sh uv run pytest -o addopts='' tests/contract/
 ```
 
-The Rust backend implements `contract_core` and `contract_operations` in this phase.
-Native operation tests exclude scenarios that also require phase-4 lifecycle RPCs:
+The Rust backend implements `contract_core`, `contract_operations`, `contract_lifecycle`,
+and `contract_gate`. Run the native contract tier with:
 
 ```bash
 SDH_CONTRACT_BACKEND=/path/to/backend \
-  ./run.sh uv run pytest -o addopts='' tests/contract/ -m 'contract_operations and not contract_lifecycle'
+  ./run.sh uv run pytest -o addopts='' tests/contract/ \
+  -m 'contract_core or contract_operations or contract_lifecycle or contract_gate or real_ludusavi'
 ```
-Native operations preserve cache/history snapshots across saves, distinguish cancellation from
-failure, reject malformed Ludusavi roots without replacing the registry, and mirror Python's
-executable, log-path, game-name, and backup-stat behavior.
-
-The subsystem markers are `contract_core`, `contract_operations`, `contract_lifecycle`,
-`contract_gate`, `contract_syncthing`, `contract_updater`, and `contract_theme`. Python
-runs every scenario; each native run selects the subsystems it implements.
+The native lifecycle tier exercises the preview-based restore decision, strict 120-second
+timestamp margin, exact lease verification, pre-scope stop-only gate, cgroup freeze/thaw, lease
+expiry and unload ordering. Python still runs every contract scenario; native runs select the
+subsystem groups they implement.
 
 The harness isolates Decky, HOME and XDG state and refuses to start unless its `flatpak` and
 `systemctl` fakes resolve first on the backend's `PATH`; it never invokes host Ludusavi or
@@ -297,33 +295,35 @@ The updater architecture enforces strict boundaries between domain models, trans
 The launch gate requires a unified cgroup v2 hierarchy and a user systemd manager that
 supports `systemctl --user freeze` and `systemctl --user thaw`. Steam may publish its lifetime
 PID just before moving that process from the user's `app.slice` into its exact application
-scope. The backend validates that bootstrap PID's owner and `/proc/<pid>/stat` start ticks,
-temporarily stops only that PID, and polls for a short bounded interval. Only the safe,
-observed `app.slice` membership is retryable; malformed cgroups, changed PID identity, wrong
-ownership, path escapes, and invalid units fail immediately. The temporary process stop is a
-handoff mechanism and can never produce a successful pause result by itself.
+scope. The backend validates the PID's owner and `/proc/<pid>/stat` start ticks. It may use a
+stop-only `SIGSTOP` gate only for the exact pre-scope membership patterns accepted by the
+Python contract: it confirms the thread group is stopped and the PID has no children, then
+returns without retrying discovery while the process is stopped. Every other incomplete or
+malformed cgroup path, changed identity, wrong owner, path escape, and invalid unit fails closed.
 
 Once the exact scope appears, the backend derives the authoritative
 `app-steam-app<appid>-<pid>.scope` from the bootstrap PID's own `/proc` cgroup membership,
 accepts only the current user's exact scope beneath `app.slice`, and records its directory
 device/inode identity. It never accepts a caller-provided unit or freezes a parent slice.
-The `systemctl` child inherits the Deck user's explicit or default systemd bus values, but a
-Decky/PyInstaller `LD_LIBRARY_PATH` is cleared in the copied child environment without
-mutating the plugin process environment.
+The `systemctl` child uses the Deck user's explicit systemd bus values or defaults
+`XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` when absent. A Decky/PyInstaller
+`LD_LIBRARY_PATH` is cleared in the copied child environment without mutating the plugin
+process environment.
 
-A pause succeeds only after `cgroup.freeze` reports the requested state and the `frozen`
-field in `cgroup.events` reports completion. The bootstrap stop is released only after the
-same PID identity is confirmed inside that verified scope; the freezer state is checked again
-after release, so the process remains blocked by its cgroup. Commands, scope acquisition, and
-state polling have separate short bounded timeouts. Missing systemd or cgroup support, an
-invalid/stale identity, and any incomplete transition fail closed, unwind the original PID
-stop when its identity still matches, and best-effort thaw a partial scope. There is no
-PID-signal fallback that can report a successful gate. Renewals verify the stored scope rather
-than requiring the launcher PID to remain alive. Explicit resume, lease expiry, the absolute
-watchdog ceiling, and plugin shutdown first request cancellation for the exact pinned operation;
-the scope is thawed only after its cancellation callback returns and its worker confirms
-completion. If process-group termination or reaping cannot be confirmed, the gate remains frozen
-and the release is reported as failed rather than risking concurrent save writes.
+A scoped pause succeeds only after `cgroup.freeze` reports the requested state and the
+`frozen` field in `cgroup.events` reports completion. The bootstrap stop is released only after
+the same PID identity is confirmed inside that verified scope; the freezer state is checked
+again after release. An eligible pre-scope pause instead remains a stop-only lease whose
+release is checked against that PID identity. Commands, scope acquisition, and state polling
+have separate short bounded timeouts. Missing systemd or cgroup support, an invalid/stale
+identity, and any incomplete transition fail closed, unwind the original PID stop when its
+identity still matches, and best-effort thaw a partial scope. Renewals verify that the stored
+scope remains frozen, or that a stop-only PID identity remains stopped. Leases last 30 seconds,
+can be renewed, and have an absolute 240-second ceiling. Explicit resume, lease expiry, the
+absolute watchdog ceiling, and plugin shutdown first request cancellation for the exact pinned
+operation; the scope is thawed only after its cancellation callback returns and its worker
+confirms completion. If process-group termination or reaping cannot be confirmed, the gate
+remains held and release is reported as failed rather than risking concurrent save writes.
 
 Every start-side mutation — the normal start restore and both conflict choices including
 `keep_local` — requires the exact backend-owned `(pid, lease_id)` pair. After the coordinator
@@ -346,6 +346,17 @@ the stable `launch_gate.scope_acquisition_failed`, `launch_gate.scope_freeze_fai
 `launch_gate.conflict_skipped` findings for gate startup regressions. It also accepts
 historical process-tree messages so `launch_gate.lease_expired` and
 `launch_gate.resume_before_resolution` remain comparable across versions.
+
+### Backend: Single-Instance Enforcement
+
+At startup, the backend identifies stale siblings by the current UID, a strictly older
+`/proc/<pid>/stat` start time, and a byte-for-byte match of the complete NUL-delimited
+`/proc/<pid>/cmdline`. It never matches a command-line prefix. In the fork build, argument
+zero is the backend executable path; under the stock Decky shim, the backend runs from its
+runtime-directory copy. Requiring the complete command line prevents matching the Python
+shim or an unrelated plugin invocation. At most eight stale siblings are handled; each gets
+three seconds to exit after `SIGTERM`, then one second after `SIGKILL`. Process identity is
+rechecked before signalling so a reused PID is not treated as the older instance.
 
 ### Backend: Syncthing Connectivity and Activity
 

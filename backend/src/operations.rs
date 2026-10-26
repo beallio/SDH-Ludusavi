@@ -10,7 +10,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use serde_json::{Map, Value, json};
@@ -18,7 +18,10 @@ use sha2::{Digest, Sha256};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use unicode_casefold::UnicodeCaseFold;
 
-use crate::persistence::{StateLock, read_object, write_json_atomic};
+use crate::{
+    lifecycle::{RestorePreview, classify_restore_change},
+    persistence::{StateLock, read_object, write_json_atomic},
+};
 
 const FLATPAK_ID: &str = "com.github.mtkennerly.ludusavi";
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -292,6 +295,96 @@ impl LudusaviOperations {
 
     pub fn get_game_history(&self) -> Value {
         lock(&self.history).clone()
+    }
+    pub fn matching_lifecycle_game(&self, name: &str, app_id: Option<&str>) -> Option<Value> {
+        lock(&self.registry)
+            .matching_game(name, app_id)
+            .map(|game| game.to_value())
+    }
+
+    pub(crate) fn start_recency(&self, name: &str) -> Result<Value, OperationError> {
+        self.run_operation_wait("start_check", Some(name), Duration::from_secs(30), || {
+            let client = self.client()?;
+            let backups = game_objects(&client.backups(Some(name))?)?;
+            let recency = if backups
+                .get(name)
+                .and_then(|game| game.get("backups"))
+                .and_then(Value::as_array)
+                .is_none_or(Vec::is_empty)
+            {
+                "no_backup"
+            } else {
+                let preview = client.restore(name, true).ok();
+                let change = preview
+                    .as_ref()
+                    .and_then(|value| {
+                        value.pointer(&format!("/games/{}/change", escape_pointer(name)))
+                    })
+                    .and_then(Value::as_str);
+                match classify_restore_change(change) {
+                    RestorePreview::LocalCurrent => "local_current",
+                    RestorePreview::BackupNewer => "backup_newer",
+                    RestorePreview::BackupDiffers => "backup_differs",
+                    RestorePreview::Ambiguous => "ambiguous",
+                }
+            };
+            let metadata = if matches!(recency, "backup_newer" | "local_current") {
+                json!({})
+            } else {
+                conflict_metadata(&client, name)
+            };
+            Ok(json!({"recency":recency, "metadata":metadata}))
+        })
+    }
+
+    pub(crate) fn exit_preview(&self, name: &str) -> Result<Value, OperationError> {
+        self.run_operation_wait("exit_check", Some(name), Duration::from_secs(30), || {
+            self.client()?.backup_preview(Some(name))
+        })
+    }
+
+    pub(crate) fn start_mutation(
+        &self,
+        name: &str,
+        restore: bool,
+        guard: impl FnOnce(
+            Box<dyn FnOnce(Arc<AtomicBool>) -> Result<Value, String>>,
+        ) -> Result<Value, String>,
+    ) -> Result<Value, OperationError> {
+        let operation = if restore { "restore" } else { "backup" };
+        let game = name.to_owned();
+        self.run_operation(operation, Some(name), || {
+            let client = self.client()?;
+            let mutation: Box<dyn FnOnce(Arc<AtomicBool>) -> Result<Value, String>> =
+                Box::new(move |cancel| {
+                    if restore {
+                        client.restore_cancellable(&game, cancel)
+                    } else {
+                        client.backup_cancellable(&game, cancel)
+                    }
+                });
+            guard(mutation)
+        })
+    }
+
+    pub(crate) fn backup_on_exit(&self, name: &str) -> Result<Value, OperationError> {
+        self.run_operation("backup", Some(name), || self.client()?.backup(name, false))
+    }
+
+    pub fn refresh_after_lifecycle(&self, name: &str) {
+        let _ = self.refresh_targeted(name);
+    }
+
+    pub fn record_lifecycle_history(
+        &self,
+        game: &str,
+        operation: &str,
+        trigger: &str,
+        status: &str,
+        reason: Option<&str>,
+        message: Option<&str>,
+    ) -> Result<(), String> {
+        self.record_history(game, operation, trigger, status, reason, message)
     }
 
     pub fn get_versions(&self) -> Result<Value, String> {
@@ -574,18 +667,50 @@ impl LudusaviOperations {
         game_name: Option<&str>,
         operation: impl FnOnce() -> Result<T, String>,
     ) -> Result<T, OperationError> {
-        let guard = match self.operation_lock.try_lock() {
-            Ok(guard) => guard,
-            Err(std::sync::TryLockError::WouldBlock) => {
-                let current = lock(&self.status)
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| "operation".to_owned());
-                return Err(OperationError::Locked(format!(
-                    "{current} is already running"
-                )));
+        self.run_operation_inner(name, game_name, None, operation)
+    }
+
+    fn run_operation_wait<T>(
+        &self,
+        name: &str,
+        game_name: Option<&str>,
+        timeout: Duration,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, OperationError> {
+        self.run_operation_inner(name, game_name, Some(timeout), operation)
+    }
+
+    fn run_operation_inner<T>(
+        &self,
+        name: &str,
+        game_name: Option<&str>,
+        wait_timeout: Option<Duration>,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, OperationError> {
+        let deadline = wait_timeout.map(|timeout| Instant::now() + timeout);
+        let guard = loop {
+            match self.operation_lock.try_lock() {
+                Ok(guard) => break guard,
+                Err(std::sync::TryLockError::Poisoned(error)) => break error.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    let current = lock(&self.status)
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| "operation".to_owned());
+                    let Some(deadline) = deadline else {
+                        return Err(OperationError::Locked(format!(
+                            "{current} is already running"
+                        )));
+                    };
+                    let now = Instant::now();
+                    if now >= deadline {
+                        return Err(OperationError::Locked(format!(
+                            "{current} is already running"
+                        )));
+                    }
+                    thread::sleep(Duration::from_millis(10).min(deadline - now));
+                }
             }
-            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
         };
         {
             let mut status = lock(&self.status);
@@ -848,7 +973,7 @@ impl LudusaviOperations {
 }
 
 #[derive(Debug)]
-enum OperationError {
+pub(crate) enum OperationError {
     Locked(String),
     Failed(String),
     Cancelled,
@@ -884,6 +1009,15 @@ impl LudusaviClient {
     }
 
     fn json(&self, args: &[String], timeout: Duration) -> Result<Value, String> {
+        self.json_cancellable(args, timeout, None)
+    }
+
+    fn json_cancellable(
+        &self,
+        args: &[String],
+        timeout: Duration,
+        cancellation: Option<&AtomicBool>,
+    ) -> Result<Value, String> {
         let mut args = args.to_vec();
         if !args.iter().any(|arg| arg == "--api") {
             args.push("--api".to_owned());
@@ -892,9 +1026,13 @@ impl LudusaviClient {
             .chain(std::iter::once(FLATPAK_ID.to_owned()))
             .chain(args)
             .collect();
-        let output = self
-            .processes
-            .run_at(&self.flatpak, &arguments, timeout, false)?;
+        let output = self.processes.run_at_cancellable(
+            &self.flatpak,
+            &arguments,
+            timeout,
+            false,
+            cancellation,
+        )?;
         parse_ludusavi_json(&output)
     }
 
@@ -955,6 +1093,29 @@ impl LudusaviClient {
         }
         args.extend(["--force".to_owned(), game.to_owned()]);
         self.json(&args, OPERATION_TIMEOUT)
+    }
+    fn backup_cancellable(
+        &self,
+        game: &str,
+        cancellation: Arc<AtomicBool>,
+    ) -> Result<Value, String> {
+        self.json_cancellable(
+            &["backup".to_owned(), "--force".to_owned(), game.to_owned()],
+            OPERATION_TIMEOUT,
+            Some(&cancellation),
+        )
+    }
+
+    fn restore_cancellable(
+        &self,
+        game: &str,
+        cancellation: Arc<AtomicBool>,
+    ) -> Result<Value, String> {
+        self.json_cancellable(
+            &["restore".to_owned(), "--force".to_owned(), game.to_owned()],
+            OPERATION_TIMEOUT,
+            Some(&cancellation),
+        )
     }
 
     fn restore_backup(&self, game: &str, backup_id: &str) -> Result<Value, String> {
@@ -1124,7 +1285,20 @@ impl ProcessManager {
         timeout: Duration,
         text: bool,
     ) -> Result<String, String> {
-        if self.stopping.load(Ordering::Acquire) {
+        self.run_at_cancellable(program, args, timeout, text, None)
+    }
+
+    fn run_at_cancellable(
+        &self,
+        program: &Path,
+        args: &[String],
+        timeout: Duration,
+        text: bool,
+        cancellation: Option<&AtomicBool>,
+    ) -> Result<String, String> {
+        if self.stopping.load(Ordering::Acquire)
+            || cancellation.is_some_and(|token| token.load(Ordering::Acquire))
+        {
             return Err("Ludusavi operation cancelled".to_owned());
         }
         let mut command = Command::new(program);
@@ -1153,7 +1327,9 @@ impl ProcessManager {
         let pid = i32::try_from(child.id())
             .map_err(|_| "Ludusavi process ID is out of range".to_owned())?;
         lock(&self.groups).insert(pid);
-        if self.stopping.load(Ordering::Acquire) {
+        if self.stopping.load(Ordering::Acquire)
+            || cancellation.is_some_and(|token| token.load(Ordering::Acquire))
+        {
             let _ = signal_group(pid, libc::SIGTERM);
         }
         let stdout = child.stdout.take().expect("piped stdout");
@@ -1164,7 +1340,9 @@ impl ProcessManager {
         let mut status = None;
         let mut outcome = None;
         loop {
-            if self.stopping.load(Ordering::Acquire) {
+            if self.stopping.load(Ordering::Acquire)
+                || cancellation.is_some_and(|token| token.load(Ordering::Acquire))
+            {
                 outcome = Some("cancelled".to_owned());
                 break;
             }
@@ -1333,6 +1511,76 @@ fn game_objects(value: &Value) -> Result<BTreeMap<String, Value>, String> {
 fn parse_ludusavi_json(output: &str) -> Result<Value, String> {
     serde_json::from_str(output)
         .map_err(|error| format!("Failed to parse Ludusavi JSON output: {error}"))
+}
+fn conflict_metadata(client: &LudusaviClient, game: &str) -> Value {
+    let mut local_modified_at = None;
+    let mut backup_modified_at: Option<String> = None;
+    let mut backup_path: Option<String> = None;
+    if let Ok(output) = client.backups(Some(game))
+        && let Ok(games) = game_objects(&output)
+        && let Some(data) = games.get(game)
+    {
+        backup_path = data
+            .get("backupPath")
+            .and_then(Value::as_str)
+            .filter(|path| !path.is_empty())
+            .map(str::to_owned);
+        if let Some(backups) = data.get("backups").and_then(Value::as_array) {
+            for when in backups
+                .iter()
+                .filter_map(|backup| backup.get("when").and_then(Value::as_str))
+            {
+                if backup_modified_at
+                    .as_deref()
+                    .is_none_or(|current| when > current)
+                {
+                    backup_modified_at = Some(when.to_owned());
+                }
+            }
+        }
+    }
+    if let Ok(output) = client.backup_preview(Some(game))
+        && let Ok(games) = game_objects(&output)
+        && let Some(files) = games
+            .get(game)
+            .and_then(|data| data.get("files"))
+            .and_then(Value::as_object)
+    {
+        let mut newest: Option<SystemTime> = None;
+        for (path, data) in files {
+            let mut candidates = Vec::with_capacity(3);
+            for candidate in [
+                Some(path.as_str()),
+                data.get("originalPath").and_then(Value::as_str),
+                data.get("redirectedPath").and_then(Value::as_str),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let candidate = PathBuf::from(candidate);
+                if candidate.is_absolute() && !candidates.contains(&candidate) {
+                    candidates.push(candidate);
+                }
+            }
+            for candidate in candidates {
+                if let Ok(modified) =
+                    fs::metadata(candidate).and_then(|metadata| metadata.modified())
+                {
+                    if newest.is_none_or(|previous| modified > previous) {
+                        newest = Some(modified);
+                    }
+                    break;
+                }
+            }
+        }
+        local_modified_at =
+            newest.and_then(|modified| OffsetDateTime::from(modified).format(&Rfc3339).ok());
+    }
+    json!({
+        "localModifiedAt": local_modified_at,
+        "backupModifiedAt": backup_modified_at,
+        "backupPath": backup_path,
+    })
 }
 
 fn game_error(game: &Value) -> Option<String> {

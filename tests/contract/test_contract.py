@@ -1614,8 +1614,6 @@ def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
         history = rpc(harness, "get_game_history")[GAME]
         assert history["last_backup"]["operation"] == "backup"
         assert history["last_restore"]["operation"] == "restore"
-        if os.environ.get("SDH_CONTRACT_BACKEND", "python") != "python":
-            return
 
         save.write_bytes(b"newer local version C\x00\n")
         future = time.time() + 300
