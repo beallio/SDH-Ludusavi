@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from typing import Any
 
 
@@ -127,10 +128,10 @@ class ContractHarness:
         self.process: subprocess.Popen[bytes] | None = None
         self.connection: socket.socket | None = None
         self._reader: threading.Thread | None = None
-        self._pending: dict[int, Future[tuple[bool, Any]]] = {}
+        self._pending: dict[str, Future[tuple[bool, Any]]] = {}
         self._pending_lock = threading.Lock()
         self._send_lock = threading.Lock()
-        self._next_id = 0
+        self._stopping = False
         self._reader_error: BaseException | None = None
         self._events: list[dict[str, Any]] = []
 
@@ -150,6 +151,7 @@ class ContractHarness:
     def start(self) -> ContractHarness:
         if self.process is not None:
             raise RuntimeError("contract backend is already running")
+        self._stopping = False
         try:
             self._check_fakes()
         except Exception:
@@ -225,27 +227,38 @@ class ContractHarness:
                     line = bytes(buffer[:newline])
                     del buffer[: newline + 1]
                     message = json.loads(line)
-                    if message.get("type") == 2:
+                    if not isinstance(message, dict):
+                        raise ValueError("RPC message is not an object")
+                    message_type = message.get("type")
+                    if message_type == 2:
                         self._events.append(message)
-                    elif message.get("type") == 1:
+                    elif message_type == 1:
+                        request_id = message.get("id")
+                        if not isinstance(request_id, str):
+                            raise ValueError("RPC reply ID is not a string")
+                        success = message.get("success")
+                        if type(success) is not bool:
+                            raise ValueError("RPC reply success is not a boolean")
+                        if "res" not in message:
+                            raise ValueError("RPC reply is missing res")
                         with self._pending_lock:
-                            pending = self._pending.get(message.get("id"))
-                        if pending is not None and not pending.done():
-                            pending.set_result((bool(message.get("success")), message.get("res")))
+                            pending = self._pending.get(request_id)
+                            if pending is not None and not pending.done():
+                                pending.set_result((success, message["res"]))
         except (OSError, ValueError, ConnectionError) as exc:
             self._reader_error = exc
             with self._pending_lock:
-                pending_calls = tuple(self._pending.values())
-            for pending in pending_calls:
-                if not pending.done():
-                    pending.set_exception(ConnectionError(f"backend RPC socket failed: {exc}"))
+                for pending in self._pending.values():
+                    if not pending.done():
+                        pending.set_exception(ConnectionError(f"backend RPC socket failed: {exc}"))
 
     def call(self, method: str, *args: Any, timeout: float = 10.0) -> tuple[bool, Any]:
         if self.connection is None:
             raise RuntimeError("contract backend is not connected")
         with self._pending_lock:
-            self._next_id += 1
-            request_id = self._next_id
+            if self._stopping:
+                raise RuntimeError("contract backend is stopping")
+            request_id = str(uuid.uuid4())
             pending: Future[tuple[bool, Any]] = Future()
             self._pending[request_id] = pending
         request = json.dumps({"type": 0, "method": method, "id": request_id, "args": list(args)})
@@ -265,6 +278,13 @@ class ContractHarness:
 
     def stop(self) -> None:
         process = self.process
+        with self._pending_lock:
+            self._stopping = True
+            pending_calls = tuple(self._pending.values())
+            self._pending.clear()
+            for pending in pending_calls:
+                if not pending.done():
+                    pending.set_exception(ConnectionError("backend is shutting down"))
         if process is None:
             return
         if process.poll() is None:
@@ -272,7 +292,7 @@ class ContractHarness:
             try:
                 process.wait(timeout=STOP_TIMEOUT)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
+                self._kill_process_group(process.pid)
                 process.wait()
                 self._close_connection()
                 self.process = None
@@ -280,8 +300,16 @@ class ContractHarness:
                     f"backend exceeded the {STOP_TIMEOUT:g}s SIGTERM shutdown limit"
                 )
                 raise AssertionError(f"{details}; the process group was killed")
+        self._kill_process_group(process.pid)
         self._close_connection()
         self.process = None
+
+    @staticmethod
+    def _kill_process_group(pgid: int) -> None:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
     def _close_connection(self) -> None:
         connection, self.connection = self.connection, None
@@ -300,6 +328,7 @@ class ContractHarness:
             raise RuntimeError("contract backend is not connected")
         with self._send_lock:
             self.connection.sendall(b'{"uninstall":true}\n')
+        time.sleep(0.025)
         self.stop()
 
     def fake_processes(self) -> list[dict[str, Any]]:

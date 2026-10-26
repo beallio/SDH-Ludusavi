@@ -69,11 +69,12 @@ Native DOM fixture waits use standard timer callbacks wrapped in promises, not N
 
 ### Black-box backend RPC contract suite
 
-Run the same newline-delimited Unix-socket RPC contract against the Python host or a native backend:
+Run the same newline-delimited Unix-socket RPC contract against the Python host or a native production backend. Contract-only runs override the repository's Python coverage threshold:
 
 ```bash
-./run.sh uv run pytest tests/contract/
-SDH_CONTRACT_BACKEND=/path/to/backend ./run.sh uv run pytest tests/contract/
+./run.sh uv run pytest -o addopts='' tests/contract/
+SDH_CONTRACT_BACKEND=/path/to/production-backend \
+  ./run.sh uv run pytest -o addopts='' tests/contract/
 ```
 
 The harness isolates Decky, HOME and XDG state and refuses to start unless its `flatpak` and
@@ -84,7 +85,13 @@ The harness isolates Decky, HOME and XDG state and refuses to start unless its `
 
 ```bash
 SDH_CONTRACT_LUDUSAVI_BIN=/path/to/ludusavi SDH_CONTRACT_REQUIRE_REAL=1 \
-  ./run.sh uv run pytest tests/contract/test_contract.py -m real_ludusavi
+  ./run.sh uv run pytest -o addopts='' tests/contract/test_contract.py -m real_ludusavi
+```
+The SDK example positive control has a separate selector; it is not a substitute for a production backend:
+
+```bash
+SDH_CONTRACT_SDK_EXAMPLE=/path/to/native_example \
+  ./run.sh uv run pytest -o addopts='' tests/contract/test_contract.py -k native_sdk_protocol_positive_control
 ```
 
 Without `SDH_CONTRACT_LUDUSAVI_BIN`, the real tier skips locally; `SDH_CONTRACT_REQUIRE_REAL=1`

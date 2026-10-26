@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -56,6 +56,132 @@ def _wait_for(predicate: Any, timeout: float, message: str) -> Any:
     raise AssertionError(message)
 
 
+def _option_value(arguments: list[str], option: str) -> str | None:
+    try:
+        index = arguments.index(option)
+    except ValueError:
+        return None
+    return arguments[index + 1] if index + 1 < len(arguments) else None
+
+
+def _assert_history_map(history: Any) -> None:
+    assert isinstance(history, dict)
+    entry_fields = {"operation", "trigger", "status", "reason", "message", "timestamp"}
+    for game_name, game_history in history.items():
+        assert isinstance(game_name, str)
+        assert isinstance(game_history, dict)
+        assert {
+            "last_backup",
+            "last_restore",
+            "last_skip",
+            "last_failure",
+            "last_operation",
+        } <= game_history.keys()
+        for entry in game_history.values():
+            if entry is None:
+                continue
+            assert isinstance(entry, dict)
+            assert entry_fields <= entry.keys()
+            assert entry["operation"] in {"backup", "restore", "start", "exit"}
+            assert entry["trigger"] in {
+                "manual_backup",
+                "manual_restore",
+                "auto_start",
+                "auto_exit",
+            }
+            assert entry["status"] in {"backed_up", "restored", "skipped", "failed"}
+            assert entry["reason"] is None or isinstance(entry["reason"], str)
+            assert entry["message"] is None or isinstance(entry["message"], str)
+            assert isinstance(entry["timestamp"], str) and entry["timestamp"]
+
+
+def _assert_refresh_result(result: Any) -> None:
+    assert isinstance(result, dict)
+    assert {"games", "aliases", "history", "dependency_error"} <= result.keys()
+    assert isinstance(result["games"], list)
+    assert isinstance(result["aliases"], dict)
+    assert all(
+        isinstance(alias, str) and isinstance(canonical, str)
+        for alias, canonical in result["aliases"].items()
+    )
+    _assert_history_map(result["history"])
+    assert result["dependency_error"] is None or isinstance(result["dependency_error"], str)
+    for game in result["games"]:
+        assert isinstance(game, dict)
+        assert {
+            "name",
+            "configured",
+            "has_backup",
+            "needs_first_backup",
+            "error",
+            "status",
+        } <= game.keys()
+        assert isinstance(game["name"], str)
+        assert isinstance(game["configured"], bool)
+        assert isinstance(game["has_backup"], bool)
+        assert isinstance(game["needs_first_backup"], bool)
+        assert game["error"] is None or isinstance(game["error"], str)
+        assert game["status"] in {"configured", "has_backup", "needs_first_backup", "error"}
+        steam_id = game.get("steam_id")
+        assert steam_id is None or (
+            isinstance(steam_id, str)
+            or isinstance(steam_id, int)
+            and not isinstance(steam_id, bool)
+        )
+
+
+def _assert_backup_list(result: Any) -> None:
+    assert isinstance(result, dict)
+    assert {"game", "backup_path", "total_size_bytes", "backups"} <= result.keys()
+    assert isinstance(result["game"], str)
+    assert result["backup_path"] is None or isinstance(result["backup_path"], str)
+    total_size = result["total_size_bytes"]
+    assert total_size is None or isinstance(total_size, int) and not isinstance(total_size, bool)
+    assert isinstance(result["backups"], list)
+    for backup in result["backups"]:
+        assert isinstance(backup, dict)
+        assert {
+            "id",
+            "when",
+            "locked",
+            "os",
+            "comment",
+            "size_bytes",
+            "file_count",
+        } <= backup.keys()
+        assert isinstance(backup["id"], str) and backup["id"]
+        assert isinstance(backup["when"], str) and backup["when"]
+        assert isinstance(backup["locked"], bool)
+        assert backup["os"] is None or isinstance(backup["os"], str)
+        assert backup["comment"] is None or isinstance(backup["comment"], str)
+        for field in ("size_bytes", "file_count"):
+            value = backup[field]
+            assert value is None or isinstance(value, int) and not isinstance(value, bool)
+
+
+def _assert_command_after(backend: ContractHarness, first_record: int, verb: str) -> None:
+    assert any(
+        len(record["argv"]) > 2 and record["argv"][2] == verb and "--preview" not in record["argv"]
+        for record in backend.fake_processes()[first_record:]
+    ), f"lifecycle result had no real Ludusavi {verb} command"
+
+
+def _assert_history_entry(
+    backend: ContractHarness,
+    field: str,
+    operation: str,
+    trigger: str,
+    status: str,
+) -> None:
+    history = rpc(backend, "get_game_history")
+    _assert_history_map(history)
+    entry = history[GAME][field]
+    assert entry is not None
+    assert entry["operation"] == operation
+    assert entry["trigger"] == trigger
+    assert entry["status"] == status
+
+
 @dataclass
 class _Child:
     pid: int
@@ -64,32 +190,29 @@ class _Child:
     tick_file: Path
 
 
-def _start_scoped_child(root: Path) -> _Child:
+def _start_systemd_child(root: Path, unit: str, systemd_args: list[str]) -> _Child:
     systemd_run = shutil.which("systemd-run")
     if systemd_run is None:
-        pytest.fail("systemd-run is required to create an isolated Steam app scope")
-    unit = f"app-steam-app{APP_ID}-{time.time_ns() % 1_000_000_000}.scope"
-    pid_file = root / "scoped-child.pid"
-    tick_file = root / "scoped-child.tick"
+        pytest.fail("systemd-run is required to create an isolated child")
+    pid_file = root / f"{unit}.pid"
+    tick_file = root / f"{unit}.tick"
     code = (
         "import os,sys,time\n"
         "pid_file, tick_file = sys.argv[1:]\n"
+        "temporary_file = tick_file + '.tmp'\n"
         "open(pid_file, 'w').write(str(os.getpid()))\n"
         "tick = 0\n"
         "while True:\n"
-        "    with open(tick_file, 'w') as stream:\n"
+        "    with open(temporary_file, 'w') as stream:\n"
         "        stream.write(str(tick))\n"
+        "    os.replace(temporary_file, tick_file)\n"
         "    tick += 1\n"
         "    time.sleep(0.01)\n"
     )
     process = subprocess.Popen(
         [
             systemd_run,
-            "--user",
-            "--scope",
-            "--slice=app.slice",
-            f"--unit={unit}",
-            "--quiet",
+            *systemd_args,
             "--",
             sys.executable,
             "-c",
@@ -117,8 +240,63 @@ def _start_scoped_child(root: Path) -> _Child:
         f"systemd-run did not start {unit}: "
         f"{process.stderr.read().decode(errors='replace') if process.poll() is not None else ''}",
     )
-    _wait_for(lambda: tick_file.exists(), 5, "scoped child heartbeat did not start")
+    _wait_for(lambda: tick_file.exists(), 5, "systemd child heartbeat did not start")
     return _Child(pid, process, unit, tick_file)
+
+
+def _start_scoped_child(root: Path) -> _Child:
+    unit = f"app-steam-app{APP_ID}-{time.time_ns() % 1_000_000_000}.scope"
+    return _start_systemd_child(
+        root,
+        unit,
+        ["--user", "--scope", "--slice=app.slice", f"--unit={unit}", "--quiet"],
+    )
+
+
+def _start_prescope_child(root: Path) -> _Child:
+    systemctl = shutil.which("systemctl")
+    if systemctl is None:
+        pytest.fail("systemctl is required to verify the exact pre-scope path")
+    existing = subprocess.run(
+        [
+            systemctl,
+            "--user",
+            "show",
+            "steam-launcher.service",
+            "--property=LoadState",
+            "--value",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if existing.returncode != 0:
+        pytest.fail(f"cannot verify pre-scope unit availability: {existing.stderr.strip()}")
+    if existing.stdout.strip() not in {"", "not-found"}:
+        pytest.fail("steam-launcher.service is already loaded; refusing to replace it")
+    return _start_systemd_child(
+        root,
+        "steam-launcher.service",
+        [
+            "--user",
+            "--unit=steam-launcher.service",
+            "--slice=app.slice",
+            "--wait",
+            "--collect",
+            "--quiet",
+        ],
+    )
+
+
+def _proc_state(pid: int) -> str | None:
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+    except FileNotFoundError:
+        return None
+    close_paren = stat.rfind(")")
+    fields = stat[close_paren + 1 :].split() if close_paren >= 0 else []
+    return fields[0] if fields else None
 
 
 def _scope_frozen(child: _Child) -> bool:
@@ -167,11 +345,19 @@ def _stop_child(child: _Child) -> None:
 class _SyncthingServer:
     def __init__(self, backup_path: Path) -> None:
         self.backup_path = backup_path
+        self.requests: list[str] = []
+        self._request_lock = threading.Lock()
+        self._status_request_count = 0
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
                 route = self.path.split("?", 1)[0]
+                with owner._request_lock:
+                    owner.requests.append(self.path)
+                    if route == "/rest/db/status":
+                        owner._status_request_count += 1
+                    status_request_count = owner._status_request_count
                 responses: dict[str, Any] = {
                     "/rest/system/status": {"myID": "CONTRACT-LOCAL-DEVICE"},
                     "/rest/config/folders": [
@@ -202,6 +388,9 @@ class _SyncthingServer:
                     },
                     "/rest/events": [],
                 }
+                responses["/rest/db/status"]["state"] = (
+                    "scanning" if status_request_count == 1 else "idle"
+                )
                 if route not in responses:
                     self.send_error(404)
                     return
@@ -276,6 +465,7 @@ def test_settings_cache_shortcut_theme_protocol_and_concurrent_calls(
     assert "Unknown settings patch kind" in failed["message"]
 
     refreshed = rpc(backend, "refresh_games", True, "42,43")
+    _assert_refresh_result(refreshed)
     assert refreshed["dependency_error"] is None
     assert any(game["name"] == GAME and game["has_backup"] for game in refreshed["games"])
     assert rpc(backend, "is_game_cache_current", "42,43") is True
@@ -303,6 +493,7 @@ def test_settings_cache_shortcut_theme_protocol_and_concurrent_calls(
     assert settings["auto_sync_enabled"] is True
     assert rpc(backend, "get_ludusavi_launcher_shortcut_id") == 7654321
     history = rpc(backend, "get_game_history")
+    _assert_history_map(history)
     assert history[GAME]["last_backup"]["operation"] == "backup"
     cache = json.loads((backend.runtime_dir / "cache.json").read_text(encoding="utf-8"))
     assert cache["game_history"][GAME]["last_backup"]["status"] == "backed_up"
@@ -310,6 +501,13 @@ def test_settings_cache_shortcut_theme_protocol_and_concurrent_calls(
     backend.uninstall()
     assert not theme.exists()
     assert (unrelated_theme / "keep.css").read_text(encoding="utf-8") == "owned elsewhere"
+
+    theme.mkdir()
+    unowned_file = theme / "owned-by-someone-else.txt"
+    unowned_file.write_text("preserve this theme", encoding="utf-8")
+    backend.start()
+    backend.uninstall()
+    assert unowned_file.read_text(encoding="utf-8") == "preserve this theme"
 
 
 def test_operations_logs_status_lock_and_local_update_state(backend: ContractHarness) -> None:
@@ -333,22 +531,34 @@ def test_operations_logs_status_lock_and_local_update_state(backend: ContractHar
     assert rpc(backend, "force_backup", GAME)["status"] == "backed_up"
     assert rpc(backend, "force_restore", GAME)["status"] == "restored"
     backups = rpc(backend, "list_backups", GAME)
+    _assert_backup_list(backups)
     assert backups["game"] == GAME
     assert len(backups["backups"]) == 2
     backup_id = backups["backups"][-1]["id"]
-    assert rpc(backend, "restore_backup_version", GAME, backup_id)["status"] == "restored"
+    selected = rpc(backend, "restore_backup_version", GAME, backup_id)
+    assert selected["status"] == "restored"
+    records = backend.fake_processes()
     assert any(
-        record["argv"][2:4] == ["restore", "--force"] and backup_id in record["argv"]
-        for record in backend.fake_processes()
+        len(record["argv"]) > 2
+        and record["argv"][2] == "restore"
+        and "--force" in record["argv"][2:]
+        for record in records
+    )
+    assert any(
+        len(record["argv"]) > 2
+        and record["argv"][2] == "restore"
+        and _option_value(record["argv"][2:], "--backup") == backup_id
+        for record in records
     )
 
     backend.set_scenario({"flatpak": {"responses": {"backup": {"delay_seconds": 0.8}}}})
+    prior_record_count = len(backend.fake_processes())
     with ThreadPoolExecutor(max_workers=1) as pool:
         first = pool.submit(backend.call, "force_backup", GAME)
         _wait_for(
             lambda: any(
                 "backup" in record["argv"] and "--preview" not in record["argv"]
-                for record in backend.fake_processes()
+                for record in backend.fake_processes()[prior_record_count:]
             ),
             5,
             "slow fake backup did not start",
@@ -426,7 +636,10 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHa
     exit_check = rpc(backend, "check_game_exit", GAME, APP_ID)
     assert exit_check["status"] == "needed"
     assert exit_check["operation"] == "backup"
+    before_exit_backup = len(backend.fake_processes())
     assert rpc(backend, "backup_game_on_exit", GAME, APP_ID)["status"] == "backed_up"
+    _assert_command_after(backend, before_exit_backup, "backup")
+    _assert_history_entry(backend, "last_backup", "backup", "auto_exit", "backed_up")
     child = _start_scoped_child(backend.root)
     backend.set_scenario(
         {
@@ -437,74 +650,74 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHa
     try:
         paused = rpc(backend, "pause_game_process", child.pid)
         assert paused["status"] == "paused", paused
+        assert type(paused["pid"]) is int and paused["pid"] == child.pid
+        assert isinstance(paused["lease_id"], str) and paused["lease_id"]
+        assert (
+            isinstance(paused["lease_ttl_seconds"], int | float)
+            and not isinstance(paused["lease_ttl_seconds"], bool)
+            and paused["lease_ttl_seconds"] > 0
+        )
         lease_id = paused["lease_id"]
+        pid = paused["pid"]
         assert _scope_frozen(child), "scope freezer did not hold the child"
         frozen_ticks = _tick_count(child)
         time.sleep(0.1)
         assert _tick_count(child) == frozen_ticks, "scope child continued running while frozen"
 
-        wrong = rpc(backend, "renew_game_process_pause", child.pid, "wrong-contract-lease")
+        wrong = rpc(backend, "renew_game_process_pause", pid, "wrong-contract-lease")
         assert wrong["status"] in {"skipped", "failed"}
-        renewed = rpc(backend, "renew_game_process_pause", child.pid, lease_id)
+        renewed = rpc(backend, "renew_game_process_pause", pid, lease_id)
         assert renewed["status"] == "renewed"
+        assert renewed["pid"] == pid
         assert (
-            rpc(
-                backend,
-                "resolve_game_start_conflict",
-                GAME,
-                APP_ID,
-                "keep_local",
-                child.pid,
-                lease_id,
-            )["status"]
-            == "backed_up"
+            isinstance(renewed["lease_ttl_seconds"], int | float)
+            and not isinstance(renewed["lease_ttl_seconds"], bool)
+            and renewed["lease_ttl_seconds"] > 0
         )
-        assert (
-            rpc(
-                backend,
-                "resolve_game_start_conflict",
-                GAME,
-                APP_ID,
-                "restore_backup",
-                child.pid,
-                lease_id,
-            )["status"]
-            == "restored"
+
+        first_record = len(backend.fake_processes())
+        kept = rpc(
+            backend,
+            "resolve_game_start_conflict",
+            GAME,
+            APP_ID,
+            "keep_local",
+            pid,
+            lease_id,
         )
-        assert (
-            rpc(
-                backend,
-                "restore_game_on_start",
-                GAME,
-                APP_ID,
-                child.pid,
-                lease_id,
-            )["status"]
-            == "restored"
+        assert kept["status"] == "backed_up"
+        _assert_command_after(backend, first_record, "backup")
+        _assert_history_entry(backend, "last_backup", "backup", "auto_start", "backed_up")
+
+        first_record = len(backend.fake_processes())
+        restored = rpc(
+            backend,
+            "resolve_game_start_conflict",
+            GAME,
+            APP_ID,
+            "restore_backup",
+            pid,
+            lease_id,
         )
+        assert restored["status"] == "restored"
+        _assert_command_after(backend, first_record, "restore")
+        _assert_history_entry(backend, "last_restore", "restore", "auto_start", "restored")
+
+        first_record = len(backend.fake_processes())
+        restored = rpc(backend, "restore_game_on_start", GAME, APP_ID, pid, lease_id)
+        assert restored["status"] == "restored"
+        _assert_command_after(backend, first_record, "restore")
+        _assert_history_entry(backend, "last_restore", "restore", "auto_start", "restored")
+
         ticks_before_resume = _tick_count(child)
-        assert rpc(backend, "resume_game_process", child.pid, lease_id)["status"] == "resumed"
+        resumed = rpc(backend, "resume_game_process", pid, lease_id)
+        assert resumed["status"] == "resumed"
+        assert resumed["pid"] == pid
         assert not _scope_frozen(child), "resume left the scope frozen"
         assert _wait_for(
             lambda: _tick_count(child) > ticks_before_resume,
             2,
             "resumed child did not make progress",
-        )
-
-        expiring = rpc(backend, "pause_game_process", child.pid)
-        assert expiring["status"] == "paused"
-        assert _scope_frozen(child)
-        ticks_at_expiry = _tick_count(child)
-        ttl = expiring["lease_ttl_seconds"]
-        _wait_for(
-            lambda: not _scope_frozen(child),
-            ttl + 5,
-            "an unrenewed pause lease did not resume within its TTL",
-        )
-        assert _wait_for(
-            lambda: _tick_count(child) > ticks_at_expiry,
-            2,
-            "expired lease did not allow child progress",
         )
     finally:
         _force_scope_thaw(backend, child)
@@ -512,7 +725,6 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHa
     calls = backend.systemctl_calls()
     assert any(call["argv"] == ["--user", "freeze", child.unit] for call in calls)
     assert any(call["argv"] == ["--user", "thaw", child.unit] for call in calls)
-
     nonexistent = rpc(backend, "pause_game_process", 2147483647)
     assert nonexistent["status"] in {"skipped", "failed"}
     foreign_pid = next(
@@ -530,7 +742,7 @@ def test_syncthing_watch_redacts_device_ids_and_uninstall_is_scoped(
     keep_dir = backend.decky_home / "themes" / "Keep Existing Theme"
     keep_dir.mkdir(parents=True)
     (keep_dir / "keep.css").write_text("owned elsewhere", encoding="utf-8")
-    with _syncthing(backend):
+    with _syncthing(backend) as server:
         started = rpc(
             backend,
             "start_syncthing_activity_watch",
@@ -539,15 +751,55 @@ def test_syncthing_watch_redacts_device_ids_and_uninstall_is_scoped(
             APP_ID,
         )
         assert started["status"] == "watching"
+        assert isinstance(started["watch_id"], str) and started["watch_id"]
+        assert started["folder_id"] == "contract-folder"
+        assert started["label"] == "Contract Folder"
+        assert started["path"] == str(backend.backup_root.resolve())
+        assert type(started["detection_grace_ms"]) is int
 
-        def read_sample() -> dict[str, Any] | None:
+        def read_settled() -> dict[str, Any] | None:
             current = rpc(backend, "get_syncthing_activity", started["watch_id"])
-            return current if current.get("sample") else None
+            sample = current.get("sample")
+            if (
+                isinstance(sample, dict)
+                and sample.get("status") == "IDLE"
+                and sample.get("folder_state") == "idle"
+                and sample.get("settled") is True
+            ):
+                return current
+            return None
 
-        activity = _wait_for(read_sample, 5, "Syncthing watch did not produce an activity sample")
+        activity = _wait_for(
+            read_settled,
+            5,
+            "Syncthing watch did not poll through scanning to a settled idle sample",
+        )
+        sample = activity["sample"]
+        assert type(sample["update_in_progress"]) is bool
+        assert sample["update_in_progress"] is False
+        assert sample["settled"] is True
+        assert type(sample["downloading"]) is bool and sample["downloading"] is False
+        assert type(sample["uploading"]) is bool and sample["uploading"] is False
+        assert isinstance(sample["timestamp_unix"], int | float)
+        assert not isinstance(sample["timestamp_unix"], bool)
+        with server._request_lock:
+            requested_routes = {path.split("?", 1)[0] for path in server.requests}
+            status_requests = server._status_request_count
+        assert status_requests >= 2, "Syncthing returned only its initialization state"
+        assert {
+            "/rest/system/status",
+            "/rest/config/folders",
+            "/rest/system/connections",
+            "/rest/db/status",
+            "/rest/events",
+        } <= requested_routes
+
         stopped = rpc(backend, "stop_syncthing_activity_watch", started["watch_id"])
         assert stopped["status"] == "stopped"
-        results = [started, activity, stopped, rpc(backend, "get_recent_logs")]
+        final_activity = rpc(backend, "get_syncthing_activity", started["watch_id"])
+        assert final_activity["status"] == "stopped"
+        assert final_activity["watch_id"] == started["watch_id"]
+        results = [started, activity, stopped, final_activity, rpc(backend, "get_recent_logs")]
         serialized_results = json.dumps(results)
         assert DEVICE_ID not in serialized_results
         assert API_KEY not in serialized_results
@@ -567,6 +819,7 @@ def test_syncthing_watch_redacts_device_ids_and_uninstall_is_scoped(
 
 
 def test_hanging_ludusavi_exits_and_reaps_process_group(backend: ContractHarness) -> None:
+    child = _start_prescope_child(backend.root)
     backend.set_scenario(
         {
             "flatpak": {
@@ -580,32 +833,83 @@ def test_hanging_ludusavi_exits_and_reaps_process_group(backend: ContractHarness
             }
         }
     )
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        operation = pool.submit(backend.call, "force_backup", GAME, timeout=190)
-        hanging = _wait_for(
-            lambda: next(
-                (
-                    record
-                    for record in backend.fake_processes()
-                    if len(record["argv"]) > 2
-                    and record["argv"][2] == "backup"
-                    and "--preview" not in record["argv"]
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            operation = pool.submit(backend.call, "force_backup", GAME, timeout=190)
+            hanging = _wait_for(
+                lambda: next(
+                    (
+                        record
+                        for record in backend.fake_processes()
+                        if len(record["argv"]) > 2
+                        and record["argv"][2] == "backup"
+                        and "--preview" not in record["argv"]
+                    ),
+                    None,
                 ),
-                None,
-            ),
-            10,
-            "hanging Ludusavi command did not start",
+                10,
+                "hanging Ludusavi command did not start",
+            )
+            paused = rpc(backend, "pause_game_process", child.pid)
+            assert paused["status"] == "paused", paused
+            assert paused["pid"] == child.pid
+            assert isinstance(paused["lease_id"], str) and paused["lease_id"]
+            assert _proc_state(child.pid) == "T", "pre-scope launch PID did not enter SIGSTOP state"
+            lease_id = paused["lease_id"]
+            original_deadline = time.monotonic() + paused["lease_ttl_seconds"]
+            frozen_ticks = _tick_count(child)
+
+            time.sleep(max(0.0, paused["lease_ttl_seconds"] - 2.0))
+            renewed = rpc(backend, "renew_game_process_pause", child.pid, lease_id)
+            assert renewed["status"] == "renewed"
+            assert renewed["pid"] == child.pid
+            assert renewed["lease_ttl_seconds"] > 0
+            _wait_for(
+                lambda: time.monotonic() >= original_deadline + 1,
+                5,
+                "original pause lease deadline was not reached after renewal",
+            )
+            assert _proc_state(child.pid) == "T", "renewal did not extend the pre-scope lease"
+            assert _tick_count(child) == frozen_ticks, (
+                "renewed pre-scope PID progressed while stopped"
+            )
+
+            resumed = rpc(backend, "resume_game_process", child.pid, lease_id)
+            assert resumed["status"] == "resumed"
+            assert resumed["pid"] == child.pid
+            assert _wait_for(
+                lambda: _proc_state(child.pid) != "T" and _tick_count(child) > frozen_ticks,
+                3,
+                "explicit resume did not release the pre-scope launch PID",
+            )
+
+            expiring = rpc(backend, "pause_game_process", child.pid)
+            assert expiring["status"] == "paused"
+            assert _proc_state(child.pid) == "T"
+            ticks_at_expiry = _tick_count(child)
+            _wait_for(
+                lambda: _proc_state(child.pid) != "T",
+                expiring["lease_ttl_seconds"] + 5,
+                "unrenewed pre-scope pause lease did not release SIGSTOP at expiry",
+            )
+            assert _wait_for(
+                lambda: _tick_count(child) > ticks_at_expiry,
+                3,
+                "expired pre-scope lease did not allow child progress",
+            )
+
+            success, result = operation.result(timeout=190)
+        assert success is True
+        assert result["status"] == "failed"
+        assert "timeout" in result["message"].lower()
+        pgid = hanging["pgid"]
+        _wait_for(
+            lambda: not _process_group_exists(pgid),
+            3,
+            f"fake Ludusavi process group {pgid} survived the operation timeout",
         )
-        success, result = operation.result(timeout=190)
-    assert success is True
-    assert result["status"] == "failed"
-    assert "timeout" in result["message"].lower()
-    pgid = hanging["pgid"]
-    _wait_for(
-        lambda: not _process_group_exists(pgid),
-        3,
-        f"fake Ludusavi process group {pgid} survived the operation timeout",
-    )
+    finally:
+        _stop_child(child)
 
 
 def _process_group_exists(pgid: int) -> bool:
@@ -632,25 +936,10 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
             }
         }
     ).start()
-    child = _start_scoped_child(harness.root)
-    harness.set_scenario(
-        {
-            "flatpak": {
-                "responses": {
-                    "restore": {
-                        "delay_seconds": 600,
-                        "ignore_term": True,
-                        "spawn_child": True,
-                    }
-                }
-            },
-            "systemctl": {
-                "simulate_scope_freeze": True,
-                "scope_unit": child.unit,
-                "response_delay_seconds": 0.3,
-            },
-        }
-    )
+    child = _start_prescope_child(harness.root)
+    operation_pool = ThreadPoolExecutor(max_workers=1)
+    shutdown_pool = ThreadPoolExecutor(max_workers=1)
+    stop_future: Future[None] | None = None
     try:
         assert rpc(harness, "update_settings", {"kind": "auto_sync", "enabled": True})[
             "auto_sync_enabled"
@@ -666,8 +955,9 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
         )
         paused = rpc(harness, "pause_game_process", child.pid)
         assert paused["status"] == "paused", paused
-        assert _scope_frozen(child)
-        operation_pool = ThreadPoolExecutor(max_workers=1)
+        assert paused["pid"] == child.pid
+        assert isinstance(paused["lease_id"], str) and paused["lease_id"]
+        assert _proc_state(child.pid) == "T", "pre-scope launch PID was not held by SIGSTOP"
         operation = operation_pool.submit(harness.call, "force_restore", GAME, timeout=30)
 
         def restore_started() -> dict[str, Any] | None:
@@ -687,19 +977,7 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
                 return {"reply": operation.result()}
             return None
 
-        deadline = time.monotonic() + 10
-        hanging = None
-        while time.monotonic() < deadline:
-            hanging = restore_started()
-            if hanging is not None:
-                break
-            time.sleep(0.01)
-        if hanging is None:
-            status = rpc(harness, "get_operation_status")
-            raise AssertionError(
-                f"slow restore did not start; operation_done={operation.done()}, "
-                f"status={status!r}, fake_processes={harness.fake_processes()!r}"
-            )
+        hanging = _wait_for(restore_started, 10, "slow restore did not start")
         assert "argv" in hanging, f"restore returned before command spawn: {hanging['reply']!r}"
         fake_pid = hanging["pid"]
         _wait_for(
@@ -711,35 +989,33 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
             5,
             "fake Ludusavi did not install its TERM handler and spawn its child",
         )
-        observed_unsafe_release = threading.Event()
-
-        def stop_backend() -> None:
-            harness.stop()
-
-        stopper = threading.Thread(target=stop_backend)
-        stopper.start()
+        assert not operation.done(), "restore RPC unexpectedly completed before backend shutdown"
+        stop_future = shutdown_pool.submit(harness.stop)
+        observed_unsafe_release = False
         deadline = time.monotonic() + 6
         while time.monotonic() < deadline:
-            if not _scope_frozen(child) and _process_group_exists(hanging["pgid"]):
-                observed_unsafe_release.set()
+            if _proc_state(child.pid) != "T" and _process_group_exists(hanging["pgid"]):
+                observed_unsafe_release = True
                 break
-            if not stopper.is_alive():
+            if stop_future.done():
                 break
             time.sleep(0.01)
-        stopper.join(timeout=6)
-        assert not stopper.is_alive(), "backend exceeded its SIGTERM shutdown deadline"
-        assert not observed_unsafe_release.is_set(), (
-            "paused child resumed while its Ludusavi process group was still alive"
+        stop_future.result(timeout=6)
+        assert not observed_unsafe_release, (
+            "pre-scope launch PID resumed while its Ludusavi process group was still alive"
         )
         assert not _process_group_exists(hanging["pgid"])
-        assert not _scope_frozen(child)
-        with pytest.raises(Exception):
+        assert _proc_state(child.pid) != "T", "backend unload left the launch PID stopped"
+        with pytest.raises(ConnectionError, match="backend is shutting down"):
             operation.result(timeout=1)
-        operation_pool.shutdown(wait=True)
     finally:
         _force_scope_thaw(harness, child)
         _stop_child(child)
-        harness.close()
+        try:
+            harness.close()
+        finally:
+            operation_pool.shutdown(wait=True, cancel_futures=True)
+            shutdown_pool.shutdown(wait=True, cancel_futures=True)
 
 
 @pytest.mark.real_ludusavi
@@ -859,10 +1135,10 @@ def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
 
 
 def test_native_sdk_protocol_positive_control() -> None:
-    backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
-    if backend == "python":
-        pytest.skip("set SDH_CONTRACT_BACKEND to the compiled SDK example")
-    harness = ContractHarness().start()
+    backend = os.environ.get("SDH_CONTRACT_SDK_EXAMPLE")
+    if not backend:
+        pytest.skip("set SDH_CONTRACT_SDK_EXAMPLE to the compiled SDK example")
+    harness = ContractHarness(backend=backend).start()
     process = harness.process
     try:
         assert rpc(harness, "echo", "contract", 42) == ["contract", 42]
