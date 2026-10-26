@@ -32,6 +32,10 @@ const KILL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_INSTALLED_APP_IDS_BYTES: usize = 16_384;
 const MAX_BACKUP_STAT_ENTRIES: usize = 1_000;
 const OPERATION_CANCELLED: &str = "Ludusavi operation cancelled";
+type GuardedMutation =
+    Box<dyn FnOnce(Arc<AtomicBool>) -> GuardedOperationResult<Result<Value, String>>>;
+type ProcessOutputReader = thread::JoinHandle<io::Result<Vec<u8>>>;
+type ProcessReaders = (ProcessOutputReader, ProcessOutputReader);
 
 #[derive(Clone, Debug)]
 struct Game {
@@ -347,22 +351,19 @@ impl LudusaviOperations {
         &self,
         name: &str,
         restore: bool,
-        guard: impl FnOnce(
-            Box<dyn FnOnce(Arc<AtomicBool>) -> Result<Value, String>>,
-        ) -> Result<Value, String>,
+        guard: impl FnOnce(GuardedMutation) -> Result<Value, String>,
     ) -> Result<Value, OperationError> {
         let operation = if restore { "restore" } else { "backup" };
         let game = name.to_owned();
         self.run_operation(operation, Some(name), || {
             let client = self.client()?;
-            let mutation: Box<dyn FnOnce(Arc<AtomicBool>) -> Result<Value, String>> =
-                Box::new(move |cancel| {
-                    if restore {
-                        client.restore_cancellable(&game, cancel)
-                    } else {
-                        client.backup_cancellable(&game, cancel)
-                    }
-                });
+            let mutation: GuardedMutation = Box::new(move |cancel| {
+                if restore {
+                    client.restore_cancellable(&game, cancel)
+                } else {
+                    client.backup_cancellable(&game, cancel)
+                }
+            });
             guard(mutation)
         })
     }
@@ -1009,7 +1010,9 @@ impl LudusaviClient {
     }
 
     fn json(&self, args: &[String], timeout: Duration) -> Result<Value, String> {
-        self.json_cancellable(args, timeout, None)
+        let mut result = self.json_cancellable(args, timeout, None);
+        result.completion.wait(Some(&self.processes.stopping));
+        result.result
     }
 
     fn json_cancellable(
@@ -1017,7 +1020,7 @@ impl LudusaviClient {
         args: &[String],
         timeout: Duration,
         cancellation: Option<&AtomicBool>,
-    ) -> Result<Value, String> {
+    ) -> GuardedOperationResult<Result<Value, String>> {
         let mut args = args.to_vec();
         if !args.iter().any(|arg| arg == "--api") {
             args.push("--api".to_owned());
@@ -1026,14 +1029,17 @@ impl LudusaviClient {
             .chain(std::iter::once(FLATPAK_ID.to_owned()))
             .chain(args)
             .collect();
-        let output = self.processes.run_at_cancellable(
+        let run = self.processes.run_at_cancellable(
             &self.flatpak,
             &arguments,
             timeout,
             false,
             cancellation,
-        )?;
-        parse_ludusavi_json(&output)
+        );
+        GuardedOperationResult {
+            result: run.result.and_then(|output| parse_ludusavi_json(&output)),
+            completion: run.completion,
+        }
     }
 
     fn text(&self, args: &[String], timeout: Duration) -> Result<String, String> {
@@ -1098,7 +1104,7 @@ impl LudusaviClient {
         &self,
         game: &str,
         cancellation: Arc<AtomicBool>,
-    ) -> Result<Value, String> {
+    ) -> GuardedOperationResult<Result<Value, String>> {
         self.json_cancellable(
             &["backup".to_owned(), "--force".to_owned(), game.to_owned()],
             OPERATION_TIMEOUT,
@@ -1110,7 +1116,7 @@ impl LudusaviClient {
         &self,
         game: &str,
         cancellation: Arc<AtomicBool>,
-    ) -> Result<Value, String> {
+    ) -> GuardedOperationResult<Result<Value, String>> {
         self.json_cancellable(
             &["restore".to_owned(), "--force".to_owned(), game.to_owned()],
             OPERATION_TIMEOUT,
@@ -1271,10 +1277,83 @@ impl LudusaviClient {
     }
 }
 
+pub(crate) struct ProcessGroupCompletion {
+    pid: Option<i32>,
+    confirmed: bool,
+    groups: Option<Arc<Mutex<BTreeSet<i32>>>>,
+    readers: Option<ProcessReaders>,
+}
+
+impl ProcessGroupCompletion {
+    pub(crate) fn confirmed() -> Self {
+        Self {
+            pid: None,
+            confirmed: true,
+            groups: None,
+            readers: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending(pid: i32) -> Self {
+        Self {
+            pid: Some(pid),
+            confirmed: false,
+            groups: None,
+            readers: None,
+        }
+    }
+
+    fn pending_command(
+        pid: i32,
+        groups: Arc<Mutex<BTreeSet<i32>>>,
+        stdout_reader: ProcessOutputReader,
+        stderr_reader: ProcessOutputReader,
+    ) -> Self {
+        Self {
+            pid: Some(pid),
+            confirmed: false,
+            groups: Some(groups),
+            readers: Some((stdout_reader, stderr_reader)),
+        }
+    }
+
+    pub(crate) fn wait(&mut self, cancellation: Option<&AtomicBool>) {
+        if !self.confirmed {
+            if let Some(pid) = self.pid {
+                while group_exists(pid) {
+                    if cancellation.is_some_and(|token| token.load(Ordering::Acquire)) {
+                        let _ = signal_group(pid, libc::SIGKILL);
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                if let Some(groups) = &self.groups {
+                    lock(groups).remove(&pid);
+                }
+            }
+            self.confirmed = true;
+        }
+        if let Some((stdout_reader, stderr_reader)) = self.readers.take() {
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+        }
+    }
+}
+
+pub(crate) struct GuardedOperationResult<T> {
+    pub(crate) result: T,
+    pub(crate) completion: ProcessGroupCompletion,
+}
+
+struct ProcessRun {
+    result: Result<String, String>,
+    completion: ProcessGroupCompletion,
+}
+
 #[derive(Default)]
 struct ProcessManager {
     stopping: AtomicBool,
-    groups: Mutex<BTreeSet<i32>>,
+    groups: Arc<Mutex<BTreeSet<i32>>>,
 }
 
 impl ProcessManager {
@@ -1285,7 +1364,9 @@ impl ProcessManager {
         timeout: Duration,
         text: bool,
     ) -> Result<String, String> {
-        self.run_at_cancellable(program, args, timeout, text, None)
+        let mut run = self.run_at_cancellable(program, args, timeout, text, None);
+        run.completion.wait(Some(&self.stopping));
+        run.result
     }
 
     fn run_at_cancellable(
@@ -1295,11 +1376,15 @@ impl ProcessManager {
         timeout: Duration,
         text: bool,
         cancellation: Option<&AtomicBool>,
-    ) -> Result<String, String> {
+    ) -> ProcessRun {
+        let failed = |message: String| ProcessRun {
+            result: Err(message),
+            completion: ProcessGroupCompletion::confirmed(),
+        };
         if self.stopping.load(Ordering::Acquire)
             || cancellation.is_some_and(|token| token.load(Ordering::Acquire))
         {
-            return Err("Ludusavi operation cancelled".to_owned());
+            return failed("Ludusavi operation cancelled".to_owned());
         }
         let mut command = Command::new(program);
         command
@@ -1321,11 +1406,18 @@ impl ProcessManager {
             );
         }
         command.process_group(0);
-        let mut child = command
-            .spawn()
-            .map_err(|error| format!("Could not start Ludusavi command: {error}"))?;
-        let pid = i32::try_from(child.id())
-            .map_err(|_| "Ludusavi process ID is out of range".to_owned())?;
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => return failed(format!("Could not start Ludusavi command: {error}")),
+        };
+        let pid = match i32::try_from(child.id()) {
+            Ok(pid) => pid,
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return failed("Ludusavi process ID is out of range".to_owned());
+            }
+        };
         lock(&self.groups).insert(pid);
         if self.stopping.load(Ordering::Acquire)
             || cancellation.is_some_and(|token| token.load(Ordering::Acquire))
@@ -1371,49 +1463,76 @@ impl ProcessManager {
             true
         };
         if !group_exited {
-            return Err("Could not confirm Ludusavi process group exit".to_owned());
+            return ProcessRun {
+                result: Err("Could not confirm Ludusavi process group exit".to_owned()),
+                completion: ProcessGroupCompletion::pending_command(
+                    pid,
+                    Arc::clone(&self.groups),
+                    stdout_reader,
+                    stderr_reader,
+                ),
+            };
         }
         if status.is_none() {
             status = child.wait().ok();
         }
-        let stdout = stdout_reader
+        let stdout = match stdout_reader
             .join()
             .unwrap_or_else(|_| Err(io::Error::other("stdout reader panicked")))
-            .map_err(|error| format!("Could not read Ludusavi stdout: {error}"))?;
-        let stderr = stderr_reader
+        {
+            Ok(stdout) => stdout,
+            Err(error) => {
+                lock(&self.groups).remove(&pid);
+                return ProcessRun {
+                    result: Err(format!("Could not read Ludusavi stdout: {error}")),
+                    completion: ProcessGroupCompletion::confirmed(),
+                };
+            }
+        };
+        let stderr = match stderr_reader
             .join()
             .unwrap_or_else(|_| Err(io::Error::other("stderr reader panicked")))
-            .map_err(|error| format!("Could not read Ludusavi stderr: {error}"))?;
-        if !group_exists(pid) {
-            lock(&self.groups).remove(&pid);
-        }
-        if let Some(outcome) = outcome {
-            if outcome == "cancelled" {
-                return Err("Ludusavi operation cancelled".to_owned());
+        {
+            Ok(stderr) => stderr,
+            Err(error) => {
+                lock(&self.groups).remove(&pid);
+                return ProcessRun {
+                    result: Err(format!("Could not read Ludusavi stderr: {error}")),
+                    completion: ProcessGroupCompletion::confirmed(),
+                };
             }
-            if let Some(timeout) = outcome.strip_prefix("timeout:") {
-                return Err(format!(
+        };
+        lock(&self.groups).remove(&pid);
+        let result = if let Some(outcome) = outcome {
+            if outcome == "cancelled" {
+                Err("Ludusavi operation cancelled".to_owned())
+            } else if let Some(timeout) = outcome.strip_prefix("timeout:") {
+                Err(format!(
                     "Ludusavi command exceeded its configured timeout after {timeout}: {}",
                     args.join(" ")
-                ));
+                ))
+            } else {
+                Err(outcome)
             }
-            return Err(outcome);
-        }
-        let Some(status) = status else {
-            return Err("Could not reap Ludusavi child process".to_owned());
-        };
-        if !status.success() {
-            return Err(format!(
-                "Ludusavi command failed with exit code {}: {}",
-                status.code().unwrap_or(-1),
-                String::from_utf8_lossy(&stderr).trim()
-            ));
-        }
-        if text {
-            Ok(String::from_utf8_lossy(&stdout).into_owned())
+        } else if let Some(status) = status {
+            if !status.success() {
+                Err(format!(
+                    "Ludusavi command failed with exit code {}: {}",
+                    status.code().unwrap_or(-1),
+                    String::from_utf8_lossy(&stderr).trim()
+                ))
+            } else if text {
+                Ok(String::from_utf8_lossy(&stdout).into_owned())
+            } else {
+                String::from_utf8(stdout)
+                    .map_err(|error| format!("Ludusavi output is not UTF-8: {error}"))
+            }
         } else {
-            String::from_utf8(stdout)
-                .map_err(|error| format!("Ludusavi output is not UTF-8: {error}"))
+            Err("Could not reap Ludusavi child process".to_owned())
+        };
+        ProcessRun {
+            result,
+            completion: ProcessGroupCompletion::confirmed(),
         }
     }
 

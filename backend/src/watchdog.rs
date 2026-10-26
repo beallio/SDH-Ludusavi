@@ -19,6 +19,7 @@ use crate::launch_gate::{
     LaunchProcessIdentity, LaunchScopeAcquirer, ScopeTransitionResult, SteamAppScope,
     SystemdScopeController, parse_start_ticks, thread_group_stopped,
 };
+use crate::operations::GuardedOperationResult;
 
 const LEASE_TTL: Duration = Duration::from_secs(30);
 const ABSOLUTE_RESUME: Duration = Duration::from_secs(240);
@@ -287,11 +288,11 @@ impl ProcessWatchdog {
         self.release_lease(pid, &lease)
     }
 
-    pub fn run_guarded<T>(
+    pub(crate) fn run_guarded<T>(
         &self,
         pid: i32,
         lease_id: &str,
-        callback: impl FnOnce(Arc<AtomicBool>) -> T,
+        callback: impl FnOnce(Arc<AtomicBool>) -> GuardedOperationResult<T>,
     ) -> Option<T> {
         if validate_pid(pid).is_err() || lease_id.is_empty() {
             return None;
@@ -319,7 +320,8 @@ impl ProcessWatchdog {
             lease.guarded_active = true;
             lease.cancellation = Some(Arc::clone(&cancel));
         }
-        let result = callback(cancel);
+        let mut result = callback(Arc::clone(&cancel));
+        result.completion.wait(Some(&cancel));
         let release_requested = {
             let mut state = lock(&self.inner.state);
             let lease = state.leases.get_mut(&pid)?;
@@ -329,7 +331,7 @@ impl ProcessWatchdog {
             self.inner.changed.notify_all();
             requested
         };
-        (!release_requested).then_some(result)
+        (!release_requested).then_some(result.result)
     }
 
     pub fn resume_all(&self) {
@@ -562,4 +564,112 @@ fn new_lease_id() -> io::Result<String> {
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
+}
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        os::unix::process::CommandExt,
+        process::{Command, Stdio},
+        sync::mpsc,
+        thread,
+        time::Duration,
+    };
+
+    use tempfile::tempdir_in;
+
+    use super::{Inner, LEASE_TTL, PauseLease, ProcessWatchdog, State, lock};
+    use crate::{
+        launch_gate::{LaunchProcessIdentity, LaunchScopeAcquirer, SystemdScopeController},
+        operations::{GuardedOperationResult, ProcessGroupCompletion},
+    };
+
+    #[test]
+    fn guarded_lease_stays_pinned_until_process_group_exit_is_confirmed() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let proc_root = temporary.path().join("proc");
+        let cgroup_root = temporary.path().join("cgroup");
+        fs::create_dir_all(&proc_root).unwrap();
+        fs::create_dir_all(&cgroup_root).unwrap();
+        let uid = unsafe { libc::geteuid() };
+        let controller = SystemdScopeController::new(&proc_root, &cgroup_root, uid);
+        let acquirer = LaunchScopeAcquirer::new(controller.clone(), &proc_root, uid);
+        let watchdog = ProcessWatchdog {
+            inner: std::sync::Arc::new(Inner {
+                state: std::sync::Mutex::new(State::default()),
+                changed: std::sync::Condvar::new(),
+                controller,
+                acquirer,
+                proc_root: proc_root.clone(),
+                stopping: std::sync::atomic::AtomicBool::new(false),
+                thread: std::sync::Mutex::new(None),
+            }),
+        };
+        let mut child = Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = i32::try_from(child.id()).unwrap();
+        let proc_dir = proc_root.join(pid.to_string());
+        let task_dir = proc_dir.join("task").join(pid.to_string());
+        fs::create_dir_all(&task_dir).unwrap();
+        let fields = std::iter::repeat_n("1", 18).collect::<Vec<_>>().join(" ");
+        let stat = format!("{pid} (fixture process) T {fields} 991");
+        fs::write(proc_dir.join("stat"), &stat).unwrap();
+        fs::write(task_dir.join("stat"), &stat).unwrap();
+        lock(&watchdog.inner.state).leases.insert(
+            pid,
+            PauseLease {
+                scope: None,
+                recovery_scopes: Vec::new(),
+                started: std::time::Instant::now(),
+                deadline: std::time::Instant::now() + LEASE_TTL,
+                lease_id: "guarded-test".to_owned(),
+                identity: Some(LaunchProcessIdentity {
+                    pid,
+                    owner_uid: uid,
+                    start_ticks: 991,
+                }),
+                guarded_active: false,
+                cancellation: None,
+                release_requested: false,
+                release_in_progress: false,
+            },
+        );
+
+        let (done_sender, done_receiver) = mpsc::channel();
+        let guarded_watchdog = watchdog.clone();
+        let mut worker = Some(thread::spawn(move || {
+            let _ = guarded_watchdog.run_guarded(pid, "guarded-test", |_| GuardedOperationResult {
+                result: (),
+                completion: ProcessGroupCompletion::pending(pid),
+            });
+            done_sender.send(()).unwrap();
+        }));
+        let completed_early = done_receiver
+            .recv_timeout(Duration::from_millis(100))
+            .is_ok();
+        if completed_early {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            worker.take().unwrap().join().unwrap();
+        }
+        assert!(
+            !completed_early,
+            "guarded lease completed while its process group was still alive"
+        );
+        assert!(
+            lock(&watchdog.inner.state).leases[&pid].guarded_active,
+            "guarded lease was not retained while process exit was unconfirmed"
+        );
+
+        child.kill().unwrap();
+        child.wait().unwrap();
+        done_receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        worker.unwrap().join().unwrap();
+    }
 }
