@@ -14,8 +14,11 @@ use serde_json::{Map, Value, json};
 use time::{OffsetDateTime, format_description, format_description::well_known::Rfc3339};
 use tokio::sync::Notify;
 
-use crate::persistence::{
-    StateLock, ensure_private_directory, existing_mode, read_object, write_json_atomic,
+use crate::{
+    operations::LudusaviOperations,
+    persistence::{
+        StateLock, ensure_private_directory, existing_mode, read_object, write_json_atomic,
+    },
 };
 
 const LOG_LIMIT: usize = 100;
@@ -33,10 +36,10 @@ const DEFAULT_NOTIFICATIONS: [&str; 7] = [
 pub struct BackendService {
     settings_path: PathBuf,
     cache_path: PathBuf,
-    state_lock: StateLock,
+    state_lock: Arc<StateLock>,
     settings: Mutex<Map<String, Value>>,
     shortcut_id: AtomicI64,
-    history: Value,
+    operations: LudusaviOperations,
     debug_logging: AtomicBool,
     logs: Mutex<VecDeque<Value>>,
     calls: Arc<CallTracker>,
@@ -51,7 +54,7 @@ impl BackendService {
 
         let settings_path = settings_dir.join("settings.json");
         let cache_path = runtime_dir.join("cache.json");
-        let state_lock = StateLock::new(&cache_path)?;
+        let state_lock = Arc::new(StateLock::new(&cache_path)?);
         let loaded = state_lock.with_lock(|| {
             let settings = read_object(&settings_path)
                 .unwrap_or_else(|error| {
@@ -79,6 +82,8 @@ impl BackendService {
         };
         let debug_logging = setting_bool(&settings, "debug_logging", true);
         let history = normalize_history(cache.get("game_history"));
+        let operations =
+            LudusaviOperations::new(cache_path.clone(), Arc::clone(&state_lock), &cache, history);
         let shortcut_id = cache
             .get("ludusaviLauncherShortcutAppId")
             .and_then(python_integer)
@@ -96,7 +101,7 @@ impl BackendService {
             state_lock,
             settings: Mutex::new(settings),
             shortcut_id: AtomicI64::new(shortcut_id),
-            history,
+            operations,
             debug_logging: AtomicBool::new(debug_logging),
             logs: Mutex::new(VecDeque::with_capacity(LOG_LIMIT)),
             calls: Arc::new(CallTracker::default()),
@@ -128,7 +133,9 @@ impl BackendService {
     }
 
     pub async fn shutdown(&self) -> bool {
-        self.calls.stop_and_wait(DRAIN_BUDGET).await
+        self.operations.cancel_processes();
+        let calls_stopped = self.calls.stop_and_wait(DRAIN_BUDGET).await;
+        calls_stopped && self.operations.processes_exited()
     }
     pub fn unavailable_reply(method: &str) -> Value {
         python_wrapper_fallback(method)
@@ -187,11 +194,66 @@ impl BackendService {
             }
             "get_operation_status" => {
                 expect_args(method, args, 0)?;
-                Ok(idle_operation_status())
+                Ok(self.operations.get_operation_status())
             }
             "get_game_history" => {
                 expect_args(method, args, 0)?;
-                Ok(self.history.clone())
+                Ok(self.operations.get_game_history())
+            }
+            "refresh_games" => {
+                if args.len() > 2 {
+                    return Err(format!(
+                        "Plugin.{method}() expected at most 2 arguments, got {}",
+                        args.len()
+                    ));
+                }
+                let force = args.first().is_some_and(python_truthy);
+                let installed_ids = args.get(1).and_then(Value::as_str);
+                Ok(self.operations.refresh_games(force, installed_ids))
+            }
+            "is_game_cache_current" => {
+                if args.len() > 1 {
+                    return Err(format!(
+                        "Plugin.{method}() expected at most 1 argument, got {}",
+                        args.len()
+                    ));
+                }
+                Ok(Value::Bool(self.operations.is_game_cache_current(
+                    args.first().and_then(Value::as_str),
+                )))
+            }
+            "force_backup" | "force_restore" | "list_backups" => {
+                expect_args(method, args, 1)?;
+                let name = args[0]
+                    .as_str()
+                    .ok_or_else(|| format!("{method} requires a game name string"))?;
+                match method {
+                    "force_backup" => self.operations.force_backup(name),
+                    "force_restore" => self.operations.force_restore(name),
+                    _ => self.operations.list_backups(name),
+                }
+            }
+            "restore_backup_version" => {
+                expect_args(method, args, 2)?;
+                let name = args[0].as_str().ok_or_else(|| {
+                    "restore_backup_version requires a game name string".to_owned()
+                })?;
+                let backup_id = args[1].as_str().ok_or_else(|| {
+                    "restore_backup_version requires a backup ID string".to_owned()
+                })?;
+                self.operations.restore_backup_version(name, backup_id)
+            }
+            "get_versions" => {
+                expect_args(method, args, 0)?;
+                self.operations.get_versions()
+            }
+            "get_ludusavi_logs" => {
+                expect_args(method, args, 0)?;
+                self.operations.get_ludusavi_logs()
+            }
+            "get_ludusavi_command" => {
+                expect_args(method, args, 0)?;
+                Ok(self.operations.get_ludusavi_command())
             }
             _ => Err(format!("Plugin has no method {method}")),
         }
@@ -341,6 +403,7 @@ fn python_wrapper_fallback(method: &str) -> Option<Value> {
         "get_recent_logs" => Some(json!([])),
         "get_operation_status" => Some(idle_operation_status()),
         "get_ludusavi_launcher_shortcut_id" => Some(json!(-1)),
+        "is_game_cache_current" => Some(Value::Bool(false)),
         "log" => Some(Value::Null),
         _ => None,
     }
@@ -737,6 +800,33 @@ mod tests {
         };
         let service = Arc::new(BackendService::new(&env).unwrap());
         (directory, service)
+    }
+
+    #[test]
+    fn history_validation_drops_invalid_entries_and_derives_latest() {
+        let valid = json!({"operation":"backup","trigger":"manual_backup","status":"backed_up","timestamp":"2026-01-01T00:00:00Z","reason":4});
+        assert_eq!(
+            super::valid_history_entry(&valid).unwrap()["reason"],
+            Value::Null
+        );
+        for invalid in [
+            json!(null),
+            json!({"operation":"unknown","trigger":"manual_backup","status":"backed_up","timestamp":"x"}),
+            json!({"operation":"backup","trigger":"unknown","status":"backed_up","timestamp":"x"}),
+            json!({"operation":"backup","trigger":"manual_backup","status":"unknown","timestamp":"x"}),
+            json!({"operation":"backup","trigger":"manual_backup","status":"backed_up","timestamp":1}),
+        ] {
+            assert!(super::valid_history_entry(&invalid).is_none(), "{invalid}");
+        }
+        let history = super::normalize_history(Some(&json!({
+            "Hades": {
+                "last_backup": {"operation":"backup","trigger":"manual_backup","status":"backed_up","timestamp":"2026-01-01T00:00:00Z"},
+                "last_failure": {"operation":"restore","trigger":"manual_restore","status":"failed","timestamp":"2026-01-02T00:00:00Z"}
+            },
+            "Broken": "not a map"
+        })));
+        assert_eq!(history["Hades"]["last_operation"]["status"], "failed");
+        assert!(history.get("Broken").is_none());
     }
 
     #[test]

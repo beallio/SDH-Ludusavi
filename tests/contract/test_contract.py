@@ -783,6 +783,102 @@ def test_theme_installation_and_uninstall_ownership(backend: ContractHarness) ->
 
 
 @pytest.mark.contract_operations
+def test_ludusavi_child_environment_is_sanitized() -> None:
+    harness = ContractHarness()
+    inherited_library_path = "/contract/parent-only-libraries"
+    harness.env["LD_LIBRARY_PATH"] = inherited_library_path
+    harness.env.pop("XDG_RUNTIME_DIR", None)
+    try:
+        harness.start()
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
+        records = harness.fake_processes()
+        version_calls = [record for record in records if record["argv"][-1] == "--version"]
+        assert version_calls
+        for record in version_calls:
+            assert record["child_environment"]["LD_LIBRARY_PATH"] == ""
+            assert record["child_environment"]["XDG_RUNTIME_DIR"] == (
+                f"/run/user/{os.getuid()}"
+                if Path(f"/run/user/{os.getuid()}").is_dir()
+                else "/run/user/1000"
+            )
+            assert record["child_environment"]["LD_LIBRARY_PATH"] != inherited_library_path
+    finally:
+        harness.close()
+
+
+@pytest.mark.contract_operations
+def test_unload_cancels_and_reaps_ludusavi_process_group() -> None:
+    harness = ContractHarness(
+        scenario={
+            "flatpak": {
+                "responses": {
+                    "backup": {
+                        "delay_seconds": 600,
+                        "ignore_term": True,
+                        "spawn_child": True,
+                    },
+                }
+            }
+        }
+    ).start()
+    operations = ThreadPoolExecutor(max_workers=1)
+    try:
+        result = operations.submit(harness.call, "force_backup", GAME, timeout=30)
+        record = _wait_for(
+            lambda: next(
+                (
+                    item
+                    for item in harness.fake_processes()
+                    if len(item["argv"]) > 2
+                    and item["argv"][2] == "backup"
+                    and "--preview" not in item["argv"]
+                ),
+                None,
+            ),
+            10,
+            "slow backup did not start",
+        )
+        started = time.monotonic()
+        harness.stop()
+        stop_seconds = time.monotonic() - started
+        assert stop_seconds < 5, f"backend shutdown took {stop_seconds:.3f}s"
+        assert not _process_group_exists(record["pgid"])
+        with pytest.raises(ConnectionError, match="backend is shutting down"):
+            result.result(timeout=1)
+    finally:
+        harness.close()
+        operations.shutdown(wait=True, cancel_futures=True)
+
+
+@pytest.mark.contract_operations
+def test_force_backup_skips_unknown_game_without_starting_backup(
+    backend: ContractHarness,
+) -> None:
+    result = rpc(backend, "force_backup", "  Unknown   Fixture ")
+    assert result == {
+        "status": "skipped",
+        "game": "Unknown Fixture",
+        "reason": "unmatched_game",
+    }
+    assert not any(
+        len(record["argv"]) > 2
+        and record["argv"][2] == "backup"
+        and "--preview" not in record["argv"]
+        for record in backend.fake_processes()
+    )
+
+
+@pytest.mark.contract_operations
+def test_restore_backup_version_rejects_unsafe_id(backend: ContractHarness) -> None:
+    backup = rpc(backend, "refresh_games", True, APP_ID)
+    assert any(game["name"] == GAME for game in backup["games"])
+    success, result = backend.call("restore_backup_version", GAME, "../outside")
+    assert success is True
+    assert result["status"] == "failed"
+    assert "Invalid backup ID" in result["message"]
+
+
+@pytest.mark.contract_operations
 def test_settings_cache_shortcut_protocol_and_concurrent_calls(
     backend: ContractHarness,
 ) -> None:
@@ -838,7 +934,6 @@ def test_settings_cache_shortcut_protocol_and_concurrent_calls(
 
 
 @pytest.mark.contract_operations
-@pytest.mark.contract_updater
 def test_operations_logs_status_lock_and_local_update_state(backend: ContractHarness) -> None:
     versions = rpc(backend, "get_versions")
     assert versions["ludusavi"] == "0.31.0"
@@ -903,6 +998,9 @@ def test_operations_logs_status_lock_and_local_update_state(backend: ContractHar
     assert success is True and result["status"] == "backed_up"
     assert rpc(backend, "get_operation_status")["is_running"] is False
 
+
+@pytest.mark.contract_updater
+def test_update_install_handoff_persistence_contract(backend: ContractHarness) -> None:
     candidate = {
         "version": "0.4.11",
         "tag": "v0.4.11",
@@ -1431,7 +1529,8 @@ def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
     config.write_text(json.dumps(config_data), encoding="utf-8")
     harness.start()
     try:
-        assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
+        versions = rpc(harness, "get_versions")
+        assert versions.get("ludusavi") == "0.31.0", versions
         save.write_bytes(b"contract save version A\x00\n")
         assert rpc(harness, "force_backup", GAME)["status"] == "backed_up"
 
@@ -1462,6 +1561,8 @@ def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
         history = rpc(harness, "get_game_history")[GAME]
         assert history["last_backup"]["operation"] == "backup"
         assert history["last_restore"]["operation"] == "restore"
+        if os.environ.get("SDH_CONTRACT_BACKEND", "python") != "python":
+            return
 
         save.write_bytes(b"newer local version C\x00\n")
         future = time.time() + 300

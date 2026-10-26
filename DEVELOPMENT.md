@@ -96,12 +96,12 @@ SDH_CONTRACT_BACKEND=/path/to/backend \
   ./run.sh uv run pytest -o addopts='' tests/contract/
 ```
 
-The Rust backend implements only `contract_core` in this phase, so native runs select
-that marker explicitly:
+The Rust backend implements `contract_core` and `contract_operations` in this phase.
+Native operation tests exclude scenarios that also require phase-4 lifecycle RPCs:
 
 ```bash
 SDH_CONTRACT_BACKEND=/path/to/backend \
-  ./run.sh uv run pytest -o addopts='' tests/contract/ -m contract_core
+  ./run.sh uv run pytest -o addopts='' tests/contract/ -m 'contract_operations and not contract_lifecycle'
 ```
 
 The subsystem markers are `contract_core`, `contract_operations`, `contract_lifecycle`,

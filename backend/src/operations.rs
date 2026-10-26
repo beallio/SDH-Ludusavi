@@ -1,0 +1,1661 @@
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    env, fs,
+    io::{self, Read},
+    os::unix::process::CommandExt,
+    path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+    time::{Duration, Instant},
+};
+
+use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+
+use crate::persistence::{StateLock, read_object, write_json_atomic};
+
+const FLATPAK_ID: &str = "com.github.mtkennerly.ludusavi";
+const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
+const OPERATION_TIMEOUT: Duration = Duration::from_secs(180);
+const BACKUPS_TIMEOUT: Duration = Duration::from_secs(30);
+const TERMINATE_GRACE: Duration = Duration::from_millis(200);
+const KILL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_INSTALLED_APP_IDS_BYTES: usize = 16_384;
+const MAX_BACKUP_STAT_ENTRIES: usize = 1_000;
+
+#[derive(Clone, Debug)]
+struct Game {
+    name: String,
+    configured: bool,
+    has_backup: bool,
+    needs_first_backup: bool,
+    steam_id: Option<String>,
+    error: Option<String>,
+}
+
+impl Game {
+    fn from_cache(value: &Value) -> Option<Self> {
+        Some(Self {
+            name: value.get("name")?.as_str()?.to_owned(),
+            configured: value
+                .get("configured")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+            has_backup: value
+                .get("has_backup")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            needs_first_backup: value
+                .get("needs_first_backup")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            steam_id: value
+                .get("steam_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            error: value
+                .get("error")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        })
+    }
+
+    fn status(&self) -> &'static str {
+        if self.error.as_ref().is_some_and(|error| !error.is_empty()) {
+            "error"
+        } else if self.has_backup {
+            "has_backup"
+        } else if self.needs_first_backup {
+            "needs_first_backup"
+        } else if self.configured {
+            "configured"
+        } else {
+            "error"
+        }
+    }
+
+    fn to_value(&self) -> Value {
+        json!({
+            "name": self.name,
+            "configured": self.configured,
+            "has_backup": self.has_backup,
+            "needs_first_backup": self.needs_first_backup,
+            "steam_id": self.steam_id,
+            "error": self.error,
+            "status": self.status(),
+        })
+    }
+}
+
+#[derive(Default)]
+struct Registry {
+    games: BTreeMap<String, Game>,
+    aliases: BTreeMap<String, String>,
+    ids: BTreeMap<String, String>,
+    installed_app_ids: Option<String>,
+    config_marker: Option<i64>,
+}
+
+impl Registry {
+    fn load(cache: &Map<String, Value>) -> Self {
+        let mut registry = Self::default();
+        if let Some(games) = cache.get("games").and_then(Value::as_array) {
+            for value in games {
+                if let Some(game) = Game::from_cache(value) {
+                    registry.games.insert(game.name.clone(), game);
+                }
+            }
+        }
+        if let Some(aliases) = cache.get("aliases").and_then(Value::as_object) {
+            registry.aliases = aliases
+                .iter()
+                .filter_map(|(key, value)| {
+                    value.as_str().map(|value| (key.clone(), value.to_owned()))
+                })
+                .collect();
+        }
+        if let Some(ids) = cache.get("ids").and_then(Value::as_object) {
+            registry.ids = ids
+                .iter()
+                .filter_map(|(key, value)| {
+                    value.as_str().map(|value| (key.clone(), value.to_owned()))
+                })
+                .collect();
+        }
+        registry.installed_app_ids = cache
+            .get("installed_app_ids")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        registry.config_marker = cache
+            .get("ludusavi_config_mtime_ns")
+            .and_then(Value::as_i64);
+        registry
+    }
+
+    fn cache_payload(&self) -> Map<String, Value> {
+        Map::from_iter([
+            (
+                "games".to_owned(),
+                Value::Array(self.games.values().map(Game::to_value).collect()),
+            ),
+            ("aliases".to_owned(), json!(self.aliases)),
+            ("ids".to_owned(), json!(self.ids)),
+            (
+                "installed_app_ids".to_owned(),
+                self.installed_app_ids
+                    .clone()
+                    .map_or(Value::Null, Value::String),
+            ),
+            (
+                "ludusavi_config_mtime_ns".to_owned(),
+                self.config_marker.map_or(Value::Null, Value::from),
+            ),
+        ])
+    }
+
+    fn is_current(
+        &self,
+        target_ids: Option<&str>,
+        target_marker: Option<i64>,
+        marker_failed: bool,
+    ) -> bool {
+        !self.games.is_empty()
+            && target_ids.is_none_or(|ids| self.installed_app_ids.as_deref() == Some(ids))
+            && !marker_failed
+            && self.config_marker == target_marker
+    }
+
+    fn matching_game(&self, name: &str, app_id: Option<&str>) -> Option<Game> {
+        if let Some(target) = app_id.and_then(|id| self.ids.get(id))
+            && let Some(game) = self.games.get(target)
+        {
+            return Some(game.clone());
+        }
+        if let Some(target) = self.aliases.get(name)
+            && let Some(game) = self.games.get(target)
+        {
+            return Some(game.clone());
+        }
+        let normalized = normalize_game_name(name);
+        if let Some(game) = self
+            .games
+            .values()
+            .find(|game| normalize_game_name(&game.name) == normalized)
+        {
+            return Some(game.clone());
+        }
+        let candidates: Vec<_> = self
+            .games
+            .values()
+            .filter(|game| {
+                let target = normalize_game_name(&game.name);
+                (target.contains(&normalized) || normalized.contains(&target))
+                    && fuzzy_match_allowed(&normalized, &target, game.configured)
+            })
+            .collect();
+        (candidates.len() == 1).then(|| candidates[0].clone())
+    }
+}
+
+#[derive(Default)]
+struct OperationStatus {
+    running: bool,
+    name: Option<String>,
+    game_name: Option<String>,
+    last_result: Option<String>,
+    last_error: Option<String>,
+}
+
+impl OperationStatus {
+    fn to_value(&self) -> Value {
+        json!({
+            "is_running": self.running,
+            "name": self.name,
+            "game_name": self.game_name,
+            "last_result": self.last_result,
+            "last_error": self.last_error,
+        })
+    }
+}
+
+pub struct LudusaviOperations {
+    cache_path: PathBuf,
+    state_lock: Arc<StateLock>,
+    registry: Mutex<Registry>,
+    history: Mutex<Value>,
+    client: Mutex<Option<Arc<LudusaviClient>>>,
+    processes: Arc<ProcessManager>,
+    operation_lock: Mutex<()>,
+    status: Mutex<OperationStatus>,
+}
+
+impl LudusaviOperations {
+    pub fn new(
+        cache_path: PathBuf,
+        state_lock: Arc<StateLock>,
+        cache: &Map<String, Value>,
+        history: Value,
+    ) -> Self {
+        Self {
+            cache_path,
+            state_lock,
+            registry: Mutex::new(Registry::load(cache)),
+            history: Mutex::new(history),
+            client: Mutex::new(None),
+            processes: Arc::new(ProcessManager::default()),
+            operation_lock: Mutex::new(()),
+            status: Mutex::new(OperationStatus::default()),
+        }
+    }
+
+    pub fn cancel_processes(&self) {
+        self.processes.cancel_all();
+    }
+
+    pub fn processes_exited(&self) -> bool {
+        self.processes.groups_exited()
+    }
+
+    pub fn get_operation_status(&self) -> Value {
+        lock(&self.status).to_value()
+    }
+
+    pub fn get_game_history(&self) -> Value {
+        lock(&self.history).clone()
+    }
+
+    pub fn get_versions(&self) -> Result<Value, String> {
+        let client = self.client()?;
+        let ludusavi = client.version()?;
+        let normalized = ludusavi.to_lowercase();
+        let normalized = normalized
+            .strip_prefix("ludusavi")
+            .unwrap_or(&normalized)
+            .trim()
+            .to_owned();
+        let mut versions = Map::new();
+        versions.insert("ludusavi".to_owned(), Value::String(normalized));
+        versions.insert("pyludusavi".to_owned(), Value::String("unknown".to_owned()));
+        versions.insert(
+            "sdh_ludusavi".to_owned(),
+            Value::String(
+                env::var("DECKY_PLUGIN_VERSION")
+                    .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned()),
+            ),
+        );
+        versions.insert(
+            "decky".to_owned(),
+            Value::String(env::var("DECKY_VERSION").unwrap_or_else(|_| "unknown".to_owned())),
+        );
+        Ok(Value::Object(versions))
+    }
+
+    pub fn get_ludusavi_command(&self) -> Value {
+        match self.client() {
+            Ok(_) => json!({
+                "commandPath": "flatpak",
+                "args": ["run", FLATPAK_ID],
+                "compatTool": "",
+            }),
+            Err(_) => Value::Null,
+        }
+    }
+
+    pub fn get_ludusavi_logs(&self) -> Result<Value, String> {
+        Ok(Value::String(self.client()?.logs()?))
+    }
+
+    pub fn is_game_cache_current(&self, app_ids: Option<&str>) -> bool {
+        let Some(target_ids) = normalize_installed_app_ids(app_ids) else {
+            return false;
+        };
+        let target_marker = self.config_marker();
+        let marker_failed = target_marker.is_err();
+        lock(&self.registry).is_current(target_ids.as_deref(), target_marker.ok(), marker_failed)
+    }
+
+    pub fn refresh_games(&self, force: bool, app_ids: Option<&str>) -> Value {
+        let normalized_ids = normalize_installed_app_ids(app_ids);
+        let marker = self.config_marker();
+        let (target_marker, marker_failed) = match marker {
+            Ok(marker) => (Some(marker), false),
+            Err(_) => (None, true),
+        };
+        let needs_refresh = {
+            let registry = lock(&self.registry);
+            force
+                || registry.games.is_empty()
+                || normalized_ids
+                    .as_ref()
+                    .and_then(Option::as_ref)
+                    .is_some_and(|ids| registry.installed_app_ids.as_deref() != Some(ids))
+                || marker_failed
+                || registry.config_marker != target_marker
+        };
+        if !needs_refresh {
+            return self.refresh_result(None);
+        }
+        if force {
+            *lock(&self.client) = None;
+        }
+        let result = self.run_operation("refresh", None, || {
+            self.refresh_statuses(normalized_ids.clone().unwrap_or(None), target_marker)
+        });
+        match result {
+            Ok(_) => self.refresh_result(None),
+            Err(OperationError::Locked(message)) => self.refresh_result(Some(message)),
+            Err(OperationError::Failed(message)) => self.refresh_result(Some(message)),
+        }
+    }
+
+    pub fn force_backup(&self, name: &str) -> Result<Value, String> {
+        self.force_operation(name, false, None)
+    }
+
+    pub fn force_restore(&self, name: &str) -> Result<Value, String> {
+        self.force_operation(name, true, None)
+    }
+
+    pub fn restore_backup_version(&self, name: &str, backup_id: &str) -> Result<Value, String> {
+        if backup_id.is_empty()
+            || backup_id.contains('/')
+            || backup_id.contains('\\')
+            || backup_id.contains("..")
+        {
+            return Err(format!("Invalid backup ID: {backup_id}"));
+        }
+        self.force_operation(name, true, Some(backup_id))
+    }
+
+    fn force_operation(
+        &self,
+        name: &str,
+        restore: bool,
+        backup_id: Option<&str>,
+    ) -> Result<Value, String> {
+        let name = sanitize_game_name(name);
+        if lock(&self.registry).games.is_empty() {
+            let _ = self.refresh_games(false, None);
+        }
+        let Some(game) = lock(&self.registry).matching_game(&name, None) else {
+            return Ok(skip_result(&name, "unmatched_game"));
+        };
+        if restore && !game.has_backup {
+            self.record_history(
+                &game.name,
+                "restore",
+                "manual_restore",
+                "skipped",
+                Some("no_backup"),
+                None,
+            )?;
+            return Ok(skip_result(&game.name, "no_backup"));
+        }
+        let operation = if restore { "restore" } else { "backup" };
+        let trigger = if restore {
+            "manual_restore"
+        } else {
+            "manual_backup"
+        };
+        let command_result = self.run_operation(operation, Some(&game.name), || {
+            let client = self.client()?;
+            if restore {
+                if let Some(backup_id) = backup_id {
+                    client.restore_backup(&game.name, backup_id)
+                } else {
+                    client.restore(&game.name, false)
+                }
+            } else {
+                client.backup(&game.name, false)
+            }
+        });
+        let result = match command_result {
+            Ok(result) => result,
+            Err(OperationError::Locked(message)) => {
+                return Ok(
+                    json!({"status":"skipped", "reason":"operation_running", "message":message}),
+                );
+            }
+            Err(OperationError::Failed(message)) => {
+                self.record_history(
+                    &game.name,
+                    operation,
+                    trigger,
+                    "failed",
+                    None,
+                    Some(&message),
+                )?;
+                return Err(message);
+            }
+        };
+        let same = result
+            .pointer(&format!("/games/{}/change", escape_pointer(&game.name)))
+            .and_then(Value::as_str)
+            == Some("Same");
+        if same {
+            self.record_history(
+                &game.name,
+                operation,
+                trigger,
+                "skipped",
+                Some("local_current"),
+                None,
+            )?;
+        } else {
+            self.record_history(
+                &game.name,
+                operation,
+                trigger,
+                if restore { "restored" } else { "backed_up" },
+                None,
+                None,
+            )?;
+        }
+        let _ = self.refresh_targeted(&game.name);
+        if same {
+            let mut response = json!({"status":"skipped", "reason":"local_current", "game":game.name, "result":result});
+            if let Some(backup_id) = backup_id {
+                response["backup_id"] = Value::String(backup_id.to_owned());
+            }
+            return Ok(response);
+        }
+        let mut response = json!({
+            "status": if restore { "restored" } else { "backed_up" },
+            "game": game.name,
+            "result": result,
+        });
+        if let Some(backup_id) = backup_id {
+            response["backup_id"] = Value::String(backup_id.to_owned());
+        }
+        Ok(response)
+    }
+
+    pub fn list_backups(&self, name: &str) -> Result<Value, String> {
+        let name = sanitize_game_name(name);
+        if lock(&self.registry).games.is_empty() {
+            let _ = self.refresh_games(false, None);
+        }
+        let Some(game) = lock(&self.registry).matching_game(&name, None) else {
+            return Ok(skip_result(&name, "unmatched_game"));
+        };
+        self.run_operation("backups_list", Some(&game.name), || {
+            self.client()?.list_backups(&game.name)
+        })
+        .map_err(|error| match error {
+            OperationError::Locked(message) | OperationError::Failed(message) => message,
+        })
+    }
+
+    fn run_operation<T>(
+        &self,
+        name: &str,
+        game_name: Option<&str>,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, OperationError> {
+        let guard = match self.operation_lock.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                let current = lock(&self.status)
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "operation".to_owned());
+                return Err(OperationError::Locked(format!(
+                    "{current} is already running"
+                )));
+            }
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+        };
+        {
+            let mut status = lock(&self.status);
+            status.running = true;
+            status.name = Some(name.to_owned());
+            status.game_name = game_name.map(str::to_owned);
+            status.last_error = None;
+        }
+        let result = operation();
+        {
+            let mut status = lock(&self.status);
+            status.running = false;
+            status.name = None;
+            status.game_name = None;
+            match &result {
+                Ok(_) => status.last_result = Some("ok".to_owned()),
+                Err(message) => {
+                    status.last_result = Some("failed".to_owned());
+                    status.last_error = Some(message.clone());
+                }
+            }
+        }
+        drop(guard);
+        result.map_err(OperationError::Failed)
+    }
+
+    fn refresh_statuses(
+        &self,
+        installed_ids: Option<String>,
+        marker: Option<i64>,
+    ) -> Result<(), String> {
+        let client = self.client()?;
+        let (preview, backups) = thread::scope(|scope| {
+            let preview = scope.spawn(|| client.backup_preview(None));
+            let backups = scope.spawn(|| client.backups(None));
+            (preview.join(), backups.join())
+        });
+        let preview = preview.map_err(|_| "Ludusavi preview worker panicked".to_owned())??;
+        let backups = backups.map_err(|_| "Ludusavi backups worker panicked".to_owned())??;
+        let preview_games = game_objects(&preview);
+        let backup_games = game_objects(&backups);
+        let mut games = Vec::new();
+        for (name, output) in preview_games {
+            let files = output.get("files").and_then(Value::as_object);
+            let registry = output.get("registry").and_then(Value::as_object);
+            if !files.is_some_and(|value| !value.is_empty())
+                && !registry.is_some_and(|value| !value.is_empty())
+            {
+                continue;
+            }
+            if matches!(
+                output.get("decision").and_then(Value::as_str),
+                Some("Ignored" | "Cancelled")
+            ) {
+                continue;
+            }
+            let has_backup = backup_games
+                .get(&name)
+                .and_then(|game| game.get("backups"))
+                .and_then(Value::as_array)
+                .is_some_and(|backups| !backups.is_empty());
+            let steam_id = output.get("steamId").and_then(|value| match value {
+                Value::String(value) => Some(value.clone()),
+                Value::Number(value) => Some(value.to_string()),
+                _ => None,
+            });
+            games.push(Game {
+                name,
+                configured: true,
+                has_backup,
+                needs_first_backup: !has_backup,
+                steam_id,
+                error: game_error(&output),
+            });
+        }
+        games.sort_by_cached_key(|game| game.name.to_lowercase());
+        let aliases = client.aliases().unwrap_or_default();
+        {
+            let mut registry = lock(&self.registry);
+            registry.games = games
+                .into_iter()
+                .map(|game| (game.name.clone(), game))
+                .collect();
+            registry.aliases = aliases;
+            registry.ids = registry
+                .games
+                .values()
+                .filter_map(|game| {
+                    game.steam_id
+                        .as_ref()
+                        .map(|id| (id.clone(), game.name.clone()))
+                })
+                .collect();
+            registry.installed_app_ids = installed_ids;
+            registry.config_marker = marker;
+        }
+        self.save_cache()
+    }
+
+    fn refresh_targeted(&self, name: &str) -> Result<(), String> {
+        let client = self.client()?;
+        let (preview, backups) = thread::scope(|scope| {
+            let preview = scope.spawn(|| client.backup_preview(Some(name)));
+            let backups = scope.spawn(|| client.backups(Some(name)));
+            (preview.join(), backups.join())
+        });
+        let preview = preview.map_err(|_| "Ludusavi preview worker panicked".to_owned())??;
+        let backups = backups.map_err(|_| "Ludusavi backups worker panicked".to_owned())??;
+        let backup_games = game_objects(&backups);
+        let Some((found_name, output)) = game_objects(&preview).into_iter().next() else {
+            return Ok(());
+        };
+        let has_backup = backup_games
+            .get(&found_name)
+            .and_then(|game| game.get("backups"))
+            .and_then(Value::as_array)
+            .is_some_and(|backups| !backups.is_empty());
+        let game = Game {
+            name: found_name.clone(),
+            configured: true,
+            has_backup,
+            needs_first_backup: !has_backup,
+            steam_id: output.get("steamId").and_then(|value| match value {
+                Value::String(value) => Some(value.clone()),
+                Value::Number(value) => Some(value.to_string()),
+                _ => None,
+            }),
+            error: game_error(&output),
+        };
+        {
+            let mut registry = lock(&self.registry);
+            let old_id = registry
+                .games
+                .get(&found_name)
+                .and_then(|old| old.steam_id.clone());
+            if let Some(old_id) = old_id {
+                registry.ids.remove(&old_id);
+            }
+            if let Some(id) = &game.steam_id {
+                registry.ids.insert(id.clone(), found_name.clone());
+            }
+            registry.games.insert(found_name, game);
+        }
+        self.save_cache()
+    }
+
+    fn refresh_result(&self, error: Option<String>) -> Value {
+        let registry = lock(&self.registry);
+        json!({
+            "games": registry.games.values().map(Game::to_value).collect::<Vec<_>>(),
+            "aliases": registry.aliases,
+            "history": self.get_game_history(),
+            "dependency_error": error,
+        })
+    }
+
+    fn config_marker(&self) -> Result<i64, String> {
+        self.client()?.config_marker()
+    }
+
+    fn client(&self) -> Result<Arc<LudusaviClient>, String> {
+        let mut client = lock(&self.client);
+        if let Some(client) = client.as_ref() {
+            return Ok(Arc::clone(client));
+        }
+        let created = Arc::new(LudusaviClient::new(Arc::clone(&self.processes))?);
+        *client = Some(Arc::clone(&created));
+        Ok(created)
+    }
+
+    fn record_history(
+        &self,
+        game: &str,
+        operation: &str,
+        trigger: &str,
+        status: &str,
+        reason: Option<&str>,
+        message: Option<&str>,
+    ) -> Result<(), String> {
+        let entry = json!({
+            "operation": operation,
+            "trigger": trigger,
+            "status": status,
+            "reason": reason,
+            "message": message,
+            "timestamp": OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned()),
+        });
+        if valid_history_entry(&entry).is_none() {
+            return Ok(());
+        }
+        {
+            let mut history = lock(&self.history);
+            let histories = history
+                .as_object_mut()
+                .ok_or_else(|| "History is not an object".to_owned())?;
+            let game_history = histories.entry(game.to_owned()).or_insert_with(|| {
+                json!({
+                    "last_backup": null,
+                    "last_restore": null,
+                    "last_skip": null,
+                    "last_failure": null,
+                    "last_operation": null,
+                })
+            });
+            let record = game_history
+                .as_object_mut()
+                .ok_or_else(|| "Game history is not an object".to_owned())?;
+            let field = match status {
+                "backed_up" => "last_backup",
+                "restored" => "last_restore",
+                "failed" => "last_failure",
+                _ => "last_skip",
+            };
+            record.insert(field.to_owned(), entry);
+            let latest = ["last_backup", "last_restore", "last_skip", "last_failure"]
+                .iter()
+                .filter_map(|field| record.get(*field))
+                .filter_map(valid_history_entry)
+                .filter(|entry| {
+                    entry
+                        .get("timestamp")
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| !value.is_empty())
+                })
+                .max_by_key(|entry| {
+                    entry
+                        .get("timestamp")
+                        .and_then(Value::as_str)
+                        .and_then(parse_timestamp)
+                        .unwrap_or(i128::MIN)
+                });
+            record.insert("last_operation".to_owned(), latest.unwrap_or(Value::Null));
+        }
+        self.save_cache()
+    }
+
+    fn save_cache(&self) -> Result<(), String> {
+        let registry = lock(&self.registry).cache_payload();
+        let history = self.get_game_history();
+        self.state_lock
+            .with_lock(|| {
+                let mut cache = read_object(&self.cache_path)?.unwrap_or_default();
+                for (key, value) in registry {
+                    cache.insert(key, value);
+                }
+                cache.insert("game_history".to_owned(), history);
+                write_json_atomic(&self.cache_path, &cache, 0o600, b"  ")
+            })
+            .map_err(|error| error.to_string())
+    }
+}
+
+#[derive(Debug)]
+enum OperationError {
+    Locked(String),
+    Failed(String),
+}
+
+struct LudusaviClient {
+    processes: Arc<ProcessManager>,
+    flatpak: PathBuf,
+    config_path: Mutex<Option<PathBuf>>,
+    version: Mutex<Option<String>>,
+}
+
+impl LudusaviClient {
+    fn new(processes: Arc<ProcessManager>) -> Result<Self, String> {
+        let flatpak = find_flatpak()
+            .ok_or_else(|| "Ludusavi Flatpak is not available to Decky".to_owned())?;
+        processes.run_at(
+            &flatpak,
+            &[
+                "run".to_owned(),
+                FLATPAK_ID.to_owned(),
+                "--version".to_owned(),
+            ],
+            DISCOVERY_TIMEOUT,
+            false,
+        )?;
+        Ok(Self {
+            processes,
+            flatpak,
+            config_path: Mutex::new(None),
+            version: Mutex::new(None),
+        })
+    }
+
+    fn json(&self, args: &[String], timeout: Duration) -> Result<Value, String> {
+        let mut args = args.to_vec();
+        if !args.iter().any(|arg| arg == "--api") {
+            args.push("--api".to_owned());
+        }
+        let arguments: Vec<_> = std::iter::once("run".to_owned())
+            .chain(std::iter::once(FLATPAK_ID.to_owned()))
+            .chain(args)
+            .collect();
+        let output = self
+            .processes
+            .run_at(&self.flatpak, &arguments, timeout, false)?;
+        parse_ludusavi_json(&output)
+    }
+
+    fn text(&self, args: &[String], timeout: Duration) -> Result<String, String> {
+        let arguments: Vec<_> = std::iter::once("run".to_owned())
+            .chain(std::iter::once(FLATPAK_ID.to_owned()))
+            .chain(args.iter().cloned())
+            .collect();
+        self.processes
+            .run_at(&self.flatpak, &arguments, timeout, true)
+    }
+
+    fn version(&self) -> Result<String, String> {
+        if let Some(version) = lock(&self.version).as_ref() {
+            return Ok(version.clone());
+        }
+        let version = self
+            .text(&["--version".to_owned()], BACKUPS_TIMEOUT)?
+            .trim()
+            .to_owned();
+        *lock(&self.version) = Some(version.clone());
+        Ok(version)
+    }
+
+    fn backup_preview(&self, game: Option<&str>) -> Result<Value, String> {
+        let mut args = vec![
+            "backup".to_owned(),
+            "--preview".to_owned(),
+            "--force".to_owned(),
+        ];
+        if let Some(game) = game {
+            args.push(game.to_owned());
+        }
+        self.json(&args, OPERATION_TIMEOUT)
+    }
+
+    fn backups(&self, game: Option<&str>) -> Result<Value, String> {
+        let mut args = vec!["backups".to_owned()];
+        if let Some(game) = game {
+            args.push(game.to_owned());
+        }
+        self.json(&args, BACKUPS_TIMEOUT)
+    }
+
+    fn backup(&self, game: &str, preview: bool) -> Result<Value, String> {
+        let mut args = vec!["backup".to_owned()];
+        if preview {
+            args.push("--preview".to_owned());
+        }
+        args.extend(["--force".to_owned(), game.to_owned()]);
+        self.json(&args, OPERATION_TIMEOUT)
+    }
+
+    fn restore(&self, game: &str, preview: bool) -> Result<Value, String> {
+        let mut args = vec!["restore".to_owned()];
+        if preview {
+            args.push("--preview".to_owned());
+        }
+        args.extend(["--force".to_owned(), game.to_owned()]);
+        self.json(&args, OPERATION_TIMEOUT)
+    }
+
+    fn restore_backup(&self, game: &str, backup_id: &str) -> Result<Value, String> {
+        self.json(
+            &[
+                "restore".to_owned(),
+                "--force".to_owned(),
+                "--backup".to_owned(),
+                backup_id.to_owned(),
+                game.to_owned(),
+            ],
+            OPERATION_TIMEOUT,
+        )
+    }
+
+    fn aliases(&self) -> Result<BTreeMap<String, String>, String> {
+        let output = self.json(&["config".to_owned(), "show".to_owned()], BACKUPS_TIMEOUT)?;
+        let mut aliases = BTreeMap::new();
+        if let Some(games) = output.get("customGames").and_then(Value::as_array) {
+            for game in games {
+                if let (Some(name), Some(alias)) = (
+                    game.get("name").and_then(Value::as_str),
+                    game.get("alias").and_then(Value::as_str),
+                ) {
+                    aliases.insert(name.to_owned(), alias.to_owned());
+                }
+            }
+        }
+        Ok(aliases)
+    }
+
+    fn config_path(&self) -> Result<PathBuf, String> {
+        let mut cached = lock(&self.config_path);
+        if cached.is_none() {
+            let path = self.text(&["config".to_owned(), "path".to_owned()], BACKUPS_TIMEOUT)?;
+            *cached = Some(
+                PathBuf::from(path.trim())
+                    .canonicalize()
+                    .map_err(|error| error.to_string())?,
+            );
+        }
+        cached
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "Ludusavi config path discovery returned no path".to_owned())
+    }
+
+    fn config_marker(&self) -> Result<i64, String> {
+        let config_path = self.config_path()?;
+        let config_metadata = fs::metadata(&config_path).map_err(|error| error.to_string())?;
+        let mut mtimes = vec![
+            config_metadata
+                .modified()
+                .map_err(|error| error.to_string())?,
+        ];
+        for filename in ["cache.yaml", "manifest.yaml"] {
+            if let Ok(metadata) = fs::metadata(config_path.with_file_name(filename))
+                && metadata.is_file()
+                && let Ok(modified) = metadata.modified()
+            {
+                mtimes.push(modified);
+            }
+        }
+        mtimes.sort();
+        let text = mtimes
+            .iter()
+            .map(|time| {
+                time.duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let digest = Sha256::digest(text.as_bytes());
+        Ok(i64::from_be_bytes(
+            digest[..8]
+                .try_into()
+                .expect("SHA-256 has eight leading bytes"),
+        ))
+    }
+
+    fn list_backups(&self, game: &str) -> Result<Value, String> {
+        let output = self.backups(Some(game))?;
+        let games = game_objects(&output);
+        let game_output = games.get(game).or_else(|| games.values().next());
+        let Some(game_output) = game_output else {
+            return Ok(
+                json!({"game":game,"backup_path":null,"total_size_bytes":null,"backups":[]}),
+            );
+        };
+        let backup_path = game_output.get("backupPath").and_then(Value::as_str);
+        let mut total_size: u64 = 0;
+        let mut all_unknown = true;
+        let backups = game_output
+            .get("backups")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .map(|(index, backup)| {
+                let name = backup.get("name").and_then(Value::as_str);
+                let (size, count) = if backup.get("size").is_some() {
+                    (
+                        backup.get("size").cloned(),
+                        backup.get("file_count").cloned(),
+                    )
+                } else if index < 10 {
+                    name.and_then(|name| backup_path.and_then(|path| backup_disk_stats(path, name)))
+                        .map_or((None, None), |(size, count)| {
+                            (Some(json!(size)), count.map(|count| json!(count)))
+                        })
+                } else {
+                    (None, None)
+                };
+                if let Some(size) = size.as_ref().and_then(Value::as_u64) {
+                    total_size = total_size.saturating_add(size);
+                    all_unknown = false;
+                }
+                json!({
+                    "id": name,
+                    "when": backup.get("when"),
+                    "locked": backup.get("locked").and_then(Value::as_bool).unwrap_or(false),
+                    "os": backup.get("os"),
+                    "comment": backup.get("comment"),
+                    "size_bytes": size,
+                    "file_count": count,
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut backups = backups;
+        backups.sort_by(|left, right| {
+            right
+                .get("when")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .cmp(left.get("when").and_then(Value::as_str).unwrap_or(""))
+        });
+        Ok(json!({
+            "game": game,
+            "backup_path": backup_path,
+            "total_size_bytes": (!all_unknown).then_some(total_size),
+            "backups": backups,
+        }))
+    }
+
+    fn logs(&self) -> Result<String, String> {
+        let path = self.config_path()?.with_file_name("ludusavi_rCURRENT.log");
+        match fs::read_to_string(path) {
+            Ok(contents) => Ok(contents),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+}
+
+#[derive(Default)]
+struct ProcessManager {
+    stopping: AtomicBool,
+    groups: Mutex<BTreeSet<i32>>,
+}
+
+impl ProcessManager {
+    fn run_at(
+        &self,
+        program: &Path,
+        args: &[String],
+        timeout: Duration,
+        text: bool,
+    ) -> Result<String, String> {
+        if self.stopping.load(Ordering::Acquire) {
+            return Err("Ludusavi operation cancelled".to_owned());
+        }
+        let mut command = Command::new(program);
+        command
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command.env("LD_LIBRARY_PATH", "");
+        if env::var_os("XDG_RUNTIME_DIR").is_none() {
+            let uid = unsafe { libc::getuid() };
+            let candidate = format!("/run/user/{uid}");
+            command.env(
+                "XDG_RUNTIME_DIR",
+                if Path::new(&candidate).is_dir() {
+                    candidate
+                } else {
+                    "/run/user/1000".to_owned()
+                },
+            );
+        }
+        command.process_group(0);
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("Could not start Ludusavi command: {error}"))?;
+        let pid = i32::try_from(child.id())
+            .map_err(|_| "Ludusavi process ID is out of range".to_owned())?;
+        lock(&self.groups).insert(pid);
+        if self.stopping.load(Ordering::Acquire) {
+            let _ = signal_group(pid, libc::SIGTERM);
+        }
+        let stdout = child.stdout.take().expect("piped stdout");
+        let stderr = child.stderr.take().expect("piped stderr");
+        let stdout_reader = thread::spawn(move || read_pipe(stdout));
+        let stderr_reader = thread::spawn(move || read_pipe(stderr));
+        let started = Instant::now();
+        let mut status = None;
+        let mut outcome = None;
+        loop {
+            if self.stopping.load(Ordering::Acquire) {
+                outcome = Some("cancelled".to_owned());
+                break;
+            }
+            match child.try_wait() {
+                Ok(Some(child_status)) => {
+                    status = Some(child_status);
+                    break;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    outcome = Some(format!("Could not wait for Ludusavi: {error}"));
+                    break;
+                }
+            }
+            if started.elapsed() >= timeout {
+                outcome = Some(format!("timeout:{timeout:?}"));
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        let group_exited = if outcome.is_some() || group_exists(pid) {
+            terminate_group(pid, &mut child)
+        } else {
+            true
+        };
+        if !group_exited {
+            return Err("Could not confirm Ludusavi process group exit".to_owned());
+        }
+        if status.is_none() {
+            status = child.wait().ok();
+        }
+        let stdout = stdout_reader
+            .join()
+            .unwrap_or_else(|_| Err(io::Error::other("stdout reader panicked")))
+            .map_err(|error| format!("Could not read Ludusavi stdout: {error}"))?;
+        let stderr = stderr_reader
+            .join()
+            .unwrap_or_else(|_| Err(io::Error::other("stderr reader panicked")))
+            .map_err(|error| format!("Could not read Ludusavi stderr: {error}"))?;
+        if !group_exists(pid) {
+            lock(&self.groups).remove(&pid);
+        }
+        if let Some(outcome) = outcome {
+            if outcome == "cancelled" {
+                return Err("Ludusavi operation cancelled".to_owned());
+            }
+            if let Some(timeout) = outcome.strip_prefix("timeout:") {
+                return Err(format!(
+                    "Ludusavi command timed out after {timeout}: {}",
+                    args.join(" ")
+                ));
+            }
+            return Err(outcome);
+        }
+        let Some(status) = status else {
+            return Err("Could not reap Ludusavi child process".to_owned());
+        };
+        if !status.success() {
+            return Err(format!(
+                "Ludusavi command failed with exit code {}: {}",
+                status.code().unwrap_or(-1),
+                String::from_utf8_lossy(&stderr).trim()
+            ));
+        }
+        if text {
+            Ok(String::from_utf8_lossy(&stdout).into_owned())
+        } else {
+            String::from_utf8(stdout)
+                .map_err(|error| format!("Ludusavi output is not UTF-8: {error}"))
+        }
+    }
+
+    fn cancel_all(&self) {
+        self.stopping.store(true, Ordering::Release);
+        for pid in lock(&self.groups).iter().copied() {
+            let _ = signal_group(pid, libc::SIGTERM);
+        }
+    }
+    fn groups_exited(&self) -> bool {
+        let mut groups = lock(&self.groups);
+        groups.retain(|pid| group_exists(*pid));
+        groups.is_empty()
+    }
+}
+
+fn read_pipe(mut pipe: impl Read) -> io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    pipe.read_to_end(&mut output)?;
+    Ok(output)
+}
+
+fn terminate_group(pid: i32, child: &mut Child) -> bool {
+    let _ = signal_group(pid, libc::SIGTERM);
+    let grace_end = Instant::now() + TERMINATE_GRACE;
+    while Instant::now() < grace_end && group_exists(pid) {
+        thread::sleep(Duration::from_millis(10));
+    }
+    if group_exists(pid) {
+        let _ = signal_group(pid, libc::SIGKILL);
+    }
+    let deadline = Instant::now() + KILL_CONFIRM_TIMEOUT;
+    while group_exists(pid) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    if child.try_wait().ok().flatten().is_none() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    !group_exists(pid)
+}
+fn signal_group(pid: i32, signal: i32) -> bool {
+    if pid <= 1 {
+        return false;
+    }
+    unsafe { libc::kill(-pid, signal) == 0 }
+}
+
+fn group_exists(pid: i32) -> bool {
+    if pid <= 1 {
+        return false;
+    }
+    if unsafe { libc::kill(-pid, 0) } == 0 {
+        true
+    } else {
+        io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    }
+}
+
+fn find_flatpak() -> Option<PathBuf> {
+    let path = env::var_os("PATH").unwrap_or_else(|| "/bin:/usr/bin".into());
+    find_executable("flatpak", &path)
+}
+
+fn find_executable(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
+    env::split_paths(path)
+        .map(|directory| {
+            if directory.as_os_str().is_empty() {
+                PathBuf::from(".")
+            } else {
+                directory
+            }
+        })
+        .map(|directory| directory.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+fn game_objects(value: &Value) -> BTreeMap<String, Value> {
+    value
+        .get("games")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, game)| game.as_object().map(|_| (name.clone(), game.clone())))
+        .collect()
+}
+
+fn parse_ludusavi_json(output: &str) -> Result<Value, String> {
+    serde_json::from_str(output)
+        .map_err(|error| format!("Failed to parse Ludusavi JSON output: {error}"))
+}
+
+fn game_error(game: &Value) -> Option<String> {
+    for collection in ["files", "registry"] {
+        if let Some(items) = game.get(collection).and_then(Value::as_object) {
+            for item in items.values() {
+                if item.get("failed").and_then(Value::as_bool) == Some(true) {
+                    return Some(
+                        item.get("error")
+                            .filter(|error| json_truthy(error))
+                            .map(python_string)
+                            .unwrap_or_else(|| "Ludusavi reported a failed item".to_owned()),
+                    );
+                }
+            }
+        }
+    }
+    None
+}
+
+fn json_truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(value) => *value,
+        Value::Number(value) => value.as_f64().is_some_and(|number| number != 0.0),
+        Value::String(value) => !value.is_empty(),
+        Value::Array(value) => !value.is_empty(),
+        Value::Object(value) => !value.is_empty(),
+    }
+}
+
+fn python_string(value: &Value) -> String {
+    match value {
+        Value::Null => "None".to_owned(),
+        Value::Bool(value) => if *value { "True" } else { "False" }.to_owned(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => value.clone(),
+        Value::Array(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(python_repr)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Value::Object(values) => format!(
+            "{{{}}}",
+            values
+                .iter()
+                .map(|(key, value)| format!(
+                    "{}: {}",
+                    python_repr(&Value::String(key.clone())),
+                    python_repr(value)
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+fn python_repr(value: &Value) -> String {
+    let Value::String(value) = value else {
+        return python_string(value);
+    };
+    let quote = if value.contains('\'') && !value.contains('"') {
+        '"'
+    } else {
+        '\''
+    };
+    let mut repr = String::with_capacity(value.len() + 2);
+    repr.push(quote);
+    for character in value.chars() {
+        match character {
+            '\\' => repr.push_str("\\\\"),
+            '\n' => repr.push_str("\\n"),
+            '\r' => repr.push_str("\\r"),
+            '\t' => repr.push_str("\\t"),
+            character if character == quote => {
+                repr.push('\\');
+                repr.push(character);
+            }
+            character => repr.push(character),
+        }
+    }
+    repr.push(quote);
+    repr
+}
+
+fn normalize_game_name(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-') {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn fuzzy_match_allowed(input: &str, target: &str, configured: bool) -> bool {
+    if input.len() > 4 && target.len() > 4 {
+        return true;
+    }
+    if !configured || target.len() != 4 || !input.starts_with(target) {
+        return false;
+    }
+    input.len() == target.len()
+        || input
+            .as_bytes()
+            .get(target.len())
+            .is_some_and(|byte| matches!(*byte, b' ' | b'.' | b'-'))
+}
+
+fn sanitize_game_name(name: &str) -> String {
+    name.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn normalize_installed_app_ids(raw: Option<&str>) -> Option<Option<String>> {
+    let Some(raw) = raw else { return Some(None) };
+    if raw.len() > MAX_INSTALLED_APP_IDS_BYTES {
+        return Some(None);
+    }
+    if raw.trim().is_empty() {
+        return Some(Some(String::new()));
+    }
+    let mut ids = BTreeSet::new();
+    for token in raw.split(',') {
+        if token.is_empty() || !token.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Some(None);
+        }
+        let canonical = token.trim_start_matches('0');
+        ids.insert(if canonical.is_empty() { "0" } else { canonical });
+    }
+    let mut ids = ids.into_iter().collect::<Vec<_>>();
+    ids.sort_by(|left, right| left.len().cmp(&right.len()).then_with(|| left.cmp(right)));
+    Some(Some(ids.join(",")))
+}
+
+fn skip_result(game: &str, reason: &str) -> Value {
+    json!({"status":"skipped", "game":game, "reason":reason})
+}
+
+fn escape_pointer(value: &str) -> String {
+    value.replace('~', "~0").replace('/', "~1")
+}
+
+fn backup_disk_stats(path: &str, name: &str) -> Option<(u64, Option<usize>)> {
+    let target = Path::new(path).join(name);
+    if target.is_file() {
+        return Some((fs::metadata(&target).ok()?.len(), None));
+    }
+    if !target.is_dir() {
+        return None;
+    }
+    let mut stack = vec![target];
+    let mut size = 0u64;
+    let mut count = 0usize;
+    let mut scanned = 0usize;
+    while let Some(directory) = stack.pop() {
+        for entry in fs::read_dir(directory).ok()? {
+            let entry = entry.ok()?;
+            scanned += 1;
+            if scanned > MAX_BACKUP_STAT_ENTRIES {
+                return None;
+            }
+            let metadata = entry.metadata().ok()?;
+            if metadata.is_dir() {
+                stack.push(entry.path());
+            } else if metadata.is_file() {
+                size = size.saturating_add(metadata.len());
+                count += 1;
+            }
+        }
+    }
+    Some((size, Some(count)))
+}
+
+fn valid_history_entry(value: &Value) -> Option<Value> {
+    let operation = value.get("operation")?.as_str()?;
+    if !matches!(operation, "backup" | "restore" | "start" | "exit") {
+        return None;
+    }
+    let trigger = value.get("trigger")?.as_str()?;
+    if !matches!(
+        trigger,
+        "manual_backup" | "manual_restore" | "auto_start" | "auto_exit"
+    ) {
+        return None;
+    }
+    let status = value.get("status")?.as_str()?;
+    if !matches!(status, "backed_up" | "restored" | "skipped" | "failed") {
+        return None;
+    }
+    let timestamp = value.get("timestamp")?.as_str()?;
+    let mut entry = Map::new();
+    entry.insert("operation".to_owned(), Value::String(operation.to_owned()));
+    entry.insert("trigger".to_owned(), Value::String(trigger.to_owned()));
+    entry.insert("status".to_owned(), Value::String(status.to_owned()));
+    for key in ["reason", "message"] {
+        entry.insert(
+            key.to_owned(),
+            value
+                .get(key)
+                .filter(|value| value.is_null() || value.is_string())
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+    }
+    entry.insert("timestamp".to_owned(), Value::String(timestamp.to_owned()));
+    Some(Value::Object(entry))
+}
+
+fn parse_timestamp(value: &str) -> Option<i128> {
+    if let Ok(timestamp) = OffsetDateTime::parse(value, &Rfc3339) {
+        return Some(timestamp.unix_timestamp_nanos());
+    }
+    let normalized = if value.contains(' ') && !value.contains('T') {
+        value.replacen(' ', "T", 1)
+    } else {
+        format!("{value}T00:00:00Z")
+    };
+    OffsetDateTime::parse(&normalized, &Rfc3339)
+        .ok()
+        .map(|timestamp| timestamp.unix_timestamp_nanos())
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ProcessManager, Registry, fuzzy_match_allowed, game_error, game_objects, group_exists,
+        normalize_game_name, normalize_installed_app_ids, parse_ludusavi_json, sanitize_game_name,
+        valid_history_entry,
+    };
+    use serde_json::json;
+    use std::{path::Path, time::Duration};
+
+    #[test]
+    fn game_name_sanitization_table_matches_python() {
+        for (input, expected) in [
+            ("", ""),
+            (" \t\n", ""),
+            ("  Hades  ", "Hades"),
+            ("Hades\t(Test)", "Hades (Test)"),
+            ("  Hades \n (Test)  ", "Hades (Test)"),
+            ("Hades: The Game!", "Hades: The Game!"),
+            ("  HADES  ", "HADES"),
+        ] {
+            assert_eq!(sanitize_game_name(input), expected, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn matcher_normalization_and_fuzzy_guard_tables() {
+        for (input, expected) in [
+            ("Hades II (Supergiant)", "hades ii supergiant"),
+            ("Portal-2...!", "portal-2..."),
+        ] {
+            assert_eq!(normalize_game_name(input), expected);
+        }
+        for (input, target, configured, expected) in [
+            ("metroid", "super metroid", true, true),
+            ("met", "super metroid", true, false),
+            ("abcd-extra", "abcd", true, true),
+            ("abcd_extra", "abcd", true, false),
+            ("abcd", "abcd", false, false),
+        ] {
+            assert_eq!(fuzzy_match_allowed(input, target, configured), expected);
+        }
+        let cache = serde_json::from_value(json!({
+            "games": [
+                {"name":"Hades: The Game!","configured":true,"steam_id":"300"},
+                {"name":"Portal 2","configured":true,"has_backup":true},
+                {"name":"Portal Stories: Mel","configured":true,"has_backup":true}
+            ],
+            "aliases":{"Old Hades Name":"Hades: The Game!"},
+            "ids":{"300":"Hades: The Game!"}
+        }))
+        .unwrap();
+        let registry = Registry::load(&cache);
+        for (query, app_id, expected) in [
+            ("hades the game", None, Some("Hades: The Game!")),
+            ("Old Hades Name", None, Some("Hades: The Game!")),
+            ("Unrelated", Some("300"), Some("Hades: The Game!")),
+            ("Portal", None, None),
+        ] {
+            assert_eq!(
+                registry
+                    .matching_game(query, app_id)
+                    .as_ref()
+                    .map(|game| game.name.as_str()),
+                expected,
+            );
+        }
+    }
+
+    #[test]
+    fn installed_app_id_normalization_table_matches_python() {
+        for (input, expected) in [
+            (None, None),
+            (Some(""), Some("")),
+            (Some("  "), Some("")),
+            (Some("300,413150"), Some("300,413150")),
+            (Some("413150,300,413150"), Some("300,413150")),
+            (Some("0002,01,2"), Some("1,2")),
+            (Some("x,1"), None),
+            (Some("1,"), None),
+        ] {
+            assert_eq!(
+                normalize_installed_app_ids(input).unwrap().as_deref(),
+                expected,
+                "{input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ludusavi_output_parsing_table_rejects_non_mapping_entries() {
+        for (input, expected) in [
+            (
+                json!({"games":{"Hades":{"files":{}},"Ignored":"not a mapping"}}),
+                1,
+            ),
+            (json!({"games":null}), 0),
+            (json!([]), 0),
+        ] {
+            assert_eq!(game_objects(&input).len(), expected);
+        }
+        for (output, expected) in [
+            (
+                r#"{"games":{"Hades":{"files":{}},"Ignored":"not a mapping"}}"#,
+                1,
+            ),
+            (r#"{"games":null}"#, 0),
+        ] {
+            assert_eq!(
+                game_objects(&parse_ludusavi_json(output).unwrap()).len(),
+                expected
+            );
+        }
+        assert!(parse_ludusavi_json("not-json").is_err());
+        assert_eq!(
+            game_error(&json!({"files":{"save":{"failed":true,"error":{"message":"denied"}}}})),
+            Some("{'message': 'denied'}".to_owned()),
+        );
+        assert_eq!(
+            game_error(&json!({"files":{"save":{"failed":true,"error":"denied"}}})),
+            Some("denied".to_owned()),
+        );
+        assert_eq!(
+            game_error(&json!({"registry":{"key":{"failed":true}}})),
+            Some("Ludusavi reported a failed item".to_owned())
+        );
+        assert_eq!(
+            game_error(&json!({"files":{"save":{"failed":false}}})),
+            None
+        );
+    }
+
+    #[test]
+    fn history_entry_validation_table_rejects_invalid_fields() {
+        let valid = json!({"operation":"backup","trigger":"manual_backup","status":"backed_up","timestamp":"2026-01-01T00:00:00Z","reason":4,"message":"ok"});
+        assert_eq!(valid_history_entry(&valid).unwrap()["reason"], json!(null));
+        for invalid in [
+            json!(null),
+            json!({"operation":"unknown","trigger":"manual_backup","status":"backed_up","timestamp":"x"}),
+            json!({"operation":"backup","trigger":"unknown","status":"backed_up","timestamp":"x"}),
+            json!({"operation":"backup","trigger":"manual_backup","status":"unknown","timestamp":"x"}),
+            json!({"operation":"backup","trigger":"manual_backup","status":"backed_up","timestamp":1}),
+        ] {
+            assert!(valid_history_entry(&invalid).is_none(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn cache_invalidation_decisions_cover_all_markers() {
+        let cache = serde_json::from_value(json!({
+            "games":[{"name":"Hades","configured":true,"has_backup":true}],
+            "installed_app_ids":"300,413150",
+            "ludusavi_config_mtime_ns":12345
+        }))
+        .unwrap();
+        let registry = Registry::load(&cache);
+        assert!(registry.is_current(Some("300,413150"), Some(12345), false));
+        assert!(!registry.is_current(Some("300"), Some(12345), false));
+        assert!(!registry.is_current(None, Some(12346), false));
+        assert!(!registry.is_current(None, Some(12345), true));
+        assert!(!Registry::default().is_current(None, Some(12345), false));
+    }
+    #[test]
+    fn timeout_kills_and_confirms_the_entire_process_group() {
+        let directory = tempfile::tempdir().unwrap();
+        let pid_file = directory.path().join("process-group");
+        let args = [
+            "-c".to_owned(),
+            "trap '' TERM; sleep 30 & echo $$ > \"$1\"; wait".to_owned(),
+            "sh".to_owned(),
+            pid_file.display().to_string(),
+        ];
+        let processes = ProcessManager::default();
+        let error = processes
+            .run_at(Path::new("/bin/sh"), &args, Duration::from_millis(80), true)
+            .unwrap_err();
+        assert!(error.contains("timed out"), "{error}");
+        let process_group = std::fs::read_to_string(pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(!group_exists(process_group));
+        assert!(processes.groups_exited());
+    }
+}

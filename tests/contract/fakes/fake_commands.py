@@ -117,6 +117,9 @@ def run_flatpak(argv: list[str]) -> int:
         "argv": argv,
         "pid": os.getpid(),
         "pgid": os.getpgid(0),
+        "child_environment": {
+            name: os.environ.get(name) for name in ("LD_LIBRARY_PATH", "XDG_RUNTIME_DIR")
+        },
     }
     _append_record("SDH_CONTRACT_FAKE_LOG", record)
     scenario = _scenario().get("flatpak", {})
