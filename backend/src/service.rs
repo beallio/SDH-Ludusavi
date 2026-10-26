@@ -801,6 +801,19 @@ mod tests {
         let service = Arc::new(BackendService::new(&env).unwrap());
         (directory, service)
     }
+    #[tokio::test]
+    async fn list_backups_cancellation_returns_skipped_through_dispatch() {
+        for include_game in [true, false] {
+            let (_directory, service) = test_service();
+            service
+                .operations
+                .prepare_cancelled_list_backups_test(include_game);
+            assert_eq!(
+                service.dispatch("list_backups", vec![json!("Hades")]).await,
+                json!({"status":"skipped","reason":"cancelled"})
+            );
+        }
+    }
 
     #[test]
     fn history_validation_drops_invalid_entries_and_derives_latest() {

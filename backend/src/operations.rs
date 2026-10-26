@@ -258,6 +258,29 @@ impl LudusaviOperations {
     pub fn cancel_processes(&self) {
         self.processes.cancel_all();
     }
+    #[cfg(test)]
+    pub(crate) fn prepare_cancelled_list_backups_test(&self, include_game: bool) {
+        if include_game {
+            lock(&self.registry).games.insert(
+                "Hades".to_owned(),
+                Game {
+                    name: "Hades".to_owned(),
+                    configured: true,
+                    has_backup: true,
+                    needs_first_backup: false,
+                    steam_id: None,
+                    error: None,
+                },
+            );
+        }
+        *lock(&self.client) = Some(Arc::new(LudusaviClient {
+            processes: Arc::clone(&self.processes),
+            flatpak: PathBuf::new(),
+            config_path: Mutex::new(None),
+            version: Mutex::new(None),
+        }));
+        self.cancel_processes();
+    }
 
     pub fn processes_exited(&self) -> bool {
         self.processes.groups_exited()
@@ -525,7 +548,7 @@ impl LudusaviOperations {
                     "message":message,
                 })),
                 OperationError::Failed(message) => Err(message),
-                OperationError::Cancelled => Err(OPERATION_CANCELLED.to_owned()),
+                OperationError::Cancelled => Ok(json!({"status":"skipped","reason":"cancelled"})),
             };
         }
         let Some(game) = lock(&self.registry).matching_game(&name, None) else {
@@ -541,7 +564,7 @@ impl LudusaviOperations {
                 "message":message,
             })),
             Err(OperationError::Failed(message)) => Err(message),
-            Err(OperationError::Cancelled) => Err(OPERATION_CANCELLED.to_owned()),
+            Err(OperationError::Cancelled) => Ok(json!({"status":"skipped","reason":"cancelled"})),
         }
     }
 
