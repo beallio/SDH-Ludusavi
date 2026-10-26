@@ -866,9 +866,11 @@ def test_hanging_ludusavi_exits_and_reaps_process_group(backend: ContractHarness
             lease_id = paused["lease_id"]
             original_deadline = time.monotonic() + paused["lease_ttl_seconds"]
             frozen_ticks = _tick_count(child)
+            scoped_pause_started = time.monotonic()
             scoped_paused = rpc(backend, "pause_game_process", scoped_child.pid)
             assert scoped_paused["status"] == "paused", scoped_paused
             assert scoped_paused["pid"] == scoped_child.pid
+            scoped_expiry_deadline = scoped_pause_started + scoped_paused["lease_ttl_seconds"] + 5
             assert _scope_frozen(scoped_child), "scoped lease did not freeze its cgroup"
             scoped_ticks_at_expiry = _tick_count(scoped_child)
 
@@ -886,9 +888,9 @@ def test_hanging_ludusavi_exits_and_reaps_process_group(backend: ContractHarness
             assert _tick_count(child) == frozen_ticks, (
                 "renewed pre-scope PID progressed while stopped"
             )
-            assert _wait_for(
+            assert not _scope_frozen(scoped_child) or _wait_for(
                 lambda: not _scope_frozen(scoped_child),
-                scoped_paused["lease_ttl_seconds"] + 5,
+                max(0.0, scoped_expiry_deadline - time.monotonic()),
                 "expired scoped lease did not thaw its cgroup",
             )
             assert _wait_for(
