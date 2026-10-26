@@ -775,6 +775,8 @@ def test_syncthing_watch_redacts_device_ids_and_uninstall_is_scoped(
             "Syncthing watch did not poll through scanning to a settled idle sample",
         )
         sample = activity["sample"]
+        assert activity["status"] == "activity"
+        assert activity["watch_id"] == started["watch_id"]
         assert type(sample["update_in_progress"]) is bool
         assert sample["update_in_progress"] is False
         assert sample["settled"] is True
