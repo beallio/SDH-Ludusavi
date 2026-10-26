@@ -6,7 +6,7 @@ use std::{
 
 use decky_plugin::Plugin;
 use sdh_ludusavi_backend::service::BackendService;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 fn register_rpc(
     plugin: Plugin,
@@ -18,10 +18,7 @@ fn register_rpc(
         async move {
             let reply = match service.get() {
                 Some(service) => service.dispatch(name, args).await,
-                None => json!({
-                    "status": "failed",
-                    "message": "Backend has not completed startup",
-                }),
+                None => BackendService::unavailable_reply(name),
             };
             Ok::<Value, String>(reply)
         }
@@ -32,7 +29,11 @@ async fn run() -> io::Result<()> {
     let service: Arc<OnceLock<Arc<BackendService>>> = Arc::new(OnceLock::new());
     let initialize = Arc::clone(&service);
     let mut plugin = Plugin::new().on_migration(move |context| async move {
-        let backend = BackendService::new(context.env()).map_err(|error| error.to_string())?;
+        let env = context.env().clone();
+        let backend = tokio::task::spawn_blocking(move || BackendService::new(&env))
+            .await
+            .map_err(|error| format!("service initialization task failed: {error}"))?
+            .map_err(|error| error.to_string())?;
         initialize
             .set(Arc::new(backend))
             .map_err(|_| "backend initialized more than once".to_owned())

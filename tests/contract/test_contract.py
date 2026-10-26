@@ -19,7 +19,7 @@ from typing import Any, Iterator
 
 import pytest
 
-from harness import ContractHarness, FAKE_BIN
+from harness import ContractHarness, FAKE_BIN, REPO_ROOT
 
 
 GAME = "Contract Fixture Game"
@@ -619,6 +619,52 @@ def test_native_shutdown_drains_inflight_persistence_call() -> None:
                 assert process.returncode == 0
             cache = json.loads((backend.runtime_dir / "cache.json").read_text(encoding="utf-8"))
             assert cache["ludusaviLauncherShortcutAppId"] == 8765432
+        finally:
+            if not lock_file.closed:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                lock_file.close()
+            backend.close()
+
+
+@pytest.mark.contract_core
+def test_native_sigterm_during_startup_lock_contention_is_prompt() -> None:
+    native_backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
+    if native_backend == "python":
+        pytest.skip("startup lock contention requires SDH_CONTRACT_BACKEND to select Rust")
+
+    with tempfile.TemporaryDirectory(
+        prefix="sdh-startup-lock-", dir="/var/tmp/sdh_ludusavi"
+    ) as temporary_root:
+        backend = ContractHarness(backend=native_backend, root=Path(temporary_root))
+        lock_path = backend.runtime_dir / ".sdh_ludusavi.state.lock"
+        lock_path.touch(mode=0o600)
+        lock_file = lock_path.open("r+b")
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            backend._check_fakes()
+            with (
+                backend.stdout_path.open("ab") as stdout_file,
+                backend.stderr_path.open("ab") as stderr_file,
+            ):
+                process = subprocess.Popen(
+                    [native_backend],
+                    cwd=REPO_ROOT,
+                    env=backend.env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=stdout_file,
+                    stderr=stderr_file,
+                    start_new_session=True,
+                )
+            backend.process = process
+            time.sleep(0.25)
+            assert process.poll() is None
+            assert not backend.socket_path.exists()
+
+            started = time.monotonic()
+            process.send_signal(signal.SIGTERM)
+            process.wait(timeout=3)
+            assert process.returncode == 0
+            assert time.monotonic() - started < 5
         finally:
             if not lock_file.closed:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
