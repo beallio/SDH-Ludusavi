@@ -226,5 +226,4 @@ jobs:
       - name: Run Native Backend RPC Contracts
         run: |
           SDH_CONTRACT_BACKEND=/var/tmp/sdh_ludusavi/cargo-target/x86_64-unknown-linux-musl/release/backend \
-            ./run.sh uv run pytest -o addopts='' tests/contract/ \
-            -m 'contract_core or contract_operations or contract_lifecycle or contract_gate or contract_syncthing or contract_updater or contract_theme or real_ludusavi'
+            ./run.sh uv run pytest -o addopts='' tests/contract/

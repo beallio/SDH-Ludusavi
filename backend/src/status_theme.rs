@@ -281,6 +281,10 @@ mod tests {
         fs::create_dir_all(&theme).unwrap();
         fs::write(theme.join("theme.json"), "user-owned").unwrap();
         uninstall_status_theme(&home, &preferences).unwrap();
+        assert!(
+            theme.join("theme.json").is_file(),
+            "unmarked theme was deleted"
+        );
         assert_eq!(
             fs::read_to_string(theme.join("theme.json")).unwrap(),
             "user-owned"

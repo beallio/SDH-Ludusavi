@@ -32,7 +32,7 @@
     },
     {
       "name": "channel_mismatch_is_rejected",
-      "channel": "stable",
+      "channel": "development",
       "installed_version": "0.5.0",
       "releases": [
         {"draft": false, "prerelease": false, "tag_name": "v0.5.2", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.2", "published_at": "2026-10-20T00:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.5.2.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.2/manifest.json"}, {"name": "SDH-Ludusavi-v0.5.2.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.2/plugin.zip"}]}

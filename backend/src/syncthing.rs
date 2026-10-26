@@ -339,9 +339,13 @@ fn candidate_config_files() -> Vec<PathBuf> {
         ("STCONFDIR", Some("config.xml")),
         ("STHOMEDIR", Some("config.xml")),
     ] {
-        if let Some(value) = env::var_os(name) {
+        if let Some(value) = env::var_os(name).filter(|value| !value.is_empty()) {
             let path = expand_path(&value.to_string_lossy());
-            candidates.push(append.map_or(path.clone(), |file| path.join(file)));
+            candidates.push(if let Some(file) = append {
+                path.join(file)
+            } else {
+                path
+            });
         }
     }
     for (variable, default, suffix) in [
@@ -349,19 +353,16 @@ fn candidate_config_files() -> Vec<PathBuf> {
         ("XDG_CONFIG_HOME", ".config", "syncthing/config.xml"),
         ("XDG_DATA_HOME", ".local/share", "syncthing/config.xml"),
     ] {
-        let base = env::var_os(variable)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(default));
-        candidates.push(base.join(suffix));
+        if let Some(value) = env::var_os(variable).filter(|value| !value.is_empty()) {
+            candidates.push(expand_path(&value.to_string_lossy()).join(suffix));
+        }
+        candidates.push(home.join(default).join(suffix));
     }
-    let mut flatpak_ids = BTreeSet::new();
-    if let Ok(id) = env::var("FLATPAK_ID")
-        && !id.trim().is_empty()
+    let current_flatpak_id = env::var("FLATPAK_ID").unwrap_or_default();
+    for id in std::iter::once(current_flatpak_id.trim())
+        .filter(|id| !id.is_empty())
+        .chain(COMMON_FLATPAK_IDS)
     {
-        flatpak_ids.insert(id);
-    }
-    flatpak_ids.extend(COMMON_FLATPAK_IDS.map(str::to_owned));
-    for id in flatpak_ids {
         let base = home.join(".var/app").join(id);
         for subpath in [
             "config/syncthing/config.xml",
@@ -989,6 +990,16 @@ fn run_watch(
                     .ok_or_else(|| "Syncthing peer completion initialization failed.".to_owned())?;
                 peers.insert(device.clone(), completion);
             }
+            if let Ok(status) = get_folder_status(&api, &folder.id) {
+                apply_folder_status(
+                    &status,
+                    &mut state,
+                    &mut runtime,
+                    &mut local,
+                    true,
+                    Instant::now(),
+                );
+            }
         }
         Ok(())
     })();
@@ -1032,21 +1043,14 @@ fn run_watch(
             break;
         }
         if let Ok(status) = get_folder_status(&api, &folder.id) {
-            let next = parse_folder_runtime(&status);
-            if runtime.sequence != 0 && next.sequence != 0 && next.sequence != runtime.sequence {
-                local.last_sequence_change = Some(now);
-                local.last_local_index = Some(now);
-                if post_game && next.sequence > runtime.sequence {
-                    note_outbound_mutation(&mut local, now);
-                }
-            }
-            state = status
-                .get("state")
-                .and_then(Value::as_str)
-                .filter(|state| !state.is_empty())
-                .unwrap_or(&state)
-                .to_owned();
-            runtime = next;
+            apply_folder_status(
+                &status,
+                &mut state,
+                &mut runtime,
+                &mut local,
+                post_game,
+                now,
+            );
         }
         let params = [
             ("since", cursor.to_string()),
@@ -1059,10 +1063,23 @@ fn run_watch(
             EVENT_TIMEOUT + Duration::from_secs(10),
         ) && let Some(events) = events.as_array()
         {
+            if events
+                .iter()
+                .filter_map(|event| integer_field(event, "id"))
+                .any(|id| id < cursor)
+            {
+                cursor = events
+                    .iter()
+                    .filter_map(|event| integer_field(event, "id"))
+                    .max()
+                    .unwrap_or(cursor);
+            }
+            let mut config_changed = false;
             for event in events {
                 if let Some(id) = integer_field(event, "id") {
                     cursor = cursor.max(id);
                 }
+                config_changed |= event.get("type").and_then(Value::as_str) == Some("ConfigSaved");
                 process_event(
                     event,
                     &folder,
@@ -1073,6 +1090,23 @@ fn run_watch(
                     &mut local,
                     post_game,
                 );
+            }
+            if config_changed {
+                match get_folder_status(&api, &folder.id) {
+                    Ok(status) => {
+                        state = status
+                            .get("state")
+                            .and_then(Value::as_str)
+                            .filter(|state| !state.is_empty())
+                            .unwrap_or("unknown")
+                            .to_owned();
+                        runtime = parse_folder_runtime(&status);
+                    }
+                    Err(_) => {
+                        state = "unknown".to_owned();
+                        runtime = FolderRuntime::default();
+                    }
+                }
             }
         }
         let now = Instant::now();
@@ -1180,6 +1214,32 @@ fn get_folder_status(api: &SyncthingApi, folder_id: &str) -> Result<Value, Strin
     } else {
         Err("Unexpected Syncthing folder status response".to_owned())
     }
+}
+
+fn apply_folder_status(
+    status: &Value,
+    state: &mut String,
+    runtime: &mut FolderRuntime,
+    local: &mut LocalActivity,
+    post_game: bool,
+    now: Instant,
+) {
+    let next = parse_folder_runtime(status);
+    if runtime.sequence != 0 && next.sequence != 0 && next.sequence != runtime.sequence {
+        local.last_sequence_change = Some(now);
+        local.last_local_index = Some(now);
+    }
+    if post_game && next.sequence > runtime.sequence {
+        note_outbound_mutation(local, now);
+    }
+    if let Some(next_state) = status
+        .get("state")
+        .and_then(Value::as_str)
+        .filter(|state| !state.is_empty())
+    {
+        *state = next_state.to_owned();
+    }
+    *runtime = next;
 }
 
 fn note_outbound_mutation(local: &mut LocalActivity, now: Instant) {
@@ -1297,8 +1357,8 @@ fn process_event(
         "LocalChangeDetected" if matches_folder => local.last_local_change = Some(now),
         "LocalIndexUpdated" if matches_folder => {
             local.last_local_index = Some(now);
-            let sequence = integer_field(&Value::Object(data.clone()), "sequence")
-                .or_else(|| integer_field(&Value::Object(data.clone()), "version"))
+            let sequence = integer_field(&event["data"], "sequence")
+                .or_else(|| integer_field(&event["data"], "version"))
                 .unwrap_or(runtime.sequence);
             if sequence != 0 && sequence != runtime.sequence {
                 local.last_sequence_change = Some(now);
@@ -1362,15 +1422,10 @@ fn publish_sample(
     outbound_streak: &mut u8,
     now: Instant,
 ) {
-    let connected_relevant = connected
-        .iter()
-        .filter(|device| peers.contains_key(*device) || !post_game)
-        .cloned()
-        .collect::<HashSet<_>>();
     let peer_pending = if post_game {
         outbound_peer_confirmation_pending(
             local.outbound_index_observed,
-            &connected_relevant,
+            connected,
             peers,
             *outbound_streak,
         )
@@ -1566,6 +1621,21 @@ mod tests {
         assert!(!outbound_peer_confirmation_pending(
             Some(now),
             &HashSet::from(["peer-a".to_owned()]),
+            &completions,
+            3
+        ));
+        completions.insert(
+            "peer-b".to_owned(),
+            PeerCompletion {
+                observed: now,
+                need_bytes: 100,
+                need_items: 1,
+                need_deletes: 0,
+            },
+        );
+        assert!(!outbound_peer_confirmation_pending(
+            Some(now),
+            &HashSet::from(["peer-a".to_owned(), "peer-b".to_owned()]),
             &completions,
             3
         ));

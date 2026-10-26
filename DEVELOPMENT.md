@@ -96,14 +96,13 @@ SDH_CONTRACT_BACKEND=/path/to/backend \
   ./run.sh uv run pytest -o addopts='' tests/contract/
 ```
 
-The Rust backend implements `contract_core`, `contract_operations`, `contract_lifecycle`,
-`contract_gate`, `contract_syncthing`, `contract_updater`, and `contract_theme`. Run the native
-contract tier, including the required real Ludusavi case, with:
+The Rust backend implements every contract subsystem. Run all native contracts, including the
+required real Ludusavi case and the unmarked harness tests, with:
 
 ```bash
-SDH_CONTRACT_BACKEND=/path/to/backend \
-  ./run.sh uv run pytest -o addopts='' tests/contract/ \
-  -m 'contract_core or contract_operations or contract_lifecycle or contract_gate or contract_syncthing or contract_updater or contract_theme or real_ludusavi'
+SDH_CONTRACT_LUDUSAVI_BIN=/path/to/ludusavi SDH_CONTRACT_REQUIRE_REAL=1 \
+  SDH_CONTRACT_BACKEND=/path/to/backend \
+  ./run.sh uv run pytest -o addopts='' tests/contract/
 ```
 The native lifecycle tier exercises the preview-based restore decision, strict 120-second
 timestamp margin, exact lease verification, pre-scope stop-only gate, cgroup freeze/thaw, lease
@@ -129,6 +128,8 @@ SDH_CONTRACT_SDK_EXAMPLE=/path/to/native_example \
 Without `SDH_CONTRACT_LUDUSAVI_BIN`, the real tier skips locally; `SDH_CONTRACT_REQUIRE_REAL=1`
 makes a missing binary an error. The two network updater RPCs, `check_for_plugin_update` and
 `revalidate_plugin_update`, are intentionally outside this contract suite.
+Their discovery and validation decisions are checked without network access by Python and Rust
+tests using the same JSON data in `tests/contract/fixtures/github/recorded.json`.
 
 ### Build the Decky frontend:
 

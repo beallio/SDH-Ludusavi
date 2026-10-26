@@ -16,10 +16,12 @@ import tempfile
 import threading
 import time
 from typing import Any, Iterator
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
 from harness import ContractHarness, FAKE_BIN, REPO_ROOT
+from sdh_ludusavi._version import resolve_version
 
 
 GAME = "Contract Fixture Game"
@@ -369,10 +371,21 @@ class _SyncthingServer:
         *,
         redirect_non_loopback: bool = False,
         hold_watch_events: bool = False,
+        hold_second_status: bool = False,
+        reset_event_cursor: bool = False,
+        refresh_on_config: bool = False,
     ) -> None:
         self.backup_path = backup_path
         self.redirect_non_loopback = redirect_non_loopback
         self.hold_watch_events = hold_watch_events
+        self.hold_second_status = hold_second_status
+        self.reset_event_cursor = reset_event_cursor
+        self.refresh_on_config = refresh_on_config
+        self.config_event_sent = threading.Event()
+        self.config_refresh_waiting = threading.Event()
+        self.release_config_refresh = threading.Event()
+        self.second_status_waiting = threading.Event()
+        self.release_second_status = threading.Event()
         self.watch_event_waiting = threading.Event()
         self.release_watch_event = threading.Event()
         self._events_request_count = 0
@@ -414,6 +427,16 @@ class _SyncthingServer:
                 if route == "/rest/events" and owner.hold_watch_events and events_request_count > 1:
                     owner.watch_event_waiting.set()
                     owner.release_watch_event.wait(timeout=4)
+                if (
+                    route == "/rest/db/status"
+                    and owner.hold_second_status
+                    and status_request_count == 2
+                ):
+                    owner.second_status_waiting.set()
+                    owner.release_second_status.wait(timeout=4)
+                if route == "/rest/db/status" and owner.config_event_sent.is_set():
+                    owner.config_refresh_waiting.set()
+                    owner.release_config_refresh.wait(timeout=4)
                 responses: dict[str, Any] = {
                     "/rest/system/status": {"myID": "CONTRACT-LOCAL-DEVICE"},
                     "/rest/config/folders": [
@@ -444,9 +467,37 @@ class _SyncthingServer:
                     },
                     "/rest/events": [],
                 }
-                responses["/rest/db/status"]["state"] = (
-                    "scanning" if status_request_count == 1 else "idle"
-                )
+                if owner.hold_second_status:
+                    responses["/rest/db/status"]["sequence"] = 0 if status_request_count == 1 else 2
+                elif not owner.refresh_on_config:
+                    responses["/rest/db/status"]["state"] = (
+                        "scanning" if status_request_count == 1 else "idle"
+                    )
+                if owner.reset_event_cursor and route == "/rest/events":
+                    since = parse_qs(urlsplit(self.path).query).get("since", ["0"])[0]
+                    event_id = {"0": 100, "100": 1, "1": 2}.get(since)
+                    if event_id is not None:
+                        responses["/rest/events"] = [
+                            {
+                                "id": event_id,
+                                "type": "StateChanged",
+                                "data": {"folder": "contract-folder", "to": "idle"},
+                            }
+                        ]
+                if (
+                    owner.refresh_on_config
+                    and route == "/rest/events"
+                    and events_request_count == 2
+                ):
+                    responses["/rest/events"] = [
+                        {
+                            "id": 1,
+                            "type": "StateChanged",
+                            "data": {"folder": "contract-folder", "to": "scanning"},
+                        },
+                        {"id": 2, "type": "ConfigSaved", "data": {}},
+                    ]
+                    owner.config_event_sent.set()
                 if route not in responses:
                     self.send_error(404)
                     return
@@ -471,6 +522,8 @@ class _SyncthingServer:
 
     def close(self) -> None:
         self.release_watch_event.set()
+        self.release_second_status.set()
+        self.release_config_refresh.set()
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)
@@ -478,11 +531,19 @@ class _SyncthingServer:
 
 @contextmanager
 def _syncthing(
-    harness: ContractHarness, *, redirect_non_loopback: bool = False
+    harness: ContractHarness,
+    *,
+    redirect_non_loopback: bool = False,
+    hold_second_status: bool = False,
+    reset_event_cursor: bool = False,
+    refresh_on_config: bool = False,
 ) -> Iterator[_SyncthingServer]:
     server = _SyncthingServer(
         harness.backup_root,
         redirect_non_loopback=redirect_non_loopback,
+        hold_second_status=hold_second_status,
+        reset_event_cursor=reset_event_cursor,
+        refresh_on_config=refresh_on_config,
     ).start()
     config = harness.xdg_state / "syncthing" / "config.xml"
     config.parent.mkdir(parents=True, exist_ok=True)
@@ -1184,6 +1245,45 @@ def test_update_install_handoff_persistence_contract(backend: ContractHarness) -
     assert rpc(backend, "get_update_check_context")["pending_update_install"] is None
 
 
+@pytest.mark.contract_updater
+def test_main_reconciles_pending_install_with_loaded_version() -> None:
+    harness = ContractHarness()
+    version = resolve_version()
+    harness.env["DECKY_PLUGIN_VERSION"] = version
+    pending = {
+        "version": version,
+        "tag": f"v{version}",
+        "channel": "stable",
+        "published_at": "2026-10-01T00:00:00Z",
+        "requested_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    (harness.runtime_dir / "cache.json").write_text(
+        json.dumps({"update_check_cache": {"pending_update_install": pending}}),
+        encoding="utf-8",
+    )
+    try:
+        harness.start()
+
+        def reconciled() -> dict[str, Any] | None:
+            context = rpc(harness, "get_update_check_context")
+            saved = json.loads((harness.runtime_dir / "cache.json").read_text(encoding="utf-8"))
+            if (
+                context["pending_update_install"] is not None
+                or saved["update_check_cache"].get("installed_release_tag") != pending["tag"]
+            ):
+                return None
+            return context
+
+        context = _wait_for(reconciled, 5, "startup did not reconcile the installed update")
+        assert context["installed_release_tag"] == pending["tag"]
+        assert context["installed_release_published_at"] == pending["published_at"]
+        saved = json.loads((harness.runtime_dir / "cache.json").read_text(encoding="utf-8"))
+        assert saved["update_check_cache"]["installed_release_tag"] == pending["tag"]
+        assert "pending_update_install" not in saved["update_check_cache"]
+    finally:
+        harness.close()
+
+
 @pytest.mark.contract_lifecycle
 @pytest.mark.contract_gate
 def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHarness) -> None:
@@ -1403,6 +1503,7 @@ def test_syncthing_watch_redacts_device_ids_and_uninstall_is_scoped(
     assert managed_theme.is_dir()
     backend.uninstall()
     assert not managed_theme.exists()
+    assert (keep_dir / "keep.css").read_text(encoding="utf-8") == "owned elsewhere"
 
 
 @pytest.mark.contract_syncthing
@@ -1422,6 +1523,96 @@ def test_syncthing_does_not_follow_non_loopback_redirect(backend: ContractHarnes
                 path.split("?", 1)[0] == "/rest/system/status" for path in server.requests
             )
         assert status_requests == 1
+
+
+@pytest.mark.contract_syncthing
+def test_syncthing_falls_back_to_home_config_when_xdg_is_set(backend: ContractHarness) -> None:
+    with _syncthing(backend):
+        original = backend.xdg_state / "syncthing" / "config.xml"
+        fallback = backend.home / ".local" / "state" / "syncthing" / "config.xml"
+        fallback.parent.mkdir(parents=True)
+        original.rename(fallback)
+        watch = rpc(backend, "start_syncthing_activity_watch", "pre_game", GAME, APP_ID)
+        assert watch["status"] == "watching", watch
+        rpc(backend, "stop_syncthing_activity_watch", watch["watch_id"])
+
+
+@pytest.mark.contract_syncthing
+def test_syncthing_prefers_current_flatpak_config() -> None:
+    harness = ContractHarness()
+    harness.env["FLATPAK_ID"] = "z.contract.syncthing"
+    current = _SyncthingServer(harness.backup_root).start()
+    other = _SyncthingServer(harness.backup_root).start()
+    try:
+        for app_id, server in [
+            ("z.contract.syncthing", current),
+            ("com.github.zocker_160.SyncThingy", other),
+        ]:
+            config = harness.home / ".var" / "app" / app_id / "config" / "syncthing" / "config.xml"
+            config.parent.mkdir(parents=True)
+            config.write_text(
+                f"<configuration><gui><address>127.0.0.1:{server.port}</address>"
+                f"<apikey>{API_KEY}</apikey></gui></configuration>",
+                encoding="utf-8",
+            )
+        harness.start()
+        watch = rpc(harness, "start_syncthing_activity_watch", "pre_game", GAME, APP_ID)
+        assert watch["status"] == "watching", watch
+        assert current.requests, "current Flatpak configuration was not selected"
+        assert not other.requests, "another Flatpak configuration took precedence"
+        rpc(harness, "stop_syncthing_activity_watch", watch["watch_id"])
+    finally:
+        harness.close()
+        current.close()
+        other.close()
+
+
+@pytest.mark.contract_syncthing
+def test_post_game_baseline_observes_second_folder_status(backend: ContractHarness) -> None:
+    with _syncthing(backend, hold_second_status=True) as server:
+        watch = rpc(backend, "start_syncthing_activity_watch", "post_game", GAME, APP_ID)
+        assert watch["status"] == "watching", watch
+        assert server.second_status_waiting.wait(timeout=3)
+        sample = rpc(backend, "get_syncthing_activity", watch["watch_id"])
+        assert sample["sample"].get("settled") is not True, "baseline settled before second status"
+        server.release_second_status.set()
+
+        def uploading() -> dict[str, Any] | None:
+            activity = rpc(backend, "get_syncthing_activity", watch["watch_id"])
+            return activity if activity.get("sample", {}).get("uploading") is True else None
+
+        _wait_for(uploading, 3, "new local sequence did not require a fresh peer confirmation")
+        rpc(backend, "stop_syncthing_activity_watch", watch["watch_id"])
+
+
+@pytest.mark.contract_syncthing
+def test_syncthing_event_cursor_recovers_after_subscription_reset(backend: ContractHarness) -> None:
+    with _syncthing(backend, reset_event_cursor=True) as server:
+        watch = rpc(backend, "start_syncthing_activity_watch", "pre_game", GAME, APP_ID)
+        assert watch["status"] == "watching", watch
+
+        def recovered() -> bool:
+            with server._request_lock:
+                return any(
+                    parse_qs(urlsplit(path).query).get("since") == ["1"]
+                    for path in server.requests
+                    if path.startswith("/rest/events?")
+                )
+
+        assert _wait_for(recovered, 4, "event subscription did not recover its reset cursor")
+        rpc(backend, "stop_syncthing_activity_watch", watch["watch_id"])
+
+
+@pytest.mark.contract_syncthing
+def test_config_saved_refreshes_folder_before_publishing_events(backend: ContractHarness) -> None:
+    with _syncthing(backend, refresh_on_config=True) as server:
+        watch = rpc(backend, "start_syncthing_activity_watch", "pre_game", GAME, APP_ID)
+        assert watch["status"] == "watching", watch
+        assert server.config_refresh_waiting.wait(timeout=3), "config change did not refresh status"
+        activity = rpc(backend, "get_syncthing_activity", watch["watch_id"])
+        assert activity["sample"]["folder_state"] == "idle"
+        server.release_config_refresh.set()
+        rpc(backend, "stop_syncthing_activity_watch", watch["watch_id"])
 
 
 @pytest.mark.contract_operations
@@ -1671,8 +1862,8 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
             time.sleep(0.01)
         stop_future.result(timeout=6)
         stop_seconds = time.monotonic() - stop_started
-        assert stop_seconds < 5, f"SIGTERM unload with both launch gates took {stop_seconds:.3f}s"
-        print(f"SIGTERM unload with both launch gates: {stop_seconds:.3f}s")
+        assert stop_seconds < 5, f"SIGTERM unload with post-game watch took {stop_seconds:.3f}s"
+        print(f"SIGTERM unload with post-game watch and both launch gates: {stop_seconds:.3f}s")
         assert observed_ordered_release, "launch gates did not release while the watch was active"
         assert not observed_unsafe_release, (
             "a launch gate was released while its Ludusavi process group was still alive"
