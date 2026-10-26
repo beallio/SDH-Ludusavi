@@ -22,6 +22,21 @@ PROTOCOL_TIMEOUT = 10.0
 STOP_TIMEOUT = 5.0
 
 
+def native_backend_path(selector: str | None = None) -> Path:
+    configured = (
+        selector if selector is not None else os.environ.get("SDH_CONTRACT_BACKEND", "shim")
+    )
+    if configured != "shim":
+        return Path(configured)
+    target_dir = Path(os.environ.get("CARGO_TARGET_DIR", REPO_ROOT / "backend" / "target"))
+    return Path(
+        os.environ.get(
+            "SDH_CONTRACT_SHIM_BINARY",
+            str(target_dir / "x86_64-unknown-linux-musl" / "release" / "backend"),
+        )
+    )
+
+
 class ContractHarness:
     """Run a backend as Decky's loader and speak its newline-delimited socket protocol."""
 
@@ -35,8 +50,9 @@ class ContractHarness:
         self._owned_root = (
             tempfile.TemporaryDirectory(prefix="sdh-contract-") if root is None else None
         )
-        self.root = Path(self._owned_root.name) if self._owned_root else root
-        assert self.root is not None
+        root_path = Path(self._owned_root.name) if self._owned_root else root
+        assert root_path is not None
+        self.root: Path = root_path
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.root.chmod(0o700)
 
@@ -117,15 +133,21 @@ class ContractHarness:
                 "SDH_CONTRACT_LUDUSAVI_CONFIG_DIR": str(self.config_dir),
                 "SDH_CONTRACT_BACKUP_ROOT": str(self.backup_root),
                 "SDH_CONTRACT_SAVE_FILE": str(self.root / "save.dat"),
-                "PYTHONPATH": os.pathsep.join(
-                    [str(REPO_ROOT / "py_modules"), str(REPO_ROOT), self.env.get("PYTHONPATH", "")]
-                ),
+                "PYTHONPATH": str(REPO_ROOT),
                 "PATH": os.pathsep.join([str(FAKE_BIN), current_path]),
             }
         )
         self.backend = (
-            backend if backend is not None else os.environ.get("SDH_CONTRACT_BACKEND", "python")
+            backend if backend is not None else os.environ.get("SDH_CONTRACT_BACKEND", "shim")
         )
+        if self.backend == "shim":
+            shutil.copyfile(REPO_ROOT / "plugin.json", self.plugin_dir / "plugin.json")
+            binary = native_backend_path("shim")
+            if binary.is_file():
+                destination = self.plugin_dir / "bin" / "backend"
+                destination.parent.mkdir(exist_ok=True)
+                shutil.copyfile(binary, destination)
+                destination.chmod(0o755)
         self.set_scenario(scenario or {})
         self.process: subprocess.Popen[bytes] | None = None
         self.connection: socket.socket | None = None
@@ -159,7 +181,7 @@ class ContractHarness:
         except Exception:
             self.close()
             raise
-        if self.backend == "python":
+        if self.backend == "shim":
             command = [sys.executable, str(REPO_ROOT / "tests/contract/host.py")]
         else:
             executable = Path(self.backend)

@@ -79,13 +79,13 @@ Characteristics:
 ```
 pyproject.toml
 uv.lock
-py_modules/{package}/
+backend/
 src/
 tests/
 uv dependency management
 ```
 
-A repository with `pyproject.toml`, `uv.lock`, `py_modules/`, `src/`, and `tests/` is Project Mode.
+A repository with `pyproject.toml`, `uv.lock`, `backend/`, `src/`, and `tests/` is Project Mode.
 
 ---
 
@@ -102,7 +102,7 @@ DEVELOPMENT.md
 pyproject.toml
 uv.lock
 run.sh
-py_modules/{package}/
+backend/
 src/
 tests/
 scripts/check_tdd.sh
@@ -112,7 +112,8 @@ docs/specs/
 
 Directory purposes:
 
-- `py_modules/{package}/`: Decky runtime-importable Python backend code.
+- `backend/`: Rust Decky backend source and pinned toolchain; the packaged binary is `bin/backend`.
+- `main.py`: stock Decky compatibility shim; the native Decky fork starts the binary directly.
 - `src/`: TypeScript frontend source.
 - `tests/`: automated tests.
 - `scripts/`: local enforcement and maintenance scripts.
@@ -126,10 +127,16 @@ Gemini-specific instruction or ignore files.
 
 # 5. Command and Cache Policy
 
-Temp files, virtual environments, and tool caches must live under:
+Python tooling caches and virtual environments live under:
 
 ```
 /tmp/{project_dir}/
+```
+
+Disposable copies, scratch files, and Rust build output live under:
+
+```
+/var/tmp/sdh_ludusavi/
 ```
 
 The virtual environment must be:
@@ -155,7 +162,7 @@ The wrapper exports:
 UV_PROJECT_ENVIRONMENT=/tmp/{project_dir}/.venv
 XDG_CACHE_HOME=/tmp/{project_dir}/.cache
 PYTHONPYCACHEPREFIX=/tmp/{project_dir}/__pycache__
-TMPDIR=/tmp/{project_dir}
+TMPDIR=/var/tmp/sdh_ludusavi
 CARGO_TARGET_DIR=/var/tmp/sdh_ludusavi/cargo-target
 ```
 
@@ -366,22 +373,17 @@ Speculative code is forbidden.
 
 Before any commit, agents must execute:
 
-```
-./run.sh uv run ruff check . --fix
-./run.sh uv run ruff format .
-./run.sh uv run ty check py_modules/sdh_ludusavi/
-./run.sh uv run pytest
-./run.sh pnpm run verify
-(
-cd backend
-../run.sh cargo fmt --manifest-path Cargo.toml --check
-../run.sh cargo clippy --manifest-path Cargo.toml --all-targets --locked -- -D warnings
-../run.sh cargo test --manifest-path Cargo.toml --locked
-)
+```bash
+./run.sh bash scripts/quality_gates.sh check
+./run.sh bash scripts/check_tdd.sh
 ```
 
-All checks must pass. The generated pre-commit hook runs these checks plus
-`scripts/check_tdd.sh`.
+The quality gate checks Ruff, Rust formatting, Clippy and unit tests, builds the
+locked static musl backend, type-checks Python tooling, runs pytest including the
+native contract suite, and verifies the frontend. The TDD check requires a
+changed Rust unit-test region or contract test alongside production Rust changes.
+
+All checks must pass. The generated pre-commit hook runs both gates.
 
 ---
 
@@ -471,7 +473,7 @@ A modifying task is complete only if:
 [ ] tests pass via ./run.sh uv run pytest
 [ ] README updated when behavior or usage changed
 [ ] dependencies documented when dependencies changed
-[ ] caches redirected to /tmp
+[ ] Python caches and environments redirected to /tmp; scratch and Rust output to /var/tmp/sdh_ludusavi
 [ ] progress and verification reported in chat
 ```
 
@@ -511,6 +513,6 @@ If uncommitted changes exist:
 
 After reviewing this file, confirm:
 
-- Temp files and caches are under `/tmp/{project_dir}`.
+- Python caches and environments are under `/tmp/{project_dir}`; scratch and Rust output are under `/var/tmp/sdh_ludusavi`.
 - The shell wrapper to run before project commands is `./run.sh`.
 - `ty` is the official type checker.

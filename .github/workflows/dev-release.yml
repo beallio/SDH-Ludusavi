@@ -83,9 +83,32 @@ jobs:
       - name: Setup Toolchain
         uses: ./.github/actions/setup-toolchain
 
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+          components: clippy,rustfmt
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install musl Linker
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+
+      - name: Provision user systemd manager and bus
+        run: |
+          uid="$(id -u)"
+          sudo loginctl enable-linger "$USER"
+          sudo systemctl start "user@${uid}.service"
+          for _ in $(seq 1 30); do
+            [[ -S "/run/user/${uid}/bus" ]] && break
+            sleep 1
+          done
+          [[ -S "/run/user/${uid}/bus" ]]
+          echo "XDG_RUNTIME_DIR=/run/user/${uid}" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${uid}/bus" >> "$GITHUB_ENV"
+
       - name: Prepare Virtual Environment and Sync Dependencies
         run: |
-          SETUPTOOLS_SCM_PRETEND_VERSION="${{ env.BASE_VERSION }}" ./run.sh uv sync
+          SETUPTOOLS_SCM_PRETEND_VERSION="${{ env.BASE_VERSION }}" ./run.sh uv sync --frozen
 
       - name: Run Quality Gates
         run: |

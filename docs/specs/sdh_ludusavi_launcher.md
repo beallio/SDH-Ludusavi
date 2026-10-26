@@ -37,7 +37,7 @@ This feature must not:
 - Parse `.desktop` files.
 - Manage multiple applications.
 - Provide a general-purpose command launcher UI.
-- Launch Ludusavi directly from the Python backend.
+- Launch Ludusavi directly from the backend.
 - Require the user to manually configure a Steam shortcut ID.
 - Require explicit QAM dismissal for correctness.
 
@@ -196,7 +196,7 @@ The config should live in the Decky plugin settings directory.
 
 ## Backend Requirements
 
-The Python backend must expose methods for reading, writing, and clearing the saved shortcut app ID.
+The Rust backend must expose methods for reading, writing, and clearing the saved shortcut app ID.
 
 ### Required Methods
 

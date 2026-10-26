@@ -20,8 +20,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from harness import ContractHarness, FAKE_BIN, REPO_ROOT
-from sdh_ludusavi._version import resolve_version
+from harness import ContractHarness, FAKE_BIN, REPO_ROOT, native_backend_path
 
 
 GAME = "Contract Fixture Game"
@@ -229,6 +228,7 @@ def _start_systemd_child(root: Path, unit: str, systemd_args: list[str]) -> _Chi
         stderr=subprocess.PIPE,
         start_new_session=True,
     )
+    assert process.stderr is not None
 
     def read_pid() -> int | None:
         if not pid_file.exists():
@@ -676,17 +676,6 @@ def test_core_settings_and_logging_contract(backend: ContractHarness) -> None:
     )
     assert "debug while enabled" in plugin_logs
 
-    if backend.backend == "python":
-        # Startup reconciliation runs concurrently with the Python contract socket.
-        startup_deadline = time.monotonic() + 3
-        while time.monotonic() < startup_deadline:
-            logs = rpc(backend, "get_recent_logs")
-            if any(entry["message"].startswith("Startup reconciliation:") for entry in logs):
-                break
-            time.sleep(0.01)
-        else:
-            pytest.fail("Python startup reconciliation did not complete")
-
     for index in range(105):
         rpc(backend, "log", "info", f"ring-{index}")
     logs = rpc(backend, "get_recent_logs")
@@ -705,19 +694,16 @@ def test_core_settings_and_logging_contract(backend: ContractHarness) -> None:
     assert success is False
     assert "Plugin has no method unknown_contract_method" in error
 
-    if backend.backend != "python":
-        assert backend.settings_dir.stat().st_mode & 0o777 == 0o700
-        assert backend.runtime_dir.stat().st_mode & 0o777 == 0o700
-        cache_path = backend.runtime_dir / "cache.json"
-        assert cache_path.stat().st_mode & 0o777 == 0o600
-        assert (backend.runtime_dir / ".sdh_ludusavi.state.lock").stat().st_mode & 0o777 == 0o600
+    assert backend.settings_dir.stat().st_mode & 0o777 == 0o700
+    assert backend.runtime_dir.stat().st_mode & 0o777 == 0o700
+    cache_path = backend.runtime_dir / "cache.json"
+    assert cache_path.stat().st_mode & 0o777 == 0o600
+    assert (backend.runtime_dir / ".sdh_ludusavi.state.lock").stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.contract_core
 def test_native_shutdown_drains_inflight_persistence_call() -> None:
-    native_backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
-    if native_backend == "python":
-        pytest.skip("in-flight native shutdown requires SDH_CONTRACT_BACKEND to select Rust")
+    native_backend = str(native_backend_path())
 
     with tempfile.TemporaryDirectory(
         prefix="sdh-shutdown-", dir="/var/tmp/sdh_ludusavi"
@@ -760,9 +746,7 @@ def test_native_shutdown_drains_inflight_persistence_call() -> None:
 
 @pytest.mark.contract_core
 def test_native_sigterm_during_startup_lock_contention_is_prompt() -> None:
-    native_backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
-    if native_backend == "python":
-        pytest.skip("startup lock contention requires SDH_CONTRACT_BACKEND to select Rust")
+    native_backend = str(native_backend_path())
 
     with tempfile.TemporaryDirectory(
         prefix="sdh-startup-lock-", dir="/var/tmp/sdh_ludusavi"
@@ -804,83 +788,6 @@ def test_native_sigterm_during_startup_lock_contention_is_prompt() -> None:
             backend.close()
 
 
-@pytest.mark.contract_core
-def test_cross_backend_persistence_is_bidirectional() -> None:
-    native_backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
-    if native_backend == "python":
-        pytest.skip("cross-backend persistence requires SDH_CONTRACT_BACKEND to select Rust")
-
-    with tempfile.TemporaryDirectory(
-        prefix="sdh-cross-backend-", dir="/var/tmp/sdh_ludusavi"
-    ) as temporary_root:
-        root = Path(temporary_root)
-        python = ContractHarness(backend="python", root=root).start()
-        try:
-            assert rpc(python, "update_settings", {"kind": "auto_sync", "enabled": True})[
-                "auto_sync_enabled"
-            ]
-            assert (
-                rpc(
-                    python,
-                    "update_settings",
-                    {"kind": "selected_game", "game_name": "Python wrote"},
-                )["selected_game"]
-                == "Python wrote"
-            )
-            assert rpc(python, "set_ludusavi_launcher_shortcut_id", 1234567) is True
-
-            history_entry = {
-                "operation": "backup",
-                "trigger": "manual_backup",
-                "status": "backed_up",
-                "reason": None,
-                "message": "written by Python",
-                "timestamp": "2026-10-24T12:34:56.123456+00:00",
-            }
-            cache_path = python.runtime_dir / "cache.json"
-            cache = json.loads(cache_path.read_text(encoding="utf-8"))
-            cache["game_history"] = {"Cross Backend Game": {"last_backup": history_entry}}
-            cache["python_future_cache_key"] = {"preserve": True}
-            cache_path.write_text(json.dumps(cache), encoding="utf-8")
-        finally:
-            python.close()
-
-        native = ContractHarness(backend=native_backend, root=root).start()
-        try:
-            settings = rpc(native, "get_settings")
-            assert settings["auto_sync_enabled"] is True
-            assert settings["selected_game"] == "Python wrote"
-            assert rpc(native, "get_ludusavi_launcher_shortcut_id") == 1234567
-            history = rpc(native, "get_game_history")
-            _assert_history_map(history)
-            assert history["Cross Backend Game"]["last_backup"]["message"] == "written by Python"
-
-            assert (
-                rpc(
-                    native, "update_settings", {"kind": "selected_game", "game_name": "Rust wrote"}
-                )["selected_game"]
-                == "Rust wrote"
-            )
-            assert rpc(native, "set_ludusavi_launcher_shortcut_id", 7654321) is True
-            cache = json.loads((native.runtime_dir / "cache.json").read_text(encoding="utf-8"))
-            assert cache["python_future_cache_key"] == {"preserve": True}
-            assert cache["game_history"]["Cross Backend Game"]["last_backup"] == history_entry
-        finally:
-            native.close()
-
-        python = ContractHarness(backend="python", root=root).start()
-        try:
-            settings = rpc(python, "get_settings")
-            assert settings["auto_sync_enabled"] is True
-            assert settings["selected_game"] == "Rust wrote"
-            assert rpc(python, "get_ludusavi_launcher_shortcut_id") == 7654321
-            history = rpc(python, "get_game_history")
-            _assert_history_map(history)
-            assert history["Cross Backend Game"]["last_backup"]["message"] == "written by Python"
-        finally:
-            python.close()
-
-
 @pytest.mark.contract_theme
 def test_theme_installation_and_uninstall_ownership(backend: ContractHarness) -> None:
     assert rpc(backend, "consume_theme_refresh_needed") is True
@@ -905,9 +812,7 @@ def test_theme_installation_and_uninstall_ownership(backend: ContractHarness) ->
 
 @pytest.mark.contract_theme
 def test_uninstall_only_theme_cleanup_needs_no_backend_state() -> None:
-    native_backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
-    if native_backend == "python":
-        pytest.skip("uninstall-only process mode requires SDH_CONTRACT_BACKEND to select Rust")
+    native_backend = str(native_backend_path())
 
     with tempfile.TemporaryDirectory(
         prefix="sdh-contract-uninstall-", dir="/var/tmp/sdh_ludusavi"
@@ -988,6 +893,7 @@ def test_unload_cancels_and_reaps_ludusavi_process_group() -> None:
         }
     )
     harness.start()
+    assert harness.process is not None
     operations = ThreadPoolExecutor(max_workers=1)
     try:
         result = operations.submit(harness.call, "force_backup", GAME, timeout=30)
@@ -1019,13 +925,12 @@ def test_unload_cancels_and_reaps_ludusavi_process_group() -> None:
         stop_seconds = time.monotonic() - started
         assert stop_seconds < 5, f"backend shutdown took {stop_seconds:.3f}s"
         assert not _process_group_exists(record["pgid"])
-        if harness.backend != "python":
-            cache = json.loads((harness.runtime_dir / "cache.json").read_text(encoding="utf-8"))
-            entry = cache["game_history"][GAME]
-            assert entry["last_skip"]["status"] == "skipped"
-            assert entry["last_skip"]["reason"] == "cancelled"
-            assert entry["last_failure"] is None
-            assert entry["last_operation"]["status"] == "skipped"
+        cache = json.loads((harness.runtime_dir / "cache.json").read_text(encoding="utf-8"))
+        entry = cache["game_history"][GAME]
+        assert entry["last_skip"]["status"] == "skipped"
+        assert entry["last_skip"]["reason"] == "cancelled"
+        assert entry["last_failure"] is None
+        assert entry["last_operation"]["status"] == "skipped"
         with pytest.raises(ConnectionError, match="backend is shutting down"):
             result.result(timeout=1)
     finally:
@@ -1082,6 +987,35 @@ def test_non_object_ludusavi_roots_preserve_the_existing_registry(
 
 
 @pytest.mark.contract_operations
+def test_successful_operations_keep_history_when_followup_refresh_fails(
+    backend: ContractHarness,
+) -> None:
+    refreshed = rpc(backend, "refresh_games", True, APP_ID)
+    assert any(game["name"] == GAME and game["has_backup"] for game in refreshed["games"])
+    backend.set_scenario(
+        {"flatpak": {"responses": {"backup_preview": {"exit_code": 23, "stderr": "offline"}}}}
+    )
+
+    assert rpc(backend, "force_backup", GAME)["status"] == "backed_up"
+    assert rpc(backend, "force_restore", GAME)["status"] == "restored"
+    previews = [
+        record
+        for record in backend.fake_processes()
+        if len(record["argv"]) > 2
+        and record["argv"][2] == "backup"
+        and "--preview" in record["argv"]
+    ]
+    assert len(previews) >= 3
+    history = rpc(backend, "get_game_history")[GAME]
+    assert history["last_backup"]["status"] == "backed_up"
+    assert history["last_restore"]["status"] == "restored"
+    backend.restart()
+    history = rpc(backend, "get_game_history")[GAME]
+    assert history["last_backup"]["status"] == "backed_up"
+    assert history["last_restore"]["status"] == "restored"
+
+
+@pytest.mark.contract_operations
 def test_restore_backup_version_rejects_unsafe_id(backend: ContractHarness) -> None:
     backup = rpc(backend, "refresh_games", True, APP_ID)
     assert any(game["name"] == GAME for game in backup["games"])
@@ -1089,6 +1023,30 @@ def test_restore_backup_version_rejects_unsafe_id(backend: ContractHarness) -> N
     assert success is True
     assert result["status"] == "failed"
     assert "Invalid backup ID" in result["message"]
+
+
+@pytest.mark.contract_core
+def test_existing_unknown_settings_and_cache_keys_survive_updates() -> None:
+    harness = ContractHarness()
+    settings_path = harness.settings_dir / "settings.json"
+    cache_path = harness.runtime_dir / "cache.json"
+    settings_path.write_text(json.dumps({"future_setting": {"nested": [1, 2]}}))
+    cache_path.write_text(json.dumps({"future_cache": {"nested": [3, 4]}}))
+    try:
+        harness.start()
+        assert rpc(harness, "update_settings", {"kind": "auto_sync", "enabled": True})[
+            "auto_sync_enabled"
+        ]
+        assert rpc(harness, "set_ludusavi_launcher_shortcut_id", 7654321) is True
+        assert json.loads(settings_path.read_text())["future_setting"] == {"nested": [1, 2]}
+        assert json.loads(cache_path.read_text())["future_cache"] == {"nested": [3, 4]}
+        harness.restart()
+        assert rpc(harness, "get_settings")["auto_sync_enabled"] is True
+        assert rpc(harness, "get_ludusavi_launcher_shortcut_id") == 7654321
+        assert json.loads(settings_path.read_text())["future_setting"] == {"nested": [1, 2]}
+        assert json.loads(cache_path.read_text())["future_cache"] == {"nested": [3, 4]}
+    finally:
+        harness.close()
 
 
 @pytest.mark.contract_operations
@@ -1248,7 +1206,7 @@ def test_update_install_handoff_persistence_contract(backend: ContractHarness) -
 @pytest.mark.contract_updater
 def test_main_reconciles_pending_install_with_loaded_version() -> None:
     harness = ContractHarness()
-    version = resolve_version()
+    version = json.loads((REPO_ROOT / "plugin.json").read_text(encoding="utf-8"))["version"]
     harness.env["DECKY_PLUGIN_VERSION"] = version
     pending = {
         "version": version,

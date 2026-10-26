@@ -4,6 +4,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -11,12 +12,52 @@ import pytest
 
 
 def load_package_module():
-    spec = importlib.util.spec_from_file_location("package_plugin", "scripts/package_plugin.py")
+    spec = importlib.util.spec_from_file_location(
+        "scripts.package_plugin", "scripts/package_plugin.py"
+    )
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_package_requires_static_backend(tmp_path: Path) -> None:
+    missing = tmp_path / "missing-backend"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/package_plugin.py",
+            "--release",
+            "--backend",
+            str(missing),
+            "--output-dir",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "backend" in result.stderr.lower()
+    assert "backend binary is missing" in result.stderr.lower()
+
+
+def test_package_rejects_dynamically_linked_backend(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/package_plugin.py",
+            "--release",
+            "--backend",
+            "/bin/ls",
+            "--output-dir",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "static" in result.stderr.lower()
 
 
 def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
@@ -34,6 +75,9 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
         names = set(archive.namelist())
         plugin_metadata = json.loads(archive.read("SDH-Ludusavi/plugin.json"))
         package_metadata = json.loads(archive.read("SDH-Ludusavi/package.json"))
+        backend = archive.getinfo("SDH-Ludusavi/bin/backend")
+        assert (backend.external_attr >> 16) & 0o777 == 0o755
+        assert archive.read(backend).startswith(b"\x7fELF")
         theme_manifest = json.loads(archive.read("SDH-Ludusavi/theme/theme.json"))
 
     mode = theme_manifest["patches"]["Save Status"]
@@ -70,8 +114,8 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
         "SDH-Ludusavi/dist/assets/logo-",
     ]:
         assert any(name.startswith(asset_prefix) and name.endswith(".png") for name in names)
-    assert "README.md" not in names
-    assert "SDH-Ludusavi/README.md" not in names
+    assert "SDH-Ludusavi/README.md" in names
+    assert not any(name.startswith("SDH-Ludusavi/py_modules/") for name in names)
     assert "src/index.tsx" not in names
     assert "SDH-Ludusavi/src/index.tsx" not in names
     assert "node_modules/.modules.yaml" not in names
@@ -119,6 +163,13 @@ def test_package_script_rebuilds_missing_runtime_bundle(
     assert build_calls == [project_root]
 
 
+def test_project_metadata_reports_mit_license() -> None:
+    package = json.loads(Path("package.json").read_text(encoding="utf-8"))
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert package["license"] == "MIT"
+    assert project["license"] == {"text": "MIT"}
+
+
 def test_package_metadata_versions_match_release_version() -> None:
     module = load_package_module()
     plugin_metadata = json.loads(Path("plugin.json").read_text())
@@ -147,12 +198,6 @@ def test_package_validation_rejects_mismatched_metadata(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Plugin metadata versions must match"):
         module.validate_package_versions(tmp_path)
-
-
-def test_post_commit_script_builds_the_project_zip() -> None:
-    source = Path("scripts/post_commit.sh").read_text()
-
-    assert "./run.sh uv run python scripts/package_plugin.py" in source
 
 
 def test_package_script_supports_release_arguments(tmp_path: Path) -> None:

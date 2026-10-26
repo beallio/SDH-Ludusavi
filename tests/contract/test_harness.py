@@ -3,12 +3,55 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+import shutil
 import time
 from uuid import UUID
 
 import pytest
 
 from harness import ContractHarness
+
+
+def test_shim_mode_reports_missing_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SDH_CONTRACT_SHIM_BINARY", str(tmp_path / "absent"))
+    harness = ContractHarness(backend="shim", root=tmp_path / "environment")
+    try:
+        with pytest.raises(RuntimeError, match="bin/backend"):
+            harness.start()
+    finally:
+        harness.close()
+
+
+def test_shim_mode_reports_missing_metadata(tmp_path: Path) -> None:
+    harness = ContractHarness(backend="shim", root=tmp_path / "environment")
+    metadata_path = harness.plugin_dir / "plugin.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata.pop("backend")
+    metadata_path.write_text(json.dumps(metadata))
+    try:
+        with pytest.raises(RuntimeError, match="plugin.json has no relative backend path"):
+            harness.start()
+    finally:
+        harness.close()
+
+
+def test_shim_mode_rejects_empty_plugin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import harness as harness_module
+
+    project = tmp_path / "project"
+    host_dir = project / "tests" / "contract"
+    host_dir.mkdir(parents=True)
+    shutil.copyfile(harness_module.REPO_ROOT / "tests/contract/host.py", host_dir / "host.py")
+    shutil.copyfile(harness_module.REPO_ROOT / "plugin.json", project / "plugin.json")
+    shutil.copytree(harness_module.REPO_ROOT / "theme", project / "theme")
+    (project / "main.py").write_text("class Plugin:\n    pass\n")
+    monkeypatch.setattr(harness_module, "REPO_ROOT", project)
+    harness = ContractHarness(backend="shim", root=tmp_path / "environment")
+    try:
+        with pytest.raises(RuntimeError, match="_main"):
+            harness.start()
+    finally:
+        harness.close()
 
 
 def _probe_backend(tmp_path: Path, response: dict[str, object]) -> tuple[Path, Path]:

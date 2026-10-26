@@ -6,6 +6,9 @@ cd "$(git rev-parse --show-toplevel)"
 echo "Verifying Decky frontend supply chain and bundle..."
 ./run.sh pnpm run verify
 
+echo "Building static Rust backend..."
+(cd backend && ../run.sh cargo build --target x86_64-unknown-linux-musl --release --locked)
+
 echo "Creating Decky plugin package..."
 ./run.sh uv run python scripts/package_plugin.py
 

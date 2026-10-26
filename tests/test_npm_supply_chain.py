@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +47,7 @@ def test_package_json_exposes_frontend_supply_chain_scripts() -> None:
 
     scripts = package["scripts"]
     assert isinstance(scripts, dict)
+    scripts = cast(dict[str, object], scripts)
     assert scripts["typecheck"] == "tsc --noEmit"
     assert scripts["audit"] == "pnpm audit --audit-level moderate"
     assert scripts["test"] == "pnpm run test:unit && pnpm run typecheck"

@@ -13,9 +13,8 @@ def test_decky_required_plugin_files_exist():
         "rollup.config.js",
         "tsconfig.json",
         "src/index.tsx",
-        "py_modules/sdh_ludusavi/service.py",
-        "py_modules/pyludusavi/__init__.py",
-        "py_modules/pyludusavi-0.3.0.dist-info/licenses/LICENSE",
+        "backend/Cargo.toml",
+        "backend/src/main.rs",
     ]:
         assert Path(required_path).exists()
 
@@ -40,10 +39,10 @@ def test_notice_preserves_project_lineage_and_design_credit() -> None:
     assert "Copyright (c) 2024-2025, GedasFX" in license_text
 
 
-def test_backend_package_uses_decky_py_modules_path():
-    assert Path("py_modules/sdh_ludusavi").is_dir()
-    assert Path("py_modules/pyludusavi").is_dir()
-    assert not Path("src/sdh_ludusavi").exists()
+def test_backend_metadata_points_to_native_executable():
+    metadata = json.loads(Path("plugin.json").read_text(encoding="utf-8"))
+    assert metadata["api_version"] == 1
+    assert metadata["backend"] == "bin/backend"
 
 
 def test_template_only_files_are_removed():
