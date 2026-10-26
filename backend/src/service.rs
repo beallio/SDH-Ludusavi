@@ -52,8 +52,24 @@ impl BackendService {
         let settings_path = settings_dir.join("settings.json");
         let cache_path = runtime_dir.join("cache.json");
         let state_lock = StateLock::new(&cache_path)?;
-        let loaded =
-            state_lock.with_lock(|| Ok((read_object(&settings_path), read_object(&cache_path))));
+        let loaded = state_lock.with_lock(|| {
+            let settings = read_object(&settings_path)
+                .unwrap_or_else(|error| {
+                    log::warn!(
+                        "Could not read settings at {}: {error}",
+                        settings_path.display()
+                    );
+                    None
+                })
+                .unwrap_or_default();
+            let cache = read_object(&cache_path)
+                .unwrap_or_else(|error| {
+                    log::warn!("Could not read cache at {}: {error}", cache_path.display());
+                    None
+                })
+                .unwrap_or_default();
+            Ok((settings, cache))
+        });
         let (settings, cache) = match loaded {
             Ok(state) => state,
             Err(error) => {
@@ -197,7 +213,17 @@ impl BackendService {
         }
         self.state_lock
             .with_lock(|| {
-                let mut settings = read_object(&self.settings_path);
+                let mut settings = match read_object(&self.settings_path) {
+                    Ok(Some(settings)) => settings,
+                    Ok(None) => lock(&self.settings).clone(),
+                    Err(error) => {
+                        log::warn!(
+                            "Could not reload settings at {}: {error}; retaining last good state",
+                            self.settings_path.display()
+                        );
+                        lock(&self.settings).clone()
+                    }
+                };
                 apply_settings_patch(&mut settings, patch)
                     .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
                 let mode = existing_mode(&self.settings_path, 0o644)?;
@@ -225,7 +251,7 @@ impl BackendService {
     fn set_shortcut_id(&self, app_id: i64) -> Result<(), String> {
         self.state_lock
             .with_lock(|| {
-                let mut cache = read_object(&self.cache_path);
+                let mut cache = read_object(&self.cache_path)?.unwrap_or_default();
                 cache.insert("ludusaviLauncherShortcutAppId".to_owned(), json!(app_id));
                 write_json_atomic(&self.cache_path, &cache, 0o600, b"  ")?;
                 self.shortcut_id.store(app_id, Ordering::Relaxed);
@@ -670,7 +696,7 @@ impl Drop for ActiveCall {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
+    use std::{fs, sync::Arc, time::Duration};
 
     use decky_plugin::Env;
     use serde_json::{Value, json};
@@ -716,6 +742,43 @@ mod tests {
         assert_eq!(settings["sync_disabled_games"], json!([]));
         assert!(!service.settings_path.exists());
         assert_eq!(service.get_recent_logs(), logs_before);
+    }
+
+    #[test]
+    fn update_settings_keeps_last_good_snapshot_after_read_failure() {
+        let (_directory, service) = test_service();
+        service
+            .update_settings(
+                json!({"kind": "selected_game", "game_name": "Keep this setting"})
+                    .as_object()
+                    .unwrap(),
+            )
+            .unwrap();
+
+        fs::write(&service.settings_path, b"{ invalid json").unwrap();
+        let updated = service
+            .update_settings(
+                json!({"kind": "auto_sync", "enabled": true})
+                    .as_object()
+                    .unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(updated["selected_game"], "Keep this setting");
+        let persisted: Value =
+            serde_json::from_slice(&fs::read(&service.settings_path).unwrap()).unwrap();
+        assert_eq!(persisted["selected_game"], "Keep this setting");
+    }
+
+    #[test]
+    fn set_shortcut_id_does_not_replace_unreadable_cache() {
+        let (_directory, service) = test_service();
+        service.set_shortcut_id(123).unwrap();
+        fs::write(&service.cache_path, b"{ invalid json").unwrap();
+
+        let unreadable_cache = fs::read(&service.cache_path).unwrap();
+        assert!(service.set_shortcut_id(456).is_err());
+        assert_eq!(fs::read(&service.cache_path).unwrap(), unreadable_cache);
     }
 
     #[tokio::test]

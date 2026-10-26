@@ -103,25 +103,20 @@ pub fn ensure_private_directory(path: &Path) -> io::Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))
 }
 
-pub fn read_object(path: &Path) -> Map<String, Value> {
+pub fn read_object(path: &Path) -> io::Result<Option<Map<String, Value>>> {
     let file = match File::open(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Map::new(),
-        Err(error) => {
-            log::warn!("Could not read {}: {error}", path.display());
-            return Map::new();
-        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
     };
-    match serde_json::from_reader::<_, Value>(file) {
-        Ok(Value::Object(object)) => object,
-        Ok(_) => {
-            log::warn!("Ignoring non-object JSON in {}", path.display());
-            Map::new()
-        }
-        Err(error) => {
-            log::warn!("Ignoring invalid JSON in {}: {error}", path.display());
-            Map::new()
-        }
+    let value = serde_json::from_reader::<_, Value>(file)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    match value {
+        Value::Object(object) => Ok(Some(object)),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("JSON in {} is not an object", path.display()),
+        )),
     }
 }
 
