@@ -1279,26 +1279,6 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = i32::try_from(child.id()).unwrap();
-        let operation_child = Command::new("/bin/sleep")
-            .arg("30")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .process_group(0)
-            .spawn()
-            .unwrap();
-        let operation_pid = i32::try_from(operation_child.id()).unwrap();
-        let (operation_exited_sender, operation_exited_receiver) = mpsc::channel();
-        let operation_reaper = thread::spawn(move || {
-            let mut operation_child = operation_child;
-            loop {
-                if operation_child.try_wait().unwrap().is_some() {
-                    operation_exited_sender.send(()).unwrap();
-                    break;
-                }
-                thread::sleep(Duration::from_millis(2));
-            }
-        });
         let proc_dir = proc_root.join(pid.to_string());
         let task_dir = proc_dir.join("task").join(pid.to_string());
         fs::create_dir_all(&task_dir).unwrap();
@@ -1336,16 +1316,22 @@ mod tests {
         );
 
         let (cancel_sender, cancel_receiver) = mpsc::channel();
+        let (registered_sender, registered_receiver) = mpsc::channel();
         let (continue_sender, continue_receiver) = mpsc::channel();
         let (panic_sender, panic_receiver) = mpsc::channel();
         let worker_watchdog = watchdog.clone();
         let worker = thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                worker_watchdog.run_guarded(pid, "panic-lease", move |cancel, completion| -> () {
-                    *completion = ProcessGroupCompletion::pending(operation_pid);
+                worker_watchdog.run_guarded(pid, "panic-lease", move |cancel, completion| {
                     cancel_sender.send(cancel).unwrap();
-                    continue_receiver.recv().unwrap();
-                    panic!("fixture guarded operation panic")
+                    crate::operations::run_test_process_after_registration(
+                        completion,
+                        move |operation_pid| {
+                            registered_sender.send(operation_pid).unwrap();
+                            continue_receiver.recv().unwrap();
+                            panic!("fixture guarded operation panic");
+                        },
+                    );
                 })
             }));
             panic_sender.send(result.is_err()).unwrap();
@@ -1353,6 +1339,10 @@ mod tests {
         let cancellation = cancel_receiver
             .recv_timeout(Duration::from_secs(1))
             .unwrap();
+        let operation_pid = registered_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        thread::sleep(Duration::from_millis(50));
 
         let (waiting_sender, waiting_receiver) = mpsc::channel();
         let (woke_sender, woke_receiver) = mpsc::channel();
@@ -1379,22 +1369,23 @@ mod tests {
         let guarded_before_unwind = lock(&watchdog.inner.state).leases[&pid].guarded_active;
         continue_sender.send(()).unwrap();
 
-        let panicked = panic_receiver.recv_timeout(Duration::from_secs(1)).unwrap();
-        let operation_exited = operation_exited_receiver
-            .recv_timeout(Duration::from_secs(1))
-            .is_ok();
-        let waiter_woke = woke_receiver
+        let completed_before_cleanup = panic_receiver
             .recv_timeout(Duration::from_millis(100))
             .is_ok();
-        if !waiter_woke {
-            if let Some(lease) = lock(&watchdog.inner.state).leases.get_mut(&pid) {
-                lease.guarded_active = false;
-                lease.cancellation = None;
-            }
-            watchdog.inner.changed.notify_all();
+        let group_alive_before_cleanup = unsafe { libc::kill(-operation_pid, 0) == 0 };
+        let waiter_woke_before_cleanup = woke_receiver
+            .recv_timeout(Duration::from_millis(100))
+            .is_ok();
+        if group_alive_before_cleanup {
+            let _ = unsafe { libc::kill(-operation_pid, libc::SIGKILL) };
         }
+        let mut status = 0;
+        let _ = unsafe { libc::waitpid(operation_pid, &mut status, 0) };
+        let panicked = completed_before_cleanup
+            || panic_receiver
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap_or(false);
         worker.join().unwrap();
-        operation_reaper.join().unwrap();
         waiter.join().unwrap();
         let cancellation_requested = cancellation.load(std::sync::atomic::Ordering::Acquire);
         let resume = watchdog.resume(pid, None);
@@ -1407,15 +1398,19 @@ mod tests {
             "test did not reach the guarded-operation state"
         );
         assert!(
-            operation_exited,
-            "unwinding returned before the exact operation process exited"
+            completed_before_cleanup,
+            "guarded cleanup stalled on an unreaped registered child"
+        );
+        assert!(
+            !group_alive_before_cleanup,
+            "guarded cleanup returned while its registered process group remained"
         );
         assert!(
             cancellation_requested,
             "unwinding did not request cancellation"
         );
         assert!(
-            waiter_woke,
+            waiter_woke_before_cleanup,
             "unwind finalization did not wake release waiters"
         );
         assert_eq!(resume["status"], "resumed");

@@ -36,6 +36,8 @@ type GuardedMutation =
     Box<dyn FnOnce(Arc<AtomicBool>, &mut ProcessGroupCompletion) -> Result<Value, String>>;
 type ProcessOutputReader = thread::JoinHandle<io::Result<Vec<u8>>>;
 type ProcessReaders = (Option<ProcessOutputReader>, Option<ProcessOutputReader>);
+#[cfg(test)]
+type AfterTrackHook = Box<dyn FnOnce(i32) + Send>;
 
 #[derive(Clone, Debug)]
 struct Game {
@@ -1304,6 +1306,7 @@ pub(crate) struct ProcessGroupCompletion {
     pid: Option<i32>,
     confirmed: bool,
     groups: Option<Arc<Mutex<BTreeSet<i32>>>>,
+    child: Option<Child>,
     readers: ProcessReaders,
 }
 
@@ -1313,6 +1316,7 @@ impl ProcessGroupCompletion {
             pid: None,
             confirmed: true,
             groups: None,
+            child: None,
             readers: (None, None),
         }
     }
@@ -1323,14 +1327,22 @@ impl ProcessGroupCompletion {
             pid: Some(pid),
             confirmed: false,
             groups: None,
+            child: None,
             readers: (None, None),
         }
     }
 
-    fn track(&mut self, pid: i32, groups: Arc<Mutex<BTreeSet<i32>>>) {
+    fn track(&mut self, pid: i32, groups: Arc<Mutex<BTreeSet<i32>>>, child: Child) {
         self.pid = Some(pid);
         self.confirmed = false;
         self.groups = Some(groups);
+        self.child = Some(child);
+    }
+
+    fn child_mut(&mut self) -> &mut Child {
+        self.child
+            .as_mut()
+            .expect("tracked process group has child")
     }
 
     fn set_stdout_reader(&mut self, reader: ProcessOutputReader) {
@@ -1357,15 +1369,21 @@ impl ProcessGroupCompletion {
     }
 
     pub(crate) fn wait(&mut self, cancellation: Option<&AtomicBool>) {
-        if !self.confirmed {
-            if let Some(pid) = self.pid {
-                while group_exists(pid) {
-                    if cancellation.is_some_and(|token| token.load(Ordering::Acquire)) {
-                        let _ = signal_group(pid, libc::SIGKILL);
-                    }
-                    thread::sleep(Duration::from_millis(10));
+        if !self.confirmed
+            && let Some(pid) = self.pid
+        {
+            while group_exists(pid) {
+                if cancellation.is_some_and(|token| token.load(Ordering::Acquire)) {
+                    let _ = signal_group(pid, libc::SIGKILL);
                 }
+                if let Some(child) = self.child.as_mut() {
+                    let _ = child.try_wait();
+                }
+                thread::sleep(Duration::from_millis(10));
             }
+        }
+        self.reap_child();
+        if !self.confirmed {
             self.confirm_exit();
         }
         if let Some(reader) = self.readers.0.take() {
@@ -1374,6 +1392,22 @@ impl ProcessGroupCompletion {
         if let Some(reader) = self.readers.1.take() {
             let _ = reader.join();
         }
+    }
+
+    fn reap_child(&mut self) {
+        if let Some(child) = self.child.as_mut() {
+            if child.try_wait().ok().flatten().is_none() {
+                let _ = child.kill();
+            }
+            let _ = child.wait();
+        }
+    }
+}
+
+impl Drop for ProcessGroupCompletion {
+    fn drop(&mut self) {
+        let cancellation = AtomicBool::new(true);
+        self.wait(Some(&cancellation));
     }
 }
 
@@ -1385,6 +1419,8 @@ struct ProcessManager {
     fail_reader_at: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     reader_attempt: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    after_track_hook: Mutex<Option<AfterTrackHook>>,
 }
 
 impl ProcessManager {
@@ -1459,19 +1495,23 @@ impl ProcessManager {
                 return Err("Ludusavi process ID is out of range".to_owned());
             }
         };
+        completion.track(pid, Arc::clone(&self.groups), child);
         lock(&self.groups).insert(pid);
-        completion.track(pid, Arc::clone(&self.groups));
+        #[cfg(test)]
+        if let Some(hook) = lock(&self.after_track_hook).take() {
+            hook(pid);
+        }
         if self.stopping.load(Ordering::Acquire)
             || cancellation.is_some_and(|token| token.load(Ordering::Acquire))
         {
             let _ = signal_group(pid, libc::SIGTERM);
         }
-        let stdout = child.stdout.take().expect("piped stdout");
-        let stderr = child.stderr.take().expect("piped stderr");
+        let stdout = completion.child_mut().stdout.take().expect("piped stdout");
+        let stderr = completion.child_mut().stderr.take().expect("piped stderr");
         let stdout_reader = match self.spawn_output_reader(stdout) {
             Ok(reader) => reader,
             Err(error) => {
-                if terminate_group(pid, &mut child) {
+                if terminate_group(pid, completion.child_mut()) {
                     completion.confirm_exit();
                     completion.wait(None);
                 }
@@ -1482,7 +1522,7 @@ impl ProcessManager {
         let stderr_reader = match self.spawn_output_reader(stderr) {
             Ok(reader) => reader,
             Err(error) => {
-                if terminate_group(pid, &mut child) {
+                if terminate_group(pid, completion.child_mut()) {
                     completion.confirm_exit();
                     completion.wait(None);
                 }
@@ -1500,7 +1540,7 @@ impl ProcessManager {
                 outcome = Some("cancelled".to_owned());
                 break;
             }
-            match child.try_wait() {
+            match completion.child_mut().try_wait() {
                 Ok(Some(child_status)) => {
                     status = Some(child_status);
                     if !group_exists(pid) {
@@ -1520,7 +1560,7 @@ impl ProcessManager {
             thread::sleep(Duration::from_millis(10));
         }
         let group_exited = if outcome.is_some() || group_exists(pid) {
-            terminate_group(pid, &mut child)
+            terminate_group(pid, completion.child_mut())
         } else {
             true
         };
@@ -1528,7 +1568,7 @@ impl ProcessManager {
             return Err("Could not confirm Ludusavi process group exit".to_owned());
         }
         if status.is_none() {
-            status = child.wait().ok();
+            status = completion.child_mut().wait().ok();
         }
         completion.confirm_exit();
         let stdout = match completion
@@ -1589,6 +1629,23 @@ impl ProcessManager {
         groups.retain(|pid| group_exists(*pid));
         groups.is_empty()
     }
+}
+
+#[cfg(test)]
+pub(crate) fn run_test_process_after_registration(
+    completion: &mut ProcessGroupCompletion,
+    after_registration: impl FnOnce(i32) + Send + 'static,
+) {
+    let processes = ProcessManager::default();
+    *lock(&processes.after_track_hook) = Some(Box::new(after_registration));
+    let _ = processes.run_at_cancellable(
+        Path::new("/bin/true"),
+        &[],
+        Duration::from_secs(1),
+        false,
+        None,
+        completion,
+    );
 }
 
 fn read_pipe(mut pipe: impl Read) -> io::Result<Vec<u8>> {
