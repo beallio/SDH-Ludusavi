@@ -21,8 +21,9 @@ pub struct StateLock {
     path: PathBuf,
     file: File,
     thread_lock: Mutex<()>,
+    #[cfg(test)]
+    test_after_acquire: Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
 }
-
 impl StateLock {
     pub fn new(cache_path: &Path) -> io::Result<Self> {
         let parent = cache_path.parent().ok_or_else(|| {
@@ -42,7 +43,17 @@ impl StateLock {
             path,
             file,
             thread_lock: Mutex::new(()),
+            #[cfg(test)]
+            test_after_acquire: Mutex::new(None),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_test_after_acquire(&self, hook: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        *self
+            .test_after_acquire
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(hook);
     }
 
     pub fn with_lock<T>(&self, operation: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
@@ -51,6 +62,15 @@ impl StateLock {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let _file_guard = FileLockGuard::acquire(&self.file, &self.path)?;
+        #[cfg(test)]
+        if let Some(hook) = self
+            .test_after_acquire
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+        {
+            hook();
+        }
         operation()
     }
 }

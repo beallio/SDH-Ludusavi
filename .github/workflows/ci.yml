@@ -198,6 +198,20 @@ jobs:
           PKG_VER=$(jq -r .version package.json)
           SETUPTOOLS_SCM_PRETEND_VERSION="$PKG_VER" ./run.sh uv sync
 
+      - name: Install Ludusavi Runtime Libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-0t64
+
+      - name: Download and Verify Ludusavi v0.31.0
+        env:
+          LUDUSAVI_SHA256: 7322ff45d41eae7ae064a80d8c9ecccc5b8fb6fc090a603a66369cd4b054068d
+        run: |
+          mkdir -p "$RUNNER_TEMP/ludusavi"
+          curl -fsSL "https://github.com/mtkennerly/ludusavi/releases/download/v0.31.0/ludusavi-v0.31.0-linux.tar.gz" \
+            -o "$RUNNER_TEMP/ludusavi-v0.31.0-linux.tar.gz"
+          echo "$LUDUSAVI_SHA256  $RUNNER_TEMP/ludusavi-v0.31.0-linux.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/ludusavi-v0.31.0-linux.tar.gz" -C "$RUNNER_TEMP/ludusavi"
+          echo "SDH_CONTRACT_LUDUSAVI_BIN=$RUNNER_TEMP/ludusavi/ludusavi" >> "$GITHUB_ENV"
+          echo "SDH_CONTRACT_REQUIRE_REAL=1" >> "$GITHUB_ENV"
       - name: Run Rust Gates
         working-directory: backend
         run: |
@@ -213,3 +227,12 @@ jobs:
         run: |
           SDH_CONTRACT_BACKEND=/var/tmp/sdh_ludusavi/cargo-target/x86_64-unknown-linux-musl/release/backend \
             ./run.sh uv run pytest -o addopts='' tests/contract/ -m contract_core
+      - name: Run Native Operations RPC Contract
+        run: |
+          SDH_CONTRACT_BACKEND=/var/tmp/sdh_ludusavi/cargo-target/x86_64-unknown-linux-musl/release/backend \
+            ./run.sh uv run pytest -o addopts='' tests/contract/ -m 'contract_operations and not contract_lifecycle'
+
+      - name: Run Native Real Ludusavi Contract
+        run: |
+          SDH_CONTRACT_BACKEND=/var/tmp/sdh_ludusavi/cargo-target/x86_64-unknown-linux-musl/release/backend \
+            ./run.sh uv run pytest -o addopts='' tests/contract/test_contract.py -m real_ludusavi

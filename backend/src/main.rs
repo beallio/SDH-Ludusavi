@@ -48,6 +48,15 @@ async fn run() -> io::Result<()> {
         "get_recent_logs",
         "get_operation_status",
         "get_game_history",
+        "refresh_games",
+        "is_game_cache_current",
+        "force_backup",
+        "force_restore",
+        "list_backups",
+        "restore_backup_version",
+        "get_versions",
+        "get_ludusavi_logs",
+        "get_ludusavi_command",
     ] {
         plugin = register_rpc(plugin, Arc::clone(&service), name);
     }
