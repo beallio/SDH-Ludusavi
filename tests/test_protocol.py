@@ -48,7 +48,6 @@ def test_backend_package_uses_decky_py_modules_path():
 
 def test_template_only_files_are_removed():
     for removed_path in [
-        "backend",
         "defaults",
         "assets/logo.png",
         ".vscode/build.sh",

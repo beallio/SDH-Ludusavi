@@ -56,7 +56,16 @@ cache_dir = "/tmp/sdh_ludusavi/.pytest_cache"
 pythonpath = ["py_modules"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-markers = ["real_ludusavi: exercises the pinned Ludusavi CLI binary"]
+markers = [
+    "real_ludusavi: exercises the pinned Ludusavi CLI binary",
+    "contract_core: exercises RPCs ported to the Rust backend",
+    "contract_operations: exercises backup and restore operations",
+    "contract_lifecycle: exercises automatic game lifecycle",
+    "contract_gate: exercises launch gate behavior",
+    "contract_syncthing: exercises Syncthing integration",
+    "contract_updater: exercises plugin updates",
+    "contract_theme: exercises status theme integration",
+]
 
 [tool.coverage.run]
 data_file = "/tmp/sdh_ludusavi/.coverage"

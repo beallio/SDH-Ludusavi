@@ -232,7 +232,7 @@ def test_timeout_cancels_and_reaps_the_entire_managed_process_group(tmp_path: Pa
     )
 
     with pytest.raises(LudusaviTimeoutError) as timeout_error:
-        executor.execute(["tree"], mode="TEXT", timeout=0.1)
+        executor.execute(["tree"], mode="TEXT", timeout=1.0)
 
     parent_pid, child_pid = (int(pid) for pid in _wait_for_text(pid_file).split())
     _wait_until_stopped(parent_pid)

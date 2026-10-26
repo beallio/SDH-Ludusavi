@@ -4,13 +4,24 @@ This document contains technical information for building, maintaining, and unde
 
 ## Development Setup
 
-Use the wrapper so Python virtual environments and caches stay outside Dropbox:
+Use `./run.sh` so Python virtual environments and caches stay outside Dropbox:
 
 ```bash
 ./run.sh uv sync
 ```
 
-The wrapper stores Python tooling state under `/tmp/sdh_ludusavi`.
+Python tooling state lives under `/tmp/sdh_ludusavi`. Rust build output is the exception:
+`./run.sh` creates `/var/tmp/sdh_ludusavi` with mode 0700 if missing and sets
+`CARGO_TARGET_DIR=/var/tmp/sdh_ludusavi/cargo-target`. Keep Rust target artifacts out of
+Dropbox and the quota-limited `/tmp`.
+
+The Rust backend foundation is built and checked locally with:
+
+```bash
+./run.sh cargo fmt --manifest-path backend/Cargo.toml --check
+./run.sh cargo clippy --manifest-path backend/Cargo.toml --all-targets --locked -- -D warnings
+./run.sh cargo test --manifest-path backend/Cargo.toml --locked
+```
 
 ## Project Structure
 
@@ -27,6 +38,9 @@ The installable Decky plugin is built from these required files:
 - `theme/`: CSS Loader manifest and status-row styles copied to `DECKY_HOME/themes/SDH-Ludusavi Status` when the plugin backend starts.
 - `LICENSE`: redistributable license text.
 - `NOTICE.md`: source lineage, third-party licenses, API integrations, and artwork provenance.
+
+The Rust crate under `backend/` is a native backend foundation only; `main.py` remains the
+launched backend, and the crate is deliberately excluded from the installable plugin package.
 
 ### Frontend Dependencies
 
@@ -69,13 +83,26 @@ Native DOM fixture waits use standard timer callbacks wrapped in promises, not N
 
 ### Black-box backend RPC contract suite
 
-Run the same newline-delimited Unix-socket RPC contract against the Python host or a native production backend. Contract-only runs override the repository's Python coverage threshold:
+Run the same newline-delimited RPC contract against the Python host or a native backend.
+Contract-only runs override the Python coverage threshold:
 
 ```bash
 ./run.sh uv run pytest -o addopts='' tests/contract/
-SDH_CONTRACT_BACKEND=/path/to/production-backend \
+SDH_CONTRACT_BACKEND=/path/to/backend \
   ./run.sh uv run pytest -o addopts='' tests/contract/
 ```
+
+The Rust backend implements only `contract_core` in this phase, so native runs select
+that marker explicitly:
+
+```bash
+SDH_CONTRACT_BACKEND=/path/to/backend \
+  ./run.sh uv run pytest -o addopts='' tests/contract/ -m contract_core
+```
+
+The subsystem markers are `contract_core`, `contract_operations`, `contract_lifecycle`,
+`contract_gate`, `contract_syncthing`, `contract_updater`, and `contract_theme`. Python
+runs every scenario; each native run selects the subsystems it implements.
 
 The harness isolates Decky, HOME and XDG state and refuses to start unless its `flatpak` and
 `systemctl` fakes resolve first on the backend's `PATH`; it never invokes host Ludusavi or

@@ -75,7 +75,9 @@ class ContractHarness:
         ):
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             directory.chmod(0o700)
-        shutil.copytree(REPO_ROOT / "theme", self.plugin_dir / "theme")
+        theme_source = REPO_ROOT / "theme"
+        if not (self.plugin_dir / "theme").exists():
+            shutil.copytree(theme_source, self.plugin_dir / "theme")
         (self.config_dir / "config.yaml").write_text("backup: {}\n", encoding="utf-8")
 
         self.env = os.environ.copy()

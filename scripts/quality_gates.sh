@@ -20,6 +20,15 @@ else
     ./run.sh uv run ruff format --check . || { echo "Ruff formatting check failed."; exit 1; }
 fi
 
+echo "Checking Rust formatting..."
+./run.sh cargo fmt --manifest-path backend/Cargo.toml --check
+
+echo "Checking Rust lints..."
+./run.sh cargo clippy --manifest-path backend/Cargo.toml --all-targets --locked -- -D warnings
+
+echo "Running Rust tests..."
+./run.sh cargo test --manifest-path backend/Cargo.toml --locked
+
 echo "Checking types..."
 ./run.sh uv run ty check py_modules/sdh_ludusavi/ || { echo "Type check failed."; exit 1; }
 
