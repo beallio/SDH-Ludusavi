@@ -717,3 +717,36 @@ fn bounded_reason(message: &str) -> String {
         .take(MAX_REASON_LENGTH)
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir_in;
+
+    use super::{read_process_identity, same_process_identity};
+
+    #[test]
+    fn launch_pid_identity_rejects_reused_pid_with_new_start_ticks() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let proc_root = temporary.path();
+        let pid = 57;
+        let proc_dir = proc_root.join(pid.to_string());
+        fs::create_dir(&proc_dir).unwrap();
+        let fields = std::iter::repeat_n("1", 18).collect::<Vec<_>>().join(" ");
+        fs::write(
+            proc_dir.join("stat"),
+            format!("{pid} (fixture process) S {fields} 991"),
+        )
+        .unwrap();
+
+        let identity = read_process_identity(proc_root, pid).unwrap();
+        fs::write(
+            proc_dir.join("stat"),
+            format!("{pid} (fixture process) S {fields} 992"),
+        )
+        .unwrap();
+
+        assert!(!same_process_identity(proc_root, &identity));
+    }
+}

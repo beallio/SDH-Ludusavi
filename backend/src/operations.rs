@@ -1393,7 +1393,7 @@ impl ProcessManager {
             }
             if let Some(timeout) = outcome.strip_prefix("timeout:") {
                 return Err(format!(
-                    "Ludusavi command timed out after {timeout}: {}",
+                    "Ludusavi command exceeded its configured timeout after {timeout}: {}",
                     args.join(" ")
                 ));
             }
@@ -2034,7 +2034,7 @@ mod tests {
         let error = processes
             .run_at(Path::new("/bin/sh"), &args, Duration::from_millis(80), true)
             .unwrap_err();
-        assert!(error.contains("timed out"), "{error}");
+        assert!(error.contains("timeout"), "{error}");
         let process_group = std::fs::read_to_string(pid_file)
             .unwrap()
             .trim()
