@@ -10,7 +10,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use serde_json::{Map, Value, json};
@@ -18,7 +18,10 @@ use sha2::{Digest, Sha256};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use unicode_casefold::UnicodeCaseFold;
 
-use crate::persistence::{StateLock, read_object, write_json_atomic};
+use crate::{
+    lifecycle::{RestorePreview, classify_restore_change},
+    persistence::{StateLock, read_object, write_json_atomic},
+};
 
 const FLATPAK_ID: &str = "com.github.mtkennerly.ludusavi";
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -29,6 +32,12 @@ const KILL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_INSTALLED_APP_IDS_BYTES: usize = 16_384;
 const MAX_BACKUP_STAT_ENTRIES: usize = 1_000;
 const OPERATION_CANCELLED: &str = "Ludusavi operation cancelled";
+type GuardedMutation =
+    Box<dyn FnOnce(Arc<AtomicBool>, &mut ProcessGroupCompletion) -> Result<Value, String>>;
+type ProcessOutputReader = thread::JoinHandle<io::Result<Vec<u8>>>;
+type ProcessReaders = (Option<ProcessOutputReader>, Option<ProcessOutputReader>);
+#[cfg(test)]
+type AfterTrackHook = Box<dyn FnOnce(i32) + Send>;
 
 #[derive(Clone, Debug)]
 struct Game {
@@ -281,6 +290,19 @@ impl LudusaviOperations {
         }));
         self.cancel_processes();
     }
+    #[cfg(test)]
+    pub(crate) fn use_ludusavi_test_command(&self, flatpak: PathBuf) {
+        *lock(&self.client) = Some(Arc::new(LudusaviClient {
+            processes: Arc::clone(&self.processes),
+            flatpak,
+            config_path: Mutex::new(None),
+            version: Mutex::new(None),
+        }));
+    }
+    #[cfg(test)]
+    pub(crate) fn hold_operation_lock_for_test(&self) -> std::sync::MutexGuard<'_, ()> {
+        lock(&self.operation_lock)
+    }
 
     pub fn processes_exited(&self) -> bool {
         self.processes.groups_exited()
@@ -292,6 +314,98 @@ impl LudusaviOperations {
 
     pub fn get_game_history(&self) -> Value {
         lock(&self.history).clone()
+    }
+    pub(crate) fn matching_lifecycle_game(
+        &self,
+        name: &str,
+        app_id: Option<&str>,
+    ) -> Result<Option<Value>, OperationError> {
+        self.ensure_registry()?;
+        Ok(lock(&self.registry)
+            .matching_game(name, app_id)
+            .map(|game| game.to_value()))
+    }
+
+    pub(crate) fn start_recency(&self, name: &str) -> Result<Value, OperationError> {
+        self.run_operation_wait("start_check", Some(name), Duration::from_secs(30), || {
+            let client = self.client()?;
+            let backups = game_objects(&client.backups(Some(name))?)?;
+            let recency = if backups
+                .get(name)
+                .and_then(|game| game.get("backups"))
+                .and_then(Value::as_array)
+                .is_none_or(Vec::is_empty)
+            {
+                "no_backup"
+            } else {
+                let preview = client.restore(name, true).ok();
+                let change = preview
+                    .as_ref()
+                    .and_then(|value| {
+                        value.pointer(&format!("/games/{}/change", escape_pointer(name)))
+                    })
+                    .and_then(Value::as_str);
+                match classify_restore_change(change) {
+                    RestorePreview::LocalCurrent => "local_current",
+                    RestorePreview::BackupNewer => "backup_newer",
+                    RestorePreview::BackupDiffers => "backup_differs",
+                    RestorePreview::Ambiguous => "ambiguous",
+                }
+            };
+            let metadata = if matches!(recency, "backup_newer" | "local_current") {
+                json!({})
+            } else {
+                conflict_metadata(&client, name)
+            };
+            Ok(json!({"recency":recency, "metadata":metadata}))
+        })
+    }
+
+    pub(crate) fn exit_preview(&self, name: &str) -> Result<Value, OperationError> {
+        self.run_operation_wait("exit_check", Some(name), Duration::from_secs(30), || {
+            self.client()?.backup_preview(Some(name))
+        })
+    }
+
+    pub(crate) fn start_mutation(
+        &self,
+        name: &str,
+        restore: bool,
+        guard: impl FnOnce(GuardedMutation) -> Result<Value, String>,
+    ) -> Result<Value, OperationError> {
+        let operation = if restore { "restore" } else { "backup" };
+        let game = name.to_owned();
+        self.run_operation(operation, Some(name), || {
+            let client = self.client()?;
+            let mutation: GuardedMutation = Box::new(move |cancel, completion| {
+                if restore {
+                    client.restore_cancellable(&game, cancel, completion)
+                } else {
+                    client.backup_cancellable(&game, cancel, completion)
+                }
+            });
+            guard(mutation)
+        })
+    }
+
+    pub(crate) fn backup_on_exit(&self, name: &str) -> Result<Value, OperationError> {
+        self.run_operation("backup", Some(name), || self.client()?.backup(name, false))
+    }
+
+    pub fn refresh_after_lifecycle(&self, name: &str) {
+        let _ = self.refresh_targeted(name);
+    }
+
+    pub fn record_lifecycle_history(
+        &self,
+        game: &str,
+        operation: &str,
+        trigger: &str,
+        status: &str,
+        reason: Option<&str>,
+        message: Option<&str>,
+    ) -> Result<(), String> {
+        self.record_history(game, operation, trigger, status, reason, message)
     }
 
     pub fn get_versions(&self) -> Result<Value, String> {
@@ -574,18 +688,50 @@ impl LudusaviOperations {
         game_name: Option<&str>,
         operation: impl FnOnce() -> Result<T, String>,
     ) -> Result<T, OperationError> {
-        let guard = match self.operation_lock.try_lock() {
-            Ok(guard) => guard,
-            Err(std::sync::TryLockError::WouldBlock) => {
-                let current = lock(&self.status)
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| "operation".to_owned());
-                return Err(OperationError::Locked(format!(
-                    "{current} is already running"
-                )));
+        self.run_operation_inner(name, game_name, None, operation)
+    }
+
+    fn run_operation_wait<T>(
+        &self,
+        name: &str,
+        game_name: Option<&str>,
+        timeout: Duration,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, OperationError> {
+        self.run_operation_inner(name, game_name, Some(timeout), operation)
+    }
+
+    fn run_operation_inner<T>(
+        &self,
+        name: &str,
+        game_name: Option<&str>,
+        wait_timeout: Option<Duration>,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, OperationError> {
+        let deadline = wait_timeout.map(|timeout| Instant::now() + timeout);
+        let guard = loop {
+            match self.operation_lock.try_lock() {
+                Ok(guard) => break guard,
+                Err(std::sync::TryLockError::Poisoned(error)) => break error.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    let current = lock(&self.status)
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| "operation".to_owned());
+                    let Some(deadline) = deadline else {
+                        return Err(OperationError::Locked(format!(
+                            "{current} is already running"
+                        )));
+                    };
+                    let now = Instant::now();
+                    if now >= deadline {
+                        return Err(OperationError::Locked(format!(
+                            "{current} is already running"
+                        )));
+                    }
+                    thread::sleep(Duration::from_millis(10).min(deadline - now));
+                }
             }
-            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
         };
         {
             let mut status = lock(&self.status);
@@ -848,7 +994,7 @@ impl LudusaviOperations {
 }
 
 #[derive(Debug)]
-enum OperationError {
+pub(crate) enum OperationError {
     Locked(String),
     Failed(String),
     Cancelled,
@@ -884,6 +1030,19 @@ impl LudusaviClient {
     }
 
     fn json(&self, args: &[String], timeout: Duration) -> Result<Value, String> {
+        let mut completion = ProcessGroupCompletion::confirmed();
+        let result = self.json_cancellable(args, timeout, None, &mut completion);
+        completion.wait(Some(&self.processes.stopping));
+        result
+    }
+
+    fn json_cancellable(
+        &self,
+        args: &[String],
+        timeout: Duration,
+        cancellation: Option<&AtomicBool>,
+        completion: &mut ProcessGroupCompletion,
+    ) -> Result<Value, String> {
         let mut args = args.to_vec();
         if !args.iter().any(|arg| arg == "--api") {
             args.push("--api".to_owned());
@@ -892,10 +1051,16 @@ impl LudusaviClient {
             .chain(std::iter::once(FLATPAK_ID.to_owned()))
             .chain(args)
             .collect();
-        let output = self
-            .processes
-            .run_at(&self.flatpak, &arguments, timeout, false)?;
-        parse_ludusavi_json(&output)
+        self.processes
+            .run_at_cancellable(
+                &self.flatpak,
+                &arguments,
+                timeout,
+                false,
+                cancellation,
+                completion,
+            )
+            .and_then(|output| parse_ludusavi_json(&output))
     }
 
     fn text(&self, args: &[String], timeout: Duration) -> Result<String, String> {
@@ -955,6 +1120,33 @@ impl LudusaviClient {
         }
         args.extend(["--force".to_owned(), game.to_owned()]);
         self.json(&args, OPERATION_TIMEOUT)
+    }
+    fn backup_cancellable(
+        &self,
+        game: &str,
+        cancellation: Arc<AtomicBool>,
+        completion: &mut ProcessGroupCompletion,
+    ) -> Result<Value, String> {
+        self.json_cancellable(
+            &["backup".to_owned(), "--force".to_owned(), game.to_owned()],
+            OPERATION_TIMEOUT,
+            Some(&cancellation),
+            completion,
+        )
+    }
+
+    fn restore_cancellable(
+        &self,
+        game: &str,
+        cancellation: Arc<AtomicBool>,
+        completion: &mut ProcessGroupCompletion,
+    ) -> Result<Value, String> {
+        self.json_cancellable(
+            &["restore".to_owned(), "--force".to_owned(), game.to_owned()],
+            OPERATION_TIMEOUT,
+            Some(&cancellation),
+            completion,
+        )
     }
 
     fn restore_backup(&self, game: &str, backup_id: &str) -> Result<Value, String> {
@@ -1110,13 +1302,141 @@ impl LudusaviClient {
     }
 }
 
+pub(crate) struct ProcessGroupCompletion {
+    pid: Option<i32>,
+    confirmed: bool,
+    groups: Option<Arc<Mutex<BTreeSet<i32>>>>,
+    child: Option<Child>,
+    readers: ProcessReaders,
+}
+
+impl ProcessGroupCompletion {
+    pub(crate) fn confirmed() -> Self {
+        Self {
+            pid: None,
+            confirmed: true,
+            groups: None,
+            child: None,
+            readers: (None, None),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending(pid: i32) -> Self {
+        Self {
+            pid: Some(pid),
+            confirmed: false,
+            groups: None,
+            child: None,
+            readers: (None, None),
+        }
+    }
+
+    fn track(&mut self, pid: i32, groups: Arc<Mutex<BTreeSet<i32>>>, child: Child) {
+        self.pid = Some(pid);
+        self.confirmed = false;
+        self.groups = Some(groups);
+        self.child = Some(child);
+    }
+
+    fn child_mut(&mut self) -> &mut Child {
+        self.child
+            .as_mut()
+            .expect("tracked process group has child")
+    }
+
+    fn set_stdout_reader(&mut self, reader: ProcessOutputReader) {
+        self.readers.0 = Some(reader);
+    }
+
+    fn set_stderr_reader(&mut self, reader: ProcessOutputReader) {
+        self.readers.1 = Some(reader);
+    }
+
+    fn take_stdout_reader(&mut self) -> Option<ProcessOutputReader> {
+        self.readers.0.take()
+    }
+
+    fn take_stderr_reader(&mut self) -> Option<ProcessOutputReader> {
+        self.readers.1.take()
+    }
+
+    fn confirm_exit(&mut self) {
+        if let (Some(pid), Some(groups)) = (self.pid, &self.groups) {
+            lock(groups).remove(&pid);
+        }
+        self.confirmed = true;
+    }
+
+    pub(crate) fn wait(&mut self, cancellation: Option<&AtomicBool>) {
+        if !self.confirmed
+            && let Some(pid) = self.pid
+        {
+            while group_exists(pid) {
+                if cancellation.is_some_and(|token| token.load(Ordering::Acquire)) {
+                    let _ = signal_group(pid, libc::SIGKILL);
+                }
+                if let Some(child) = self.child.as_mut() {
+                    let _ = child.try_wait();
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        self.reap_child();
+        if !self.confirmed {
+            self.confirm_exit();
+        }
+        if let Some(reader) = self.readers.0.take() {
+            let _ = reader.join();
+        }
+        if let Some(reader) = self.readers.1.take() {
+            let _ = reader.join();
+        }
+    }
+
+    fn reap_child(&mut self) {
+        if let Some(child) = self.child.as_mut() {
+            if child.try_wait().ok().flatten().is_none() {
+                let _ = child.kill();
+            }
+            let _ = child.wait();
+        }
+    }
+}
+
+impl Drop for ProcessGroupCompletion {
+    fn drop(&mut self) {
+        let cancellation = AtomicBool::new(true);
+        self.wait(Some(&cancellation));
+    }
+}
+
 #[derive(Default)]
 struct ProcessManager {
     stopping: AtomicBool,
-    groups: Mutex<BTreeSet<i32>>,
+    groups: Arc<Mutex<BTreeSet<i32>>>,
+    #[cfg(test)]
+    fail_reader_at: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    reader_attempt: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    after_track_hook: Mutex<Option<AfterTrackHook>>,
 }
 
 impl ProcessManager {
+    fn spawn_output_reader(
+        &self,
+        pipe: impl Read + Send + 'static,
+    ) -> io::Result<ProcessOutputReader> {
+        #[cfg(test)]
+        {
+            let attempt = self.reader_attempt.fetch_add(1, Ordering::AcqRel) + 1;
+            if self.fail_reader_at.load(Ordering::Acquire) == attempt {
+                return Err(io::Error::other("fixture output reader creation failure"));
+            }
+        }
+        thread::Builder::new().spawn(move || read_pipe(pipe))
+    }
     fn run_at(
         &self,
         program: &Path,
@@ -1124,7 +1444,24 @@ impl ProcessManager {
         timeout: Duration,
         text: bool,
     ) -> Result<String, String> {
-        if self.stopping.load(Ordering::Acquire) {
+        let mut completion = ProcessGroupCompletion::confirmed();
+        let result = self.run_at_cancellable(program, args, timeout, text, None, &mut completion);
+        completion.wait(Some(&self.stopping));
+        result
+    }
+
+    fn run_at_cancellable(
+        &self,
+        program: &Path,
+        args: &[String],
+        timeout: Duration,
+        text: bool,
+        cancellation: Option<&AtomicBool>,
+        completion: &mut ProcessGroupCompletion,
+    ) -> Result<String, String> {
+        if self.stopping.load(Ordering::Acquire)
+            || cancellation.is_some_and(|token| token.load(Ordering::Acquire))
+        {
             return Err("Ludusavi operation cancelled".to_owned());
         }
         let mut command = Command::new(program);
@@ -1150,25 +1487,60 @@ impl ProcessManager {
         let mut child = command
             .spawn()
             .map_err(|error| format!("Could not start Ludusavi command: {error}"))?;
-        let pid = i32::try_from(child.id())
-            .map_err(|_| "Ludusavi process ID is out of range".to_owned())?;
+        let pid = match i32::try_from(child.id()) {
+            Ok(pid) => pid,
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Ludusavi process ID is out of range".to_owned());
+            }
+        };
+        completion.track(pid, Arc::clone(&self.groups), child);
         lock(&self.groups).insert(pid);
-        if self.stopping.load(Ordering::Acquire) {
+        #[cfg(test)]
+        if let Some(hook) = lock(&self.after_track_hook).take() {
+            hook(pid);
+        }
+        if self.stopping.load(Ordering::Acquire)
+            || cancellation.is_some_and(|token| token.load(Ordering::Acquire))
+        {
             let _ = signal_group(pid, libc::SIGTERM);
         }
-        let stdout = child.stdout.take().expect("piped stdout");
-        let stderr = child.stderr.take().expect("piped stderr");
-        let stdout_reader = thread::spawn(move || read_pipe(stdout));
-        let stderr_reader = thread::spawn(move || read_pipe(stderr));
+        let stdout = completion.child_mut().stdout.take().expect("piped stdout");
+        let stderr = completion.child_mut().stderr.take().expect("piped stderr");
+        let stdout_reader = match self.spawn_output_reader(stdout) {
+            Ok(reader) => reader,
+            Err(error) => {
+                if terminate_group(pid, completion.child_mut()) {
+                    completion.confirm_exit();
+                    completion.wait(None);
+                }
+                return Err(format!("Could not start Ludusavi stdout reader: {error}"));
+            }
+        };
+        completion.set_stdout_reader(stdout_reader);
+        let stderr_reader = match self.spawn_output_reader(stderr) {
+            Ok(reader) => reader,
+            Err(error) => {
+                if terminate_group(pid, completion.child_mut()) {
+                    completion.confirm_exit();
+                    completion.wait(None);
+                }
+                return Err(format!("Could not start Ludusavi stderr reader: {error}"));
+            }
+        };
+        completion.set_stderr_reader(stderr_reader);
         let started = Instant::now();
         let mut status = None;
         let mut outcome = None;
         loop {
-            if self.stopping.load(Ordering::Acquire) {
+            if self.stopping.load(Ordering::Acquire)
+                || cancellation.is_some_and(|token| token.load(Ordering::Acquire))
+            {
                 outcome = Some("cancelled".to_owned());
                 break;
             }
-            match child.try_wait() {
+            match completion.child_mut().try_wait() {
                 Ok(Some(child_status)) => {
                     status = Some(child_status);
                     if !group_exists(pid) {
@@ -1188,7 +1560,7 @@ impl ProcessManager {
             thread::sleep(Duration::from_millis(10));
         }
         let group_exited = if outcome.is_some() || group_exists(pid) {
-            terminate_group(pid, &mut child)
+            terminate_group(pid, completion.child_mut())
         } else {
             true
         };
@@ -1196,46 +1568,53 @@ impl ProcessManager {
             return Err("Could not confirm Ludusavi process group exit".to_owned());
         }
         if status.is_none() {
-            status = child.wait().ok();
+            status = completion.child_mut().wait().ok();
         }
-        let stdout = stdout_reader
+        completion.confirm_exit();
+        let stdout = match completion
+            .take_stdout_reader()
+            .ok_or_else(|| "Ludusavi stdout reader was not started".to_owned())?
             .join()
             .unwrap_or_else(|_| Err(io::Error::other("stdout reader panicked")))
-            .map_err(|error| format!("Could not read Ludusavi stdout: {error}"))?;
-        let stderr = stderr_reader
+        {
+            Ok(stdout) => stdout,
+            Err(error) => return Err(format!("Could not read Ludusavi stdout: {error}")),
+        };
+        let stderr = match completion
+            .take_stderr_reader()
+            .ok_or_else(|| "Ludusavi stderr reader was not started".to_owned())?
             .join()
             .unwrap_or_else(|_| Err(io::Error::other("stderr reader panicked")))
-            .map_err(|error| format!("Could not read Ludusavi stderr: {error}"))?;
-        if !group_exists(pid) {
-            lock(&self.groups).remove(&pid);
-        }
+        {
+            Ok(stderr) => stderr,
+            Err(error) => return Err(format!("Could not read Ludusavi stderr: {error}")),
+        };
         if let Some(outcome) = outcome {
             if outcome == "cancelled" {
-                return Err("Ludusavi operation cancelled".to_owned());
-            }
-            if let Some(timeout) = outcome.strip_prefix("timeout:") {
-                return Err(format!(
-                    "Ludusavi command timed out after {timeout}: {}",
+                Err("Ludusavi operation cancelled".to_owned())
+            } else if let Some(timeout) = outcome.strip_prefix("timeout:") {
+                Err(format!(
+                    "Ludusavi command exceeded its configured timeout after {timeout}: {}",
                     args.join(" ")
-                ));
+                ))
+            } else {
+                Err(outcome)
             }
-            return Err(outcome);
-        }
-        let Some(status) = status else {
-            return Err("Could not reap Ludusavi child process".to_owned());
-        };
-        if !status.success() {
-            return Err(format!(
-                "Ludusavi command failed with exit code {}: {}",
-                status.code().unwrap_or(-1),
-                String::from_utf8_lossy(&stderr).trim()
-            ));
-        }
-        if text {
-            Ok(String::from_utf8_lossy(&stdout).into_owned())
+        } else if let Some(status) = status {
+            if !status.success() {
+                Err(format!(
+                    "Ludusavi command failed with exit code {}: {}",
+                    status.code().unwrap_or(-1),
+                    String::from_utf8_lossy(&stderr).trim()
+                ))
+            } else if text {
+                Ok(String::from_utf8_lossy(&stdout).into_owned())
+            } else {
+                String::from_utf8(stdout)
+                    .map_err(|error| format!("Ludusavi output is not UTF-8: {error}"))
+            }
         } else {
-            String::from_utf8(stdout)
-                .map_err(|error| format!("Ludusavi output is not UTF-8: {error}"))
+            Err("Could not reap Ludusavi child process".to_owned())
         }
     }
 
@@ -1250,6 +1629,23 @@ impl ProcessManager {
         groups.retain(|pid| group_exists(*pid));
         groups.is_empty()
     }
+}
+
+#[cfg(test)]
+pub(crate) fn run_test_process_after_registration(
+    completion: &mut ProcessGroupCompletion,
+    after_registration: impl FnOnce(i32) + Send + 'static,
+) {
+    let processes = ProcessManager::default();
+    *lock(&processes.after_track_hook) = Some(Box::new(after_registration));
+    let _ = processes.run_at_cancellable(
+        Path::new("/bin/true"),
+        &[],
+        Duration::from_secs(1),
+        false,
+        None,
+        completion,
+    );
 }
 
 fn read_pipe(mut pipe: impl Read) -> io::Result<Vec<u8>> {
@@ -1333,6 +1729,76 @@ fn game_objects(value: &Value) -> Result<BTreeMap<String, Value>, String> {
 fn parse_ludusavi_json(output: &str) -> Result<Value, String> {
     serde_json::from_str(output)
         .map_err(|error| format!("Failed to parse Ludusavi JSON output: {error}"))
+}
+fn conflict_metadata(client: &LudusaviClient, game: &str) -> Value {
+    let mut local_modified_at = None;
+    let mut backup_modified_at: Option<String> = None;
+    let mut backup_path: Option<String> = None;
+    if let Ok(output) = client.backups(Some(game))
+        && let Ok(games) = game_objects(&output)
+        && let Some(data) = games.get(game)
+    {
+        backup_path = data
+            .get("backupPath")
+            .and_then(Value::as_str)
+            .filter(|path| !path.is_empty())
+            .map(str::to_owned);
+        if let Some(backups) = data.get("backups").and_then(Value::as_array) {
+            for when in backups
+                .iter()
+                .filter_map(|backup| backup.get("when").and_then(Value::as_str))
+            {
+                if backup_modified_at
+                    .as_deref()
+                    .is_none_or(|current| when > current)
+                {
+                    backup_modified_at = Some(when.to_owned());
+                }
+            }
+        }
+    }
+    if let Ok(output) = client.backup_preview(Some(game))
+        && let Ok(games) = game_objects(&output)
+        && let Some(files) = games
+            .get(game)
+            .and_then(|data| data.get("files"))
+            .and_then(Value::as_object)
+    {
+        let mut newest: Option<SystemTime> = None;
+        for (path, data) in files {
+            let mut candidates = Vec::with_capacity(3);
+            for candidate in [
+                Some(path.as_str()),
+                data.get("originalPath").and_then(Value::as_str),
+                data.get("redirectedPath").and_then(Value::as_str),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let candidate = PathBuf::from(candidate);
+                if candidate.is_absolute() && !candidates.contains(&candidate) {
+                    candidates.push(candidate);
+                }
+            }
+            for candidate in candidates {
+                if let Ok(modified) =
+                    fs::metadata(candidate).and_then(|metadata| metadata.modified())
+                {
+                    if newest.is_none_or(|previous| modified > previous) {
+                        newest = Some(modified);
+                    }
+                    break;
+                }
+            }
+        }
+        local_modified_at =
+            newest.and_then(|modified| OffsetDateTime::from(modified).format(&Rfc3339).ok());
+    }
+    json!({
+        "localModifiedAt": local_modified_at,
+        "backupModifiedAt": backup_modified_at,
+        "backupPath": backup_path,
+    })
 }
 
 fn game_error(game: &Value) -> Option<String> {
@@ -1786,7 +2252,7 @@ mod tests {
         let error = processes
             .run_at(Path::new("/bin/sh"), &args, Duration::from_millis(80), true)
             .unwrap_err();
-        assert!(error.contains("timed out"), "{error}");
+        assert!(error.contains("timeout"), "{error}");
         let process_group = std::fs::read_to_string(pid_file)
             .unwrap()
             .trim()
@@ -1794,6 +2260,40 @@ mod tests {
             .unwrap();
         assert!(!group_exists(process_group));
         assert!(processes.groups_exited());
+    }
+    #[test]
+    fn output_reader_creation_failure_terminates_the_owned_process_group() {
+        for failure_index in [1, 2] {
+            let args = [
+                "-c".to_owned(),
+                "trap '' TERM; sleep 30 & wait".to_owned(),
+                "sh".to_owned(),
+            ];
+            let processes = ProcessManager::default();
+            processes
+                .fail_reader_at
+                .store(failure_index, std::sync::atomic::Ordering::Release);
+            let mut completion = super::ProcessGroupCompletion::confirmed();
+            let error = processes
+                .run_at_cancellable(
+                    Path::new("/bin/sh"),
+                    &args,
+                    Duration::from_secs(2),
+                    true,
+                    None,
+                    &mut completion,
+                )
+                .unwrap_err();
+            completion.wait(None);
+            let process_group = completion.pid.unwrap();
+            assert!(completion.confirmed);
+            assert!(!group_exists(process_group));
+            assert!(processes.groups_exited());
+            assert!(
+                error.contains("reader"),
+                "failure at reader {failure_index} returned {error}"
+            );
+        }
     }
     #[test]
     fn successful_leader_waits_for_writer_descendant_before_returning() {

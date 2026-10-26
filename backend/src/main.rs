@@ -28,16 +28,36 @@ fn register_rpc(
 async fn run() -> io::Result<()> {
     let service: Arc<OnceLock<Arc<BackendService>>> = Arc::new(OnceLock::new());
     let initialize = Arc::clone(&service);
-    let mut plugin = Plugin::new().on_migration(move |context| async move {
-        let env = context.env().clone();
-        let backend = tokio::task::spawn_blocking(move || BackendService::new(&env))
+    let mut plugin = Plugin::new()
+        .on_migration(move |context| async move {
+            let env = context.env().clone();
+            let backend = tokio::task::spawn_blocking(move || BackendService::new(&env))
+                .await
+                .map_err(|error| format!("service initialization task failed: {error}"))?
+                .map_err(|error| error.to_string())?;
+            initialize
+                .set(Arc::new(backend))
+                .map_err(|_| "backend initialized more than once".to_owned())
+        })
+        .on_main(|_context| async move {
+            match tokio::task::spawn_blocking(
+                sdh_ludusavi_backend::singleton::enforce_single_instance,
+            )
             .await
-            .map_err(|error| format!("service initialization task failed: {error}"))?
-            .map_err(|error| error.to_string())?;
-        initialize
-            .set(Arc::new(backend))
-            .map_err(|_| "backend initialized more than once".to_owned())
-    });
+            {
+                Ok(Ok(report)) => log::info!(
+                    "Single-instance check completed: status={}, terminated={}, killed={}, skipped={}, failed={}",
+                    report.status,
+                    report.terminated.len(),
+                    report.killed.len(),
+                    report.skipped.len(),
+                    report.failed.len()
+                ),
+                Ok(Err(error)) => log::warn!("Single-instance check failed; continuing startup: {error}"),
+                Err(error) => log::warn!("Single-instance check task failed; continuing startup: {error}"),
+            }
+            Ok(())
+        });
 
     for name in [
         "get_settings",
@@ -48,6 +68,14 @@ async fn run() -> io::Result<()> {
         "get_recent_logs",
         "get_operation_status",
         "get_game_history",
+        "check_game_start",
+        "restore_game_on_start",
+        "resolve_game_start_conflict",
+        "check_game_exit",
+        "backup_game_on_exit",
+        "pause_game_process",
+        "renew_game_process_pause",
+        "resume_game_process",
         "refresh_games",
         "is_game_cache_current",
         "force_backup",

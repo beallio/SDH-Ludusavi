@@ -118,3 +118,51 @@ def test_graceful_backend_exit_still_kills_remaining_process_group(tmp_path: Pat
             pytest.fail("backend process group survived graceful backend exit")
     finally:
         harness.close()
+
+
+def test_systemd_child_startup_failure_stops_started_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import signal
+    from io import BytesIO
+
+    import test_contract
+
+    child_pid = 424242
+    signals: list[tuple[int, int]] = []
+    wait_calls = 0
+
+    class FakeProcess:
+        stderr = BytesIO()
+        waited = False
+
+        def poll(self) -> int | None:
+            return None if not self.waited else 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.waited = True
+            return 0
+
+    process = FakeProcess()
+
+    def start_process(arguments: list[str], **_kwargs: object) -> FakeProcess:
+        Path(arguments[-2]).write_text(str(child_pid), encoding="ascii")
+        return process
+
+    def fail_after_pid(_predicate: object, _timeout: float, _message: str) -> int:
+        nonlocal wait_calls
+        wait_calls += 1
+        if wait_calls == 1:
+            return child_pid
+        raise TimeoutError("simulated heartbeat failure")
+
+    monkeypatch.setattr(test_contract.shutil, "which", lambda _name: "/usr/bin/systemd-run")
+    monkeypatch.setattr(test_contract.subprocess, "Popen", start_process)
+    monkeypatch.setattr(test_contract.os, "kill", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr(test_contract, "_wait_for", fail_after_pid)
+
+    with pytest.raises(TimeoutError, match="simulated heartbeat failure"):
+        test_contract._start_systemd_child(tmp_path, "fixture.service", ["--user"])
+
+    assert signals == [(child_pid, signal.SIGCONT), (child_pid, signal.SIGTERM)]
+    assert process.waited

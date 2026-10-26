@@ -236,14 +236,32 @@ def _start_systemd_child(root: Path, unit: str, systemd_args: list[str]) -> _Chi
         except ValueError:
             return None
 
-    pid = _wait_for(
-        read_pid,
-        10,
-        f"systemd-run did not start {unit}: "
-        f"{process.stderr.read().decode(errors='replace') if process.poll() is not None else ''}",
-    )
-    _wait_for(lambda: tick_file.exists(), 5, "systemd child heartbeat did not start")
-    return _Child(pid, process, unit, tick_file)
+    try:
+        pid = _wait_for(
+            read_pid,
+            10,
+            f"systemd-run did not start {unit}: "
+            f"{process.stderr.read().decode(errors='replace') if process.poll() is not None else ''}",
+        )
+        _wait_for(lambda: tick_file.exists(), 5, "systemd child heartbeat did not start")
+        return _Child(pid, process, unit, tick_file)
+    except BaseException:
+        try:
+            pid = read_pid()
+            if pid is not None:
+                _stop_child(_Child(pid, process, unit, tick_file))
+            elif process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+        except BaseException as cleanup_error:
+            raise RuntimeError(
+                f"Could not clean up failed systemd fixture {unit}"
+            ) from cleanup_error
+        raise
 
 
 def _start_scoped_child(root: Path) -> _Child:
@@ -1519,6 +1537,7 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
             "fake Ludusavi did not install its TERM handler and spawn its child",
         )
         assert not operation.done(), "restore RPC unexpectedly completed before backend shutdown"
+        stop_started = time.monotonic()
         stop_future = shutdown_pool.submit(harness.stop)
         observed_unsafe_release = False
         deadline = time.monotonic() + 6
@@ -1532,6 +1551,9 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
                 break
             time.sleep(0.01)
         stop_future.result(timeout=6)
+        stop_seconds = time.monotonic() - stop_started
+        assert stop_seconds < 5, f"SIGTERM unload with both launch gates took {stop_seconds:.3f}s"
+        print(f"SIGTERM unload with both launch gates: {stop_seconds:.3f}s")
         assert not observed_unsafe_release, (
             "a launch gate was released while its Ludusavi process group was still alive"
         )
@@ -1614,8 +1636,6 @@ def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
         history = rpc(harness, "get_game_history")[GAME]
         assert history["last_backup"]["operation"] == "backup"
         assert history["last_restore"]["operation"] == "restore"
-        if os.environ.get("SDH_CONTRACT_BACKEND", "python") != "python":
-            return
 
         save.write_bytes(b"newer local version C\x00\n")
         future = time.time() + 300
