@@ -132,6 +132,9 @@ Their discovery and validation decisions are checked without network access by P
 tests using the same JSON data in `tests/contract/fixtures/github/recorded.json`.
 Updater checks snapshot settings before contacting the release client; concurrent settings changes,
 unmatched install handoffs, and expired rate-limit cooldowns must not block updater calls.
+Rust updater cache mutations reload the latest persisted state under the shared state lock, then
+write atomically before publishing their in-memory result. Startup reconciliation uses the same
+transaction so concurrent updater instances cannot overwrite a newer install handoff or notification.
 
 ### Build the Decky frontend:
 

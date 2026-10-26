@@ -482,6 +482,32 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
 }
 
+fn normalized_update_cache(root_cache: &Map<String, Value>) -> Map<String, Value> {
+    let mut cache = root_cache
+        .get("update_check_cache")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if cache
+        .get("pending_update_install")
+        .is_some_and(|pending| !pending.is_object() || pending.get("version").is_none())
+    {
+        cache.remove("pending_update_install");
+    }
+    for key in ["last_checked_at", "installed_release_published_at"] {
+        if cache.get(key).is_some_and(|value| !value.is_string()) {
+            cache.remove(key);
+        }
+    }
+    if cache
+        .get("last_result")
+        .is_some_and(|value| !value.is_object())
+    {
+        cache.remove("last_result");
+    }
+    cache
+}
+
 pub struct PluginUpdater {
     client: Arc<dyn ReleaseClient>,
     state_lock: Arc<StateLock>,
@@ -489,6 +515,8 @@ pub struct PluginUpdater {
     cache: Mutex<Map<String, Value>>,
     rate_limited_until: Mutex<Option<OffsetDateTime>>,
     installed_version: String,
+    #[cfg(test)]
+    test_before_save: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl PluginUpdater {
@@ -536,28 +564,7 @@ impl PluginUpdater {
         installed_version: String,
         client: Arc<dyn ReleaseClient>,
     ) -> Self {
-        let mut cache = root_cache
-            .get("update_check_cache")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        if cache
-            .get("pending_update_install")
-            .is_some_and(|pending| !pending.is_object() || pending.get("version").is_none())
-        {
-            cache.remove("pending_update_install");
-        }
-        for key in ["last_checked_at", "installed_release_published_at"] {
-            if cache.get(key).is_some_and(|value| !value.is_string()) {
-                cache.remove(key);
-            }
-        }
-        if cache
-            .get("last_result")
-            .is_some_and(|value| !value.is_object())
-        {
-            cache.remove("last_result");
-        }
+        let cache = normalized_update_cache(root_cache);
         Self {
             client,
             state_lock,
@@ -565,17 +572,36 @@ impl PluginUpdater {
             cache: Mutex::new(cache),
             rate_limited_until: Mutex::new(None),
             installed_version,
+            #[cfg(test)]
+            test_before_save: Mutex::new(None),
         }
     }
 
-    fn save(&self) -> Result<(), String> {
-        let update_cache = Value::Object(lock(&self.cache).clone());
+    fn transact_update_cache(
+        &self,
+        change: impl FnOnce(&mut Map<String, Value>) -> bool,
+    ) -> Result<(), String> {
+        #[cfg(test)]
+        {
+            let hook = lock(&self.test_before_save).clone();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
         self.state_lock
             .with_lock(|| {
                 let mut root = read_object(&self.cache_path)?.unwrap_or_default();
-                root.insert("update_check_cache".to_owned(), update_cache);
-                let mode = existing_mode(&self.cache_path, 0o600)?;
-                write_json_atomic(&self.cache_path, &root, mode, b"  ")
+                let mut cache = normalized_update_cache(&root);
+                if change(&mut cache) {
+                    root.insert(
+                        "update_check_cache".to_owned(),
+                        Value::Object(cache.clone()),
+                    );
+                    let mode = existing_mode(&self.cache_path, 0o600)?;
+                    write_json_atomic(&self.cache_path, &root, mode, b"  ")?;
+                }
+                *lock(&self.cache) = cache;
+                Ok(())
             })
             .map_err(|error| error.to_string())
     }
@@ -702,8 +728,7 @@ impl PluginUpdater {
         } else {
             json!({"status":"current", "checked_at":checked_at, "checked_version":current_version, "channel":channel})
         };
-        {
-            let mut cache = lock(&self.cache);
+        self.transact_update_cache(|cache| {
             cache.insert("last_checked_at".to_owned(), json!(checked_at));
             cache.insert("last_checked_channel".to_owned(), json!(channel));
             cache.insert("last_checked_version".to_owned(), json!(current_version));
@@ -711,8 +736,8 @@ impl PluginUpdater {
             if let Some(candidate) = candidate {
                 cache.insert("last_available_tag".to_owned(), json!(candidate.tag));
             }
-        }
-        self.save()?;
+            true
+        })?;
         let mut public_result = result;
         public_result
             .as_object_mut()
@@ -728,7 +753,7 @@ impl PluginUpdater {
     pub fn revalidate(&self, candidate: &Value) -> Result<Value, String> {
         let started = Instant::now();
         let now = OffsetDateTime::now_utc();
-        let expired = {
+        {
             let mut cooldown = lock(&self.rate_limited_until);
             if let Some(until) = *cooldown {
                 if now < until {
@@ -737,13 +762,7 @@ impl PluginUpdater {
                     );
                 }
                 *cooldown = None;
-                true
-            } else {
-                false
             }
-        };
-        if expired {
-            self.save()?;
         }
         let Some(tag) = candidate.get("tag").and_then(Value::as_str) else {
             return Ok(
@@ -755,7 +774,6 @@ impl PluginUpdater {
         if matches!(response.status, 403 | 429) {
             let retry = retry_after(&response.headers, OffsetDateTime::now_utc());
             *lock(&self.rate_limited_until) = parse_time(&retry);
-            self.save()?;
             let message = response
                 .body
                 .get("message")
@@ -824,21 +842,21 @@ impl PluginUpdater {
         candidate: &Value,
         settings: &Map<String, Value>,
     ) -> Result<Value, String> {
-        let mut cache = lock(&self.cache);
-        cache.insert(
-            "pending_update_install".to_owned(),
-            json!({
-                "version": candidate.get("version"),
-                "tag": candidate.get("tag"),
-                "channel": candidate.get("channel"),
-                "published_at": candidate.get("published_at"),
-                "requested_at": format_time(OffsetDateTime::now_utc()),
-                "update_trace_id": candidate.get("updateTraceId"),
-            }),
-        );
-        clear_stale_cache(&mut cache);
-        drop(cache);
-        self.save()?;
+        self.transact_update_cache(|cache| {
+            cache.insert(
+                "pending_update_install".to_owned(),
+                json!({
+                    "version": candidate.get("version"),
+                    "tag": candidate.get("tag"),
+                    "channel": candidate.get("channel"),
+                    "published_at": candidate.get("published_at"),
+                    "requested_at": format_time(OffsetDateTime::now_utc()),
+                    "update_trace_id": candidate.get("updateTraceId"),
+                }),
+            );
+            clear_stale_cache(cache);
+            true
+        })?;
         Ok(self.context(settings))
     }
 
@@ -847,8 +865,7 @@ impl PluginUpdater {
         version: &str,
         settings: &Map<String, Value>,
     ) -> Result<Value, String> {
-        let changed = {
-            let mut cache = lock(&self.cache);
+        self.transact_update_cache(|cache| {
             if let Some(pending) = cache
                 .get_mut("pending_update_install")
                 .and_then(Value::as_object_mut)
@@ -858,21 +875,20 @@ impl PluginUpdater {
                     "handoff_confirmed_at".to_owned(),
                     json!(format_time(OffsetDateTime::now_utc())),
                 );
-                clear_stale_cache(&mut cache);
+                clear_stale_cache(cache);
                 true
             } else {
                 false
             }
-        };
-        if changed {
-            self.save()?;
-        }
+        })?;
         Ok(self.context(settings))
     }
 
     pub fn mark_notified(&self, tag: &str, settings: &Map<String, Value>) -> Result<Value, String> {
-        lock(&self.cache).insert("last_notified_tag".to_owned(), json!(tag));
-        self.save()?;
+        self.transact_update_cache(|cache| {
+            cache.insert("last_notified_tag".to_owned(), json!(tag));
+            true
+        })?;
         Ok(self.context(settings))
     }
 
@@ -881,8 +897,7 @@ impl PluginUpdater {
         version: Option<&str>,
         settings: &Map<String, Value>,
     ) -> Result<Value, String> {
-        let changed = {
-            let mut cache = lock(&self.cache);
+        self.transact_update_cache(|cache| {
             let pending_version = cache
                 .get("pending_update_install")
                 .and_then(|pending| pending.get("version"))
@@ -891,44 +906,40 @@ impl PluginUpdater {
                 && (version.is_none() || pending_version == version)
             {
                 cache.remove("pending_update_install");
-                clear_stale_cache(&mut cache);
+                clear_stale_cache(cache);
                 true
             } else {
                 false
             }
-        };
-        if changed {
-            self.save()?;
-        }
+        })?;
         Ok(self.context(settings))
     }
 
     pub fn reconcile_pending_install(&self, current_version: &str) -> Result<(), String> {
-        let mut cache = lock(&self.cache);
-        let Some(pending) = cache.get("pending_update_install").cloned() else {
-            return Ok(());
-        };
-        let pending_version = pending.get("version").and_then(Value::as_str).unwrap_or("");
-        if pending_install_matches_loaded_version(pending_version, current_version) {
-            cache.insert(
-                "installed_release_tag".to_owned(),
-                pending.get("tag").cloned().unwrap_or(Value::Null),
-            );
-            cache.insert(
-                "installed_release_published_at".to_owned(),
-                pending.get("published_at").cloned().unwrap_or(Value::Null),
-            );
-            cache.remove("pending_update_install");
-            clear_stale_cache(&mut cache);
-            drop(cache);
-            self.save()?;
-        } else if !is_fresh_pending_install(&pending, OffsetDateTime::now_utc()) {
-            cache.remove("pending_update_install");
-            clear_stale_cache(&mut cache);
-            drop(cache);
-            self.save()?;
-        }
-        Ok(())
+        self.transact_update_cache(|cache| {
+            if let Some(pending) = cache.get("pending_update_install").cloned() {
+                let pending_version = pending.get("version").and_then(Value::as_str).unwrap_or("");
+                if pending_install_matches_loaded_version(pending_version, current_version) {
+                    cache.insert(
+                        "installed_release_tag".to_owned(),
+                        pending.get("tag").cloned().unwrap_or(Value::Null),
+                    );
+                    cache.insert(
+                        "installed_release_published_at".to_owned(),
+                        pending.get("published_at").cloned().unwrap_or(Value::Null),
+                    );
+                    cache.remove("pending_update_install");
+                    clear_stale_cache(cache);
+                    return true;
+                }
+                if !is_fresh_pending_install(&pending, OffsetDateTime::now_utc()) {
+                    cache.remove("pending_update_install");
+                    clear_stale_cache(cache);
+                    return true;
+                }
+            }
+            false
+        })
     }
 
     pub fn has_pending_install(&self) -> bool {
@@ -1097,15 +1108,240 @@ mod tests {
         (directory, updater, client)
     }
     #[test]
+    fn delayed_save_cannot_erase_a_newer_pending_install() {
+        let (_directory, updater, _) = updater(&fixture(), &Value::Null);
+        let updater = Arc::new(updater);
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        let first = std::sync::atomic::AtomicBool::new(true);
+        *updater.test_before_save.lock().unwrap() = Some(Arc::new(move || {
+            if first.swap(false, std::sync::atomic::Ordering::AcqRel) {
+                entered_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(std::time::Duration::from_secs(3))
+                    .unwrap();
+            }
+        }));
+        let older = Arc::clone(&updater);
+        let (older_tx, older_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = older_tx.send(older.mark_notified("v0.4.0", &serde_json::Map::new()));
+        });
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("older save did not pause");
+        let newer = Arc::clone(&updater);
+        let (newer_tx, newer_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = newer_tx.send(newer.record_install_requested(
+                &json!({"version":"0.5.1","tag":"v0.5.1"}),
+                &serde_json::Map::new(),
+            ));
+        });
+        let new_result = newer_rx.recv_timeout(std::time::Duration::from_secs(2));
+        release_tx.send(()).unwrap();
+        new_result
+            .expect("newer pending install did not save")
+            .unwrap();
+        older_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("older save did not finish")
+            .unwrap();
+        let disk = super::read_object(&updater.cache_path).unwrap().unwrap();
+        assert_eq!(
+            disk["update_check_cache"]["pending_update_install"]["version"],
+            "0.5.1"
+        );
+    }
+
+    #[test]
+    fn startup_reconciliation_adopts_newer_pending_install_from_disk() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (_directory, a, client) = updater(&fixture(), &Value::Null);
+            let settings = serde_json::Map::new();
+            a.record_install_requested(&json!({"version":"0.5.1","tag":"v0.5.1"}), &settings)
+                .unwrap();
+            let root = super::read_object(&a.cache_path).unwrap().unwrap();
+            let b = PluginUpdater::with_client(
+                Arc::new(StateLock::new(&a.cache_path).unwrap()),
+                a.cache_path.clone(),
+                &root,
+                "0.5.1".to_owned(),
+                client,
+            );
+            a.record_install_requested(&json!({"version":"0.5.2","tag":"v0.5.2"}), &settings)
+                .unwrap();
+            b.reconcile_pending_install("0.5.1").unwrap();
+            let context = b.context(&settings);
+            b.mark_notified("v0.5.2", &settings).unwrap();
+            let disk = super::read_object(&a.cache_path).unwrap().unwrap();
+            let _ = sender.send((context, disk));
+        });
+        let (context, disk) = receiver
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .expect("startup reconciliation did not complete");
+        assert_eq!(context["pending_update_install"]["version"], "0.5.2");
+        assert_eq!(
+            disk["update_check_cache"]["pending_update_install"]["version"],
+            "0.5.2"
+        );
+    }
+
+    #[test]
+    fn startup_reconciliation_preserves_already_promoted_metadata() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (_directory, a, client) = updater(&fixture(), &Value::Null);
+            let settings = serde_json::Map::new();
+            a.record_install_requested(&json!({"version":"0.5.1","tag":"v0.5.1"}), &settings)
+                .unwrap();
+            let root = super::read_object(&a.cache_path).unwrap().unwrap();
+            let b = PluginUpdater::with_client(
+                Arc::new(StateLock::new(&a.cache_path).unwrap()),
+                a.cache_path.clone(),
+                &root,
+                "0.5.1".to_owned(),
+                client,
+            );
+            a.reconcile_pending_install("0.5.1").unwrap();
+            a.mark_notified("v0.6.0", &settings).unwrap();
+            b.reconcile_pending_install("0.5.1").unwrap();
+            let context = b.context(&settings);
+            let disk = super::read_object(&a.cache_path).unwrap().unwrap();
+            let _ = sender.send((context, disk));
+        });
+        let (context, disk) = receiver
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .expect("startup reconciliation did not complete");
+        assert_eq!(context["installed_release_tag"], "v0.5.1");
+        assert_eq!(context["last_notified_tag"], "v0.6.0");
+        assert_eq!(disk["update_check_cache"]["last_notified_tag"], "v0.6.0");
+    }
+
+    #[test]
+    fn startup_reconciliation_does_not_drop_concurrent_install_request() {
+        let (_directory, updater, _) = updater(&fixture(), &Value::Null);
+        let updater = Arc::new(updater);
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        let first = std::sync::atomic::AtomicBool::new(true);
+        updater.state_lock.set_test_after_acquire(Arc::new(move || {
+            if first.swap(false, std::sync::atomic::Ordering::AcqRel) {
+                entered_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap();
+            }
+        }));
+        let reconciling = Arc::clone(&updater);
+        let (reconciled_tx, reconciled_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = reconciled_tx.send(reconciling.reconcile_pending_install("0.5.0"));
+        });
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("startup did not acquire state lock");
+        let recording = Arc::clone(&updater);
+        let (recorded_tx, recorded_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = recorded_tx.send(recording.record_install_requested(
+                &json!({"version":"0.5.1","tag":"v0.5.1"}),
+                &serde_json::Map::new(),
+            ));
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while updater
+            .cache
+            .lock()
+            .unwrap()
+            .get("pending_update_install")
+            .is_none()
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        release_tx.send(()).unwrap();
+        reconciled_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("startup did not finish")
+            .unwrap();
+        recorded_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("install request did not finish")
+            .unwrap();
+        let disk = super::read_object(&updater.cache_path).unwrap().unwrap();
+        assert_eq!(
+            disk["update_check_cache"]["pending_update_install"]["version"],
+            "0.5.1"
+        );
+    }
+
+    #[test]
+    fn concurrent_backend_instances_preserve_each_others_update_fields() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (_directory, a, client) = updater(&fixture(), &Value::Null);
+            let settings = serde_json::Map::new();
+            let b = PluginUpdater::with_client(
+                Arc::new(StateLock::new(&a.cache_path).unwrap()),
+                a.cache_path.clone(),
+                &serde_json::Map::new(),
+                "0.5.0".to_owned(),
+                client,
+            );
+            a.record_install_requested(&json!({"version":"0.5.1","tag":"v0.5.1"}), &settings)
+                .unwrap();
+            b.mark_notified("v0.6.0", &settings).unwrap();
+            let _ = sender.send(super::read_object(&a.cache_path).unwrap().unwrap());
+        });
+        let disk = receiver
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .expect("concurrent updater transaction did not finish");
+        assert_eq!(
+            disk["update_check_cache"]["pending_update_install"]["version"],
+            "0.5.1"
+        );
+        assert_eq!(disk["update_check_cache"]["last_notified_tag"], "v0.6.0");
+    }
+
+    #[test]
+    fn failed_install_record_write_does_not_publish_pending_install() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (_directory, updater, _) = updater(&fixture(), &Value::Null);
+            fs::write(&updater.cache_path, b"{invalid").unwrap();
+            let result = updater.record_install_requested(
+                &json!({"version":"0.5.1","tag":"v0.5.1"}),
+                &serde_json::Map::new(),
+            );
+            let context = updater.context(&serde_json::Map::new());
+            let _ = sender.send((result.is_err(), context));
+        });
+        let (failed, context) = receiver
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .expect("failed updater transaction did not finish");
+        assert!(failed);
+        assert!(context["pending_update_install"].is_null());
+    }
+    #[test]
     fn unchanged_pending_install_calls_return_without_blocking() {
         for present in [false, true] {
             for confirm in [false, true] {
                 let (_directory, updater, _) = updater(&fixture(), &Value::Null);
                 if present {
-                    updater.cache.lock().unwrap().insert(
-                        "pending_update_install".to_owned(),
-                        json!({"version":"0.5.1","tag":"v0.5.1"}),
-                    );
+                    updater
+                        .record_install_requested(
+                            &json!({"version":"0.5.1","tag":"v0.5.1"}),
+                            &serde_json::Map::new(),
+                        )
+                        .unwrap();
                 }
                 let (sender, receiver) = std::sync::mpsc::channel();
                 std::thread::spawn(move || {
