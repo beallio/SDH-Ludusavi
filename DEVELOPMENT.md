@@ -97,17 +97,17 @@ SDH_CONTRACT_BACKEND=/path/to/backend \
 ```
 
 The Rust backend implements `contract_core`, `contract_operations`, `contract_lifecycle`,
-and `contract_gate`. Run the native contract tier with:
+`contract_gate`, `contract_syncthing`, `contract_updater`, and `contract_theme`. Run the native
+contract tier, including the required real Ludusavi case, with:
 
 ```bash
 SDH_CONTRACT_BACKEND=/path/to/backend \
   ./run.sh uv run pytest -o addopts='' tests/contract/ \
-  -m 'contract_core or contract_operations or contract_lifecycle or contract_gate or real_ludusavi'
+  -m 'contract_core or contract_operations or contract_lifecycle or contract_gate or contract_syncthing or contract_updater or contract_theme or real_ludusavi'
 ```
 The native lifecycle tier exercises the preview-based restore decision, strict 120-second
 timestamp margin, exact lease verification, pre-scope stop-only gate, cgroup freeze/thaw, lease
-expiry and unload ordering. Python still runs every contract scenario; native runs select the
-subsystem groups they implement.
+expiry and unload ordering. Native runs select the same implemented subsystem markers as Python.
 
 The harness isolates Decky, HOME and XDG state and refuses to start unless its `flatpak` and
 `systemctl` fakes resolve first on the backend's `PATH`; it never invokes host Ludusavi or

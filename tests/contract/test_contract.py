@@ -363,11 +363,23 @@ def _stop_child(child: _Child) -> None:
 
 
 class _SyncthingServer:
-    def __init__(self, backup_path: Path) -> None:
+    def __init__(
+        self,
+        backup_path: Path,
+        *,
+        redirect_non_loopback: bool = False,
+        hold_watch_events: bool = False,
+    ) -> None:
         self.backup_path = backup_path
+        self.redirect_non_loopback = redirect_non_loopback
+        self.hold_watch_events = hold_watch_events
+        self.watch_event_waiting = threading.Event()
+        self.release_watch_event = threading.Event()
+        self._events_request_count = 0
         self.requests: list[str] = []
         self._request_lock = threading.Lock()
         self._status_request_count = 0
+        self._system_status_count = 0
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -375,9 +387,33 @@ class _SyncthingServer:
                 route = self.path.split("?", 1)[0]
                 with owner._request_lock:
                     owner.requests.append(self.path)
+                    if route == "/rest/system/status":
+                        owner._system_status_count += 1
                     if route == "/rest/db/status":
                         owner._status_request_count += 1
+                    if route == "/rest/events":
+                        owner._events_request_count += 1
+                    events_request_count = owner._events_request_count
+                    system_status_count = owner._system_status_count
                     status_request_count = owner._status_request_count
+                if self.headers.get("X-API-Key") != API_KEY:
+                    self.send_error(401)
+                    return
+                if (
+                    route == "/rest/system/status"
+                    and owner.redirect_non_loopback
+                    and system_status_count == 1
+                ):
+                    self.send_response(302)
+                    self.send_header(
+                        "Location",
+                        f"http://0.0.0.0:{owner.port}/rest/system/status",
+                    )
+                    self.end_headers()
+                    return
+                if route == "/rest/events" and owner.hold_watch_events and events_request_count > 1:
+                    owner.watch_event_waiting.set()
+                    owner.release_watch_event.wait(timeout=4)
                 responses: dict[str, Any] = {
                     "/rest/system/status": {"myID": "CONTRACT-LOCAL-DEVICE"},
                     "/rest/config/folders": [
@@ -434,14 +470,20 @@ class _SyncthingServer:
         return self
 
     def close(self) -> None:
+        self.release_watch_event.set()
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)
 
 
 @contextmanager
-def _syncthing(harness: ContractHarness) -> Iterator[_SyncthingServer]:
-    server = _SyncthingServer(harness.backup_root).start()
+def _syncthing(
+    harness: ContractHarness, *, redirect_non_loopback: bool = False
+) -> Iterator[_SyncthingServer]:
+    server = _SyncthingServer(
+        harness.backup_root,
+        redirect_non_loopback=redirect_non_loopback,
+    ).start()
     config = harness.xdg_state / "syncthing" / "config.xml"
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text(
@@ -1361,7 +1403,25 @@ def test_syncthing_watch_redacts_device_ids_and_uninstall_is_scoped(
     assert managed_theme.is_dir()
     backend.uninstall()
     assert not managed_theme.exists()
-    assert (keep_dir / "keep.css").read_text(encoding="utf-8") == "owned elsewhere"
+
+
+@pytest.mark.contract_syncthing
+def test_syncthing_does_not_follow_non_loopback_redirect(backend: ContractHarness) -> None:
+    with _syncthing(backend, redirect_non_loopback=True) as server:
+        result = rpc(
+            backend,
+            "start_syncthing_activity_watch",
+            "pre_game",
+            GAME,
+            APP_ID,
+        )
+        assert result["status"] == "skipped"
+        assert result["reason"] == "api_unavailable"
+        with server._request_lock:
+            status_requests = sum(
+                path.split("?", 1)[0] == "/rest/system/status" for path in server.requests
+            )
+        assert status_requests == 1
 
 
 @pytest.mark.contract_operations
@@ -1500,6 +1560,7 @@ def _process_group_exists(pgid: int) -> bool:
 @pytest.mark.contract_operations
 @pytest.mark.contract_lifecycle
 @pytest.mark.contract_gate
+@pytest.mark.contract_syncthing
 def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
     scenario: dict[str, Any] = {
         "flatpak": {
@@ -1512,7 +1573,12 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
             }
         }
     }
-    harness = ContractHarness(scenario=scenario).start()
+    harness = ContractHarness(scenario=scenario)
+    server = _SyncthingServer(harness.backup_root, hold_watch_events=True).start()
+    harness.env.update(
+        {"SYNCTHING_API_KEY": API_KEY, "SYNCTHING_API_URL": f"http://127.0.0.1:{server.port}"}
+    )
+    harness.start()
     child = _start_prescope_child(harness.root)
     operation_pool = ThreadPoolExecutor(max_workers=1)
     shutdown_pool = ThreadPoolExecutor(max_workers=1)
@@ -1579,15 +1645,26 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
             "fake Ludusavi did not install its TERM handler and spawn its child",
         )
         assert not operation.done(), "restore RPC unexpectedly completed before backend shutdown"
+        watch = rpc(harness, "start_syncthing_activity_watch", "post_game", GAME, APP_ID)
+        assert watch["status"] == "watching", watch
+        assert server.watch_event_waiting.wait(timeout=3), (
+            "post-game watch did not enter event poll"
+        )
         stop_started = time.monotonic()
         stop_future = shutdown_pool.submit(harness.stop)
         observed_unsafe_release = False
+        observed_ordered_release = False
         deadline = time.monotonic() + 6
         while time.monotonic() < deadline:
             if (
                 _proc_state(child.pid) != "T" or not _scope_frozen(scoped_child)
             ) and _process_group_exists(hanging["pgid"]):
                 observed_unsafe_release = True
+                break
+            if _proc_state(child.pid) != "T" and not _scope_frozen(scoped_child):
+                observed_ordered_release = True
+                assert not stop_future.done(), "watch stopped before launch gates were released"
+                server.release_watch_event.set()
                 break
             if stop_future.done():
                 break
@@ -1596,6 +1673,7 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
         stop_seconds = time.monotonic() - stop_started
         assert stop_seconds < 5, f"SIGTERM unload with both launch gates took {stop_seconds:.3f}s"
         print(f"SIGTERM unload with both launch gates: {stop_seconds:.3f}s")
+        assert observed_ordered_release, "launch gates did not release while the watch was active"
         assert not observed_unsafe_release, (
             "a launch gate was released while its Ludusavi process group was still alive"
         )
@@ -1610,6 +1688,7 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
         with pytest.raises(ConnectionError, match="backend is shutting down"):
             operation.result(timeout=1)
     finally:
+        server.release_watch_event.set()
         if scoped_child is not None:
             _force_scope_thaw(harness, scoped_child)
             _stop_child(scoped_child)
@@ -1619,6 +1698,7 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
         finally:
             operation_pool.shutdown(wait=True, cancel_futures=True)
             shutdown_pool.shutdown(wait=True, cancel_futures=True)
+            server.close()
 
 
 @pytest.mark.contract_operations

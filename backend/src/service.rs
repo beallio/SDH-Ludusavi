@@ -20,6 +20,7 @@ use crate::{
     persistence::{
         StateLock, ensure_private_directory, existing_mode, read_object, write_json_atomic,
     },
+    syncthing::SyncthingWatchManager,
     updater::PluginUpdater,
     watchdog::ProcessWatchdog,
 };
@@ -44,6 +45,7 @@ pub struct BackendService {
     shortcut_id: AtomicI64,
     operations: LudusaviOperations,
     updater: PluginUpdater,
+    syncthing: Arc<SyncthingWatchManager>,
     watchdog: ProcessWatchdog,
     debug_logging: AtomicBool,
     logs: Mutex<VecDeque<Value>>,
@@ -123,6 +125,7 @@ impl BackendService {
             shortcut_id: AtomicI64::new(shortcut_id),
             operations,
             updater,
+            syncthing: Arc::new(SyncthingWatchManager::default()),
             watchdog: ProcessWatchdog::default(),
             debug_logging: AtomicBool::new(debug_logging),
             logs: Mutex::new(VecDeque::with_capacity(LOG_LIMIT)),
@@ -209,33 +212,52 @@ impl BackendService {
         self.operations.cancel_processes();
         let tokio_deadline = tokio::time::Instant::from_std(deadline);
         let calls_stopped = self.calls.wait_for_drain_until(tokio_deadline).await;
-        if !calls_stopped || !self.operations.processes_exited() {
+        let processes_exited = calls_stopped && self.operations.processes_exited();
+        let watchdog_stopped = if calls_stopped && processes_exited {
+            let watchdog = self.watchdog.clone();
+            matches!(
+                tokio::time::timeout_at(
+                    tokio_deadline,
+                    tokio::task::spawn_blocking(move || watchdog.stop_until(deadline))
+                )
+                .await,
+                Ok(Ok(true))
+            )
+        } else {
             self.log(
                 "error",
                 "Managed Ludusavi shutdown could not confirm process exit; retaining launch gates (reason=cancellation_unconfirmed retained_gate=true)",
                 Some("launch_gate"),
                 None,
             );
-            return false;
-        }
-        let watchdog = self.watchdog.clone();
-        if !matches!(
-            tokio::time::timeout_at(
-                tokio_deadline,
-                tokio::task::spawn_blocking(move || watchdog.stop_until(deadline))
-            )
-            .await,
-            Ok(Ok(true))
-        ) {
+            false
+        };
+        if calls_stopped && processes_exited && !watchdog_stopped {
             self.log(
                 "error",
                 "Launch-gate shutdown could not confirm guarded callbacks; retaining launch gates (reason=cancellation_unconfirmed retained_gate=true)",
                 Some("launch_gate"),
                 None,
             );
-            return false;
         }
-        true
+        let syncthing = Arc::clone(&self.syncthing);
+        let watches_stopped = matches!(
+            tokio::time::timeout_at(
+                tokio_deadline,
+                tokio::task::spawn_blocking(move || syncthing.stop_all_until(deadline))
+            )
+            .await,
+            Ok(Ok(true))
+        );
+        if !watches_stopped {
+            self.log(
+                "warning",
+                "Syncthing watches did not stop before the unload deadline",
+                None,
+                None,
+            );
+        }
+        calls_stopped && processes_exited && watchdog_stopped && watches_stopped
     }
     pub fn unavailable_reply(method: &str) -> Value {
         python_wrapper_fallback(method)
@@ -247,6 +269,37 @@ impl BackendService {
             "consume_theme_refresh_needed" => {
                 expect_args(method, args, 0)?;
                 Ok(Value::Bool(self.consume_theme_refresh_needed()))
+            }
+            "start_syncthing_activity_watch" => {
+                expect_args(method, args, 3)?;
+                let phase = args[0]
+                    .as_str()
+                    .ok_or_else(|| "phase must be a string".to_owned())?;
+                let optional_string = |index: usize, field: &str| match &args[index] {
+                    Value::Null => Ok(None),
+                    Value::String(value) => Ok(Some(value.as_str())),
+                    _ => Err(format!("{field} must be a string or null")),
+                };
+                let game_name = optional_string(1, "game_name")?;
+                let app_id = optional_string(2, "app_id")?;
+                let backup_path = self.operations.get_backup_path().ok().flatten();
+                Ok(self
+                    .syncthing
+                    .start_watch(phase, game_name, app_id, backup_path.as_deref()))
+            }
+            "get_syncthing_activity" => {
+                expect_args(method, args, 1)?;
+                let watch_id = args[0]
+                    .as_str()
+                    .ok_or_else(|| "watch_id must be a string".to_owned())?;
+                Ok(self.syncthing.get_activity(watch_id))
+            }
+            "stop_syncthing_activity_watch" => {
+                expect_args(method, args, 1)?;
+                let watch_id = args[0]
+                    .as_str()
+                    .ok_or_else(|| "watch_id must be a string".to_owned())?;
+                Ok(self.syncthing.stop_watch(watch_id))
             }
             "get_update_check_context" => {
                 expect_args(method, args, 0)?;

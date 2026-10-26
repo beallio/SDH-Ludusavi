@@ -1,19 +1,20 @@
 use std::{
     cmp::Ordering,
     collections::BTreeMap,
-    sync::{Arc, LazyLock, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
     time::{Duration, Instant},
 };
 
+use crate::{
+    http::block_on,
+    persistence::{StateLock, existing_mode, read_object, write_json_atomic},
+};
 use reqwest::{
     Client,
     header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT},
 };
 use serde_json::{Map, Value, json};
 use time::{Duration as TimeDuration, OffsetDateTime, format_description::well_known::Rfc3339};
-use tokio::runtime::{Builder, Runtime};
-
-use crate::persistence::{StateLock, existing_mode, read_object, write_json_atomic};
 
 const OWNER: &str = "beallio";
 const REPOSITORY: &str = "SDH-Ludusavi";
@@ -39,13 +40,6 @@ struct GitHubReleaseClient {
     user_agent: HeaderValue,
 }
 
-static HTTP_RUNTIME: LazyLock<Result<Runtime, String>> = LazyLock::new(|| {
-    Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| error.to_string())
-});
-
 impl GitHubReleaseClient {
     fn new(version: &str) -> Result<Self, String> {
         let mut headers = HeaderMap::new();
@@ -67,28 +61,20 @@ impl GitHubReleaseClient {
         Ok(Self { client, user_agent })
     }
     fn fetch(&self, url: &str) -> JsonResponse {
-        let runtime = match HTTP_RUNTIME.as_ref() {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                return JsonResponse {
-                    status: 500,
-                    headers: BTreeMap::new(),
-                    body: json!({"error": error}),
-                };
-            }
-        };
-        let response = match runtime.block_on(
+        let response = match block_on(
             self.client
                 .get(url)
                 .header(USER_AGENT, &self.user_agent)
                 .send(),
-        ) {
+        )
+        .and_then(|response| response.map_err(|error| error.to_string()))
+        {
             Ok(response) => response,
             Err(error) => {
                 return JsonResponse {
                     status: 500,
                     headers: BTreeMap::new(),
-                    body: json!({"error": error.to_string()}),
+                    body: json!({"error": error}),
                 };
             }
         };
@@ -103,13 +89,15 @@ impl GitHubReleaseClient {
                     .map(|value| (name.as_str().to_ascii_lowercase(), value.to_owned()))
             })
             .collect();
-        let bytes = match runtime.block_on(response.bytes()) {
+        let bytes = match block_on(response.bytes())
+            .and_then(|bytes| bytes.map_err(|error| error.to_string()))
+        {
             Ok(bytes) => bytes,
             Err(error) => {
                 return JsonResponse {
                     status: 500,
                     headers,
-                    body: json!({"error": error.to_string()}),
+                    body: json!({"error": error}),
                 };
             }
         };

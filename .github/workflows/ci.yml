@@ -223,16 +223,8 @@ jobs:
         working-directory: backend
         run: ../run.sh cargo build --manifest-path Cargo.toml --release --locked --target x86_64-unknown-linux-musl
 
-      - name: Run Native Core RPC Contract
+      - name: Run Native Backend RPC Contracts
         run: |
           SDH_CONTRACT_BACKEND=/var/tmp/sdh_ludusavi/cargo-target/x86_64-unknown-linux-musl/release/backend \
-            ./run.sh uv run pytest -o addopts='' tests/contract/ -m contract_core
-      - name: Run Native Operations RPC Contract
-        run: |
-          SDH_CONTRACT_BACKEND=/var/tmp/sdh_ludusavi/cargo-target/x86_64-unknown-linux-musl/release/backend \
-            ./run.sh uv run pytest -o addopts='' tests/contract/ -m 'contract_operations and not contract_lifecycle'
-
-      - name: Run Native Real Ludusavi Contract
-        run: |
-          SDH_CONTRACT_BACKEND=/var/tmp/sdh_ludusavi/cargo-target/x86_64-unknown-linux-musl/release/backend \
-            ./run.sh uv run pytest -o addopts='' tests/contract/test_contract.py -m real_ludusavi
+            ./run.sh uv run pytest -o addopts='' tests/contract/ \
+            -m 'contract_core or contract_operations or contract_lifecycle or contract_gate or contract_syncthing or contract_updater or contract_theme or real_ludusavi'

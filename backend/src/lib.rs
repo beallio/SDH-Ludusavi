@@ -1,8 +1,10 @@
 //! Native SDH-Ludusavi backend.
+mod http;
 pub mod launch_gate;
 pub mod lifecycle;
 pub mod operations;
 pub mod singleton;
+pub mod syncthing;
 pub mod watchdog;
 
 pub mod persistence;
