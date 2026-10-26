@@ -1,0 +1,70 @@
+{
+  "checks": [
+    {
+      "name": "stable_skips_prerelease_and_selects_latest_stable",
+      "channel": "stable",
+      "installed_version": "0.4.10",
+      "releases": [
+        {"draft": false, "prerelease": true, "tag_name": "v0.6.0-dev.g9", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.6.0-dev.g9", "published_at": "2026-10-20T00:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.6.0-dev.g9.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.6.0-dev.g9/manifest.json"}, {"name": "SDH-Ludusavi-v0.6.0-dev.g9.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.6.0-dev.g9/plugin.zip"}]},
+        {"draft": false, "prerelease": false, "tag_name": "v0.5.1", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.1", "published_at": "2026-10-19T00:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.5.1.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.1/manifest.json"}, {"name": "SDH-Ludusavi-v0.5.1.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.1/plugin.zip"}]},
+        {"draft": false, "prerelease": false, "tag_name": "v0.5.0", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.0", "published_at": "2026-10-18T00:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.5.0.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.0/manifest.json"}, {"name": "SDH-Ludusavi-v0.5.0.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.0/plugin.zip"}]}
+      ],
+      "manifests": {
+        "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.6.0-dev.g9/manifest.json": {"schemaVersion": 1, "pluginName": "SDH-Ludusavi", "packageName": "sdh-ludusavi", "version": "0.6.0-dev.g9", "sourceVersion": "0.6.0", "tag": "v0.6.0-dev.g9", "channel": "dev", "assetName": "SDH-Ludusavi-v0.6.0-dev.g9.zip", "sha256": "9999999999999999999999999999999999999999999999999999999999999999", "generatedAt": "2026-10-20T00:00:00Z"},
+        "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.1/manifest.json": {"schemaVersion": 1, "pluginName": "SDH-Ludusavi", "packageName": "sdh-ludusavi", "version": "0.5.1", "sourceVersion": "0.5.1", "tag": "v0.5.1", "channel": "stable", "assetName": "SDH-Ludusavi-v0.5.1.zip", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "generatedAt": "2026-10-19T00:00:00Z"},
+        "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.0/manifest.json": {"schemaVersion": 1, "pluginName": "SDH-Ludusavi", "packageName": "sdh-ludusavi", "version": "0.5.0", "sourceVersion": "0.5.0", "tag": "v0.5.0", "channel": "stable", "assetName": "SDH-Ludusavi-v0.5.0.zip", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "generatedAt": "2026-10-18T00:00:00Z"}
+      },
+      "expected": {"status": "available", "candidate": {"version": "0.5.1", "tag": "v0.5.1", "channel": "stable", "artifact_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.1/plugin.zip", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "release_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.1", "published_at": "2026-10-19T00:00:00Z", "action": "update"}}
+    },
+    {
+      "name": "development_selects_newer_prerelease",
+      "channel": "development",
+      "installed_version": "0.5.0",
+      "releases": [
+        {"draft": false, "prerelease": true, "tag_name": "v0.5.3-dev.g8", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.3-dev.g8", "published_at": "2026-10-21T00:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.5.3-dev.g8.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.3-dev.g8/manifest.json"}, {"name": "SDH-Ludusavi-v0.5.3-dev.g8.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.3-dev.g8/plugin.zip"}]},
+        {"draft": false, "prerelease": false, "tag_name": "v0.5.2", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.2", "published_at": "2026-10-20T00:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.5.2.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.2/manifest.json"}, {"name": "SDH-Ludusavi-v0.5.2.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.2/plugin.zip"}]}
+      ],
+      "manifests": {
+        "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.3-dev.g8/manifest.json": {"schemaVersion": 1, "pluginName": "SDH-Ludusavi", "packageName": "sdh-ludusavi", "version": "0.5.3-dev.g8", "sourceVersion": "0.5.3", "tag": "v0.5.3-dev.g8", "channel": "dev", "assetName": "SDH-Ludusavi-v0.5.3-dev.g8.zip", "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "generatedAt": "2026-10-21T00:00:00Z"},
+        "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.2/manifest.json": {"schemaVersion": 1, "pluginName": "SDH-Ludusavi", "packageName": "sdh-ludusavi", "version": "0.5.2", "sourceVersion": "0.5.2", "tag": "v0.5.2", "channel": "stable", "assetName": "SDH-Ludusavi-v0.5.2.zip", "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "generatedAt": "2026-10-20T00:00:00Z"}
+      },
+      "expected": {"status": "available", "candidate": {"version": "0.5.3-dev.g8", "tag": "v0.5.3-dev.g8", "channel": "development", "artifact_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.3-dev.g8/plugin.zip", "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "release_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.3-dev.g8", "published_at": "2026-10-21T00:00:00Z", "action": "update"}}
+    },
+    {
+      "name": "channel_mismatch_is_rejected",
+      "channel": "stable",
+      "installed_version": "0.5.0",
+      "releases": [
+        {"draft": false, "prerelease": false, "tag_name": "v0.5.2", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.2", "published_at": "2026-10-20T00:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.5.2.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.2/manifest.json"}, {"name": "SDH-Ludusavi-v0.5.2.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.2/plugin.zip"}]}
+      ],
+      "manifests": {
+        "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.2/manifest.json": {"schemaVersion": 1, "pluginName": "SDH-Ludusavi", "packageName": "sdh-ludusavi", "version": "0.5.2", "sourceVersion": "0.5.2", "tag": "v0.5.2", "channel": "dev", "assetName": "SDH-Ludusavi-v0.5.2.zip", "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "generatedAt": "2026-10-20T00:00:00Z"}
+      },
+      "expected": {"status": "current"}
+    },
+    {
+      "name": "only_five_manifest_candidates_are_tried",
+      "channel": "stable",
+      "installed_version": "0.4.0",
+      "releases": [
+        {"draft": false, "prerelease": false, "tag_name": "v0.5.6", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.6", "published_at": "2026-10-26T06:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.5.6.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.6/manifest.json"}, {"name": "SDH-Ludusavi-v0.5.6.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.6/plugin.zip"}]},
+        {"draft": false, "prerelease": false, "tag_name": "v0.5.5", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.5", "published_at": "2026-10-26T05:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.5.5.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.5/manifest.json"}, {"name": "SDH-Ludusavi-v0.5.5.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.5/plugin.zip"}]},
+        {"draft": false, "prerelease": false, "tag_name": "v0.5.4", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.4", "published_at": "2026-10-26T04:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.5.4.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.4/manifest.json"}, {"name": "SDH-Ludusavi-v0.5.4.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.4/plugin.zip"}]},
+        {"draft": false, "prerelease": false, "tag_name": "v0.5.3", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.3", "published_at": "2026-10-26T03:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.5.3.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.3/manifest.json"}, {"name": "SDH-Ludusavi-v0.5.3.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.3/plugin.zip"}]},
+        {"draft": false, "prerelease": false, "tag_name": "v0.5.2", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.2", "published_at": "2026-10-26T02:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.5.2.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.2/manifest.json"}, {"name": "SDH-Ludusavi-v0.5.2.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.2/plugin.zip"}]},
+        {"draft": false, "prerelease": false, "tag_name": "v0.5.1", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.1", "published_at": "2026-10-26T01:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.5.1.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.1/manifest.json"}, {"name": "SDH-Ludusavi-v0.5.1.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.1/plugin.zip"}]}
+      ],
+      "manifests": {
+        "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.1/manifest.json": {"schemaVersion": 1, "pluginName": "SDH-Ludusavi", "packageName": "sdh-ludusavi", "version": "0.5.1", "sourceVersion": "0.5.1", "tag": "v0.5.1", "channel": "stable", "assetName": "SDH-Ludusavi-v0.5.1.zip", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "generatedAt": "2026-10-26T01:00:00Z"}
+      },
+      "expected": {"status": "current"},
+      "expected_manifest_attempts": 5
+    }
+  ],
+  "revalidation": {
+    "release": {"draft": false, "prerelease": false, "tag_name": "v0.5.1", "html_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.1", "published_at": "2026-10-19T00:00:00Z", "assets": [{"name": "SDH-Ludusavi-v0.5.1.manifest.json", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.1/manifest.json"}, {"name": "SDH-Ludusavi-v0.5.1.zip", "browser_download_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.1/plugin.zip"}]},
+    "manifest": {"schemaVersion": 1, "pluginName": "SDH-Ludusavi", "packageName": "sdh-ludusavi", "version": "0.5.1", "sourceVersion": "0.5.1", "tag": "v0.5.1", "channel": "stable", "assetName": "SDH-Ludusavi-v0.5.1.zip", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "generatedAt": "2026-10-19T00:00:00Z"},
+    "candidate": {"version": "0.5.1", "tag": "v0.5.1", "channel": "stable", "artifact_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.1/plugin.zip", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "release_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.1", "published_at": "2026-10-19T00:00:00Z", "action": "update"},
+    "expected": {"version": "0.5.1", "tag": "v0.5.1", "channel": "stable", "artifact_url": "https://github.com/beallio/SDH-Ludusavi/releases/download/v0.5.1/plugin.zip", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "release_url": "https://github.com/beallio/SDH-Ludusavi/releases/tag/v0.5.1", "published_at": "2026-10-19T00:00:00Z", "action": "update"}
+  }
+}

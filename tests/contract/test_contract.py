@@ -800,6 +800,48 @@ def test_theme_installation_and_uninstall_ownership(backend: ContractHarness) ->
     assert unowned_file.read_text(encoding="utf-8") == "preserve this theme"
 
 
+@pytest.mark.contract_theme
+def test_uninstall_only_theme_cleanup_needs_no_backend_state() -> None:
+    native_backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
+    if native_backend == "python":
+        pytest.skip("uninstall-only process mode requires SDH_CONTRACT_BACKEND to select Rust")
+
+    with tempfile.TemporaryDirectory(
+        prefix="sdh-contract-uninstall-", dir="/var/tmp/sdh_ludusavi"
+    ) as temporary_root:
+        harness = ContractHarness(backend=native_backend, root=Path(temporary_root))
+        theme = harness.decky_home / "themes" / "SDH-Ludusavi Status"
+        theme.mkdir(parents=True)
+        (theme / ".sdh-ludusavi-status-theme").write_text(
+            "sdh-ludusavi-status-theme-1\n", encoding="ascii"
+        )
+        (theme / "config_USER.json").write_text('{"active":true}\n', encoding="utf-8")
+        unrelated = harness.decky_home / "themes" / "Unrelated Theme"
+        unrelated.mkdir()
+        (unrelated / "keep.css").write_text("keep", encoding="utf-8")
+        environment = harness.env.copy()
+        environment["DECKY_PLUGIN_HOOK"] = "uninstall"
+        environment.pop("DECKY_PLUGIN_SOCKET", None)
+
+        result = subprocess.run(
+            [native_backend],
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr.decode(errors="replace")
+        assert not theme.exists()
+        assert (harness.runtime_dir / "status-theme-choices.json").read_text(
+            encoding="utf-8"
+        ) == '{"active":true}\n'
+        assert (unrelated / "keep.css").read_text(encoding="utf-8") == "keep"
+        assert not (harness.runtime_dir / "cache.json").exists()
+        assert not (harness.settings_dir / "settings.json").exists()
+
+
 @pytest.mark.contract_operations
 def test_ludusavi_child_environment_is_sanitized() -> None:
     harness = ContractHarness()

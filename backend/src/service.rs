@@ -3,7 +3,7 @@ use std::{
     io,
     path::{Path, PathBuf},
     sync::{
-        Arc, LazyLock, Mutex,
+        Arc, Condvar, LazyLock, Mutex,
         atomic::{AtomicBool, AtomicI64, Ordering},
     },
     time::{Duration, Instant},
@@ -20,6 +20,7 @@ use crate::{
     persistence::{
         StateLock, ensure_private_directory, existing_mode, read_object, write_json_atomic,
     },
+    updater::PluginUpdater,
     watchdog::ProcessWatchdog,
 };
 
@@ -42,10 +43,19 @@ pub struct BackendService {
     settings: Mutex<Map<String, Value>>,
     shortcut_id: AtomicI64,
     operations: LudusaviOperations,
+    updater: PluginUpdater,
     watchdog: ProcessWatchdog,
     debug_logging: AtomicBool,
     logs: Mutex<VecDeque<Value>>,
     calls: Arc<CallTracker>,
+    theme_state: Mutex<ThemeState>,
+    theme_ready: Condvar,
+}
+
+#[derive(Default)]
+struct ThemeState {
+    ready: bool,
+    refresh_needed: bool,
 }
 
 impl BackendService {
@@ -87,6 +97,13 @@ impl BackendService {
         let history = normalize_history(cache.get("game_history"));
         let operations =
             LudusaviOperations::new(cache_path.clone(), Arc::clone(&state_lock), &cache, history);
+        let updater = PluginUpdater::new(
+            Arc::clone(&state_lock),
+            cache_path.clone(),
+            &cache,
+            env.plugin_version.clone(),
+        )
+        .map_err(io::Error::other)?;
         let shortcut_id = cache
             .get("ludusaviLauncherShortcutAppId")
             .and_then(python_integer)
@@ -105,10 +122,13 @@ impl BackendService {
             settings: Mutex::new(settings),
             shortcut_id: AtomicI64::new(shortcut_id),
             operations,
+            updater,
             watchdog: ProcessWatchdog::default(),
             debug_logging: AtomicBool::new(debug_logging),
             logs: Mutex::new(VecDeque::with_capacity(LOG_LIMIT)),
             calls: Arc::new(CallTracker::default()),
+            theme_state: Mutex::new(ThemeState::default()),
+            theme_ready: Condvar::new(),
         };
         service.log(
             "info",
@@ -117,6 +137,50 @@ impl BackendService {
             None,
         );
         Ok(service)
+    }
+
+    pub fn startup(&self, env: &Env) {
+        let result = crate::status_theme::install_status_theme(
+            &env.plugin_dir.join("theme"),
+            &env.decky_home,
+            &env.plugin_runtime_dir,
+        );
+        let refresh_needed = match result {
+            Ok(changed) => changed,
+            Err(error) => {
+                self.log(
+                    "warning",
+                    &format!("CSS Loader theme could not be installed: {error}"),
+                    None,
+                    None,
+                );
+                false
+            }
+        };
+        let mut state = lock(&self.theme_state);
+        state.refresh_needed = refresh_needed;
+        state.ready = true;
+        self.theme_ready.notify_all();
+        drop(state);
+        if let Err(error) = self.updater.reconcile_pending_install(&env.plugin_version) {
+            self.log(
+                "warning",
+                &format!("Could not reconcile pending plugin update: {error}"),
+                None,
+                None,
+            );
+        }
+    }
+
+    fn consume_theme_refresh_needed(&self) -> bool {
+        let mut state = lock(&self.theme_state);
+        while !state.ready {
+            state = self
+                .theme_ready
+                .wait(state)
+                .unwrap_or_else(|error| error.into_inner());
+        }
+        std::mem::take(&mut state.refresh_needed)
     }
 
     pub async fn dispatch(self: &Arc<Self>, method: &'static str, args: Vec<Value>) -> Value {
@@ -180,6 +244,63 @@ impl BackendService {
 
     fn invoke(&self, method: &str, args: &[Value]) -> Result<Value, String> {
         match method {
+            "consume_theme_refresh_needed" => {
+                expect_args(method, args, 0)?;
+                Ok(Value::Bool(self.consume_theme_refresh_needed()))
+            }
+            "get_update_check_context" => {
+                expect_args(method, args, 0)?;
+                Ok(self.updater.context(&lock(&self.settings)))
+            }
+            "check_for_plugin_update" => {
+                expect_range(method, args, 1, 2)?;
+                let current_version = args[0]
+                    .as_str()
+                    .ok_or_else(|| "current version must be a string".to_owned())?;
+                self.updater.check_for_update(
+                    &lock(&self.settings),
+                    current_version,
+                    args.get(1).is_some_and(python_truthy),
+                )
+            }
+            "revalidate_plugin_update" => {
+                expect_args(method, args, 1)?;
+                self.updater.revalidate(&args[0])
+            }
+            "record_update_install_requested" => {
+                expect_args(method, args, 1)?;
+                if !args[0].is_object() {
+                    return Err("candidate must be an object".to_owned());
+                }
+                let settings = lock(&self.settings).clone();
+                self.updater.record_install_requested(&args[0], &settings)
+            }
+            "confirm_update_install_handoff" => {
+                expect_args(method, args, 1)?;
+                let version = args[0]
+                    .as_str()
+                    .ok_or_else(|| "version must be a string".to_owned())?;
+                let settings = lock(&self.settings).clone();
+                self.updater.confirm_install_handoff(version, &settings)
+            }
+            "mark_update_notified" => {
+                expect_args(method, args, 1)?;
+                let tag = args[0]
+                    .as_str()
+                    .ok_or_else(|| "tag must be a string".to_owned())?;
+                let settings = lock(&self.settings).clone();
+                self.updater.mark_notified(tag, &settings)
+            }
+            "clear_pending_update_install" => {
+                expect_range(method, args, 0, 1)?;
+                let version = match args.first() {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(version)) => Some(version.as_str()),
+                    Some(_) => return Err("version must be a string or null".to_owned()),
+                };
+                let settings = lock(&self.settings).clone();
+                self.updater.clear_pending_install(version, &settings)
+            }
             "get_settings" => {
                 expect_args(method, args, 0)?;
                 Ok(self.get_settings())
