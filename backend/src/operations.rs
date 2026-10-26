@@ -1085,7 +1085,9 @@ impl ProcessManager {
             match child.try_wait() {
                 Ok(Some(child_status)) => {
                     status = Some(child_status);
-                    break;
+                    if !group_exists(pid) {
+                        break;
+                    }
                 }
                 Ok(None) => {}
                 Err(error) => {
@@ -1656,6 +1658,28 @@ mod tests {
             .parse()
             .unwrap();
         assert!(!group_exists(process_group));
+        assert!(processes.groups_exited());
+    }
+    #[test]
+    fn successful_leader_waits_for_writer_descendant_before_returning() {
+        let directory = tempfile::tempdir().unwrap();
+        let marker = directory.path().join("writer-finished");
+        let args = [
+            "-c".to_owned(),
+            "printf '{}\\n'; (sleep 0.1; printf child-finished > \"$1\") &".to_owned(),
+            "sh".to_owned(),
+            marker.display().to_string(),
+        ];
+        let processes = ProcessManager::default();
+        let output = processes
+            .run_at(Path::new("/bin/sh"), &args, Duration::from_secs(1), true)
+            .unwrap();
+        assert_eq!(output, "{}\n");
+        assert!(
+            marker.exists(),
+            "writer descendant was terminated before finishing"
+        );
+        assert_eq!(std::fs::read_to_string(marker).unwrap(), "child-finished");
         assert!(processes.groups_exited());
     }
 }
