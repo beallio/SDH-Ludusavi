@@ -5,7 +5,7 @@ use std::{
 };
 
 use decky_plugin::Plugin;
-use sdh_ludusavi_backend::service::BackendService;
+use sdh_ludusavi_backend::{service::BackendService, status_theme};
 use serde_json::Value;
 
 fn register_rpc(
@@ -28,6 +28,7 @@ fn register_rpc(
 async fn run() -> io::Result<()> {
     let service: Arc<OnceLock<Arc<BackendService>>> = Arc::new(OnceLock::new());
     let initialize = Arc::clone(&service);
+    let startup_service = Arc::clone(&service);
     let mut plugin = Plugin::new()
         .on_migration(move |context| async move {
             let env = context.env().clone();
@@ -39,7 +40,7 @@ async fn run() -> io::Result<()> {
                 .set(Arc::new(backend))
                 .map_err(|_| "backend initialized more than once".to_owned())
         })
-        .on_main(|_context| async move {
+        .on_main(move |context| async move {
             match tokio::task::spawn_blocking(
                 sdh_ludusavi_backend::singleton::enforce_single_instance,
             )
@@ -56,10 +57,43 @@ async fn run() -> io::Result<()> {
                 Ok(Err(error)) => log::warn!("Single-instance check failed; continuing startup: {error}"),
                 Err(error) => log::warn!("Single-instance check task failed; continuing startup: {error}"),
             }
+            if let Some(service) = startup_service.get() {
+                let service = Arc::clone(service);
+                let env = context.env().clone();
+                if let Err(error) = tokio::task::spawn_blocking(move || service.startup(&env)).await {
+                    log::error!("Backend startup task failed: {error}");
+                }
+            }
+            Ok(())
+        })
+        .on_uninstall(|context| async move {
+            let env = context.env().clone();
+            match tokio::task::spawn_blocking(move || {
+                status_theme::uninstall_status_theme(&env.decky_home, &env.plugin_runtime_dir)
+            })
+            .await
+            {
+                Ok(Ok(())) => (),
+                Ok(Err(error)) => {
+                    log::warn!("CSS Loader theme was retained during uninstall: {error}")
+                }
+                Err(error) => log::warn!("CSS Loader theme uninstall task failed: {error}"),
+            }
             Ok(())
         });
 
     for name in [
+        "get_update_check_context",
+        "check_for_plugin_update",
+        "revalidate_plugin_update",
+        "record_update_install_requested",
+        "confirm_update_install_handoff",
+        "mark_update_notified",
+        "clear_pending_update_install",
+        "consume_theme_refresh_needed",
+        "start_syncthing_activity_watch",
+        "get_syncthing_activity",
+        "stop_syncthing_activity_watch",
         "get_settings",
         "update_settings",
         "get_ludusavi_launcher_shortcut_id",

@@ -96,18 +96,17 @@ SDH_CONTRACT_BACKEND=/path/to/backend \
   ./run.sh uv run pytest -o addopts='' tests/contract/
 ```
 
-The Rust backend implements `contract_core`, `contract_operations`, `contract_lifecycle`,
-and `contract_gate`. Run the native contract tier with:
+The Rust backend implements every contract subsystem. Run all native contracts, including the
+required real Ludusavi case and the unmarked harness tests, with:
 
 ```bash
-SDH_CONTRACT_BACKEND=/path/to/backend \
-  ./run.sh uv run pytest -o addopts='' tests/contract/ \
-  -m 'contract_core or contract_operations or contract_lifecycle or contract_gate or real_ludusavi'
+SDH_CONTRACT_LUDUSAVI_BIN=/path/to/ludusavi SDH_CONTRACT_REQUIRE_REAL=1 \
+  SDH_CONTRACT_BACKEND=/path/to/backend \
+  ./run.sh uv run pytest -o addopts='' tests/contract/
 ```
 The native lifecycle tier exercises the preview-based restore decision, strict 120-second
 timestamp margin, exact lease verification, pre-scope stop-only gate, cgroup freeze/thaw, lease
-expiry and unload ordering. Python still runs every contract scenario; native runs select the
-subsystem groups they implement.
+expiry and unload ordering. Native runs select the same implemented subsystem markers as Python.
 
 The harness isolates Decky, HOME and XDG state and refuses to start unless its `flatpak` and
 `systemctl` fakes resolve first on the backend's `PATH`; it never invokes host Ludusavi or
@@ -129,6 +128,15 @@ SDH_CONTRACT_SDK_EXAMPLE=/path/to/native_example \
 Without `SDH_CONTRACT_LUDUSAVI_BIN`, the real tier skips locally; `SDH_CONTRACT_REQUIRE_REAL=1`
 makes a missing binary an error. The two network updater RPCs, `check_for_plugin_update` and
 `revalidate_plugin_update`, are intentionally outside this contract suite.
+Their discovery and validation decisions are checked without network access by Python and Rust
+tests using the same JSON data in `tests/contract/fixtures/github/recorded.json`.
+Malformed manifests with missing or non-string source-version and generation-time fields are
+rejected in both discovery and revalidation.
+Updater checks snapshot settings before contacting the release client; concurrent settings changes,
+unmatched install handoffs, and expired rate-limit cooldowns must not block updater calls.
+Rust updater cache mutations reload the latest persisted state under the shared state lock, then
+write atomically before publishing their in-memory result. Startup reconciliation uses the same
+transaction so concurrent updater instances cannot overwrite a newer install handoff or notification.
 
 ### Build the Decky frontend:
 
@@ -365,6 +373,8 @@ backup path. The `/rest/system/connections` endpoint is used only to intersect c
 connected device IDs with the remote devices configured for that folder. Its global and
 per-device byte counters are intentionally ignored because a single connection can carry
 traffic for multiple folders.
+Configured loopback API path prefixes are retained for every REST request, and a watch removes
+itself from manager ownership when its TTL expires even if the frontend never sends a stop call.
 
 BrowserView activity and transfer direction instead come from folder-scoped sources:
 `/rest/db/status?folder=<folder-id>` and events whose `folder` matches the resolved

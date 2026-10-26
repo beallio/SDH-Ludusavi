@@ -433,6 +433,16 @@ impl LudusaviOperations {
         );
         Ok(Value::Object(versions))
     }
+    pub fn get_backup_path(&self) -> Result<Option<String>, String> {
+        let output = self
+            .client()?
+            .json(&["config".to_owned(), "show".to_owned()], BACKUPS_TIMEOUT)?;
+        Ok(output
+            .pointer("/backup/path")
+            .and_then(Value::as_str)
+            .filter(|path| !path.trim().is_empty() && *path != "unknown")
+            .map(str::to_owned))
+    }
 
     pub fn get_ludusavi_command(&self) -> Value {
         match self.client() {

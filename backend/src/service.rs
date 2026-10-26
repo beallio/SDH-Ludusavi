@@ -3,7 +3,7 @@ use std::{
     io,
     path::{Path, PathBuf},
     sync::{
-        Arc, LazyLock, Mutex,
+        Arc, Condvar, LazyLock, Mutex,
         atomic::{AtomicBool, AtomicI64, Ordering},
     },
     time::{Duration, Instant},
@@ -20,6 +20,8 @@ use crate::{
     persistence::{
         StateLock, ensure_private_directory, existing_mode, read_object, write_json_atomic,
     },
+    syncthing::SyncthingWatchManager,
+    updater::PluginUpdater,
     watchdog::ProcessWatchdog,
 };
 
@@ -42,10 +44,20 @@ pub struct BackendService {
     settings: Mutex<Map<String, Value>>,
     shortcut_id: AtomicI64,
     operations: LudusaviOperations,
+    updater: PluginUpdater,
+    syncthing: Arc<SyncthingWatchManager>,
     watchdog: ProcessWatchdog,
     debug_logging: AtomicBool,
     logs: Mutex<VecDeque<Value>>,
     calls: Arc<CallTracker>,
+    theme_state: Mutex<ThemeState>,
+    theme_ready: Condvar,
+}
+
+#[derive(Default)]
+struct ThemeState {
+    ready: bool,
+    refresh_needed: bool,
 }
 
 impl BackendService {
@@ -87,6 +99,13 @@ impl BackendService {
         let history = normalize_history(cache.get("game_history"));
         let operations =
             LudusaviOperations::new(cache_path.clone(), Arc::clone(&state_lock), &cache, history);
+        let updater = PluginUpdater::new(
+            Arc::clone(&state_lock),
+            cache_path.clone(),
+            &cache,
+            env.plugin_version.clone(),
+        )
+        .map_err(io::Error::other)?;
         let shortcut_id = cache
             .get("ludusaviLauncherShortcutAppId")
             .and_then(python_integer)
@@ -105,10 +124,14 @@ impl BackendService {
             settings: Mutex::new(settings),
             shortcut_id: AtomicI64::new(shortcut_id),
             operations,
+            updater,
+            syncthing: Arc::new(SyncthingWatchManager::default()),
             watchdog: ProcessWatchdog::default(),
             debug_logging: AtomicBool::new(debug_logging),
             logs: Mutex::new(VecDeque::with_capacity(LOG_LIMIT)),
             calls: Arc::new(CallTracker::default()),
+            theme_state: Mutex::new(ThemeState::default()),
+            theme_ready: Condvar::new(),
         };
         service.log(
             "info",
@@ -117,6 +140,50 @@ impl BackendService {
             None,
         );
         Ok(service)
+    }
+
+    pub fn startup(&self, env: &Env) {
+        let result = crate::status_theme::install_status_theme(
+            &env.plugin_dir.join("theme"),
+            &env.decky_home,
+            &env.plugin_runtime_dir,
+        );
+        let refresh_needed = match result {
+            Ok(changed) => changed,
+            Err(error) => {
+                self.log(
+                    "warning",
+                    &format!("CSS Loader theme could not be installed: {error}"),
+                    None,
+                    None,
+                );
+                false
+            }
+        };
+        let mut state = lock(&self.theme_state);
+        state.refresh_needed = refresh_needed;
+        state.ready = true;
+        self.theme_ready.notify_all();
+        drop(state);
+        if let Err(error) = self.updater.reconcile_pending_install(&env.plugin_version) {
+            self.log(
+                "warning",
+                &format!("Could not reconcile pending plugin update: {error}"),
+                None,
+                None,
+            );
+        }
+    }
+
+    fn consume_theme_refresh_needed(&self) -> bool {
+        let mut state = lock(&self.theme_state);
+        while !state.ready {
+            state = self
+                .theme_ready
+                .wait(state)
+                .unwrap_or_else(|error| error.into_inner());
+        }
+        std::mem::take(&mut state.refresh_needed)
     }
 
     pub async fn dispatch(self: &Arc<Self>, method: &'static str, args: Vec<Value>) -> Value {
@@ -145,33 +212,52 @@ impl BackendService {
         self.operations.cancel_processes();
         let tokio_deadline = tokio::time::Instant::from_std(deadline);
         let calls_stopped = self.calls.wait_for_drain_until(tokio_deadline).await;
-        if !calls_stopped || !self.operations.processes_exited() {
+        let processes_exited = calls_stopped && self.operations.processes_exited();
+        let watchdog_stopped = if calls_stopped && processes_exited {
+            let watchdog = self.watchdog.clone();
+            matches!(
+                tokio::time::timeout_at(
+                    tokio_deadline,
+                    tokio::task::spawn_blocking(move || watchdog.stop_until(deadline))
+                )
+                .await,
+                Ok(Ok(true))
+            )
+        } else {
             self.log(
                 "error",
                 "Managed Ludusavi shutdown could not confirm process exit; retaining launch gates (reason=cancellation_unconfirmed retained_gate=true)",
                 Some("launch_gate"),
                 None,
             );
-            return false;
-        }
-        let watchdog = self.watchdog.clone();
-        if !matches!(
-            tokio::time::timeout_at(
-                tokio_deadline,
-                tokio::task::spawn_blocking(move || watchdog.stop_until(deadline))
-            )
-            .await,
-            Ok(Ok(true))
-        ) {
+            false
+        };
+        if calls_stopped && processes_exited && !watchdog_stopped {
             self.log(
                 "error",
                 "Launch-gate shutdown could not confirm guarded callbacks; retaining launch gates (reason=cancellation_unconfirmed retained_gate=true)",
                 Some("launch_gate"),
                 None,
             );
-            return false;
         }
-        true
+        let syncthing = Arc::clone(&self.syncthing);
+        let watches_stopped = matches!(
+            tokio::time::timeout_at(
+                tokio_deadline,
+                tokio::task::spawn_blocking(move || syncthing.stop_all_until(deadline))
+            )
+            .await,
+            Ok(Ok(true))
+        );
+        if !watches_stopped {
+            self.log(
+                "warning",
+                "Syncthing watches did not stop before the unload deadline",
+                None,
+                None,
+            );
+        }
+        calls_stopped && processes_exited && watchdog_stopped && watches_stopped
     }
     pub fn unavailable_reply(method: &str) -> Value {
         python_wrapper_fallback(method)
@@ -180,6 +266,95 @@ impl BackendService {
 
     fn invoke(&self, method: &str, args: &[Value]) -> Result<Value, String> {
         match method {
+            "consume_theme_refresh_needed" => {
+                expect_args(method, args, 0)?;
+                Ok(Value::Bool(self.consume_theme_refresh_needed()))
+            }
+            "start_syncthing_activity_watch" => {
+                expect_args(method, args, 3)?;
+                let phase = args[0]
+                    .as_str()
+                    .ok_or_else(|| "phase must be a string".to_owned())?;
+                let optional_string = |index: usize, field: &str| match &args[index] {
+                    Value::Null => Ok(None),
+                    Value::String(value) => Ok(Some(value.as_str())),
+                    _ => Err(format!("{field} must be a string or null")),
+                };
+                let game_name = optional_string(1, "game_name")?;
+                let app_id = optional_string(2, "app_id")?;
+                let backup_path = self.operations.get_backup_path().ok().flatten();
+                Ok(self
+                    .syncthing
+                    .start_watch(phase, game_name, app_id, backup_path.as_deref()))
+            }
+            "get_syncthing_activity" => {
+                expect_args(method, args, 1)?;
+                let watch_id = args[0]
+                    .as_str()
+                    .ok_or_else(|| "watch_id must be a string".to_owned())?;
+                Ok(self.syncthing.get_activity(watch_id))
+            }
+            "stop_syncthing_activity_watch" => {
+                expect_args(method, args, 1)?;
+                let watch_id = args[0]
+                    .as_str()
+                    .ok_or_else(|| "watch_id must be a string".to_owned())?;
+                Ok(self.syncthing.stop_watch(watch_id))
+            }
+            "get_update_check_context" => {
+                expect_args(method, args, 0)?;
+                Ok(self.updater.context(&lock(&self.settings)))
+            }
+            "check_for_plugin_update" => {
+                expect_range(method, args, 1, 2)?;
+                let current_version = args[0]
+                    .as_str()
+                    .ok_or_else(|| "current version must be a string".to_owned())?;
+                let settings = lock(&self.settings).clone();
+                self.updater.check_for_update(
+                    &settings,
+                    current_version,
+                    args.get(1).is_some_and(python_truthy),
+                )
+            }
+            "revalidate_plugin_update" => {
+                expect_args(method, args, 1)?;
+                self.updater.revalidate(&args[0])
+            }
+            "record_update_install_requested" => {
+                expect_args(method, args, 1)?;
+                if !args[0].is_object() {
+                    return Err("candidate must be an object".to_owned());
+                }
+                let settings = lock(&self.settings).clone();
+                self.updater.record_install_requested(&args[0], &settings)
+            }
+            "confirm_update_install_handoff" => {
+                expect_args(method, args, 1)?;
+                let version = args[0]
+                    .as_str()
+                    .ok_or_else(|| "version must be a string".to_owned())?;
+                let settings = lock(&self.settings).clone();
+                self.updater.confirm_install_handoff(version, &settings)
+            }
+            "mark_update_notified" => {
+                expect_args(method, args, 1)?;
+                let tag = args[0]
+                    .as_str()
+                    .ok_or_else(|| "tag must be a string".to_owned())?;
+                let settings = lock(&self.settings).clone();
+                self.updater.mark_notified(tag, &settings)
+            }
+            "clear_pending_update_install" => {
+                expect_range(method, args, 0, 1)?;
+                let version = match args.first() {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(version)) => Some(version.as_str()),
+                    Some(_) => return Err("version must be a string or null".to_owned()),
+                };
+                let settings = lock(&self.settings).clone();
+                self.updater.clear_pending_install(version, &settings)
+            }
             "get_settings" => {
                 expect_args(method, args, 0)?;
                 Ok(self.get_settings())
@@ -1487,6 +1662,57 @@ mod tests {
         };
         let service = Arc::new(BackendService::new(&env).unwrap());
         (directory, service)
+    }
+
+    #[test]
+    fn update_check_does_not_hold_settings_during_client_request() {
+        let (_directory, mut service) = test_service();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = std::sync::Mutex::new(release_rx);
+        Arc::get_mut(&mut service)
+            .unwrap()
+            .updater
+            .set_test_list_releases(Arc::new(move || {
+                entered_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(3))
+                    .unwrap();
+            }));
+        let checking = Arc::clone(&service);
+        let (check_tx, check_rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let _ = check_tx
+                .send(checking.invoke("check_for_plugin_update", &[json!("0.5.0"), json!(true)]));
+        });
+        entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("update check did not reach client");
+        let updating = Arc::clone(&service);
+        let (update_tx, update_rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let _ = update_tx.send(updating.invoke(
+                "update_settings",
+                &[json!({"kind":"selected_game","game_name":"Changed"})],
+            ));
+        });
+        let updated = update_rx.recv_timeout(Duration::from_secs(1));
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            updated
+                .expect("settings update blocked behind update check")
+                .unwrap()["selected_game"],
+            "Changed"
+        );
+        assert_eq!(
+            check_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("update check did not complete")
+                .unwrap()["status"],
+            "current"
+        );
     }
     #[tokio::test]
     async fn list_backups_cancellation_returns_skipped_through_dispatch() {
