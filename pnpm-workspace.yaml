@@ -11,6 +11,16 @@ minimumReleaseAgeExclude:
   - nanoid@3.3.18
   # Exact audited fix for indexed source-map denial of service.
   - source-map-js@1.2.2
+  # Exact audited Vitest 4.1.12 release set: fixes @vitest/mocker
+  # GHSA-qxg6-89mg-rqv8 and GHSA-xp26-3454-mjgp. Clears quarantine on 2026-10-29.
+  - vitest@4.1.12
+  - '@vitest/expect@4.1.12'
+  - '@vitest/mocker@4.1.12'
+  - '@vitest/pretty-format@4.1.12'
+  - '@vitest/runner@4.1.12'
+  - '@vitest/snapshot@4.1.12'
+  - '@vitest/spy@4.1.12'
+  - '@vitest/utils@4.1.12'
 storeDir: /tmp/sdh_ludusavi/.pnpm-store
 virtualStoreDir: /tmp/sdh_ludusavi/pnpm-virtual-store
 sideEffectsCache: false

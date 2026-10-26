@@ -46,6 +46,15 @@ Its matching quarantine exception is limited to that audited version; the normal
 14-day release-age policy remains in force for other versions. This transitive
 PostCSS/Vite dependency is development tooling, not plugin runtime code.
 
+Vitest 4.1.12 fixes two `@vitest/mocker` redirect allowlist bypasses
+([GHSA-qxg6-89mg-rqv8](https://github.com/advisories/GHSA-qxg6-89mg-rqv8),
+[GHSA-xp26-3454-mjgp](https://github.com/advisories/GHSA-xp26-3454-mjgp)).
+Its quarantine exceptions name only the exact 4.1.12 release set. The direct `vite`
+8.1.6 pin fixes five Vite dev-server advisories, including
+[GHSA-587h-7wmj-h5pm](https://github.com/advisories/GHSA-587h-7wmj-h5pm). Vite is a
+Vitest peer dependency, so pnpm overrides do not replace it; 8.1.6 is older than
+14 days and needs no exception. Both are test tooling, not plugin runtime code.
+
 `react-dom` 18.3.1 and `linkedom` 0.18.12 are development-only dependencies for native status-row behavior tests. React DOM renders the row, and LinkeDOM supplies the DOM for selector and visibility checks. They are not bundled as Decky runtime dependencies. Live Deck checks are still required for computed Steam styles, native clipping, and MutationObserver behavior.
 
 Native DOM fixture waits use standard timer callbacks wrapped in promises, not Node-specific promise timer APIs. Keep these fixtures compatible with the locked dependency graph on a clean install.
