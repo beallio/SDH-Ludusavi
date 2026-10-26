@@ -83,6 +83,32 @@ def test_analyze_watchdog_resume_before_resolution() -> None:
     )
 
 
+def test_analyze_rust_watchdog_expiry_correlates_with_later_action() -> None:
+    data = run_json_fixture("rust-watchdog.log")
+    findings = {finding["rule_id"]: finding for finding in data["findings"]}
+    assert set(findings) == {
+        "launch_gate.lease_expired",
+        "launch_gate.resume_before_resolution",
+    }
+    assert findings["launch_gate.lease_expired"]["line_number"] == 4
+    assert "PID 4125439: lease expired" in findings["launch_gate.lease_expired"]["evidence"]
+    assert (
+        "watchdog resume at line 4" in findings["launch_gate.resume_before_resolution"]["evidence"]
+    )
+
+
+def test_analyze_rust_watchdog_absolute_ceiling(tmp_path: Path) -> None:
+    log = tmp_path / "rust-ceiling.log"
+    log.write_text(
+        "[2026-10-26 16:23:14,824][WARNING]: "
+        "Watchdog releasing launch gate for root PID 4125439: absolute ceiling\n",
+        encoding="utf-8",
+    )
+    findings, _ = load_analyze_module().analyze_logs([log])
+    assert [finding.rule_id for finding in findings] == ["launch_gate.lease_expired"]
+    assert "absolute ceiling" in findings[0].evidence
+
+
 def test_analyze_syncthing_ttl_expiry() -> None:
     data = run_json_fixture("syncthing-ttl-expiry.log")
     assert any(finding["rule_id"] == "syncthing.watch_ttl_expired" for finding in data["findings"])

@@ -349,14 +349,12 @@ decisions. A remaining `operation_running` result is a visible failure, not a si
 completion. Syncthing's independent 120-second pre-game and 300/900-second post-game observation
 limits are unchanged.
 
-Successful transitions are logged as `Froze Steam app scope ... for root PID ...` and
-`Thawed Steam app scope ... for root PID ...`. Acquisition, discovery, transition, renewal,
-or automatic thaw failures are bounded warning/error diagnostics without raw cgroup paths,
-command environments, D-Bus addresses, or unbounded command output. The log analyzer emits
-the stable `launch_gate.scope_acquisition_failed`, `launch_gate.scope_freeze_failed`, and
-`launch_gate.conflict_skipped` findings for gate startup regressions. It also accepts
-historical process-tree messages so `launch_gate.lease_expired` and
-`launch_gate.resume_before_resolution` remain comparable across versions.
+The Rust backend logs `Launch gate acquired for root PID ...` and
+`Watchdog releasing launch gate for root PID ...: ...`. The log analyzer recognizes those
+messages and historical process-tree and scope messages so `launch_gate.lease_expired` and
+`launch_gate.resume_before_resolution` remain comparable across versions. It also recognizes
+historical gate-startup failures as `launch_gate.scope_acquisition_failed`,
+`launch_gate.scope_freeze_failed`, and `launch_gate.conflict_skipped` findings.
 
 ### Backend: Single-Instance Enforcement
 
