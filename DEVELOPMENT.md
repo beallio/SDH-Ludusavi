@@ -67,6 +67,37 @@ Native DOM fixture waits use standard timer callbacks wrapped in promises, not N
 ./run.sh uv run pytest
 ```
 
+### Black-box backend RPC contract suite
+
+Run the same newline-delimited Unix-socket RPC contract against the Python host or a native production backend. Contract-only runs override the repository's Python coverage threshold:
+
+```bash
+./run.sh uv run pytest -o addopts='' tests/contract/
+SDH_CONTRACT_BACKEND=/path/to/production-backend \
+  ./run.sh uv run pytest -o addopts='' tests/contract/
+```
+
+The harness isolates Decky, HOME and XDG state and refuses to start unless its `flatpak` and
+`systemctl` fakes resolve first on the backend's `PATH`; it never invokes host Ludusavi or
+`systemctl`. The optional real tier uses Ludusavi v0.31.0
+(`ludusavi-v0.31.0-linux.tar.gz`, SHA-256
+`7322ff45d41eae7ae064a80d8c9ecccc5b8fb6fc090a603a66369cd4b054068d`):
+
+```bash
+SDH_CONTRACT_LUDUSAVI_BIN=/path/to/ludusavi SDH_CONTRACT_REQUIRE_REAL=1 \
+  ./run.sh uv run pytest -o addopts='' tests/contract/test_contract.py -m real_ludusavi
+```
+The SDK example positive control has a separate selector; it is not a substitute for a production backend:
+
+```bash
+SDH_CONTRACT_SDK_EXAMPLE=/path/to/native_example \
+  ./run.sh uv run pytest -o addopts='' tests/contract/test_contract.py -k native_sdk_protocol_positive_control
+```
+
+Without `SDH_CONTRACT_LUDUSAVI_BIN`, the real tier skips locally; `SDH_CONTRACT_REQUIRE_REAL=1`
+makes a missing binary an error. The two network updater RPCs, `check_for_plugin_update` and
+`revalidate_plugin_update`, are intentionally outside this contract suite.
+
 ### Build the Decky frontend:
 
 ```bash

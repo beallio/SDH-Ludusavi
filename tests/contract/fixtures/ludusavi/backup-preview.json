@@ -1,0 +1,26 @@
+{
+  "overall": {
+    "totalGames": 1,
+    "totalBytes": 48,
+    "processedGames": 1,
+    "processedBytes": 48,
+    "changedGames": {
+      "new": 0,
+      "different": 1,
+      "same": 0
+    }
+  },
+  "games": {
+    "Contract Fixture Game": {
+      "decision": "Processed",
+      "change": "Different",
+      "files": {
+        "/tmp/sdh_ludusavi_contract_fixture/save.dat": {
+          "change": "Different",
+          "bytes": 48
+        }
+      },
+      "registry": {}
+    }
+  }
+}

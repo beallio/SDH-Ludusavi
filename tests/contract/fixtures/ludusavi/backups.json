@@ -1,0 +1,21 @@
+{
+  "games": {
+    "Contract Fixture Game": {
+      "backupPath": "/tmp/sdh_ludusavi_contract_fixture/backups/Contract Fixture Game",
+      "backups": [
+        {
+          "name": "backup-20261026T021713Z.zip",
+          "when": "2026-10-26T02:17:13.833500719Z",
+          "os": "linux",
+          "locked": false
+        },
+        {
+          "name": "backup-20261026T021728Z.zip",
+          "when": "2026-10-26T02:17:28.988148866Z",
+          "os": "linux",
+          "locked": false
+        }
+      ]
+    }
+  }
+}
