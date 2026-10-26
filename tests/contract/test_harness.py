@@ -107,7 +107,7 @@ def test_graceful_backend_exit_still_kills_remaining_process_group(tmp_path: Pat
         while time.monotonic() < deadline:
             try:
                 stat = Path(f"/proc/{child_pid}/stat").read_text(encoding="ascii")
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
                 break
             close_paren = stat.rfind(")")
             fields = stat[close_paren + 1 :].split() if close_paren >= 0 else []

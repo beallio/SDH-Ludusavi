@@ -822,20 +822,26 @@ def test_syncthing_watch_redacts_device_ids_and_uninstall_is_scoped(
 
 def test_hanging_ludusavi_exits_and_reaps_process_group(backend: ContractHarness) -> None:
     child = _start_prescope_child(backend.root)
-    backend.set_scenario(
-        {
-            "flatpak": {
-                "responses": {
-                    "backup": {
-                        "delay_seconds": 600,
-                        "ignore_term": True,
-                        "spawn_child": True,
-                    }
-                }
-            }
-        }
-    )
+    scoped_child: _Child | None = None
     try:
+        scoped_child = _start_scoped_child(backend.root)
+        backend.set_scenario(
+            {
+                "flatpak": {
+                    "responses": {
+                        "backup": {
+                            "delay_seconds": 600,
+                            "ignore_term": True,
+                            "spawn_child": True,
+                        }
+                    }
+                },
+                "systemctl": {
+                    "simulate_scope_freeze": True,
+                    "scope_unit": scoped_child.unit,
+                },
+            }
+        )
         with ThreadPoolExecutor(max_workers=1) as pool:
             operation = pool.submit(backend.call, "force_backup", GAME, timeout=190)
             hanging = _wait_for(
@@ -860,6 +866,11 @@ def test_hanging_ludusavi_exits_and_reaps_process_group(backend: ContractHarness
             lease_id = paused["lease_id"]
             original_deadline = time.monotonic() + paused["lease_ttl_seconds"]
             frozen_ticks = _tick_count(child)
+            scoped_paused = rpc(backend, "pause_game_process", scoped_child.pid)
+            assert scoped_paused["status"] == "paused", scoped_paused
+            assert scoped_paused["pid"] == scoped_child.pid
+            assert _scope_frozen(scoped_child), "scoped lease did not freeze its cgroup"
+            scoped_ticks_at_expiry = _tick_count(scoped_child)
 
             time.sleep(max(0.0, paused["lease_ttl_seconds"] - 2.0))
             renewed = rpc(backend, "renew_game_process_pause", child.pid, lease_id)
@@ -874,6 +885,16 @@ def test_hanging_ludusavi_exits_and_reaps_process_group(backend: ContractHarness
             assert _proc_state(child.pid) == "T", "renewal did not extend the pre-scope lease"
             assert _tick_count(child) == frozen_ticks, (
                 "renewed pre-scope PID progressed while stopped"
+            )
+            assert _wait_for(
+                lambda: not _scope_frozen(scoped_child),
+                scoped_paused["lease_ttl_seconds"] + 5,
+                "expired scoped lease did not thaw its cgroup",
+            )
+            assert _wait_for(
+                lambda: _tick_count(scoped_child) > scoped_ticks_at_expiry,
+                3,
+                "expired scoped lease did not allow child progress",
             )
 
             resumed = rpc(backend, "resume_game_process", child.pid, lease_id)
@@ -911,6 +932,9 @@ def test_hanging_ludusavi_exits_and_reaps_process_group(backend: ContractHarness
             f"fake Ludusavi process group {pgid} survived the operation timeout",
         )
     finally:
+        if scoped_child is not None:
+            _force_scope_thaw(backend, scoped_child)
+            _stop_child(scoped_child)
         _stop_child(child)
 
 
@@ -925,24 +949,30 @@ def _process_group_exists(pgid: int) -> bool:
 
 
 def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
-    harness = ContractHarness(
-        scenario={
-            "flatpak": {
-                "responses": {
-                    "restore": {
-                        "delay_seconds": 600,
-                        "ignore_term": True,
-                        "spawn_child": True,
-                    }
+    scenario: dict[str, Any] = {
+        "flatpak": {
+            "responses": {
+                "restore": {
+                    "delay_seconds": 600,
+                    "ignore_term": True,
+                    "spawn_child": True,
                 }
             }
         }
-    ).start()
+    }
+    harness = ContractHarness(scenario=scenario).start()
     child = _start_prescope_child(harness.root)
     operation_pool = ThreadPoolExecutor(max_workers=1)
     shutdown_pool = ThreadPoolExecutor(max_workers=1)
     stop_future: Future[None] | None = None
+    scoped_child: _Child | None = None
     try:
+        scoped_child = _start_scoped_child(harness.root)
+        scenario["systemctl"] = {
+            "simulate_scope_freeze": True,
+            "scope_unit": scoped_child.unit,
+        }
+        harness.set_scenario(scenario)
         assert rpc(harness, "update_settings", {"kind": "auto_sync", "enabled": True})[
             "auto_sync_enabled"
         ]
@@ -960,6 +990,11 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
         assert paused["pid"] == child.pid
         assert isinstance(paused["lease_id"], str) and paused["lease_id"]
         assert _proc_state(child.pid) == "T", "pre-scope launch PID was not held by SIGSTOP"
+        scoped_paused = rpc(harness, "pause_game_process", scoped_child.pid)
+        assert scoped_paused["status"] == "paused", scoped_paused
+        assert scoped_paused["pid"] == scoped_child.pid
+        assert _scope_frozen(scoped_child), "scoped game child was not frozen before unload"
+        scoped_frozen_ticks = _tick_count(scoped_child)
         operation = operation_pool.submit(harness.call, "force_restore", GAME, timeout=30)
 
         def restore_started() -> dict[str, Any] | None:
@@ -996,7 +1031,9 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
         observed_unsafe_release = False
         deadline = time.monotonic() + 6
         while time.monotonic() < deadline:
-            if _proc_state(child.pid) != "T" and _process_group_exists(hanging["pgid"]):
+            if (
+                _proc_state(child.pid) != "T" or not _scope_frozen(scoped_child)
+            ) and _process_group_exists(hanging["pgid"]):
                 observed_unsafe_release = True
                 break
             if stop_future.done():
@@ -1004,14 +1041,22 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
             time.sleep(0.01)
         stop_future.result(timeout=6)
         assert not observed_unsafe_release, (
-            "pre-scope launch PID resumed while its Ludusavi process group was still alive"
+            "a launch gate was released while its Ludusavi process group was still alive"
         )
         assert not _process_group_exists(hanging["pgid"])
         assert _proc_state(child.pid) != "T", "backend unload left the launch PID stopped"
+        assert not _scope_frozen(scoped_child), "backend unload left the scoped app cgroup frozen"
+        assert _wait_for(
+            lambda: _tick_count(scoped_child) > scoped_frozen_ticks,
+            3,
+            "unloaded backend did not release scoped child progress",
+        )
         with pytest.raises(ConnectionError, match="backend is shutting down"):
             operation.result(timeout=1)
     finally:
-        _force_scope_thaw(harness, child)
+        if scoped_child is not None:
+            _force_scope_thaw(harness, scoped_child)
+            _stop_child(scoped_child)
         _stop_child(child)
         try:
             harness.close()
