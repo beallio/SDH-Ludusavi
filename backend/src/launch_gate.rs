@@ -115,7 +115,9 @@ impl SystemdScopeController {
             .map_err(|_| "Unable to read launch PID cgroup membership".to_owned())?;
         let path = unified_cgroup_path(&content)?;
         let parts = validate_scope_parts(&path, self.uid)?;
-        let scope_dir = self.resolved_scope_dir(&parts)?;
+        let scope_dir = self
+            .resolved_scope_dir(&parts)
+            .map_err(|_| "Steam app scope is unavailable".to_owned())?;
         for name in ["cgroup.freeze", "cgroup.events"] {
             let value = fs::read_to_string(scope_dir.join(name))
                 .map_err(|_| "Steam app scope has no readable freezer state".to_owned())?;
@@ -262,34 +264,57 @@ impl SystemdScopeController {
         }
     }
 
-    fn resolved_scope_dir(&self, parts: &[String]) -> Result<PathBuf, String> {
-        let root = fs::canonicalize(&self.cgroup_root)
-            .map_err(|_| "Steam app scope is unavailable".to_owned())?;
+    fn resolved_scope_dir(&self, parts: &[String]) -> io::Result<PathBuf> {
+        let root = fs::canonicalize(&self.cgroup_root).map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Steam cgroup root is unavailable",
+                )
+            } else {
+                error
+            }
+        })?;
         let expected = parts
             .iter()
             .fold(root.clone(), |path, part| path.join(part));
-        let resolved =
-            fs::canonicalize(&expected).map_err(|_| "Steam app scope is unavailable".to_owned())?;
+        let resolved = fs::canonicalize(&expected)?;
         if resolved != expected || !resolved.starts_with(&root) {
-            return Err("Steam app scope escapes the cgroup root".to_owned());
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Steam app scope escapes the cgroup root",
+            ));
         }
         Ok(resolved)
     }
 
-    fn scope_dir(&self, scope: &SteamAppScope) -> Result<PathBuf, String> {
-        let parts = validate_scope_parts(&scope.cgroup_path, self.uid)?;
+    fn scope_dir(&self, scope: &SteamAppScope) -> io::Result<PathBuf> {
+        let parts = validate_scope_parts(&scope.cgroup_path, self.uid)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
         if parts[4] != scope.unit {
-            return Err("Scope unit does not match its cgroup path".to_owned());
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Scope unit does not match its cgroup path",
+            ));
         }
         self.resolved_scope_dir(&parts)
     }
 
     fn scope_state(&self, scope: &SteamAppScope) -> (ScopeState, String) {
-        let Ok(path) = self.scope_dir(scope) else {
-            return (
-                ScopeState::Invalid,
-                "Steam app scope path is invalid".to_owned(),
-            );
+        let path = match self.scope_dir(scope) {
+            Ok(path) => path,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return (
+                    ScopeState::Missing,
+                    "Steam app scope disappeared".to_owned(),
+                );
+            }
+            Err(_) => {
+                return (
+                    ScopeState::Invalid,
+                    "Steam app scope path is invalid".to_owned(),
+                );
+            }
         };
         let identity = match fs::metadata(&path) {
             Ok(identity) => identity,
@@ -856,10 +881,36 @@ mod tests {
     use tempfile::tempdir_in;
 
     use super::{
-        LaunchScopeAcquirer, SystemdScopeController, read_process_identity, same_process_identity,
-        thread_group_stopped,
+        LaunchScopeAcquirer, SteamAppScope, SystemdScopeController, read_process_identity,
+        same_process_identity, thread_group_stopped,
     };
 
+    #[test]
+    fn vanished_scope_is_an_idempotent_thaw() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let cgroup_root = temporary.path().join("cgroup");
+        fs::create_dir(&cgroup_root).unwrap();
+        let uid = unsafe { libc::geteuid() };
+        let unit = "app-steam-app123-456.scope";
+        let cgroup_path =
+            format!("/user.slice/user-{uid}.slice/user@{uid}.service/app.slice/{unit}");
+        let scope_dir = cgroup_root.join(cgroup_path.trim_start_matches('/'));
+        fs::create_dir_all(&scope_dir).unwrap();
+        let scope = SteamAppScope {
+            unit: unit.to_owned(),
+            cgroup_path,
+            device: 0,
+            inode: 0,
+            root_pid: 456,
+        };
+        fs::remove_dir_all(scope_dir).unwrap();
+
+        let result = SystemdScopeController::new(temporary.path().join("proc"), &cgroup_root, uid)
+            .thaw(&scope);
+
+        assert!(result.success, "{}", result.reason);
+        assert!(result.disappeared);
+    }
     #[test]
     fn launch_pid_identity_rejects_reused_pid_with_new_start_ticks() {
         let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
