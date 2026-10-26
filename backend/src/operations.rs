@@ -33,9 +33,9 @@ const MAX_INSTALLED_APP_IDS_BYTES: usize = 16_384;
 const MAX_BACKUP_STAT_ENTRIES: usize = 1_000;
 const OPERATION_CANCELLED: &str = "Ludusavi operation cancelled";
 type GuardedMutation =
-    Box<dyn FnOnce(Arc<AtomicBool>) -> GuardedOperationResult<Result<Value, String>>>;
+    Box<dyn FnOnce(Arc<AtomicBool>, &mut ProcessGroupCompletion) -> Result<Value, String>>;
 type ProcessOutputReader = thread::JoinHandle<io::Result<Vec<u8>>>;
-type ProcessReaders = (ProcessOutputReader, ProcessOutputReader);
+type ProcessReaders = (Option<ProcessOutputReader>, Option<ProcessOutputReader>);
 
 #[derive(Clone, Debug)]
 struct Game {
@@ -357,11 +357,11 @@ impl LudusaviOperations {
         let game = name.to_owned();
         self.run_operation(operation, Some(name), || {
             let client = self.client()?;
-            let mutation: GuardedMutation = Box::new(move |cancel| {
+            let mutation: GuardedMutation = Box::new(move |cancel, completion| {
                 if restore {
-                    client.restore_cancellable(&game, cancel)
+                    client.restore_cancellable(&game, cancel, completion)
                 } else {
-                    client.backup_cancellable(&game, cancel)
+                    client.backup_cancellable(&game, cancel, completion)
                 }
             });
             guard(mutation)
@@ -1010,9 +1010,10 @@ impl LudusaviClient {
     }
 
     fn json(&self, args: &[String], timeout: Duration) -> Result<Value, String> {
-        let mut result = self.json_cancellable(args, timeout, None);
-        result.completion.wait(Some(&self.processes.stopping));
-        result.result
+        let mut completion = ProcessGroupCompletion::confirmed();
+        let result = self.json_cancellable(args, timeout, None, &mut completion);
+        completion.wait(Some(&self.processes.stopping));
+        result
     }
 
     fn json_cancellable(
@@ -1020,7 +1021,8 @@ impl LudusaviClient {
         args: &[String],
         timeout: Duration,
         cancellation: Option<&AtomicBool>,
-    ) -> GuardedOperationResult<Result<Value, String>> {
+        completion: &mut ProcessGroupCompletion,
+    ) -> Result<Value, String> {
         let mut args = args.to_vec();
         if !args.iter().any(|arg| arg == "--api") {
             args.push("--api".to_owned());
@@ -1029,17 +1031,16 @@ impl LudusaviClient {
             .chain(std::iter::once(FLATPAK_ID.to_owned()))
             .chain(args)
             .collect();
-        let run = self.processes.run_at_cancellable(
-            &self.flatpak,
-            &arguments,
-            timeout,
-            false,
-            cancellation,
-        );
-        GuardedOperationResult {
-            result: run.result.and_then(|output| parse_ludusavi_json(&output)),
-            completion: run.completion,
-        }
+        self.processes
+            .run_at_cancellable(
+                &self.flatpak,
+                &arguments,
+                timeout,
+                false,
+                cancellation,
+                completion,
+            )
+            .and_then(|output| parse_ludusavi_json(&output))
     }
 
     fn text(&self, args: &[String], timeout: Duration) -> Result<String, String> {
@@ -1104,11 +1105,13 @@ impl LudusaviClient {
         &self,
         game: &str,
         cancellation: Arc<AtomicBool>,
-    ) -> GuardedOperationResult<Result<Value, String>> {
+        completion: &mut ProcessGroupCompletion,
+    ) -> Result<Value, String> {
         self.json_cancellable(
             &["backup".to_owned(), "--force".to_owned(), game.to_owned()],
             OPERATION_TIMEOUT,
             Some(&cancellation),
+            completion,
         )
     }
 
@@ -1116,11 +1119,13 @@ impl LudusaviClient {
         &self,
         game: &str,
         cancellation: Arc<AtomicBool>,
-    ) -> GuardedOperationResult<Result<Value, String>> {
+        completion: &mut ProcessGroupCompletion,
+    ) -> Result<Value, String> {
         self.json_cancellable(
             &["restore".to_owned(), "--force".to_owned(), game.to_owned()],
             OPERATION_TIMEOUT,
             Some(&cancellation),
+            completion,
         )
     }
 
@@ -1281,7 +1286,7 @@ pub(crate) struct ProcessGroupCompletion {
     pid: Option<i32>,
     confirmed: bool,
     groups: Option<Arc<Mutex<BTreeSet<i32>>>>,
-    readers: Option<ProcessReaders>,
+    readers: ProcessReaders,
 }
 
 impl ProcessGroupCompletion {
@@ -1290,7 +1295,7 @@ impl ProcessGroupCompletion {
             pid: None,
             confirmed: true,
             groups: None,
-            readers: None,
+            readers: (None, None),
         }
     }
 
@@ -1300,22 +1305,37 @@ impl ProcessGroupCompletion {
             pid: Some(pid),
             confirmed: false,
             groups: None,
-            readers: None,
+            readers: (None, None),
         }
     }
 
-    fn pending_command(
-        pid: i32,
-        groups: Arc<Mutex<BTreeSet<i32>>>,
-        stdout_reader: ProcessOutputReader,
-        stderr_reader: ProcessOutputReader,
-    ) -> Self {
-        Self {
-            pid: Some(pid),
-            confirmed: false,
-            groups: Some(groups),
-            readers: Some((stdout_reader, stderr_reader)),
+    fn track(&mut self, pid: i32, groups: Arc<Mutex<BTreeSet<i32>>>) {
+        self.pid = Some(pid);
+        self.confirmed = false;
+        self.groups = Some(groups);
+    }
+
+    fn set_stdout_reader(&mut self, reader: ProcessOutputReader) {
+        self.readers.0 = Some(reader);
+    }
+
+    fn set_stderr_reader(&mut self, reader: ProcessOutputReader) {
+        self.readers.1 = Some(reader);
+    }
+
+    fn take_stdout_reader(&mut self) -> Option<ProcessOutputReader> {
+        self.readers.0.take()
+    }
+
+    fn take_stderr_reader(&mut self) -> Option<ProcessOutputReader> {
+        self.readers.1.take()
+    }
+
+    fn confirm_exit(&mut self) {
+        if let (Some(pid), Some(groups)) = (self.pid, &self.groups) {
+            lock(groups).remove(&pid);
         }
+        self.confirmed = true;
     }
 
     pub(crate) fn wait(&mut self, cancellation: Option<&AtomicBool>) {
@@ -1327,27 +1347,16 @@ impl ProcessGroupCompletion {
                     }
                     thread::sleep(Duration::from_millis(10));
                 }
-                if let Some(groups) = &self.groups {
-                    lock(groups).remove(&pid);
-                }
             }
-            self.confirmed = true;
+            self.confirm_exit();
         }
-        if let Some((stdout_reader, stderr_reader)) = self.readers.take() {
-            let _ = stdout_reader.join();
-            let _ = stderr_reader.join();
+        if let Some(reader) = self.readers.0.take() {
+            let _ = reader.join();
+        }
+        if let Some(reader) = self.readers.1.take() {
+            let _ = reader.join();
         }
     }
-}
-
-pub(crate) struct GuardedOperationResult<T> {
-    pub(crate) result: T,
-    pub(crate) completion: ProcessGroupCompletion,
-}
-
-struct ProcessRun {
-    result: Result<String, String>,
-    completion: ProcessGroupCompletion,
 }
 
 #[derive(Default)]
@@ -1364,9 +1373,10 @@ impl ProcessManager {
         timeout: Duration,
         text: bool,
     ) -> Result<String, String> {
-        let mut run = self.run_at_cancellable(program, args, timeout, text, None);
-        run.completion.wait(Some(&self.stopping));
-        run.result
+        let mut completion = ProcessGroupCompletion::confirmed();
+        let result = self.run_at_cancellable(program, args, timeout, text, None, &mut completion);
+        completion.wait(Some(&self.stopping));
+        result
     }
 
     fn run_at_cancellable(
@@ -1376,15 +1386,12 @@ impl ProcessManager {
         timeout: Duration,
         text: bool,
         cancellation: Option<&AtomicBool>,
-    ) -> ProcessRun {
-        let failed = |message: String| ProcessRun {
-            result: Err(message),
-            completion: ProcessGroupCompletion::confirmed(),
-        };
+        completion: &mut ProcessGroupCompletion,
+    ) -> Result<String, String> {
         if self.stopping.load(Ordering::Acquire)
             || cancellation.is_some_and(|token| token.load(Ordering::Acquire))
         {
-            return failed("Ludusavi operation cancelled".to_owned());
+            return Err("Ludusavi operation cancelled".to_owned());
         }
         let mut command = Command::new(program);
         command
@@ -1406,19 +1413,19 @@ impl ProcessManager {
             );
         }
         command.process_group(0);
-        let mut child = match command.spawn() {
-            Ok(child) => child,
-            Err(error) => return failed(format!("Could not start Ludusavi command: {error}")),
-        };
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("Could not start Ludusavi command: {error}"))?;
         let pid = match i32::try_from(child.id()) {
             Ok(pid) => pid,
             Err(_) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return failed("Ludusavi process ID is out of range".to_owned());
+                return Err("Ludusavi process ID is out of range".to_owned());
             }
         };
         lock(&self.groups).insert(pid);
+        completion.track(pid, Arc::clone(&self.groups));
         if self.stopping.load(Ordering::Acquire)
             || cancellation.is_some_and(|token| token.load(Ordering::Acquire))
         {
@@ -1426,8 +1433,8 @@ impl ProcessManager {
         }
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
-        let stdout_reader = thread::spawn(move || read_pipe(stdout));
-        let stderr_reader = thread::spawn(move || read_pipe(stderr));
+        completion.set_stdout_reader(thread::spawn(move || read_pipe(stdout)));
+        completion.set_stderr_reader(thread::spawn(move || read_pipe(stderr)));
         let started = Instant::now();
         let mut status = None;
         let mut outcome = None;
@@ -1463,47 +1470,31 @@ impl ProcessManager {
             true
         };
         if !group_exited {
-            return ProcessRun {
-                result: Err("Could not confirm Ludusavi process group exit".to_owned()),
-                completion: ProcessGroupCompletion::pending_command(
-                    pid,
-                    Arc::clone(&self.groups),
-                    stdout_reader,
-                    stderr_reader,
-                ),
-            };
+            return Err("Could not confirm Ludusavi process group exit".to_owned());
         }
         if status.is_none() {
             status = child.wait().ok();
         }
-        let stdout = match stdout_reader
+        completion.confirm_exit();
+        let stdout = match completion
+            .take_stdout_reader()
+            .ok_or_else(|| "Ludusavi stdout reader was not started".to_owned())?
             .join()
             .unwrap_or_else(|_| Err(io::Error::other("stdout reader panicked")))
         {
             Ok(stdout) => stdout,
-            Err(error) => {
-                lock(&self.groups).remove(&pid);
-                return ProcessRun {
-                    result: Err(format!("Could not read Ludusavi stdout: {error}")),
-                    completion: ProcessGroupCompletion::confirmed(),
-                };
-            }
+            Err(error) => return Err(format!("Could not read Ludusavi stdout: {error}")),
         };
-        let stderr = match stderr_reader
+        let stderr = match completion
+            .take_stderr_reader()
+            .ok_or_else(|| "Ludusavi stderr reader was not started".to_owned())?
             .join()
             .unwrap_or_else(|_| Err(io::Error::other("stderr reader panicked")))
         {
             Ok(stderr) => stderr,
-            Err(error) => {
-                lock(&self.groups).remove(&pid);
-                return ProcessRun {
-                    result: Err(format!("Could not read Ludusavi stderr: {error}")),
-                    completion: ProcessGroupCompletion::confirmed(),
-                };
-            }
+            Err(error) => return Err(format!("Could not read Ludusavi stderr: {error}")),
         };
-        lock(&self.groups).remove(&pid);
-        let result = if let Some(outcome) = outcome {
+        if let Some(outcome) = outcome {
             if outcome == "cancelled" {
                 Err("Ludusavi operation cancelled".to_owned())
             } else if let Some(timeout) = outcome.strip_prefix("timeout:") {
@@ -1529,10 +1520,6 @@ impl ProcessManager {
             }
         } else {
             Err("Could not reap Ludusavi child process".to_owned())
-        };
-        ProcessRun {
-            result,
-            completion: ProcessGroupCompletion::confirmed(),
         }
     }
 

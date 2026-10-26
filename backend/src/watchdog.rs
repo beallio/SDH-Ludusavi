@@ -19,7 +19,7 @@ use crate::launch_gate::{
     LaunchProcessIdentity, LaunchScopeAcquirer, ScopeAcquisitionResult, ScopeTransitionResult,
     SteamAppScope, SystemdScopeController, parse_start_ticks, thread_group_stopped,
 };
-use crate::operations::GuardedOperationResult;
+use crate::operations::ProcessGroupCompletion;
 
 const LEASE_TTL: Duration = Duration::from_secs(30);
 const ABSOLUTE_RESUME: Duration = Duration::from_secs(240);
@@ -73,6 +73,57 @@ impl ScopeAcquirer for LaunchScopeAcquirer {
 #[derive(Clone)]
 pub struct ProcessWatchdog {
     inner: Arc<Inner>,
+}
+struct GuardedOperationGuard {
+    inner: Arc<Inner>,
+    pid: i32,
+    generation: u64,
+    guarded_generation: u64,
+    cancellation: Arc<AtomicBool>,
+    completion: ProcessGroupCompletion,
+    finalized: bool,
+}
+
+impl GuardedOperationGuard {
+    fn finalize(&self) -> Option<bool> {
+        let transition = self.inner.transition_lock(self.pid);
+        let _transition = lock(&transition);
+        let mut state = lock(&self.inner.state);
+        let Some(lease) = state.leases.get_mut(&self.pid) else {
+            self.inner.changed.notify_all();
+            return None;
+        };
+        if lease.generation != self.generation
+            || lease.guarded_generation != self.guarded_generation
+        {
+            self.inner.changed.notify_all();
+            return None;
+        }
+        lease.guarded_active = false;
+        lease.cancellation = None;
+        let release_requested = lease.release_requested;
+        self.inner.changed.notify_all();
+        Some(release_requested)
+    }
+
+    fn finish(&mut self) -> Option<bool> {
+        self.completion.wait(Some(&self.cancellation));
+        let release_requested = self.finalize();
+        self.finalized = true;
+        release_requested
+    }
+}
+
+impl Drop for GuardedOperationGuard {
+    fn drop(&mut self) {
+        if self.finalized {
+            return;
+        }
+        self.cancellation.store(true, Ordering::Release);
+        self.completion.wait(Some(&self.cancellation));
+        let _ = self.finalize();
+        self.finalized = true;
+    }
 }
 
 impl Default for ProcessWatchdog {
@@ -331,7 +382,7 @@ impl ProcessWatchdog {
         &self,
         pid: i32,
         lease_id: &str,
-        callback: impl FnOnce(Arc<AtomicBool>) -> GuardedOperationResult<T>,
+        callback: impl FnOnce(Arc<AtomicBool>, &mut ProcessGroupCompletion) -> T,
     ) -> Option<T> {
         if validate_pid(pid).is_err() || lease_id.is_empty() {
             return None;
@@ -363,23 +414,18 @@ impl ProcessWatchdog {
             lease.cancellation = Some(Arc::clone(&cancel));
             (lease.generation, lease.guarded_generation)
         };
-        let mut result = callback(Arc::clone(&cancel));
-        result.completion.wait(Some(&cancel));
-        let release_requested = {
-            let _transition = lock(&transition);
-            let mut state = lock(&self.inner.state);
-            let lease = state.leases.get_mut(&pid)?;
-            if lease.generation != generation || lease.guarded_generation != guarded_generation {
-                self.inner.changed.notify_all();
-                return None;
-            }
-            lease.guarded_active = false;
-            lease.cancellation = None;
-            let requested = lease.release_requested;
-            self.inner.changed.notify_all();
-            requested
+        let mut operation = GuardedOperationGuard {
+            inner: Arc::clone(&self.inner),
+            pid,
+            generation,
+            guarded_generation,
+            cancellation: Arc::clone(&cancel),
+            completion: ProcessGroupCompletion::confirmed(),
+            finalized: false,
         };
-        (!release_requested).then_some(result.result)
+        let result = callback(cancel, &mut operation.completion);
+        let release_requested = operation.finish()?;
+        (!release_requested).then_some(result)
     }
 
     pub fn resume_all(&self) {
@@ -644,7 +690,7 @@ mod tests {
             LaunchProcessIdentity, LaunchScopeAcquirer, ScopeAcquisitionResult,
             SystemdScopeController,
         },
-        operations::{GuardedOperationResult, ProcessGroupCompletion},
+        operations::ProcessGroupCompletion,
     };
 
     fn test_watchdog(
@@ -723,9 +769,8 @@ mod tests {
         let (done_sender, done_receiver) = mpsc::channel();
         let guarded_watchdog = watchdog.clone();
         let mut worker = Some(thread::spawn(move || {
-            let _ = guarded_watchdog.run_guarded(pid, "guarded-test", |_| GuardedOperationResult {
-                result: (),
-                completion: ProcessGroupCompletion::pending(pid),
+            let _ = guarded_watchdog.run_guarded(pid, "guarded-test", |_, completion| {
+                *completion = ProcessGroupCompletion::pending(pid);
             });
             done_sender.send(()).unwrap();
         }));
@@ -839,13 +884,9 @@ mod tests {
         let guarded_watchdog = watchdog.clone();
         let guarded_thread = thread::spawn(move || {
             attempt_sender.send(()).unwrap();
-            let result = guarded_watchdog.run_guarded(pid, "old-lease", move |_| {
+            let result = guarded_watchdog.run_guarded(pid, "old-lease", move |_, _| {
                 started_sender.send(()).unwrap();
                 finish_receiver.recv().unwrap();
-                GuardedOperationResult {
-                    result: (),
-                    completion: ProcessGroupCompletion::confirmed(),
-                }
             });
             result_sender.send(result.is_some()).unwrap();
         });
@@ -878,5 +919,163 @@ mod tests {
             !guarded_succeeded,
             "old guarded lease completion applied to a replacement lease"
         );
+    }
+    #[test]
+    fn guarded_callback_unwind_cancels_and_wakes_release_waiters() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let proc_root = temporary.path().join("proc");
+        let cgroup_root = temporary.path().join("cgroup");
+        fs::create_dir_all(&proc_root).unwrap();
+        fs::create_dir_all(&cgroup_root).unwrap();
+        let uid = unsafe { libc::geteuid() };
+        let mut child = Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = i32::try_from(child.id()).unwrap();
+        let operation_child = Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let operation_pid = i32::try_from(operation_child.id()).unwrap();
+        let (operation_exited_sender, operation_exited_receiver) = mpsc::channel();
+        let operation_reaper = thread::spawn(move || {
+            let mut operation_child = operation_child;
+            loop {
+                if operation_child.try_wait().unwrap().is_some() {
+                    operation_exited_sender.send(()).unwrap();
+                    break;
+                }
+                thread::sleep(Duration::from_millis(2));
+            }
+        });
+        let proc_dir = proc_root.join(pid.to_string());
+        let task_dir = proc_dir.join("task").join(pid.to_string());
+        fs::create_dir_all(&task_dir).unwrap();
+        let fields = std::iter::repeat_n("1", 18).collect::<Vec<_>>().join(" ");
+        let stat = format!("{pid} (fixture process) T {fields} 991");
+        fs::write(proc_dir.join("stat"), &stat).unwrap();
+        fs::write(task_dir.join("stat"), &stat).unwrap();
+        let controller = SystemdScopeController::new(&proc_root, &cgroup_root, uid);
+        let acquirer: Arc<dyn ScopeAcquirer> = Arc::new(LaunchScopeAcquirer::new(
+            controller.clone(),
+            &proc_root,
+            uid,
+        ));
+        let watchdog = test_watchdog(controller, proc_root, acquirer);
+        lock(&watchdog.inner.state).leases.insert(
+            pid,
+            PauseLease {
+                scope: None,
+                recovery_scopes: Vec::new(),
+                started: std::time::Instant::now(),
+                deadline: std::time::Instant::now() + LEASE_TTL,
+                lease_id: "panic-lease".to_owned(),
+                identity: Some(LaunchProcessIdentity {
+                    pid,
+                    owner_uid: uid,
+                    start_ticks: 991,
+                }),
+                generation: 1,
+                guarded_generation: 0,
+                guarded_active: false,
+                cancellation: None,
+                release_requested: false,
+                release_in_progress: false,
+            },
+        );
+
+        let (cancel_sender, cancel_receiver) = mpsc::channel();
+        let (continue_sender, continue_receiver) = mpsc::channel();
+        let (panic_sender, panic_receiver) = mpsc::channel();
+        let worker_watchdog = watchdog.clone();
+        let worker = thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                worker_watchdog.run_guarded(pid, "panic-lease", move |cancel, completion| -> () {
+                    *completion = ProcessGroupCompletion::pending(operation_pid);
+                    cancel_sender.send(cancel).unwrap();
+                    continue_receiver.recv().unwrap();
+                    panic!("fixture guarded operation panic")
+                })
+            }));
+            panic_sender.send(result.is_err()).unwrap();
+        });
+        let cancellation = cancel_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+
+        let (waiting_sender, waiting_receiver) = mpsc::channel();
+        let (woke_sender, woke_receiver) = mpsc::channel();
+        let waiting_watchdog = watchdog.clone();
+        let waiter = thread::spawn(move || {
+            let mut state = lock(&waiting_watchdog.inner.state);
+            waiting_sender.send(()).unwrap();
+            while state
+                .leases
+                .get(&pid)
+                .is_some_and(|lease| lease.guarded_active)
+            {
+                state = waiting_watchdog
+                    .inner
+                    .changed
+                    .wait(state)
+                    .unwrap_or_else(|error| error.into_inner());
+            }
+            woke_sender.send(()).unwrap();
+        });
+        waiting_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        let guarded_before_unwind = lock(&watchdog.inner.state).leases[&pid].guarded_active;
+        continue_sender.send(()).unwrap();
+
+        let panicked = panic_receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        let operation_exited = operation_exited_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .is_ok();
+        let waiter_woke = woke_receiver
+            .recv_timeout(Duration::from_millis(100))
+            .is_ok();
+        if !waiter_woke {
+            if let Some(lease) = lock(&watchdog.inner.state).leases.get_mut(&pid) {
+                lease.guarded_active = false;
+                lease.cancellation = None;
+            }
+            watchdog.inner.changed.notify_all();
+        }
+        worker.join().unwrap();
+        operation_reaper.join().unwrap();
+        waiter.join().unwrap();
+        let cancellation_requested = cancellation.load(std::sync::atomic::Ordering::Acquire);
+        let resume = watchdog.resume(pid, None);
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        assert!(panicked, "callback panic was swallowed");
+        assert!(
+            guarded_before_unwind,
+            "test did not reach the guarded-operation state"
+        );
+        assert!(
+            operation_exited,
+            "unwinding returned before the exact operation process exited"
+        );
+        assert!(
+            cancellation_requested,
+            "unwinding did not request cancellation"
+        );
+        assert!(
+            waiter_woke,
+            "unwind finalization did not wake release waiters"
+        );
+        assert_eq!(resume["status"], "resumed");
     }
 }
