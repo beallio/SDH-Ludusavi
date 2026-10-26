@@ -144,6 +144,11 @@ Run project commands through the wrapper so environment variables are applied:
 ./run.sh <command>
 ```
 
+Rust build output is the exception to the `/tmp` cache rule. `./run.sh` sets
+`CARGO_TARGET_DIR=/var/tmp/sdh_ludusavi/cargo-target` and creates
+`/var/tmp/sdh_ludusavi` with mode 0700 if missing. Keep Rust target artifacts out of
+Dropbox and the quota-limited `/tmp`.
+
 The wrapper exports:
 
 ```
@@ -151,6 +156,7 @@ UV_PROJECT_ENVIRONMENT=/tmp/{project_dir}/.venv
 XDG_CACHE_HOME=/tmp/{project_dir}/.cache
 PYTHONPYCACHEPREFIX=/tmp/{project_dir}/__pycache__
 TMPDIR=/tmp/{project_dir}
+CARGO_TARGET_DIR=/var/tmp/sdh_ludusavi/cargo-target
 ```
 
 Required tool cache redirections:
@@ -160,6 +166,7 @@ uv -> /tmp/{project_dir}/.uv_cache
 ruff -> /tmp/{project_dir}/.ruff_cache
 pytest -> /tmp/{project_dir}/.pytest_cache
 coverage -> /tmp/{project_dir}/.coverage
+Rust build output -> /var/tmp/sdh_ludusavi/cargo-target
 ```
 
 No generated caches may exist inside the repository.
@@ -364,9 +371,16 @@ Before any commit, agents must execute:
 ./run.sh uv run ruff format .
 ./run.sh uv run ty check py_modules/sdh_ludusavi/
 ./run.sh uv run pytest
+./run.sh pnpm run verify
+(
+cd backend
+../run.sh cargo fmt --manifest-path Cargo.toml --check
+../run.sh cargo clippy --manifest-path Cargo.toml --all-targets --locked -- -D warnings
+../run.sh cargo test --manifest-path Cargo.toml --locked
+)
 ```
 
-All checks must pass. The generated pre-commit hook runs the same core checks plus
+All checks must pass. The generated pre-commit hook runs these checks plus
 `scripts/check_tdd.sh`.
 
 ---

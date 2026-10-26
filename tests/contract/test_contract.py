@@ -4,6 +4,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -11,13 +12,14 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from typing import Any, Iterator
 
 import pytest
 
-from harness import ContractHarness, FAKE_BIN
+from harness import ContractHarness, FAKE_BIN, REPO_ROOT
 
 
 GAME = "Contract Fixture Game"
@@ -436,22 +438,358 @@ def _syncthing(harness: ContractHarness) -> Iterator[_SyncthingServer]:
         server.close()
 
 
-def test_settings_cache_shortcut_theme_protocol_and_concurrent_calls(
-    backend: ContractHarness,
-) -> None:
+@pytest.mark.contract_core
+def test_core_settings_and_logging_contract(backend: ContractHarness) -> None:
     settings = rpc(backend, "get_settings")
-    assert settings["auto_sync_enabled"] is False
-    assert settings["selected_game"] == ""
-    assert settings["update_channel"] == "stable"
+    assert settings == {
+        "auto_sync_enabled": False,
+        "sync_disabled_games": [],
+        "selected_game": "",
+        "notifications": {
+            "enabled": True,
+            "auto_sync_progress": True,
+            "auto_sync_results": True,
+            "manual_operations": True,
+            "refresh_status": True,
+            "failures_errors": True,
+            "update_available": True,
+        },
+        "update_channel": "stable",
+        "automatic_update_checks": True,
+        "debug_logging": True,
+    }
+    assert rpc(backend, "get_operation_status") == {
+        "is_running": False,
+        "name": None,
+        "game_name": None,
+        "last_result": None,
+        "last_error": None,
+    }
+    assert rpc(backend, "get_ludusavi_launcher_shortcut_id") == -1
+    assert rpc(backend, "set_ludusavi_launcher_shortcut_id", 7654321) is True
+    assert rpc(backend, "get_ludusavi_launcher_shortcut_id") == 7654321
+
+    updated = rpc(backend, "update_settings", {"kind": "auto_sync", "enabled": True})
+    assert updated["auto_sync_enabled"] is True
+    saved = json.loads((backend.settings_dir / "settings.json").read_text(encoding="utf-8"))
+    assert saved["auto_sync_enabled"] is True
+    disabled = rpc(
+        backend,
+        "update_settings",
+        {"kind": "game_sync", "game_name": "  Core   Game  ", "enabled": False},
+    )
+    assert disabled["sync_disabled_games"] == ["Core Game"]
+    unchanged = rpc(
+        backend, "update_settings", {"kind": "game_sync", "game_name": "", "enabled": "invalid"}
+    )
+    assert unchanged["sync_disabled_games"] == ["Core Game"]
+    enabled = rpc(
+        backend,
+        "update_settings",
+        {"kind": "game_sync", "game_name": "Core Game", "enabled": True},
+    )
+    assert enabled["sync_disabled_games"] == []
+    assert (
+        rpc(backend, "update_settings", {"kind": "selected_game", "game_name": "  Core   Game "})[
+            "selected_game"
+        ]
+        == "Core Game"
+    )
+    assert (
+        rpc(
+            backend,
+            "update_settings",
+            {"kind": "notification", "key": "manual_operations", "enabled": False},
+        )["notifications"]["manual_operations"]
+        is False
+    )
+    assert (
+        rpc(backend, "update_settings", {"kind": "update_channel", "channel": "development"})[
+            "update_channel"
+        ]
+        == "development"
+    )
+    assert (
+        rpc(backend, "update_settings", {"kind": "automatic_update_checks", "enabled": False})[
+            "automatic_update_checks"
+        ]
+        is False
+    )
+    assert (
+        rpc(backend, "update_settings", {"kind": "debug_logging", "enabled": False})[
+            "debug_logging"
+        ]
+        is False
+    )
+    failed = rpc(backend, "update_settings", {"kind": "unknown_contract_patch"})
+    assert failed["status"] == "failed"
+    assert "Unknown settings patch kind" in failed["message"]
+    failed = rpc(backend, "update_settings", {"kind": "auto_sync", "enabled": "not a boolean"})
+    assert failed["status"] == "failed"
+    assert "requires boolean enabled" in failed["message"]
+
+    assert rpc(backend, "log", "debug", "debug while disabled", None, GAME) is None
+    logs = rpc(backend, "get_recent_logs")
+    assert any(
+        entry["message"] == "debug while disabled"
+        and entry["level"] == "debug"
+        and entry["operation"] == "frontend"
+        and entry["game_name"] == GAME
+        for entry in logs
+    )
+    plugin_logs = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in backend.log_dir.rglob("*")
+        if path.is_file()
+    )
+    assert "debug while disabled" not in plugin_logs
+    assert (
+        rpc(backend, "update_settings", {"kind": "debug_logging", "enabled": True})["debug_logging"]
+        is True
+    )
+    rpc(backend, "log", "debug", "debug while enabled", None, GAME)
+    plugin_logs = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in backend.log_dir.rglob("*")
+        if path.is_file()
+    )
+    assert "debug while enabled" in plugin_logs
+
+    if backend.backend == "python":
+        # Startup reconciliation runs concurrently with the Python contract socket.
+        startup_deadline = time.monotonic() + 3
+        while time.monotonic() < startup_deadline:
+            logs = rpc(backend, "get_recent_logs")
+            if any(entry["message"].startswith("Startup reconciliation:") for entry in logs):
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("Python startup reconciliation did not complete")
+
+    for index in range(105):
+        rpc(backend, "log", "info", f"ring-{index}")
+    logs = rpc(backend, "get_recent_logs")
+    assert len(logs) == 100
+    assert logs[0]["message"] == "ring-5"
+    assert logs[-1]["message"] == "ring-104"
+    assert set(logs[0]) == {"level", "message", "timestamp", "operation", "game_name"}
+    assert len(logs[0]["timestamp"]) == 19
+    assert logs[0]["operation"] == "frontend"
+    assert logs[0]["game_name"] is None
+
+    history = rpc(backend, "get_game_history")
+    _assert_history_map(history)
+    assert history == {}
+    success, error = backend.call("unknown_contract_method")
+    assert success is False
+    assert "Plugin has no method unknown_contract_method" in error
+
+    if backend.backend != "python":
+        assert backend.settings_dir.stat().st_mode & 0o777 == 0o700
+        assert backend.runtime_dir.stat().st_mode & 0o777 == 0o700
+        cache_path = backend.runtime_dir / "cache.json"
+        assert cache_path.stat().st_mode & 0o777 == 0o600
+        assert (backend.runtime_dir / ".sdh_ludusavi.state.lock").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.contract_core
+def test_native_shutdown_drains_inflight_persistence_call() -> None:
+    native_backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
+    if native_backend == "python":
+        pytest.skip("in-flight native shutdown requires SDH_CONTRACT_BACKEND to select Rust")
+
+    with tempfile.TemporaryDirectory(
+        prefix="sdh-shutdown-", dir="/var/tmp/sdh_ludusavi"
+    ) as temporary_root:
+        backend = ContractHarness(backend=native_backend, root=Path(temporary_root)).start()
+        process = backend.process
+        assert process is not None
+        lock_file = (backend.runtime_dir / ".sdh_ludusavi.state.lock").open("r+b")
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                pending = executor.submit(
+                    backend.call, "set_ludusavi_launcher_shortcut_id", 8765432
+                )
+                try:
+                    time.sleep(0.1)
+                    process.send_signal(signal.SIGTERM)
+                    time.sleep(0.1)
+                    assert process.poll() is None, "native backend exited before draining the call"
+                finally:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                    lock_file.close()
+
+                try:
+                    success, result = pending.result(timeout=1)
+                except ConnectionError:
+                    pass
+                else:
+                    assert success and result is True
+                process.wait(timeout=5)
+                assert process.returncode == 0
+            cache = json.loads((backend.runtime_dir / "cache.json").read_text(encoding="utf-8"))
+            assert cache["ludusaviLauncherShortcutAppId"] == 8765432
+        finally:
+            if not lock_file.closed:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                lock_file.close()
+            backend.close()
+
+
+@pytest.mark.contract_core
+def test_native_sigterm_during_startup_lock_contention_is_prompt() -> None:
+    native_backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
+    if native_backend == "python":
+        pytest.skip("startup lock contention requires SDH_CONTRACT_BACKEND to select Rust")
+
+    with tempfile.TemporaryDirectory(
+        prefix="sdh-startup-lock-", dir="/var/tmp/sdh_ludusavi"
+    ) as temporary_root:
+        backend = ContractHarness(backend=native_backend, root=Path(temporary_root))
+        lock_path = backend.runtime_dir / ".sdh_ludusavi.state.lock"
+        lock_path.touch(mode=0o600)
+        lock_file = lock_path.open("r+b")
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            backend._check_fakes()
+            with (
+                backend.stdout_path.open("ab") as stdout_file,
+                backend.stderr_path.open("ab") as stderr_file,
+            ):
+                process = subprocess.Popen(
+                    [native_backend],
+                    cwd=REPO_ROOT,
+                    env=backend.env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=stdout_file,
+                    stderr=stderr_file,
+                    start_new_session=True,
+                )
+            backend.process = process
+            time.sleep(0.25)
+            assert process.poll() is None
+            assert not backend.socket_path.exists()
+
+            started = time.monotonic()
+            process.send_signal(signal.SIGTERM)
+            process.wait(timeout=3)
+            assert process.returncode == 0
+            assert time.monotonic() - started < 5
+        finally:
+            if not lock_file.closed:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                lock_file.close()
+            backend.close()
+
+
+@pytest.mark.contract_core
+def test_cross_backend_persistence_is_bidirectional() -> None:
+    native_backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
+    if native_backend == "python":
+        pytest.skip("cross-backend persistence requires SDH_CONTRACT_BACKEND to select Rust")
+
+    with tempfile.TemporaryDirectory(
+        prefix="sdh-cross-backend-", dir="/var/tmp/sdh_ludusavi"
+    ) as temporary_root:
+        root = Path(temporary_root)
+        python = ContractHarness(backend="python", root=root).start()
+        try:
+            assert rpc(python, "update_settings", {"kind": "auto_sync", "enabled": True})[
+                "auto_sync_enabled"
+            ]
+            assert (
+                rpc(
+                    python,
+                    "update_settings",
+                    {"kind": "selected_game", "game_name": "Python wrote"},
+                )["selected_game"]
+                == "Python wrote"
+            )
+            assert rpc(python, "set_ludusavi_launcher_shortcut_id", 1234567) is True
+
+            history_entry = {
+                "operation": "backup",
+                "trigger": "manual_backup",
+                "status": "backed_up",
+                "reason": None,
+                "message": "written by Python",
+                "timestamp": "2026-10-24T12:34:56.123456+00:00",
+            }
+            cache_path = python.runtime_dir / "cache.json"
+            cache = json.loads(cache_path.read_text(encoding="utf-8"))
+            cache["game_history"] = {"Cross Backend Game": {"last_backup": history_entry}}
+            cache["python_future_cache_key"] = {"preserve": True}
+            cache_path.write_text(json.dumps(cache), encoding="utf-8")
+        finally:
+            python.close()
+
+        native = ContractHarness(backend=native_backend, root=root).start()
+        try:
+            settings = rpc(native, "get_settings")
+            assert settings["auto_sync_enabled"] is True
+            assert settings["selected_game"] == "Python wrote"
+            assert rpc(native, "get_ludusavi_launcher_shortcut_id") == 1234567
+            history = rpc(native, "get_game_history")
+            _assert_history_map(history)
+            assert history["Cross Backend Game"]["last_backup"]["message"] == "written by Python"
+
+            assert (
+                rpc(
+                    native, "update_settings", {"kind": "selected_game", "game_name": "Rust wrote"}
+                )["selected_game"]
+                == "Rust wrote"
+            )
+            assert rpc(native, "set_ludusavi_launcher_shortcut_id", 7654321) is True
+            cache = json.loads((native.runtime_dir / "cache.json").read_text(encoding="utf-8"))
+            assert cache["python_future_cache_key"] == {"preserve": True}
+            assert cache["game_history"]["Cross Backend Game"]["last_backup"] == history_entry
+        finally:
+            native.close()
+
+        python = ContractHarness(backend="python", root=root).start()
+        try:
+            settings = rpc(python, "get_settings")
+            assert settings["auto_sync_enabled"] is True
+            assert settings["selected_game"] == "Rust wrote"
+            assert rpc(python, "get_ludusavi_launcher_shortcut_id") == 7654321
+            history = rpc(python, "get_game_history")
+            _assert_history_map(history)
+            assert history["Cross Backend Game"]["last_backup"]["message"] == "written by Python"
+        finally:
+            python.close()
+
+
+@pytest.mark.contract_theme
+def test_theme_installation_and_uninstall_ownership(backend: ContractHarness) -> None:
     assert rpc(backend, "consume_theme_refresh_needed") is True
     assert rpc(backend, "consume_theme_refresh_needed") is False
-
     theme = backend.decky_home / "themes" / "SDH-Ludusavi Status"
     assert (theme / "theme.json").is_file()
     unrelated_theme = backend.decky_home / "themes" / "Keep Existing Theme"
     unrelated_theme.mkdir(parents=True)
     (unrelated_theme / "keep.css").write_text("owned elsewhere", encoding="utf-8")
 
+    backend.uninstall()
+    assert not theme.exists()
+    assert (unrelated_theme / "keep.css").read_text(encoding="utf-8") == "owned elsewhere"
+
+    theme.mkdir()
+    unowned_file = theme / "owned-by-someone-else.txt"
+    unowned_file.write_text("preserve this theme", encoding="utf-8")
+    backend.start()
+    backend.uninstall()
+    assert unowned_file.read_text(encoding="utf-8") == "preserve this theme"
+
+
+@pytest.mark.contract_operations
+def test_settings_cache_shortcut_protocol_and_concurrent_calls(
+    backend: ContractHarness,
+) -> None:
+    settings = rpc(backend, "get_settings")
+    assert settings["auto_sync_enabled"] is False
+    assert settings["selected_game"] == ""
+    assert settings["update_channel"] == "stable"
     assert rpc(backend, "get_ludusavi_launcher_shortcut_id") == -1
     assert rpc(backend, "set_ludusavi_launcher_shortcut_id", 7654321) is True
     assert rpc(backend, "get_ludusavi_launcher_shortcut_id") == 7654321
@@ -498,18 +836,9 @@ def test_settings_cache_shortcut_theme_protocol_and_concurrent_calls(
     cache = json.loads((backend.runtime_dir / "cache.json").read_text(encoding="utf-8"))
     assert cache["game_history"][GAME]["last_backup"]["status"] == "backed_up"
 
-    backend.uninstall()
-    assert not theme.exists()
-    assert (unrelated_theme / "keep.css").read_text(encoding="utf-8") == "owned elsewhere"
 
-    theme.mkdir()
-    unowned_file = theme / "owned-by-someone-else.txt"
-    unowned_file.write_text("preserve this theme", encoding="utf-8")
-    backend.start()
-    backend.uninstall()
-    assert unowned_file.read_text(encoding="utf-8") == "preserve this theme"
-
-
+@pytest.mark.contract_operations
+@pytest.mark.contract_updater
 def test_operations_logs_status_lock_and_local_update_state(backend: ContractHarness) -> None:
     versions = rpc(backend, "get_versions")
     assert versions["ludusavi"] == "0.31.0"
@@ -602,6 +931,8 @@ def test_operations_logs_status_lock_and_local_update_state(backend: ContractHar
     assert rpc(backend, "get_update_check_context")["pending_update_install"] is None
 
 
+@pytest.mark.contract_lifecycle
+@pytest.mark.contract_gate
 def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHarness) -> None:
     (backend.root / "save.dat").write_bytes(b"newer local save\n")
     scenario_backups = _load_fixture("backups.json")
@@ -736,6 +1067,8 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHa
     assert foreign["status"] in {"skipped", "failed"}
 
 
+@pytest.mark.contract_syncthing
+@pytest.mark.contract_theme
 def test_syncthing_watch_redacts_device_ids_and_uninstall_is_scoped(
     backend: ContractHarness,
 ) -> None:
@@ -820,6 +1153,9 @@ def test_syncthing_watch_redacts_device_ids_and_uninstall_is_scoped(
     assert (keep_dir / "keep.css").read_text(encoding="utf-8") == "owned elsewhere"
 
 
+@pytest.mark.contract_operations
+@pytest.mark.contract_lifecycle
+@pytest.mark.contract_gate
 def test_hanging_ludusavi_exits_and_reaps_process_group(backend: ContractHarness) -> None:
     child = _start_prescope_child(backend.root)
     scoped_child: _Child | None = None
@@ -950,6 +1286,9 @@ def _process_group_exists(pgid: int) -> bool:
     return True
 
 
+@pytest.mark.contract_operations
+@pytest.mark.contract_lifecycle
+@pytest.mark.contract_gate
 def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
     scenario: dict[str, Any] = {
         "flatpak": {
@@ -1067,6 +1406,8 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
             shutdown_pool.shutdown(wait=True, cancel_futures=True)
 
 
+@pytest.mark.contract_operations
+@pytest.mark.contract_lifecycle
 @pytest.mark.real_ludusavi
 def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
     monkeypatch: pytest.MonkeyPatch,

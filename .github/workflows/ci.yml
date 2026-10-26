@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - dev
   workflow_dispatch:
 
 env:
@@ -23,6 +24,12 @@ jobs:
 
       - name: Setup Toolchain
         uses: ./.github/actions/setup-toolchain
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+          components: clippy,rustfmt
+          targets: x86_64-unknown-linux-musl
       - name: Provision user systemd manager and bus
         run: |
           uid="$(id -u)"
@@ -163,3 +170,46 @@ jobs:
       - name: Run Real Ludusavi Contract
         run: |
           ./run.sh uv run pytest -o addopts='' tests/contract/test_contract.py -m real_ludusavi
+  rust-backend:
+    name: Native Rust Backend and Core Contract
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Toolchain
+        uses: ./.github/actions/setup-toolchain
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+          components: clippy,rustfmt
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install musl Linker
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+
+      - name: Prepare Virtual Environment and Sync Dependencies
+        run: |
+          PKG_VER=$(jq -r .version package.json)
+          SETUPTOOLS_SCM_PRETEND_VERSION="$PKG_VER" ./run.sh uv sync
+
+      - name: Run Rust Gates
+        working-directory: backend
+        run: |
+          ../run.sh cargo fmt --manifest-path Cargo.toml --check
+          ../run.sh cargo clippy --manifest-path Cargo.toml --all-targets --locked -- -D warnings
+          ../run.sh cargo test --manifest-path Cargo.toml --locked
+
+      - name: Build SteamOS Backend
+        working-directory: backend
+        run: ../run.sh cargo build --manifest-path Cargo.toml --release --locked --target x86_64-unknown-linux-musl
+
+      - name: Run Native Core RPC Contract
+        run: |
+          SDH_CONTRACT_BACKEND=/var/tmp/sdh_ludusavi/cargo-target/x86_64-unknown-linux-musl/release/backend \
+            ./run.sh uv run pytest -o addopts='' tests/contract/ -m contract_core
