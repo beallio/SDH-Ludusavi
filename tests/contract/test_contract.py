@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -966,6 +967,128 @@ def test_uninstall_only_theme_cleanup_needs_no_backend_state() -> None:
 
 
 @pytest.mark.contract_operations
+def test_version_discovery_cache_tracks_the_active_flatpak_deployment() -> None:
+    harness = ContractHarness()
+    old_deployment = harness.root / "deployment-old"
+    new_deployment = harness.root / "deployment-new"
+    old_deployment.mkdir()
+    new_deployment.mkdir()
+    active = harness.root / "active"
+    active.symlink_to(old_deployment, target_is_directory=True)
+    harness.env["SDH_CONTRACT_FLATPAK_LOCATION"] = str(active)
+    harness.start()
+    try:
+        assert harness.fake_processes() == []
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
+        assert [record["argv"][2:] for record in harness.fake_processes()] == [["--version"]]
+
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
+        before = len(harness.fake_processes())
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
+        commands = [record["argv"][2:] for record in harness.fake_processes()[before:]]
+        assert len(commands) == 3, commands
+        assert not any(command == ["--version"] for command in commands)
+
+        active.unlink()
+        active.symlink_to(new_deployment, target_is_directory=True)
+        harness.set_scenario(
+            {"flatpak": {"responses": {"version": {"stdout": "ludusavi 0.32.0\n"}}}}
+        )
+        before = len(harness.fake_processes())
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.32.0"
+        commands = [record["argv"][2:] for record in harness.fake_processes()[before:]]
+        assert commands.count(["--version"]) == 1, commands
+
+        active.unlink()
+        harness.set_scenario({"flatpak": {"responses": {"version": {"exit_code": 1}}}})
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"]
+        assert rpc(harness, "get_ludusavi_command") is None
+
+        active.symlink_to(new_deployment, target_is_directory=True)
+        harness.set_scenario(
+            {"flatpak": {"responses": {"version": {"stdout": "ludusavi 0.32.0\n"}}}}
+        )
+        harness.restart()
+        before = len(harness.fake_processes())
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.32.0"
+        assert [record["argv"][2:] for record in harness.fake_processes()[before:]] == [
+            ["--version"]
+        ]
+    finally:
+        harness.close()
+
+
+@pytest.mark.contract_operations
+@pytest.mark.parametrize("failed_operation", ["refresh", "text", "backup"])
+def test_ludusavi_execution_failure_invalidates_cached_availability(
+    failed_operation: str,
+) -> None:
+    harness = ContractHarness()
+    deployment = harness.root / "deployment"
+    deployment.mkdir()
+    active = harness.root / "active"
+    active.symlink_to(deployment, target_is_directory=True)
+    harness.env["SDH_CONTRACT_FLATPAK_LOCATION"] = str(active)
+    harness.start()
+    try:
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
+        assert rpc(harness, "get_ludusavi_command")["commandPath"] == "flatpak"
+        if failed_operation != "text":
+            assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
+
+        command = {
+            "refresh": "backup_preview",
+            "text": "config_path",
+            "backup": "backup",
+        }[failed_operation]
+        harness.set_scenario(
+            {
+                "flatpak": {
+                    "responses": {
+                        command: {"exit_code": 23, "stderr": "Flatpak runtime unavailable"},
+                        "version": {"exit_code": 23, "stderr": "Flatpak runtime unavailable"},
+                    }
+                }
+            }
+        )
+        if failed_operation == "refresh":
+            assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"]
+        elif failed_operation == "text":
+            assert rpc(harness, "get_ludusavi_logs")["status"] == "failed"
+        else:
+            assert rpc(harness, "force_backup", GAME)["status"] == "failed"
+
+        before = len(harness.fake_processes())
+        assert rpc(harness, "get_versions")["status"] == "failed"
+        assert rpc(harness, "get_ludusavi_command") is None
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"]
+        commands = [record["argv"][2:] for record in harness.fake_processes()[before:]]
+        assert commands.count(["--version"]) >= 3, commands
+        assert all(command == ["--version"] for command in commands), commands
+
+        harness.set_scenario({})
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
+        assert rpc(harness, "get_ludusavi_command")["commandPath"] == "flatpak"
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
+    finally:
+        harness.close()
+
+
+@pytest.mark.contract_operations
+def test_version_discovery_rechecks_when_deployment_cannot_be_identified(
+    backend: ContractHarness,
+) -> None:
+    assert rpc(backend, "get_versions")["ludusavi"] == "0.31.0"
+    assert [record["argv"][2:] for record in backend.fake_processes()] == [["--version"]]
+    backend.set_scenario({"flatpak": {"responses": {"version": {"exit_code": 1}}}})
+    assert rpc(backend, "refresh_games", True, APP_ID)["dependency_error"]
+    assert rpc(backend, "get_ludusavi_command") is None
+    backend.set_scenario({})
+    assert rpc(backend, "get_versions")["ludusavi"] == "0.31.0"
+
+
+@pytest.mark.contract_operations
 def test_ludusavi_child_environment_is_sanitized() -> None:
     harness = ContractHarness()
     inherited_library_path = "/contract/parent-only-libraries"
@@ -1873,6 +1996,65 @@ def test_fixture_cleanup_thaws_a_frozen_owned_scope(
         assert _unit_state(child.unit)["LoadState"] == "not-found"
     finally:
         _stop_child(child)
+
+
+@pytest.mark.contract_syncthing
+@pytest.mark.parametrize("version", [ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3])
+def test_syncthing_watch_supports_local_https(
+    backend: ContractHarness, version: ssl.TLSVersion
+) -> None:
+    openssl = shutil.which("openssl")
+    if openssl is None:
+        pytest.skip("openssl is required to generate the local TLS fixture")
+    certificate = backend.root / "syncthing-cert.pem"
+    key = backend.root / "syncthing-key.pem"
+    subprocess.run(
+        [
+            openssl,
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=localhost",
+            "-keyout",
+            str(key),
+            "-out",
+            str(certificate),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=10,
+    )
+    server = _SyncthingServer(backend.backup_root)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = version
+    context.maximum_version = version
+    context.load_cert_chain(certificate, key)
+    server.server.socket = context.wrap_socket(server.server.socket, server_side=True)
+    server.start()
+    try:
+        config = backend.xdg_state / "syncthing" / "config.xml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(
+            '<configuration><gui enabled="true" tls="true">'
+            f"<address>127.0.0.1:{server.port}</address><apikey>{API_KEY}</apikey>"
+            "</gui></configuration>",
+            encoding="utf-8",
+        )
+        started = rpc(backend, "start_syncthing_activity_watch", "pre_game", GAME, APP_ID)
+        assert started["status"] == "watching", started
+        assert (
+            rpc(backend, "stop_syncthing_activity_watch", started["watch_id"])["status"]
+            == "stopped"
+        )
+        assert any(path.startswith("/rest/system/status") for path in server.requests)
+    finally:
+        server.close()
 
 
 @pytest.mark.contract_syncthing
