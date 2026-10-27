@@ -22,6 +22,22 @@ def load_package_module():
     return module
 
 
+@pytest.fixture
+def bundle_args(tmp_path: Path) -> list[str]:
+    license_path = tmp_path / "ludusavi-license"
+    third_party = tmp_path / "third-party"
+    license_path.write_text("license", encoding="utf-8")
+    third_party.write_text("third-party notices", encoding="utf-8")
+    return [
+        "--ludusavi",
+        "/bin/ls",
+        "--ludusavi-license",
+        str(license_path),
+        "--ludusavi-third-party",
+        str(third_party),
+    ]
+
+
 def test_package_requires_static_backend(tmp_path: Path) -> None:
     missing = tmp_path / "missing-backend"
     result = subprocess.run(
@@ -60,11 +76,13 @@ def test_package_rejects_dynamically_linked_backend(tmp_path: Path) -> None:
     assert "static" in result.stderr.lower()
 
 
-def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
+def test_package_script_creates_exact_decky_plugin_zip(
+    tmp_path: Path, bundle_args: list[str]
+) -> None:
     module = load_package_module()
 
     subprocess.run(
-        [sys.executable, "scripts/package_plugin.py", "--output-dir", str(tmp_path)],
+        [sys.executable, "scripts/package_plugin.py", "--output-dir", str(tmp_path), *bundle_args],
         check=True,
     )
 
@@ -78,6 +96,13 @@ def test_package_script_creates_exact_decky_plugin_zip(tmp_path: Path) -> None:
         backend = archive.getinfo("SDH-Ludusavi/bin/backend")
         assert (backend.external_attr >> 16) & 0o777 == 0o755
         assert archive.read(backend).startswith(b"\x7fELF")
+        ludusavi = archive.getinfo("SDH-Ludusavi/bin/ludusavi")
+        assert (ludusavi.external_attr >> 16) & 0o777 == 0o755
+        assert archive.read(ludusavi) == Path("/bin/ls").read_bytes()
+        assert archive.read("SDH-Ludusavi/licenses/ludusavi/LICENSE") == b"license"
+        assert (
+            archive.read("SDH-Ludusavi/licenses/ludusavi/third-party.txt") == b"third-party notices"
+        )
         theme_manifest = json.loads(archive.read("SDH-Ludusavi/theme/theme.json"))
 
     mode = theme_manifest["patches"]["Save Status"]
@@ -200,7 +225,7 @@ def test_package_validation_rejects_mismatched_metadata(tmp_path: Path) -> None:
         module.validate_package_versions(tmp_path)
 
 
-def test_package_script_supports_release_arguments(tmp_path: Path) -> None:
+def test_package_script_supports_release_arguments(tmp_path: Path, bundle_args: list[str]) -> None:
     import hashlib
 
     # Record source versions and ensure they aren't modified
@@ -221,6 +246,7 @@ def test_package_script_supports_release_arguments(tmp_path: Path) -> None:
             "--emit-release-metadata",
             "--output-dir",
             str(tmp_path),
+            *bundle_args,
         ],
         check=True,
     )
@@ -271,7 +297,7 @@ def test_package_script_supports_release_arguments(tmp_path: Path) -> None:
         )
 
 
-def test_package_script_dev_prerelease(tmp_path: Path) -> None:
+def test_package_script_dev_prerelease(tmp_path: Path, bundle_args: list[str]) -> None:
     # Run release packaging with a dev/prerelease version
     subprocess.run(
         [
@@ -284,6 +310,7 @@ def test_package_script_dev_prerelease(tmp_path: Path) -> None:
             "--emit-release-metadata",
             "--output-dir",
             str(tmp_path),
+            *bundle_args,
         ],
         check=True,
     )
@@ -301,7 +328,7 @@ def test_package_script_dev_prerelease(tmp_path: Path) -> None:
     assert manifest_data["assetName"] == "SDH-Ludusavi-v0.2.1-dev.55d87c6.zip"
 
 
-def test_release_zip_strips_debug_flag(tmp_path: Path) -> None:
+def test_release_zip_strips_debug_flag(tmp_path: Path, bundle_args: list[str]) -> None:
     plugin_src = json.loads(Path("plugin.json").read_text(encoding="utf-8"))
     assert "debug" in plugin_src.get("flags", []), "precondition: repo keeps debug for dev"
 
@@ -317,6 +344,7 @@ def test_release_zip_strips_debug_flag(tmp_path: Path) -> None:
             "--versioned-output",
             "--output-dir",
             str(tmp_path),
+            *bundle_args,
         ],
         check=True,
     )
@@ -333,9 +361,9 @@ def test_release_zip_strips_debug_flag(tmp_path: Path) -> None:
     assert "debug" in json.loads(Path("plugin.json").read_text(encoding="utf-8"))["flags"]
 
 
-def test_local_zip_keeps_debug_flag(tmp_path: Path) -> None:
+def test_local_zip_keeps_debug_flag(tmp_path: Path, bundle_args: list[str]) -> None:
     subprocess.run(
-        [sys.executable, "scripts/package_plugin.py", "--output-dir", str(tmp_path)],
+        [sys.executable, "scripts/package_plugin.py", "--output-dir", str(tmp_path), *bundle_args],
         check=True,
     )
 
@@ -343,3 +371,98 @@ def test_local_zip_keeps_debug_flag(tmp_path: Path) -> None:
         zip_plugin = json.loads(archive.read("SDH-Ludusavi/plugin.json"))
 
     assert "debug" in zip_plugin.get("flags", [])
+
+
+def test_package_fetches_bundle_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bundle_args: list[str]
+) -> None:
+    module = load_package_module()
+    paths = (Path(bundle_args[1]), Path(bundle_args[3]), Path(bundle_args[5]))
+    calls: list[bool] = []
+
+    def fetch_bundle() -> tuple[Path, Path, Path]:
+        calls.append(True)
+        return paths
+
+    monkeypatch.setattr(module, "fetch_bundle", fetch_bundle)
+    zip_path = module.build_plugin_zip(Path.cwd(), tmp_path, is_release=True)
+    assert calls == [True]
+    with zipfile.ZipFile(zip_path) as archive:
+        assert archive.read("SDH-Ludusavi/bin/ludusavi") == paths[0].read_bytes()
+
+
+@pytest.mark.parametrize("content", [b"not an ELF", b"\x7fELF\x02\x01\x01"])
+def test_package_rejects_invalid_ludusavi(
+    tmp_path: Path, bundle_args: list[str], content: bytes
+) -> None:
+    binary = tmp_path / "bad-ludusavi"
+    binary.write_bytes(content)
+    bundle_args[1] = str(binary)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/package_plugin.py",
+            "--release",
+            "--output-dir",
+            str(tmp_path),
+            *bundle_args,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "ludusavi" in result.stderr.lower()
+    assert "elf" in result.stderr.lower()
+
+
+@pytest.mark.parametrize("index", [3, 5])
+def test_package_rejects_empty_license(tmp_path: Path, bundle_args: list[str], index: int) -> None:
+    Path(bundle_args[index]).write_bytes(b"")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/package_plugin.py",
+            "--release",
+            "--output-dir",
+            str(tmp_path),
+            *bundle_args,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "empty" in result.stderr.lower()
+
+
+def test_package_rejects_partial_bundle_override(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/package_plugin.py",
+            "--release",
+            "--ludusavi",
+            "/bin/ls",
+            "--output-dir",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "all three" in result.stderr.lower()
+
+
+def test_release_workflows_fetch_pinned_bundle_before_packaging() -> None:
+    for name in ("ci", "release", "dev-release"):
+        workflow = Path(f".github/workflows/{name}.yml").read_text(encoding="utf-8")
+        assert workflow.index("scripts/fetch_ludusavi.py") < workflow.index(
+            "scripts/package_plugin.py"
+        )
+    ci = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    rust_job = ci[ci.index("  rust-backend:") :]
+    assert "scripts/fetch_ludusavi.py" in rust_job
+    assert "SDH_CONTRACT_LUDUSAVI_BIN=$ludusavi_bin" in rust_job
+    assert "SDH_CONTRACT_REQUIRE_REAL=1" in rust_job
+    assert "libgtk-3-0t64" in rust_job
+    assert "libgtk-3-0" in rust_job
+    assert "mtkennerly/ludusavi/releases" not in rust_job

@@ -99,6 +99,9 @@ jobs:
         run: |
           ./run.sh uv sync --frozen
 
+      - name: Fetch Pinned Ludusavi Bundle
+        run: ./run.sh uv run python scripts/fetch_ludusavi.py
+
       - name: Run Quality Gates
         run: |
           ./run.sh bash scripts/quality_gates.sh check
