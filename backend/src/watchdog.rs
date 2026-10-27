@@ -1229,6 +1229,85 @@ mod tests {
     }
 
     #[test]
+    fn cancelling_cooperative_child_releases_guarded_launch_gate() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let proc_root = temporary.path().join("proc");
+        let cgroup_root = temporary.path().join("cgroup");
+        fs::create_dir_all(&proc_root).unwrap();
+        fs::create_dir_all(&cgroup_root).unwrap();
+        let uid = unsafe { libc::geteuid() };
+        let mut child = Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = i32::try_from(child.id()).unwrap();
+        let proc_dir = proc_root.join(pid.to_string());
+        let task_dir = proc_dir.join("task").join(pid.to_string());
+        fs::create_dir_all(&task_dir).unwrap();
+        let fields = std::iter::repeat_n("1", 18).collect::<Vec<_>>().join(" ");
+        let stat = format!("{pid} (fixture process) T {fields} 991");
+        fs::write(proc_dir.join("stat"), &stat).unwrap();
+        fs::write(task_dir.join("stat"), &stat).unwrap();
+        let controller = SystemdScopeController::new(&proc_root, &cgroup_root, uid);
+        let acquirer: Arc<dyn ScopeAcquirer> = Arc::new(LaunchScopeAcquirer::new(
+            controller.clone(),
+            &proc_root,
+            uid,
+        ));
+        let watchdog = test_watchdog(controller, proc_root, acquirer);
+        lock(&watchdog.inner.state).leases.insert(
+            pid,
+            PauseLease {
+                scope: None,
+                recovery_scopes: Vec::new(),
+                started: std::time::Instant::now(),
+                deadline: std::time::Instant::now() + LEASE_TTL,
+                lease_id: "cancel-lease".to_owned(),
+                identity: Some(LaunchProcessIdentity {
+                    pid,
+                    owner_uid: uid,
+                    start_ticks: 991,
+                }),
+                generation: 1,
+                guarded_generation: 0,
+                guarded_active: false,
+                cancellation: None,
+                release_requested: false,
+                release_in_progress: false,
+            },
+        );
+        let (registered_sender, registered_receiver) = mpsc::channel();
+        let guarded_watchdog = watchdog.clone();
+        let worker = thread::spawn(move || {
+            guarded_watchdog.run_guarded(pid, "cancel-lease", move |cancel, completion| {
+                crate::operations::run_test_cancellable_process(
+                    completion,
+                    &cancel,
+                    move |operation_pid| registered_sender.send(operation_pid).unwrap(),
+                )
+            })
+        });
+        let operation_pid = registered_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        let started = std::time::Instant::now();
+        let result = watchdog.resume(pid, Some("cancel-lease"));
+        let elapsed = started.elapsed();
+        worker.join().unwrap();
+        let group_gone = unsafe { libc::kill(-operation_pid, 0) } != 0;
+        let _ = watchdog.resume(pid, None);
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        assert_eq!(result["status"], "resumed", "{result}");
+        assert!(elapsed < super::GUARDED_COMPLETION_TIMEOUT, "{elapsed:?}");
+        assert!(group_gone, "cancelled operation group survived release");
+    }
+
+    #[test]
     fn guarded_lease_stays_pinned_until_process_group_exit_is_confirmed() {
         let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
         let proc_root = temporary.path().join("proc");

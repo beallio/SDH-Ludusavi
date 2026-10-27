@@ -1696,6 +1696,24 @@ pub(crate) fn run_test_process_after_registration(
     );
 }
 
+#[cfg(test)]
+pub(crate) fn run_test_cancellable_process(
+    completion: &mut ProcessGroupCompletion,
+    cancellation: &AtomicBool,
+    after_registration: impl FnOnce(i32) + Send + 'static,
+) -> Result<String, String> {
+    let processes = ProcessManager::default();
+    *lock(&processes.after_track_hook) = Some(Box::new(after_registration));
+    processes.run_at_cancellable(
+        Path::new("/bin/sleep"),
+        &["30".to_owned()],
+        Duration::from_secs(30),
+        false,
+        Some(cancellation),
+        completion,
+    )
+}
+
 fn read_pipe(mut pipe: impl Read) -> io::Result<Vec<u8>> {
     let mut output = Vec::new();
     pipe.read_to_end(&mut output)?;
@@ -1706,6 +1724,7 @@ fn terminate_group(pid: i32, child: &mut Child) -> bool {
     let _ = signal_group(pid, libc::SIGTERM);
     let grace_end = Instant::now() + TERMINATE_GRACE;
     while Instant::now() < grace_end && group_exists(pid) {
+        let _ = child.try_wait();
         thread::sleep(Duration::from_millis(10));
     }
     if group_exists(pid) {
@@ -1713,6 +1732,7 @@ fn terminate_group(pid: i32, child: &mut Child) -> bool {
     }
     let deadline = Instant::now() + KILL_CONFIRM_TIMEOUT;
     while group_exists(pid) && Instant::now() < deadline {
+        let _ = child.try_wait();
         thread::sleep(Duration::from_millis(10));
     }
     if child.try_wait().ok().flatten().is_none() {
