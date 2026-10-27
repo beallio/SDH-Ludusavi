@@ -966,6 +966,72 @@ def test_uninstall_only_theme_cleanup_needs_no_backend_state() -> None:
 
 
 @pytest.mark.contract_operations
+def test_version_discovery_cache_tracks_the_active_flatpak_deployment() -> None:
+    harness = ContractHarness()
+    old_deployment = harness.root / "deployment-old"
+    new_deployment = harness.root / "deployment-new"
+    old_deployment.mkdir()
+    new_deployment.mkdir()
+    active = harness.root / "active"
+    active.symlink_to(old_deployment, target_is_directory=True)
+    harness.env["SDH_CONTRACT_FLATPAK_LOCATION"] = str(active)
+    harness.start()
+    try:
+        assert harness.fake_processes() == []
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
+        assert [record["argv"][2:] for record in harness.fake_processes()] == [["--version"]]
+
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
+        before = len(harness.fake_processes())
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
+        commands = [record["argv"][2:] for record in harness.fake_processes()[before:]]
+        assert len(commands) == 3, commands
+        assert not any(command == ["--version"] for command in commands)
+
+        active.unlink()
+        active.symlink_to(new_deployment, target_is_directory=True)
+        harness.set_scenario(
+            {"flatpak": {"responses": {"version": {"stdout": "ludusavi 0.32.0\n"}}}}
+        )
+        before = len(harness.fake_processes())
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.32.0"
+        commands = [record["argv"][2:] for record in harness.fake_processes()[before:]]
+        assert commands.count(["--version"]) == 1, commands
+
+        active.unlink()
+        harness.set_scenario({"flatpak": {"responses": {"version": {"exit_code": 1}}}})
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"]
+        assert rpc(harness, "get_ludusavi_command") is None
+
+        active.symlink_to(new_deployment, target_is_directory=True)
+        harness.set_scenario(
+            {"flatpak": {"responses": {"version": {"stdout": "ludusavi 0.32.0\n"}}}}
+        )
+        harness.restart()
+        before = len(harness.fake_processes())
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.32.0"
+        assert [record["argv"][2:] for record in harness.fake_processes()[before:]] == [
+            ["--version"]
+        ]
+    finally:
+        harness.close()
+
+
+@pytest.mark.contract_operations
+def test_version_discovery_rechecks_when_deployment_cannot_be_identified(
+    backend: ContractHarness,
+) -> None:
+    assert rpc(backend, "get_versions")["ludusavi"] == "0.31.0"
+    assert [record["argv"][2:] for record in backend.fake_processes()] == [["--version"]]
+    backend.set_scenario({"flatpak": {"responses": {"version": {"exit_code": 1}}}})
+    assert rpc(backend, "refresh_games", True, APP_ID)["dependency_error"]
+    assert rpc(backend, "get_ludusavi_command") is None
+    backend.set_scenario({})
+    assert rpc(backend, "get_versions")["ludusavi"] == "0.31.0"
+
+
+@pytest.mark.contract_operations
 def test_ludusavi_child_environment_is_sanitized() -> None:
     harness = ContractHarness()
     inherited_library_path = "/contract/parent-only-libraries"

@@ -25,6 +25,7 @@ use crate::{
 
 const FLATPAK_ID: &str = "com.github.mtkennerly.ludusavi";
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
+const DEPLOYMENT_TIMEOUT: Duration = Duration::from_secs(1);
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(180);
 const BACKUPS_TIMEOUT: Duration = Duration::from_secs(30);
 const TERMINATE_GRACE: Duration = Duration::from_millis(200);
@@ -287,6 +288,7 @@ impl LudusaviOperations {
             processes: Arc::clone(&self.processes),
             flatpak: PathBuf::new(),
             config_path: Mutex::new(None),
+            deployment: None,
             version: Mutex::new(None),
         }));
         self.cancel_processes();
@@ -297,6 +299,7 @@ impl LudusaviOperations {
             processes: Arc::clone(&self.processes),
             flatpak,
             config_path: Mutex::new(None),
+            deployment: None,
             version: Mutex::new(None),
         }));
     }
@@ -491,7 +494,16 @@ impl LudusaviOperations {
             return self.refresh_result(None);
         }
         if force {
-            *lock(&self.client) = None;
+            let mut client = lock(&self.client);
+            if let Some(existing) = client.as_ref()
+                && existing.deployment.is_some()
+                && find_flatpak().as_ref() == Some(&existing.flatpak)
+                && existing.deployment == deployment_location(&self.processes, &existing.flatpak)
+            {
+                *lock(&existing.config_path) = None;
+            } else {
+                *client = None;
+            }
         }
         let result = self.run_operation("refresh", None, || {
             self.refresh_statuses(normalized_ids.clone().unwrap_or(None), target_marker)
@@ -1018,6 +1030,7 @@ pub(crate) enum OperationError {
 struct LudusaviClient {
     processes: Arc<ProcessManager>,
     flatpak: PathBuf,
+    deployment: Option<PathBuf>,
     config_path: Mutex<Option<PathBuf>>,
     version: Mutex<Option<String>>,
 }
@@ -1026,7 +1039,8 @@ impl LudusaviClient {
     fn new(processes: Arc<ProcessManager>) -> Result<Self, String> {
         let flatpak = find_flatpak()
             .ok_or_else(|| "Ludusavi Flatpak is not available to Decky".to_owned())?;
-        processes.run_at(
+        let deployment = deployment_location(&processes, &flatpak);
+        let version = processes.run_at(
             &flatpak,
             &[
                 "run".to_owned(),
@@ -1039,8 +1053,9 @@ impl LudusaviClient {
         Ok(Self {
             processes,
             flatpak,
+            deployment,
             config_path: Mutex::new(None),
-            version: Mutex::new(None),
+            version: Mutex::new(Some(version.trim().to_owned())),
         })
     }
 
@@ -1088,14 +1103,15 @@ impl LudusaviClient {
     }
 
     fn version(&self) -> Result<String, String> {
-        if let Some(version) = lock(&self.version).as_ref() {
+        let mut cached = lock(&self.version);
+        if let Some(version) = cached.as_ref() {
             return Ok(version.clone());
         }
         let version = self
             .text(&["--version".to_owned()], BACKUPS_TIMEOUT)?
             .trim()
             .to_owned();
-        *lock(&self.version) = Some(version.clone());
+        *cached = Some(version.clone());
         Ok(version)
     }
 
@@ -1704,6 +1720,27 @@ fn group_exists(pid: i32) -> bool {
     } else {
         io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
     }
+}
+
+fn deployment_location(processes: &ProcessManager, flatpak: &Path) -> Option<PathBuf> {
+    let output = processes
+        .run_at(
+            flatpak,
+            &[
+                "info".to_owned(),
+                "--show-location".to_owned(),
+                FLATPAK_ID.to_owned(),
+            ],
+            DEPLOYMENT_TIMEOUT,
+            false,
+        )
+        .ok()?;
+    let path = Path::new(output.trim());
+    if !path.is_absolute() {
+        return None;
+    }
+    let path = path.canonicalize().ok()?;
+    path.is_dir().then_some(path)
 }
 
 fn find_flatpak() -> Option<PathBuf> {
@@ -2428,6 +2465,7 @@ mod tests {
             flatpak: PathBuf::new(),
             config_path: std::sync::Mutex::new(None),
             version: std::sync::Mutex::new(None),
+            deployment: None,
         }));
         operations.cancel_processes();
 
@@ -2547,6 +2585,7 @@ mod tests {
             flatpak: fake,
             config_path: std::sync::Mutex::new(None),
             version: std::sync::Mutex::new(None),
+            deployment: None,
         };
 
         assert_eq!(client.logs().unwrap(), "original path");

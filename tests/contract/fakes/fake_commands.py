@@ -126,6 +126,15 @@ def _hang_if_configured(config: dict[str, Any]) -> None:
 
 
 def run_flatpak(argv: list[str]) -> int:
+    if argv == ["info", "--show-location", "com.github.mtkennerly.ludusavi"]:
+        if os.environ.get("SDH_CONTRACT_FLATPAK_INFO_LOG"):
+            _append_record("SDH_CONTRACT_FLATPAK_INFO_LOG", {"argv": argv})
+        location = os.environ.get("SDH_CONTRACT_FLATPAK_LOCATION")
+        if location and Path(location).is_dir():
+            print(location)
+            return 0
+        print("Ludusavi installation not found", file=sys.stderr)
+        return 1
     record: dict[str, Any] = {
         "argv": argv,
         "pid": os.getpid(),
