@@ -1098,7 +1098,7 @@ impl LudusaviClient {
                 cancellation,
                 completion,
             )
-            .inspect_err(|_| self.execution_failed.store(true, Ordering::Release))
+            .inspect_err(|message| self.note_failure(message))
             .and_then(|output| parse_ludusavi_json(&output))
     }
 
@@ -1109,7 +1109,14 @@ impl LudusaviClient {
             .collect();
         self.processes
             .run_at(&self.flatpak, &arguments, timeout, true)
-            .inspect_err(|_| self.execution_failed.store(true, Ordering::Release))
+            .inspect_err(|message| self.note_failure(message))
+    }
+
+    fn note_failure(&self, message: &str) {
+        // Cancellation stops a healthy Ludusavi; only real failures force rediscovery.
+        if message != OPERATION_CANCELLED {
+            self.execution_failed.store(true, Ordering::Release);
+        }
     }
 
     fn version(&self) -> Result<String, String> {
