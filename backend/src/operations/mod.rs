@@ -303,27 +303,34 @@ impl LudusaviOperations {
     pub(crate) fn start_recency(&self, name: &str) -> Result<Value, OperationError> {
         self.run_operation_wait("start_check", Some(name), Duration::from_secs(30), || {
             let client = self.client()?;
-            let backups = game_objects(&client.backups(Some(name))?)?;
-            let recency = if backups
-                .get(name)
-                .and_then(|game| game.get("backups"))
-                .and_then(Value::as_array)
-                .is_none_or(Vec::is_empty)
-            {
-                "no_backup"
-            } else {
-                let preview = client.restore(name, true).ok();
-                let change = preview
-                    .as_ref()
-                    .and_then(|value| {
-                        value.pointer(&format!("/games/{}/change", escape_pointer(name)))
-                    })
-                    .and_then(Value::as_str);
-                match classify_restore_change(change) {
-                    RestorePreview::LocalCurrent => "local_current",
-                    RestorePreview::BackupNewer => "backup_newer",
-                    RestorePreview::BackupDiffers => "backup_differs",
-                    RestorePreview::Ambiguous => "ambiguous",
+            // One preview answers the common cases; each Ludusavi launch reloads its manifest.
+            // Real Ludusavi returns an empty `games` map exactly when the game has no backup.
+            let preview = client.restore(name, true);
+            let preview_games = preview
+                .as_ref()
+                .ok()
+                .and_then(|value| game_objects(value).ok());
+            let recency = match preview_games {
+                Some(games) if games.is_empty() => "no_backup",
+                Some(games) if games.contains_key(name) => {
+                    restore_recency(games.get(name).and_then(|game| game.get("change")))
+                }
+                // Failed or unexpected preview: the two-step decision, reusing that same preview
+                // so a retry can neither change the answer nor add another timeout.
+                _ => {
+                    let backups = game_objects(&client.backups(Some(name))?)?;
+                    if backups
+                        .get(name)
+                        .and_then(|game| game.get("backups"))
+                        .and_then(Value::as_array)
+                        .is_none_or(Vec::is_empty)
+                    {
+                        "no_backup"
+                    } else {
+                        restore_recency(preview.as_ref().ok().and_then(|value| {
+                            value.pointer(&format!("/games/{}/change", escape_pointer(name)))
+                        }))
+                    }
                 }
             };
             let metadata = if matches!(recency, "backup_newer" | "local_current") {
@@ -1001,6 +1008,14 @@ pub(crate) enum OperationError {
     Cancelled,
 }
 
+fn restore_recency(change: Option<&Value>) -> &'static str {
+    match classify_restore_change(change.and_then(Value::as_str)) {
+        RestorePreview::LocalCurrent => "local_current",
+        RestorePreview::BackupNewer => "backup_newer",
+        RestorePreview::BackupDiffers => "backup_differs",
+        RestorePreview::Ambiguous => "ambiguous",
+    }
+}
 fn conflict_metadata(client: &LudusaviClient, game: &str) -> Value {
     let mut local_modified_at = None;
     let mut backup_modified_at: Option<String> = None;
