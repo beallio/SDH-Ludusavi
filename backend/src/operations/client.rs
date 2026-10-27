@@ -1,36 +1,174 @@
 use super::*;
+pub(crate) struct LudusaviPaths {
+    pub(crate) bundled: PathBuf,
+    pub(crate) native_config: PathBuf,
+    pub(crate) flatpak_config: PathBuf,
+}
+
+impl LudusaviPaths {
+    pub(crate) fn new(
+        plugin_dir: &Path,
+        home: &Path,
+        xdg_config: Option<&std::ffi::OsStr>,
+    ) -> Self {
+        let config = xdg_config
+            .map(Path::new)
+            .filter(|path| path.is_absolute())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| home.join(".config"));
+        Self {
+            bundled: plugin_dir.join("bin/ludusavi"),
+            native_config: config.join("ludusavi"),
+            flatpak_config: home.join(".var/app/com.github.mtkennerly.ludusavi/config/ludusavi"),
+        }
+    }
+}
+
+pub(super) enum Runner {
+    Bundled {
+        exe: PathBuf,
+        canonical: PathBuf,
+    },
+    Flatpak {
+        flatpak: PathBuf,
+        deployment: Option<PathBuf>,
+    },
+}
+
+impl Runner {
+    fn program(&self) -> &Path {
+        match self {
+            Self::Bundled { exe, .. } => exe,
+            Self::Flatpak { flatpak, .. } => flatpak,
+        }
+    }
+
+    fn arguments(&self, config: &Path, args: &[String]) -> Vec<std::ffi::OsString> {
+        let mut arguments = Vec::with_capacity(args.len() + 4);
+        if matches!(self, Self::Flatpak { .. }) {
+            arguments.extend(["run".into(), FLATPAK_ID.into()]);
+        }
+        arguments.push("--config".into());
+        arguments.push(config.as_os_str().to_owned());
+        arguments.extend(args.iter().map(std::ffi::OsString::from));
+        arguments
+    }
+}
+
 pub(super) struct LudusaviClient {
     pub(super) processes: Arc<ProcessManager>,
-    pub(super) flatpak: PathBuf,
-    pub(super) deployment: Option<PathBuf>,
+    pub(super) runner: Runner,
+    pub(super) native_config: PathBuf,
     pub(super) execution_failed: AtomicBool,
     pub(super) config_path: Mutex<Option<PathBuf>>,
     pub(super) version: Mutex<Option<String>>,
 }
 
 impl LudusaviClient {
-    pub(super) fn new(processes: Arc<ProcessManager>) -> Result<Self, String> {
-        let flatpak = find_flatpak()
-            .ok_or_else(|| "Ludusavi Flatpak is not available to Decky".to_owned())?;
-        let deployment = deployment_location(&processes, &flatpak);
-        let version = processes.run_at(
-            &flatpak,
-            &[
-                "run".to_owned(),
-                FLATPAK_ID.to_owned(),
-                "--version".to_owned(),
-            ],
-            DISCOVERY_TIMEOUT,
-            false,
-        )?;
-        Ok(Self {
+    pub(super) fn new(
+        processes: Arc<ProcessManager>,
+        paths: &LudusaviPaths,
+        flatpak: Option<PathBuf>,
+    ) -> Result<Self, String> {
+        let probe = |runner: &Runner| {
+            processes.run_at(
+                runner.program(),
+                &runner.arguments(&paths.native_config, &["--version".to_owned()]),
+                DISCOVERY_TIMEOUT,
+                false,
+            )
+        };
+        let bundled = if executable(&paths.bundled) {
+            match paths.bundled.canonicalize() {
+                Ok(canonical) => {
+                    let runner = Runner::Bundled {
+                        exe: paths.bundled.clone(),
+                        canonical,
+                    };
+                    match probe(&runner) {
+                        Ok(version) => Some((runner, version)),
+                        Err(error) => {
+                            log::warn!("Bundled Ludusavi could not run: {error}");
+                            None
+                        }
+                    }
+                }
+                Err(error) => {
+                    log::warn!("Bundled Ludusavi path could not be resolved: {error}");
+                    None
+                }
+            }
+        } else {
+            if fs::symlink_metadata(&paths.bundled).is_ok() {
+                log::warn!(
+                    "Bundled Ludusavi is not a regular executable file: {}",
+                    paths.bundled.display()
+                );
+            }
+            None
+        };
+        let (runner, version) = bundled.or_else(|| {
+            let flatpak = flatpak?;
+            let deployment = deployment_location(&processes, &flatpak);
+            let runner = Runner::Flatpak { flatpak, deployment };
+            probe(&runner).ok().map(|version| (runner, version))
+        }).ok_or_else(|| "Ludusavi is not available: the bundled copy could not run and the Ludusavi Flatpak was not found".to_owned())?;
+        let client = Self {
             processes,
-            flatpak,
-            deployment,
+            runner,
+            native_config: paths.native_config.clone(),
             execution_failed: AtomicBool::new(false),
             config_path: Mutex::new(None),
             version: Mutex::new(Some(version.trim().to_owned())),
-        })
+        };
+        if let Err(error) = super::migration::migrate(paths, |config| {
+            let args = ["config".to_owned(), "show".to_owned(), "--api".to_owned()];
+            client
+                .processes
+                .run_at(
+                    client.runner.program(),
+                    &client.runner.arguments(config, &args),
+                    BACKUPS_TIMEOUT,
+                    false,
+                )
+                .and_then(|output| parse_ludusavi_json(&output))
+        }) {
+            log::warn!("Could not migrate Ludusavi configuration: {error}");
+        }
+        Ok(client)
+    }
+
+    pub(super) fn reusable(&self) -> bool {
+        if self.execution_failed.load(Ordering::Acquire) {
+            return false;
+        }
+        match &self.runner {
+            Runner::Bundled { exe, canonical } => {
+                executable(exe) && exe.canonicalize().is_ok_and(|path| path == *canonical)
+            }
+            Runner::Flatpak {
+                flatpak,
+                deployment,
+            } => {
+                deployment.is_some()
+                    && find_flatpak().as_ref() == Some(flatpak)
+                    && *deployment == deployment_location(&self.processes, flatpak)
+            }
+        }
+    }
+
+    pub(super) fn launcher_command(&self) -> Value {
+        let command = match &self.runner {
+            Runner::Bundled { exe, .. } => exe.to_string_lossy().into_owned(),
+            Runner::Flatpak { .. } => "flatpak".to_owned(),
+        };
+        let args: Vec<_> = self
+            .runner
+            .arguments(&self.native_config, &[])
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        json!({"commandPath": command, "args": args, "compatTool": ""})
     }
 
     pub(super) fn json(&self, args: &[String], timeout: Duration) -> Result<Value, String> {
@@ -47,17 +185,13 @@ impl LudusaviClient {
         cancellation: Option<&AtomicBool>,
         completion: &mut ProcessGroupCompletion,
     ) -> Result<Value, String> {
-        let mut args = args.to_vec();
+        let mut arguments = self.runner.arguments(&self.native_config, args);
         if !args.iter().any(|arg| arg == "--api") {
-            args.push("--api".to_owned());
+            arguments.push("--api".into());
         }
-        let arguments: Vec<_> = std::iter::once("run".to_owned())
-            .chain(std::iter::once(FLATPAK_ID.to_owned()))
-            .chain(args)
-            .collect();
         self.processes
             .run_at_cancellable(
-                &self.flatpak,
+                self.runner.program(),
                 &arguments,
                 timeout,
                 false,
@@ -69,12 +203,9 @@ impl LudusaviClient {
     }
 
     fn text(&self, args: &[String], timeout: Duration) -> Result<String, String> {
-        let arguments: Vec<_> = std::iter::once("run".to_owned())
-            .chain(std::iter::once(FLATPAK_ID.to_owned()))
-            .chain(args.iter().cloned())
-            .collect();
+        let arguments = self.runner.arguments(&self.native_config, args);
         self.processes
-            .run_at(&self.flatpak, &arguments, timeout, true)
+            .run_at(self.runner.program(), &arguments, timeout, true)
             .inspect_err(|message| self.note_failure(message))
     }
 
@@ -319,11 +450,7 @@ pub(super) fn deployment_location(processes: &ProcessManager, flatpak: &Path) ->
     let output = processes
         .run_at(
             flatpak,
-            &[
-                "info".to_owned(),
-                "--show-location".to_owned(),
-                FLATPAK_ID.to_owned(),
-            ],
+            &["info".into(), "--show-location".into(), FLATPAK_ID.into()],
             DEPLOYMENT_TIMEOUT,
             false,
         )
@@ -351,11 +478,13 @@ fn find_executable(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
             }
         })
         .map(|directory| directory.join(name))
-        .find(|candidate| {
-            candidate.is_file()
-                && std::ffi::CString::new(candidate.as_os_str().as_bytes())
-                    .is_ok_and(|path| unsafe { libc::access(path.as_ptr(), libc::X_OK) == 0 })
-        })
+        .find(|candidate| executable(candidate))
+}
+
+fn executable(path: &Path) -> bool {
+    path.is_file()
+        && std::ffi::CString::new(path.as_os_str().as_bytes())
+            .is_ok_and(|path| unsafe { libc::access(path.as_ptr(), libc::X_OK) == 0 })
 }
 
 pub(super) fn game_objects(value: &Value) -> Result<BTreeMap<String, Value>, String> {
@@ -444,6 +573,423 @@ mod tests {
         os::unix::fs::{PermissionsExt, symlink},
     };
     use zip::{CompressionMethod, ZipWriter, write::FileOptions};
+    #[test]
+    fn flatpak_commands_include_the_native_config_prefix() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = directory.path().join("flatpak");
+        fs::write(&fake, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        let client = LudusaviClient {
+            processes: Arc::new(ProcessManager::default()),
+            runner: Runner::Flatpak {
+                flatpak: fake,
+                deployment: None,
+            },
+            native_config: PathBuf::from("/contract-native/ludusavi"),
+            execution_failed: AtomicBool::new(false),
+            config_path: Mutex::new(None),
+            version: Mutex::new(None),
+        };
+
+        let output = client
+            .text(&["--version".to_owned()], BACKUPS_TIMEOUT)
+            .unwrap();
+        assert_eq!(
+            output.lines().collect::<Vec<_>>(),
+            [
+                "run",
+                FLATPAK_ID,
+                "--config",
+                "/contract-native/ludusavi",
+                "--version"
+            ]
+        );
+    }
+
+    struct Fixture {
+        directory: tempfile::TempDir,
+        paths: LudusaviPaths,
+        flatpak: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path();
+            let paths = LudusaviPaths {
+                bundled: root.join("plugin/bin/ludusavi"),
+                native_config: root.join("native/ludusavi"),
+                flatpak_config: root.join("flatpak-config/ludusavi"),
+            };
+            let flatpak = root.join("flatpak");
+            fs::create_dir_all(paths.bundled.parent().unwrap()).unwrap();
+            let fixture = Self {
+                directory,
+                paths,
+                flatpak,
+            };
+            fixture.write_fake(&fixture.flatpak);
+            fixture
+        }
+
+        fn write_fake(&self, path: &Path) {
+            let root = self.directory.path();
+            fs::write(
+                path,
+                format!(
+                    "#!/bin/sh\nprintf '%s\\n' BEGIN \"$@\" END >> '{}'\n\
+                     if [ \"$1\" = run ]; then shift 2; fi\n\
+                     [ \"$1\" = --config ] || exit 91\n\
+                     config=\"$2\"; shift 2\n\
+                     case \"$1 $2\" in\n\
+                       '--version ') echo 'ludusavi 0.31.0';;\n\
+                       'config show')\n\
+                         # Like real Ludusavi, write default files into the folder being read.\n\
+                         [ -e \"$config/config.yaml\" ] || : > \"$config/config.yaml\"\n\
+                         [ -e \"$config/cache.yaml\" ] || : > \"$config/cache.yaml\"\n\
+                         grep -q lookup-fails \"$config/config.yaml\" && exit 1\n\
+                         url=$(sed -n 's/^url: //p' \"$config/config.yaml\")\n\
+                         if [ -z \"$url\" ]; then echo '{{\"manifest\":{{}}}}'; \
+                         else printf '{{\"manifest\":{{\"url\":\"%s\"}}}}\\n' \"$url\"; fi;;\n\
+                       *) echo '{{}}';;\n\
+                     esac\n",
+                    root.join("calls").display(),
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        fn client(&self, flatpak: Option<PathBuf>) -> Result<LudusaviClient, String> {
+            LudusaviClient::new(Arc::new(ProcessManager::default()), &self.paths, flatpak)
+        }
+
+        fn calls(&self) -> String {
+            fs::read_to_string(self.directory.path().join("calls")).unwrap_or_default()
+        }
+
+        fn source(&self, name: &str, bytes: &str) {
+            fs::create_dir_all(&self.paths.flatpak_config).unwrap();
+            fs::write(self.paths.flatpak_config.join(name), bytes).unwrap();
+        }
+    }
+
+    #[test]
+    fn discovery_prefers_a_working_bundle_and_falls_back_for_unusable_bundles() {
+        for mode in ["working", "missing", "non-executable", "fails"] {
+            let fixture = Fixture::new();
+            if mode != "missing" {
+                fixture.write_fake(&fixture.paths.bundled);
+            }
+            if mode == "non-executable" {
+                fs::set_permissions(&fixture.paths.bundled, fs::Permissions::from_mode(0o644))
+                    .unwrap();
+            } else if mode == "fails" {
+                fs::write(&fixture.paths.bundled, "#!/bin/sh\nexit 7\n").unwrap();
+            }
+            let client = fixture.client(Some(fixture.flatpak.clone())).unwrap();
+            let expected = if mode == "working" {
+                json!({
+                    "commandPath": fixture.paths.bundled,
+                    "args": ["--config", fixture.paths.native_config],
+                    "compatTool": "",
+                })
+            } else {
+                json!({
+                    "commandPath": "flatpak",
+                    "args": ["run", FLATPAK_ID, "--config", fixture.paths.native_config],
+                    "compatTool": "",
+                })
+            };
+            assert_eq!(client.launcher_command(), expected, "{mode}");
+            let calls = fixture.calls();
+            let native_prefix = format!(
+                "--config\n{}\n--version\n",
+                fixture.paths.native_config.display()
+            );
+            assert!(calls.contains(&native_prefix), "{mode}: {calls}");
+            assert_eq!(calls.contains("BEGIN\nrun\n"), mode != "working", "{mode}");
+        }
+    }
+
+    #[test]
+    fn bundled_reuse_requires_a_healthy_regular_executable() {
+        let fixture = Fixture::new();
+        fixture.write_fake(&fixture.paths.bundled);
+        let client = fixture.client(Some(fixture.flatpak.clone())).unwrap();
+        assert!(client.reusable());
+        fs::set_permissions(&fixture.paths.bundled, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!client.reusable());
+        fs::set_permissions(&fixture.paths.bundled, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(client.reusable());
+        client.execution_failed.store(true, Ordering::Release);
+        assert!(!client.reusable());
+        client.execution_failed.store(false, Ordering::Release);
+        fs::remove_file(&fixture.paths.bundled).unwrap();
+        assert!(!client.reusable());
+    }
+
+    #[test]
+    fn unavailable_runners_report_the_shared_error() {
+        let fixture = Fixture::new();
+        let expected = "Ludusavi is not available: the bundled copy could not run and the Ludusavi Flatpak was not found";
+        assert_eq!(fixture.client(None).err().unwrap(), expected);
+        fs::write(&fixture.flatpak, "#!/bin/sh\nexit 1\n").unwrap();
+        assert_eq!(
+            fixture.client(Some(fixture.flatpak.clone())).err().unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn both_runners_prefix_json_and_text_commands_with_native_config() {
+        for bundled in [true, false] {
+            let fixture = Fixture::new();
+            if bundled {
+                fixture.write_fake(&fixture.paths.bundled);
+            }
+            let client = fixture.client(Some(fixture.flatpak.clone())).unwrap();
+            client.json(&["backups".into()], BACKUPS_TIMEOUT).unwrap();
+            client
+                .text(&["config".into(), "path".into()], BACKUPS_TIMEOUT)
+                .unwrap();
+            let prefix = if bundled {
+                "BEGIN\n".to_owned()
+            } else {
+                format!("BEGIN\nrun\n{FLATPAK_ID}\n")
+            };
+            let config = fixture.paths.native_config.display();
+            let calls = fixture.calls();
+            assert!(calls.contains(&format!(
+                "{prefix}--config\n{config}\nbackups\n--api\nEND\n"
+            )));
+            assert!(calls.contains(&format!("{prefix}--config\n{config}\nconfig\npath\nEND\n")));
+        }
+    }
+
+    #[test]
+    fn migration_preserves_existing_and_dangling_config() {
+        for mode in [
+            "missing",
+            "existing",
+            "dangling",
+            "missing-source",
+            "symlink-source",
+        ] {
+            let fixture = Fixture::new();
+            if mode == "symlink-source" {
+                fixture.source("real.yaml", "source config");
+                symlink(
+                    "real.yaml",
+                    fixture.paths.flatpak_config.join("config.yaml"),
+                )
+                .unwrap();
+            } else if mode != "missing-source" {
+                fixture.source("config.yaml", "source config");
+            }
+            let config = fixture.paths.native_config.join("config.yaml");
+            if mode == "existing" || mode == "dangling" {
+                fs::create_dir_all(&fixture.paths.native_config).unwrap();
+                if mode == "existing" {
+                    fs::write(&config, "existing config").unwrap();
+                } else {
+                    symlink("missing-target", &config).unwrap();
+                }
+            }
+            fixture.client(Some(fixture.flatpak.clone())).unwrap();
+            match mode {
+                "missing" | "symlink-source" => {
+                    assert_eq!(fs::read_to_string(config).unwrap(), "source config")
+                }
+                "existing" => assert_eq!(fs::read_to_string(config).unwrap(), "existing config"),
+                "dangling" => assert!(
+                    fs::symlink_metadata(config)
+                        .unwrap()
+                        .file_type()
+                        .is_symlink()
+                ),
+                _ => assert!(!config.exists()),
+            }
+        }
+    }
+
+    #[test]
+    fn migration_manifest_and_cache_are_copied_only_when_safe() {
+        for mode in [
+            "equal",
+            "mismatch",
+            "source-lookup-fails",
+            "native-lookup-fails",
+            "missing-url",
+            "source-missing-manifest",
+            "source-missing-cache",
+            "native-manifest",
+            "native-cache",
+            "native-dangling",
+        ] {
+            let fixture = Fixture::new();
+            let source_config = if mode == "source-lookup-fails" {
+                "url: same\nlookup-fails\n"
+            } else {
+                "url: same\n"
+            };
+            fixture.source("config.yaml", source_config);
+            if mode != "source-missing-manifest" {
+                fixture.source("manifest.yaml", "source manifest");
+            }
+            if mode != "source-missing-cache" {
+                fixture.source("cache.yaml", "source cache");
+            }
+            let native_config = match mode {
+                "mismatch" => Some("url: different\n"),
+                "native-lookup-fails" => Some("url: same\nlookup-fails\n"),
+                "missing-url" => Some("no address\n"),
+                _ => None,
+            };
+            if let Some(contents) = native_config {
+                fs::create_dir_all(&fixture.paths.native_config).unwrap();
+                fs::write(fixture.paths.native_config.join("config.yaml"), contents).unwrap();
+            }
+            if let "native-manifest" | "native-cache" | "native-dangling" = mode {
+                fs::create_dir_all(&fixture.paths.native_config).unwrap();
+                let name = if mode == "native-cache" {
+                    "cache.yaml"
+                } else {
+                    "manifest.yaml"
+                };
+                let path = fixture.paths.native_config.join(name);
+                if mode == "native-dangling" {
+                    symlink("missing-target", path).unwrap();
+                } else {
+                    fs::write(path, "existing").unwrap();
+                }
+            }
+            let client = fixture.client(Some(fixture.flatpak.clone())).unwrap();
+            assert!(!client.execution_failed.load(Ordering::Acquire), "{mode}");
+            for name in ["manifest.yaml", "cache.yaml"] {
+                let path = fixture.paths.native_config.join(name);
+                let existing = (mode == "native-manifest" && name == "manifest.yaml")
+                    || (mode == "native-cache" && name == "cache.yaml");
+                if mode == "equal" {
+                    assert_eq!(
+                        fs::read_to_string(path).unwrap(),
+                        format!("source {}", name.trim_end_matches(".yaml"))
+                    );
+                } else if existing {
+                    assert_eq!(fs::read_to_string(path).unwrap(), "existing");
+                } else if mode == "native-dangling" && name == "manifest.yaml" {
+                    assert!(fs::symlink_metadata(path).unwrap().file_type().is_symlink());
+                } else {
+                    assert!(!path.exists(), "{mode}: {name}");
+                }
+            }
+            // The address lookups must not leave files in either real folder.
+            let names = |directory: &Path| {
+                let mut names = fs::read_dir(directory)
+                    .map(|entries| {
+                        entries
+                            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                names.sort();
+                names
+            };
+            let mut source_names = vec!["config.yaml"];
+            if mode != "source-missing-manifest" {
+                source_names.push("manifest.yaml");
+            }
+            if mode != "source-missing-cache" {
+                source_names.push("cache.yaml");
+            }
+            source_names.sort();
+            assert_eq!(names(&fixture.paths.flatpak_config), source_names, "{mode}");
+            assert!(
+                names(&fixture.paths.native_config)
+                    .iter()
+                    .all(|name| !name.starts_with(".sdh-ludusavi-")),
+                "{mode}"
+            );
+        }
+    }
+
+    #[test]
+    fn migration_does_not_copy_either_file_if_lookup_creates_one() {
+        for created in ["cache.yaml", "manifest.yaml"] {
+            let fixture = Fixture::new();
+            fixture.source("manifest.yaml", "source manifest");
+            fixture.source("cache.yaml", "source cache");
+            fs::create_dir_all(&fixture.paths.native_config).unwrap();
+            let result = super::super::migration::migrate(&fixture.paths, |_| {
+                // Another writer creates one of the files while the addresses are being read.
+                fs::write(
+                    fixture.paths.native_config.join(created),
+                    "created by lookup",
+                )
+                .unwrap();
+                Ok(json!({"manifest":{"url":"same"}}))
+            });
+            assert!(result.is_ok(), "{created}: {result:?}");
+            assert_eq!(
+                fs::read_to_string(fixture.paths.native_config.join(created)).unwrap(),
+                "created by lookup"
+            );
+            let other = if created == "cache.yaml" {
+                "manifest.yaml"
+            } else {
+                "cache.yaml"
+            };
+            assert!(!fixture.paths.native_config.join(other).exists());
+        }
+    }
+
+    #[test]
+    fn migration_skips_same_directory_and_errors_are_nonfatal() {
+        let mut fixture = Fixture::new();
+        fixture.source("config.yaml", "same config");
+        fixture.source("manifest.yaml", "same manifest");
+        fixture.source("cache.yaml", "same cache");
+        let alias = fixture.directory.path().join("alias");
+        symlink(&fixture.paths.flatpak_config, &alias).unwrap();
+        fixture.paths.native_config = alias;
+        fixture.client(Some(fixture.flatpak.clone())).unwrap();
+        assert_eq!(
+            fs::read_to_string(fixture.paths.native_config.join("config.yaml")).unwrap(),
+            "same config"
+        );
+        assert!(!fixture.calls().contains("config\nshow"));
+
+        let fixture = Fixture::new();
+        fixture.source("config.yaml", "source");
+        fs::write(
+            fixture.paths.native_config.parent().unwrap(),
+            "not a directory",
+        )
+        .unwrap();
+        let client = fixture.client(Some(fixture.flatpak.clone())).unwrap();
+        assert_eq!(client.version().unwrap(), "ludusavi 0.31.0");
+    }
+
+    #[test]
+    fn native_config_uses_only_absolute_xdg_paths() {
+        let plugin = Path::new("/plugin");
+        let home = Path::new("/home/user");
+        for (xdg, expected) in [
+            (None, "/home/user/.config/ludusavi"),
+            (Some(""), "/home/user/.config/ludusavi"),
+            (Some("relative"), "/home/user/.config/ludusavi"),
+            (Some("/custom/config"), "/custom/config/ludusavi"),
+        ] {
+            let paths = LudusaviPaths::new(plugin, home, xdg.map(std::ffi::OsStr::new));
+            assert_eq!(paths.native_config, Path::new(expected));
+            assert_eq!(paths.bundled, Path::new("/plugin/bin/ludusavi"));
+            assert_eq!(
+                paths.flatpak_config,
+                Path::new("/home/user/.var/app/com.github.mtkennerly.ludusavi/config/ludusavi")
+            );
+        }
+    }
+
     #[test]
     fn ludusavi_output_parsing_table_rejects_non_mapping_entries() {
         for (input, expected) in [
@@ -605,10 +1151,13 @@ mod tests {
         fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
         let client = LudusaviClient {
             processes: Arc::new(ProcessManager::default()),
-            flatpak: fake,
+            runner: Runner::Flatpak {
+                flatpak: fake,
+                deployment: None,
+            },
+            native_config: original.clone(),
             config_path: std::sync::Mutex::new(None),
             version: std::sync::Mutex::new(None),
-            deployment: None,
             execution_failed: AtomicBool::new(false),
         };
 

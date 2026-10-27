@@ -59,12 +59,12 @@ def _response_key(args: list[str]) -> str:
     return "unsupported"
 
 
-def _generated_response(key: str) -> tuple[str, str, int]:
+def _generated_response(key: str, config: str) -> tuple[str, str, int]:
     if key == "version":
         return "ludusavi 0.31.0\n", "", 0
     if key == "config_path":
         return (
-            str(Path(os.environ["SDH_CONTRACT_LUDUSAVI_CONFIG_DIR"]) / "config.yaml") + "\n",
+            str(Path(config) / "config.yaml") + "\n",
             "",
             0,
         )
@@ -81,7 +81,7 @@ def _relocate_paths(output: str) -> str:
     )
 
 
-def _apply_response(response: dict[str, Any], key: str) -> tuple[str, str, int]:
+def _apply_response(response: dict[str, Any], key: str, config: str) -> tuple[str, str, int]:
     if "json" in response:
         stdout, stderr, exit_code = json.dumps(response["json"]), "", 0
     elif "fixture" in response:
@@ -90,7 +90,7 @@ def _apply_response(response: dict[str, Any], key: str) -> tuple[str, str, int]:
     elif "stdout" in response:
         stdout, stderr, exit_code = str(response["stdout"]), "", 0
     else:
-        stdout, stderr, exit_code = _generated_response(key)
+        stdout, stderr, exit_code = _generated_response(key, config)
     return (
         _relocate_paths(stdout),
         str(response.get("stderr", stderr)),
@@ -135,8 +135,23 @@ def run_flatpak(argv: list[str]) -> int:
             return 0
         print("Ludusavi installation not found", file=sys.stderr)
         return 1
+    if argv[:2] != ["run", "com.github.mtkennerly.ludusavi"]:
+        print("unsupported fake Flatpak command", file=sys.stderr)
+        return 64
+    return run_ludusavi(argv, "flatpak")
+
+
+def run_ludusavi(argv: list[str], runner: str = "bundled") -> int:
+    arguments = argv[2:] if runner == "flatpak" else argv
+    if len(arguments) < 2 or arguments[0] != "--config":
+        print("fake Ludusavi requires --config DIR", file=sys.stderr)
+        return 64
+    config, command_args = arguments[1], arguments[2:]
     record: dict[str, Any] = {
         "argv": argv,
+        "runner": runner,
+        "config": config,
+        "command_args": command_args,
         "pid": os.getpid(),
         "pgid": os.getpgid(0),
         "child_environment": {
@@ -144,8 +159,7 @@ def run_flatpak(argv: list[str]) -> int:
         },
     }
     _append_record("SDH_CONTRACT_FAKE_LOG", record)
-    scenario = _scenario().get("flatpak", {})
-    command_args = argv[2:] if argv[:2] == ["run", "com.github.mtkennerly.ludusavi"] else argv
+    scenario = _scenario().get(runner, {})
     key = _response_key(command_args)
     response = scenario.get("responses", {}).get(key, {})
     _hang_if_configured(response)
@@ -160,9 +174,9 @@ def run_flatpak(argv: list[str]) -> int:
             executable,
             "--no-manifest-update",
             "--config",
-            os.environ["SDH_CONTRACT_LUDUSAVI_CONFIG_DIR"],
+            config,
+            *command_args,
         ]
-        command.extend(command_args)
         environment = os.environ.copy()
         library_path = environment.get("SDH_CONTRACT_LUDUSAVI_LD_LIBRARY_PATH")
         if library_path:
@@ -170,9 +184,9 @@ def run_flatpak(argv: list[str]) -> int:
         os.execve(executable, command, environment)
 
     if not response:
-        stdout, stderr, exit_code = _generated_response(key)
+        stdout, stderr, exit_code = _generated_response(key, config)
     else:
-        stdout, stderr, exit_code = _apply_response(response, key)
+        stdout, stderr, exit_code = _apply_response(response, key, config)
     sys.stdout.write(stdout)
     sys.stderr.write(stderr)
     return exit_code

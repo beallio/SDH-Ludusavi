@@ -137,7 +137,7 @@ impl ProcessManager {
     pub(super) fn run_at(
         &self,
         program: &Path,
-        args: &[String],
+        args: &[std::ffi::OsString],
         timeout: Duration,
         text: bool,
     ) -> Result<String, String> {
@@ -150,7 +150,7 @@ impl ProcessManager {
     pub(super) fn run_at_cancellable(
         &self,
         program: &Path,
-        args: &[String],
+        args: &[std::ffi::OsString],
         timeout: Duration,
         text: bool,
         cancellation: Option<&AtomicBool>,
@@ -292,7 +292,7 @@ impl ProcessManager {
             } else if let Some(timeout) = outcome.strip_prefix("timeout:") {
                 Err(format!(
                     "Ludusavi command exceeded its configured timeout after {timeout}: {}",
-                    args.join(" ")
+                    args.join(std::ffi::OsStr::new(" ")).to_string_lossy()
                 ))
             } else {
                 Err(outcome)
@@ -381,10 +381,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let pid_file = directory.path().join("process-group");
         let args = [
-            "-c".to_owned(),
-            "trap '' TERM; sleep 30 & echo $$ > \"$1\"; wait".to_owned(),
-            "sh".to_owned(),
-            pid_file.display().to_string(),
+            "-c".into(),
+            "trap '' TERM; sleep 30 & echo $$ > \"$1\"; wait".into(),
+            "sh".into(),
+            pid_file.as_os_str().to_owned(),
         ];
         let processes = ProcessManager::default();
         let error = processes
@@ -403,9 +403,9 @@ mod tests {
     fn output_reader_creation_failure_terminates_the_owned_process_group() {
         for failure_index in [1, 2] {
             let args = [
-                "-c".to_owned(),
-                "trap '' TERM; sleep 30 & wait".to_owned(),
-                "sh".to_owned(),
+                "-c".into(),
+                "trap '' TERM; sleep 30 & wait".into(),
+                "sh".into(),
             ];
             let processes = ProcessManager::default();
             processes
@@ -438,10 +438,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let marker = directory.path().join("writer-finished");
         let args = [
-            "-c".to_owned(),
-            "printf '{}\\n'; (sleep 0.1; printf child-finished > \"$1\") &".to_owned(),
-            "sh".to_owned(),
-            marker.display().to_string(),
+            "-c".into(),
+            "printf '{}\\n'; (sleep 0.1; printf child-finished > \"$1\") &".into(),
+            "sh".into(),
+            marker.as_os_str().to_owned(),
         ];
         let processes = ProcessManager::default();
         let output = processes

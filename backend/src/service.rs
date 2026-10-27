@@ -17,7 +17,7 @@ use tokio::sync::Notify;
 use crate::{
     history::valid_history_entry,
     lifecycle::{TimestampDirection, timestamp_direction},
-    operations::{LudusaviOperations, OperationError},
+    operations::{LudusaviOperations, LudusaviPaths, OperationError},
     persistence::{
         StateLock, ensure_private_directory, existing_mode, read_object, write_json_atomic,
     },
@@ -98,8 +98,17 @@ impl BackendService {
         };
         let debug_logging = setting_bool(&settings, "debug_logging", true);
         let history = normalize_history(cache.get("game_history"));
-        let operations =
-            LudusaviOperations::new(cache_path.clone(), Arc::clone(&state_lock), &cache, history);
+        let operations = LudusaviOperations::new(
+            cache_path.clone(),
+            Arc::clone(&state_lock),
+            &cache,
+            history,
+            LudusaviPaths::new(
+                &env.plugin_dir,
+                &env.home,
+                std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+            ),
+        );
         let updater = PluginUpdater::new(
             Arc::clone(&state_lock),
             cache_path.clone(),
@@ -1744,12 +1753,12 @@ mod tests {
         fs::write(&config_path, "fixture").unwrap();
         let flatpak = directory.path().join("flatpak");
         let script = r#"#!/bin/sh
-case "$3" in
+case "$5" in
     backup) printf '%s\n' '{"games":{"Hades":{"files":{"save":{}},"decision":"Same","steamId":"300"}}}' ;;
     backups) printf '%s\n' '{"games":{"Hades":{"backups":[{"name":"latest"}]}}}' ;;
     restore) printf '%s\n' '{"games":{"Hades":{"change":"Same"}}}' ;;
     config)
-        if [ "$4" = path ]; then
+        if [ "$6" = path ]; then
             printf '%s\n' '@CONFIG_PATH@'
         else
             printf '%s\n' '{"customGames":[]}'

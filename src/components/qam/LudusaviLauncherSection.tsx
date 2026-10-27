@@ -82,7 +82,7 @@ export function LudusaviLauncherSection({
       {!ludusaviCommand && !isLaunching && !isLoading && (
         <PanelSectionRow>
           <div style={{ color: "#ef4444", fontSize: "12px", padding: "0 4px" }}>
-            Ludusavi not found. Please install it via Flatpak or add to PATH.
+            Ludusavi could not start. Neither the copy included with the plugin nor a Ludusavi Flatpak worked. Open View Logs for details.
           </div>
         </PanelSectionRow>
       )}

@@ -133,7 +133,7 @@ class ContractHarness:
                 "SDH_CONTRACT_LUDUSAVI_CONFIG_DIR": str(self.config_dir),
                 "SDH_CONTRACT_BACKUP_ROOT": str(self.backup_root),
                 "SDH_CONTRACT_SAVE_FILE": str(self.root / "save.dat"),
-                "PYTHONPATH": str(REPO_ROOT),
+                "PYTHONPATH": os.pathsep.join([str(FAKE_BIN), str(REPO_ROOT)]),
                 "PATH": os.pathsep.join([str(FAKE_BIN), current_path]),
             }
         )
@@ -161,6 +161,13 @@ class ContractHarness:
 
     def set_scenario(self, scenario: dict[str, Any]) -> None:
         self.scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
+
+    def install_bundled_fake(self) -> Path:
+        binary = self.plugin_dir / "bin" / "ludusavi"
+        binary.parent.mkdir(exist_ok=True)
+        shutil.copyfile(FAKE_BIN / "ludusavi", binary)
+        binary.chmod(0o755)
+        return binary
 
     def _check_fakes(self) -> None:
         for command in ("flatpak", "systemctl"):
