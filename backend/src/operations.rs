@@ -107,6 +107,7 @@ impl Game {
 struct Registry {
     games: BTreeMap<String, Game>,
     aliases: BTreeMap<String, String>,
+    aliases_marker: Option<i64>,
     ids: BTreeMap<String, String>,
     installed_app_ids: Option<String>,
     config_marker: Option<i64>,
@@ -827,14 +828,18 @@ impl LudusaviOperations {
             });
         }
         games.sort_by_cached_key(|game| game.name.to_lowercase());
-        let aliases = client.aliases().unwrap_or_default();
+        let reload_aliases = marker.is_none() || lock(&self.registry).aliases_marker != marker;
+        let aliases = reload_aliases.then(|| client.aliases());
         {
             let mut registry = lock(&self.registry);
             registry.games = games
                 .into_iter()
                 .map(|game| (game.name.clone(), game))
                 .collect();
-            registry.aliases = aliases;
+            if let Some(aliases) = aliases {
+                registry.aliases_marker = if aliases.is_ok() { marker } else { None };
+                registry.aliases = aliases.unwrap_or_default();
+            }
             registry.ids = registry
                 .games
                 .values()
