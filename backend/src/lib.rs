@@ -1,15 +1,15 @@
 //! Native SDH-Ludusavi backend.
+mod history;
 mod http;
-pub mod launch_gate;
-pub mod lifecycle;
-pub mod operations;
+mod launch_gate;
+mod lifecycle;
+mod operations;
 pub mod singleton;
-pub mod syncthing;
-pub mod watchdog;
+mod syncthing;
+mod watchdog;
 
-pub mod persistence;
-#[cfg(test)]
-mod phase4_tests;
+mod persistence;
+mod procfs;
 pub mod service;
 pub mod status_theme;
-pub mod updater;
+mod updater;

@@ -650,7 +650,8 @@ The guarded operation owns the matching managed Ludusavi cancellation scope. Exp
 lease expiry, the 240-second watchdog emergency boundary, and plugin shutdown request
 token-scoped cancellation, wait for the command worker to acknowledge completion, and only then
 thaw the scope. If the process group cannot be confirmed reaped, the failure remains fail-closed
-and the gate is retained. Both real Ludusavi commands and preview/status checks have a 180-second
+and the gate is retained. The owned child is reaped while waiting, but descendants must also
+exit before release. Both real Ludusavi commands and preview/status checks have a 180-second
 subprocess limit. Automatic lifecycle checks may wait for an active coordinator operation for up
 to 30 seconds so their decisions use fresh data; start-side mutations remain fail-fast, returning
 the user-visible `operation_running` outcome rather than copying from a stale decision.

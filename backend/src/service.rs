@@ -15,6 +15,7 @@ use time::{OffsetDateTime, format_description, format_description::well_known::R
 use tokio::sync::Notify;
 
 use crate::{
+    history::valid_history_entry,
     lifecycle::{TimestampDirection, timestamp_direction},
     operations::{LudusaviOperations, OperationError},
     persistence::{
@@ -260,7 +261,7 @@ impl BackendService {
         calls_stopped && processes_exited && watchdog_stopped && watches_stopped
     }
     pub fn unavailable_reply(method: &str) -> Value {
-        python_wrapper_fallback(method)
+        getter_fallback(method)
             .unwrap_or_else(|| failed_reply("Backend has not completed startup".to_owned()))
     }
 
@@ -1252,10 +1253,10 @@ fn failed_reply(message: String) -> Value {
 }
 
 fn failed_dispatch_reply(method: &str, message: String) -> Value {
-    python_wrapper_fallback(method).unwrap_or_else(|| failed_reply(message))
+    getter_fallback(method).unwrap_or_else(|| failed_reply(message))
 }
 
-fn python_wrapper_fallback(method: &str) -> Option<Value> {
+fn getter_fallback(method: &str) -> Option<Value> {
     match method {
         "get_recent_logs" => Some(json!([])),
         "get_operation_status" => Some(idle_operation_status()),
@@ -1277,7 +1278,7 @@ fn idle_operation_status() -> Value {
 }
 
 fn unloading_reply(method: &str) -> Value {
-    python_wrapper_fallback(method).unwrap_or_else(|| {
+    getter_fallback(method).unwrap_or_else(|| {
         json!({
             "status": "skipped",
             "reason": "unloading",
@@ -1514,40 +1515,6 @@ fn normalize_history(value: Option<&Value>) -> Value {
         normalized.insert(game.clone(), Value::Object(result));
     }
     Value::Object(normalized)
-}
-
-fn valid_history_entry(value: &Value) -> Option<Value> {
-    let entry = value.as_object()?;
-    let operation = entry.get("operation")?.as_str()?;
-    if !matches!(operation, "backup" | "restore" | "start" | "exit") {
-        return None;
-    }
-    let trigger = entry.get("trigger")?.as_str()?;
-    if !matches!(
-        trigger,
-        "manual_backup" | "manual_restore" | "auto_start" | "auto_exit"
-    ) {
-        return None;
-    }
-    let status = entry.get("status")?.as_str()?;
-    if !matches!(status, "backed_up" | "restored" | "skipped" | "failed") {
-        return None;
-    }
-    let timestamp = entry.get("timestamp")?.as_str()?;
-    let mut normalized = Map::new();
-    normalized.insert("operation".to_owned(), Value::String(operation.to_owned()));
-    normalized.insert("trigger".to_owned(), Value::String(trigger.to_owned()));
-    normalized.insert("status".to_owned(), Value::String(status.to_owned()));
-    for key in ["reason", "message"] {
-        let value = entry
-            .get(key)
-            .filter(|value| value.is_string() || value.is_null())
-            .cloned()
-            .unwrap_or(Value::Null);
-        normalized.insert(key.to_owned(), value);
-    }
-    normalized.insert("timestamp".to_owned(), Value::String(timestamp.to_owned()));
-    Some(Value::Object(normalized))
 }
 
 fn parse_iso_timestamp(value: &str) -> Option<i128> {
@@ -1946,7 +1913,7 @@ esac
     }
 
     #[tokio::test]
-    async fn dispatcher_errors_use_python_getter_fallbacks() {
+    async fn dispatcher_errors_use_getter_fallbacks() {
         let (_directory, service) = test_service();
         assert_eq!(
             service.dispatch("get_recent_logs", vec![Value::Null]).await,
@@ -1993,7 +1960,7 @@ esac
     }
 
     #[tokio::test]
-    async fn unloading_uses_python_getter_fallbacks() {
+    async fn unloading_uses_getter_fallbacks() {
         let (_directory, service) = test_service();
         assert!(service.shutdown().await);
         assert_eq!(

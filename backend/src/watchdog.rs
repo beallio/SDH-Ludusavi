@@ -11,13 +11,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use std::os::unix::fs::MetadataExt;
-
 use serde_json::{Value, json};
 
 use crate::launch_gate::{
     LaunchProcessIdentity, LaunchScopeAcquirer, ScopeAcquisitionResult, ScopeTransitionResult,
-    SteamAppScope, SystemdScopeController, parse_start_ticks, thread_group_stopped,
+    SteamAppScope, SystemdScopeController, read_process_identity, thread_group_stopped,
 };
 use crate::operations::ProcessGroupCompletion;
 
@@ -484,11 +482,6 @@ impl ProcessWatchdog {
         (!release_requested).then_some(result)
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_stop_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
-        *lock(&self.inner.stop_hook) = Some(hook);
-    }
-
     pub(crate) fn stop_until(&self, deadline: Instant) -> bool {
         let mut stored_deadline = lock(&self.inner.shutdown_deadline);
         *stored_deadline =
@@ -785,7 +778,6 @@ fn verify_frozen(
         return ScopeTransitionResult {
             success: false,
             reason: "Steam app scope is no longer frozen".to_owned(),
-            disappeared: false,
         };
     }
     controller.wait_for_frozen(scope, true)
@@ -803,24 +795,13 @@ fn stop_only_failure(proc_root: &Path, pid: i32, lease: &PauseLease) -> Option<S
     let Some(identity) = lease.identity.as_ref() else {
         return Some("Launch PID identity changed".to_owned());
     };
-    if process_identity(proc_root, pid).as_ref() != Some(identity) {
+    if read_process_identity(proc_root, pid).as_ref() != Some(identity) {
         return Some("Launch PID identity changed".to_owned());
     }
     if !thread_group_stopped(proc_root, pid) {
         return Some("Launch PID is no longer stopped".to_owned());
     }
     None
-}
-
-fn process_identity(proc_root: &Path, pid: i32) -> Option<LaunchProcessIdentity> {
-    let dir = proc_root.join(pid.to_string());
-    let owner_uid = std::fs::metadata(&dir).ok()?.uid();
-    let stat = std::fs::read_to_string(dir.join("stat")).ok()?;
-    Some(LaunchProcessIdentity {
-        pid,
-        owner_uid,
-        start_ticks: parse_start_ticks(&stat, pid)?,
-    })
 }
 
 fn release_stop_only(
@@ -830,7 +811,7 @@ fn release_stop_only(
     let Some(identity) = identity else {
         return Err("Stop-only lease has no process identity".to_owned());
     };
-    if process_identity(proc_root, identity.pid).as_ref() != Some(identity) {
+    if read_process_identity(proc_root, identity.pid).as_ref() != Some(identity) {
         return Ok(());
     }
     if unsafe { libc::kill(identity.pid, libc::SIGCONT) } == 0 {
@@ -902,6 +883,30 @@ mod tests {
         },
         operations::ProcessGroupCompletion,
     };
+
+    impl ProcessWatchdog {
+        pub(crate) fn set_stop_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+            *lock(&self.inner.stop_hook) = Some(hook);
+        }
+    }
+
+    #[test]
+    fn lease_expiry_preserves_strict_deadline_and_absolute_ceiling() {
+        assert_eq!(super::lease_expiry_reason(0.0, 30.0, 30.0), None);
+        assert_eq!(
+            super::lease_expiry_reason(0.0, 30.0, 30.001),
+            Some("lease expired")
+        );
+        assert_eq!(super::lease_expiry_reason(0.0, 500.0, 240.0), None);
+        assert_eq!(
+            super::lease_expiry_reason(0.0, 500.0, 240.001),
+            Some("absolute ceiling")
+        );
+        assert_eq!(
+            super::lease_expiry_reason(0.0, 500.0, 241.0),
+            Some("absolute ceiling")
+        );
+    }
 
     fn test_watchdog(
         controller: SystemdScopeController,
@@ -977,7 +982,6 @@ mod tests {
                 ScopeTransitionResult {
                     success: true,
                     reason: String::new(),
-                    disappeared: false,
                 }
             }));
         watchdog.inner.ensure_watchdog().unwrap();
@@ -1070,7 +1074,6 @@ mod tests {
                 } else {
                     String::new()
                 },
-                disappeared: false,
             }
         }));
         let uid = unsafe { libc::geteuid() };
@@ -1226,6 +1229,85 @@ mod tests {
             process_stopped,
             "shutdown released a gate after its deadline"
         );
+    }
+
+    #[test]
+    fn cancelling_cooperative_child_releases_guarded_launch_gate() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let proc_root = temporary.path().join("proc");
+        let cgroup_root = temporary.path().join("cgroup");
+        fs::create_dir_all(&proc_root).unwrap();
+        fs::create_dir_all(&cgroup_root).unwrap();
+        let uid = unsafe { libc::geteuid() };
+        let mut child = Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = i32::try_from(child.id()).unwrap();
+        let proc_dir = proc_root.join(pid.to_string());
+        let task_dir = proc_dir.join("task").join(pid.to_string());
+        fs::create_dir_all(&task_dir).unwrap();
+        let fields = std::iter::repeat_n("1", 18).collect::<Vec<_>>().join(" ");
+        let stat = format!("{pid} (fixture process) T {fields} 991");
+        fs::write(proc_dir.join("stat"), &stat).unwrap();
+        fs::write(task_dir.join("stat"), &stat).unwrap();
+        let controller = SystemdScopeController::new(&proc_root, &cgroup_root, uid);
+        let acquirer: Arc<dyn ScopeAcquirer> = Arc::new(LaunchScopeAcquirer::new(
+            controller.clone(),
+            &proc_root,
+            uid,
+        ));
+        let watchdog = test_watchdog(controller, proc_root, acquirer);
+        lock(&watchdog.inner.state).leases.insert(
+            pid,
+            PauseLease {
+                scope: None,
+                recovery_scopes: Vec::new(),
+                started: std::time::Instant::now(),
+                deadline: std::time::Instant::now() + LEASE_TTL,
+                lease_id: "cancel-lease".to_owned(),
+                identity: Some(LaunchProcessIdentity {
+                    pid,
+                    owner_uid: uid,
+                    start_ticks: 991,
+                }),
+                generation: 1,
+                guarded_generation: 0,
+                guarded_active: false,
+                cancellation: None,
+                release_requested: false,
+                release_in_progress: false,
+            },
+        );
+        let (registered_sender, registered_receiver) = mpsc::channel();
+        let guarded_watchdog = watchdog.clone();
+        let worker = thread::spawn(move || {
+            guarded_watchdog.run_guarded(pid, "cancel-lease", move |cancel, completion| {
+                crate::operations::test_support::run_test_cancellable_process(
+                    completion,
+                    &cancel,
+                    move |operation_pid| registered_sender.send(operation_pid).unwrap(),
+                )
+            })
+        });
+        let operation_pid = registered_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        let started = std::time::Instant::now();
+        let result = watchdog.resume(pid, Some("cancel-lease"));
+        let elapsed = started.elapsed();
+        worker.join().unwrap();
+        let group_gone = unsafe { libc::kill(-operation_pid, 0) } != 0;
+        let _ = watchdog.resume(pid, None);
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        assert_eq!(result["status"], "resumed", "{result}");
+        assert!(elapsed < super::GUARDED_COMPLETION_TIMEOUT, "{elapsed:?}");
+        assert!(group_gone, "cancelled operation group survived release");
     }
 
     #[test]
@@ -1497,7 +1579,7 @@ mod tests {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 worker_watchdog.run_guarded(pid, "panic-lease", move |cancel, completion| {
                     cancel_sender.send(cancel).unwrap();
-                    crate::operations::run_test_process_after_registration(
+                    crate::operations::test_support::run_test_process_after_registration(
                         completion,
                         move |operation_pid| {
                             registered_sender.send(operation_pid).unwrap();

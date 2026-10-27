@@ -30,7 +30,6 @@ pub struct SteamAppScope {
 pub struct ScopeTransitionResult {
     pub success: bool,
     pub reason: String,
-    pub disappeared: bool,
 }
 
 impl ScopeTransitionResult {
@@ -38,7 +37,6 @@ impl ScopeTransitionResult {
         Self {
             success: true,
             reason: String::new(),
-            disappeared: false,
         }
     }
 
@@ -46,7 +44,6 @@ impl ScopeTransitionResult {
         Self {
             success: false,
             reason: reason.into(),
-            disappeared: false,
         }
     }
 }
@@ -94,13 +91,6 @@ impl SystemdScopeController {
             #[cfg(test)]
             thaw_hook: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
-    }
-    #[cfg(test)]
-    pub(crate) fn set_thaw_hook(&self, hook: ThawHook) {
-        *self
-            .thaw_hook
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(hook);
     }
 
     pub fn discover(&self, pid: i32) -> Result<SteamAppScope, String> {
@@ -184,11 +174,7 @@ impl SystemdScopeController {
         }
         let (state, reason) = self.scope_state(scope);
         if state == ScopeState::Missing {
-            return ScopeTransitionResult {
-                success: true,
-                reason: String::new(),
-                disappeared: true,
-            };
+            return ScopeTransitionResult::ok();
         }
         if state != ScopeState::Live {
             return ScopeTransitionResult::failed(reason);
@@ -196,11 +182,7 @@ impl SystemdScopeController {
         let command = self.run_unit_command_until("thaw", &scope.unit, deadline);
         if !command.success {
             return if self.scope_state(scope).0 == ScopeState::Missing {
-                ScopeTransitionResult {
-                    success: true,
-                    reason: String::new(),
-                    disappeared: true,
-                }
+                ScopeTransitionResult::ok()
             } else {
                 command
             };
@@ -233,11 +215,7 @@ impl SystemdScopeController {
         loop {
             let (state, reason) = self.scope_state(scope);
             if state == ScopeState::Missing && expected == 0 {
-                return ScopeTransitionResult {
-                    success: true,
-                    reason: String::new(),
-                    disappeared: true,
-                };
+                return ScopeTransitionResult::ok();
             }
             if state != ScopeState::Live {
                 return ScopeTransitionResult::failed(reason);
@@ -665,20 +643,9 @@ fn coerce_pid(pid: i32) -> Result<i32, String> {
     }
 }
 
-pub(crate) fn parse_start_ticks(stat: &str, expected_pid: i32) -> Option<u64> {
-    let open = stat.find('(')?;
-    let close = stat.rfind(')')?;
-    if open == 0 || close <= open || stat[..open].trim().parse::<i32>().ok()? != expected_pid {
-        return None;
-    }
-    stat[close + 1..].split_whitespace().nth(19)?.parse().ok()
-}
-
-fn read_process_identity(proc_root: &Path, pid: i32) -> Option<LaunchProcessIdentity> {
+pub(crate) fn read_process_identity(proc_root: &Path, pid: i32) -> Option<LaunchProcessIdentity> {
     let proc_dir = proc_root.join(pid.to_string());
-    let owner_uid = fs::metadata(&proc_dir).ok()?.uid();
-    let stat = fs::read_to_string(proc_dir.join("stat")).ok()?;
-    let start_ticks = parse_start_ticks(&stat, pid)?;
+    let (owner_uid, start_ticks, _) = crate::procfs::read_identity(&proc_dir, pid)?;
     Some(LaunchProcessIdentity {
         pid,
         owner_uid,
@@ -886,6 +853,23 @@ mod tests {
         read_process_identity, same_process_identity, thread_group_stopped, validate_scope_parts,
     };
 
+    impl SystemdScopeController {
+        pub(crate) fn set_thaw_hook(&self, hook: super::ThawHook) {
+            *self
+                .thaw_hook
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = Some(hook);
+        }
+    }
+
+    #[test]
+    fn proc_start_ticks_use_field_22_after_the_last_comm_parenthesis() {
+        let stat = "57 (worker (nested) name) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 991";
+        assert_eq!(crate::procfs::parse_start_ticks(stat, 57), Some(991));
+        assert_eq!(crate::procfs::parse_start_ticks(stat, 58), None);
+        assert_eq!(crate::procfs::parse_start_ticks("malformed", 57), None);
+    }
+
     #[test]
     fn scope_validation_rejects_traversal_and_symlink_escape() {
         let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
@@ -1029,7 +1013,6 @@ fi
             .thaw(&scope);
 
         assert!(result.success, "{}", result.reason);
-        assert!(result.disappeared);
     }
     #[test]
     fn launch_pid_identity_rejects_reused_pid_with_new_start_ticks() {

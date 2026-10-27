@@ -106,7 +106,6 @@ export function LudusaviContent({
     ludusaviState.versions ?? {
       sdh_ludusavi: "Loading...",
       ludusavi: "Loading...",
-      pyludusavi: "Loading...",
       decky: "Loading..."
     };
   const [operation, setOperation] = useState<OperationStatus>({

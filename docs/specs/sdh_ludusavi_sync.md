@@ -28,6 +28,7 @@ membership metadata, and a backend-owned Ludusavi config modification marker. Th
 is valid for fast QAM open only when the Steam app marker and Ludusavi config marker
 still match the current runtime state. The Ludusavi marker is based on the active config
 file's `st_mtime_ns` value.
+Game lists returned after refresh or from cache are ordered by Unicode casefolded title.
 
 `installed_app_ids` is treated as frontend-provided input. The backend must bound,
 parse, deduplicate, and sort it before comparison or persistence. Malformed or oversized
@@ -70,6 +71,8 @@ cached status.
 To track synchronization of backup data to other devices, the plugin monitors Syncthing activity in the background.
 
 - **Non-blocking Behavior**: Monitoring is advisory and display-only. Syncthing connection/API issues or slow sync will never block game launch or game exit.
+- **Credentials**: The API key and GUI address read from Syncthing's XML configuration
+  resolve numeric character references and predefined XML entities before use.
 - **Path Resolution**: The watched folder is resolved dynamically by matching Syncthing configured folders against Ludusavi's backup path.
 - **Conflict Handling**: The monitor is stopped when a conflict is detected and is restarted only after a resolution operation is chosen, preventing the conflict screen from being overridden by temporary Syncthing statuses.
 - **Peer Connectivity Gate**: Peer connectivity, not internet connectivity, controls monitoring. Before a watch starts, the backend intersects the matched folder's configured remote devices with the currently connected devices from `/rest/system/connections`. A folder with no configured remote devices is classified `folder_not_shared` (rendered as `LOCAL BACKUP SAVED - PATH NOT SHARED`); configured devices with none connected is classified `no_connected_peers`. Connected devices that do not share the matched folder do not count.
@@ -134,7 +137,7 @@ state and by the global operation lock.
 ## UI
 
 The Decky panel includes an Automatic Sync toggle, a Ludusavi game selector, refresh,
-force backup, force restore, progress state, Ludusavi/rclone versions, dependency
+force backup, force restore, progress state, plugin/Ludusavi/Decky versions, dependency
 states, notification preferences, and a recent log panel. Notification preferences live
 above the Ludusavi launcher panel and can suppress all plugin toasts or supported toast
 categories. Autosync progress and successful autosync results are shown in a compact

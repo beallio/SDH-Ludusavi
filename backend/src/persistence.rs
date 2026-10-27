@@ -48,14 +48,6 @@ impl StateLock {
         })
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_test_after_acquire(&self, hook: std::sync::Arc<dyn Fn() + Send + Sync>) {
-        *self
-            .test_after_acquire
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(hook);
-    }
-
     pub fn with_lock<T>(&self, operation: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
         let _thread_guard = self
             .thread_lock
@@ -83,7 +75,7 @@ impl<'a> FileLockGuard<'a> {
     fn acquire(file: &'a File, path: &Path) -> io::Result<Self> {
         let deadline = Instant::now() + LOCK_TIMEOUT;
         loop {
-            // Python and Rust use this lock file to coordinate shared state across processes.
+            // Coordinate shared state across backend processes.
             let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
             if result == 0 {
                 return Ok(Self { file });
@@ -194,6 +186,15 @@ mod tests {
     use tempfile::tempdir_in;
 
     use super::write_json_before_rename;
+
+    impl super::StateLock {
+        pub(crate) fn set_test_after_acquire(&self, hook: std::sync::Arc<dyn Fn() + Send + Sync>) {
+            *self
+                .test_after_acquire
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = Some(hook);
+        }
+    }
 
     #[test]
     fn atomic_write_keeps_previous_file_when_rename_fails() {
