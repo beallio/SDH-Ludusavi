@@ -148,10 +148,17 @@ specified in [the sync spec](sdh_ludusavi_sync.md#ludusavi-integration). Let
 ```ts
 const ludusaviCommand: LudusaviLaunchCommand = {
   commandPath: exe,
-  args: ["--config", N],
+  args: ["WINIT_X11_SCALE_FACTOR=1", "%command%", "--config", N],
   compatTool: "",
 };
 ```
+
+Steam applies `VAR=value %command% args` launch options to non-Steam shortcuts.
+The Ludusavi Flatpak sets `WINIT_X11_SCALE_FACTOR=1` in its own environment;
+the bundled binary needs it in the launch options. Without it, winit derives a
+scale of about 1.7 from gamescope's reported screen size, the window becomes
+larger than the 1280x800 X screen, and controls beyond the screen edge (such as
+the **Other** tab) cannot be selected. The Flatpak command needs no override.
 
 If the bundled binary cannot run and the Flatpak is available:
 

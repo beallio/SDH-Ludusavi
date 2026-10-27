@@ -981,7 +981,7 @@ def test_bundled_runner_is_preferred_and_reused_until_its_target_changes() -> No
         assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
         assert rpc(harness, "get_ludusavi_command") == {
             "commandPath": str(bundled),
-            "args": ["--config", str(harness.config_dir)],
+            "args": ["WINIT_X11_SCALE_FACTOR=1", "%command%", "--config", str(harness.config_dir)],
             "compatTool": "",
         }
         assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
