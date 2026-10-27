@@ -1761,6 +1761,12 @@ mod tests {
                 service.dispatch("list_backups", vec![json!("Hades")]).await,
                 json!({"status":"skipped","reason":"cancelled"})
             );
+            // A cancelled run leaves Ludusavi verified; it must not force rediscovery.
+            assert_ne!(
+                service.operations.get_ludusavi_command(),
+                Value::Null,
+                "cancellation discarded the verified Ludusavi client"
+            );
         }
     }
 
