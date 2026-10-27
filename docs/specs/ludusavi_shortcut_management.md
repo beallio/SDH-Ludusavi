@@ -68,7 +68,7 @@ This complexity is unnecessary and can lead to multiple shortcuts or confusion.
     - Launch via `RunGame`.
 
 ### 5. Implementation Details (Backend)
-- No significant changes required as `get_ludusavi_launcher_shortcut_id` and `set_ludusavi_launcher_shortcut_id` already exist in `py_modules/sdh_ludusavi/service.py`.
+- `get_ludusavi_launcher_shortcut_id` and `set_ludusavi_launcher_shortcut_id` are implemented by the Rust backend service.
 
 ## Verification & Testing
 

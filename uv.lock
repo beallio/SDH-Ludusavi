@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 
 [options]
@@ -139,15 +139,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyludusavi"
-version = "0.3.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/86/e2/dbc2ddc99abe1a3f604e8202b4bcd5c37d1025cebe8aba8f8bc366467970/pyludusavi-0.3.0.tar.gz", hash = "sha256:f0a0d64f10a5347de11e9c73f027ed06fa0c817be22cd39f5f321a5c1fe896dd", size = 12808, upload-time = "2026-06-26T17:18:35.347Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2f/51/86435530e0de7765749f6713fae2a3ff73c3755529c45ea548d89ca11365/pyludusavi-0.3.0-py3-none-any.whl", hash = "sha256:4328381494371cb8cba5c40ee8bfb36641e852d52bb8aaaf7ca66e04fe1104c0", size = 15160, upload-time = "2026-06-26T17:18:34.487Z" },
-]
-
-[[package]]
 name = "pytest"
 version = "9.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -217,10 +208,7 @@ wheels = [
 
 [[package]]
 name = "sdh-ludusavi"
-source = { editable = "." }
-dependencies = [
-    { name = "pyludusavi" },
-]
+source = { virtual = "." }
 
 [package.dev-dependencies]
 dev = [
@@ -232,7 +220,6 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pyludusavi", specifier = ">=0.3.0" }]
 
 [package.metadata.requires-dev]
 dev = [

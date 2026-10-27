@@ -15,45 +15,26 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 keywords = ["decky", "ludusavi", "steam-deck", "backup", "saves"]
-dependencies = [
-    "pyludusavi>=0.3.0",
-]
+dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/beallio/SDH-Ludusavi"
 Repository = "https://github.com/beallio/SDH-Ludusavi"
 Issues = "https://github.com/beallio/SDH-Ludusavi/issues"
 
-[tool.hatch.version]
-source = "vcs"
-raw-options = { git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--abbrev=40", "--match", "v[0-9]*", "--exclude", "*-dev*"] }
-
-[tool.hatch.build.targets.wheel]
-packages = ["py_modules/sdh_ludusavi"]
-
-[tool.hatch.build.targets.sdist]
-include = [
-    "py_modules/sdh_ludusavi",
-    "README.md",
-    "LICENSE",
-    "NOTICE.md",
-]
-
-[build-system]
-requires = ["hatchling", "hatch-vcs"]
-build-backend = "hatchling.build"
 
 [tool.uv]
 cache-dir = "/tmp/sdh_ludusavi/.uv_cache"
+package = false
 
 [tool.ruff]
 line-length = 100
 cache-dir = "/tmp/sdh_ludusavi/.ruff_cache"
+extend-exclude = ["main.py"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=py_modules/sdh_ludusavi --cov-report=term --cov-fail-under=83"
 cache_dir = "/tmp/sdh_ludusavi/.pytest_cache"
-pythonpath = ["py_modules"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [

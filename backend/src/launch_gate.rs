@@ -870,6 +870,7 @@ fn bounded_reason(message: &str) -> String {
 mod tests {
     use std::{
         fs,
+        os::unix::fs::{MetadataExt, PermissionsExt, symlink},
         os::unix::process::CommandExt,
         path::Path,
         process::{Command, Stdio},
@@ -881,9 +882,128 @@ mod tests {
     use tempfile::tempdir_in;
 
     use super::{
-        LaunchScopeAcquirer, SteamAppScope, SystemdScopeController, read_process_identity,
-        same_process_identity, thread_group_stopped,
+        LaunchScopeAcquirer, SteamAppScope, SystemdScopeController, has_children,
+        read_process_identity, same_process_identity, thread_group_stopped, validate_scope_parts,
     };
+
+    #[test]
+    fn scope_validation_rejects_traversal_and_symlink_escape() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let uid = unsafe { libc::geteuid() };
+        let prefix = format!("/user.slice/user-{uid}.slice/user@{uid}.service/app.slice");
+        for suffix in [
+            "/../app-steam-app123-456.scope",
+            "/app-steam-app123-456.scope/child",
+            "/other.scope",
+        ] {
+            assert!(validate_scope_parts(&format!("{prefix}{suffix}"), uid).is_err());
+        }
+        let cgroup_root = temporary.path().join("cgroup");
+        let parent = cgroup_root.join(prefix.trim_start_matches('/'));
+        fs::create_dir_all(&parent).unwrap();
+        let outside = temporary.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        symlink(&outside, parent.join("app-steam-app123-456.scope")).unwrap();
+        let controller =
+            SystemdScopeController::new(temporary.path().join("proc"), &cgroup_root, uid);
+        let parts =
+            validate_scope_parts(&format!("{prefix}/app-steam-app123-456.scope"), uid).unwrap();
+        assert!(controller.resolved_scope_dir(&parts).is_err());
+    }
+
+    #[test]
+    fn freeze_timeout_rolls_back_partial_transition() {
+        let uid = unsafe { libc::geteuid() };
+        let relative = format!(
+            "user.slice/user-{uid}.slice/user@{uid}.service/app.slice/app-steam-app123-456.scope"
+        );
+        if let Some(root) = std::env::var_os("SDH_TEST_FREEZE_ROOT") {
+            let root = Path::new(&root);
+            let scope_dir = root.join("cgroup").join(&relative);
+            let metadata = fs::metadata(&scope_dir).unwrap();
+            let scope = SteamAppScope {
+                unit: "app-steam-app123-456.scope".to_owned(),
+                cgroup_path: format!("/{relative}"),
+                device: metadata.dev(),
+                inode: metadata.ino(),
+                root_pid: 456,
+            };
+            let controller =
+                SystemdScopeController::new(root.join("proc"), root.join("cgroup"), uid);
+            let result = controller.freeze(&scope);
+            assert!(!result.success);
+            assert!(result.reason.contains("timed out"), "{}", result.reason);
+            assert_eq!(
+                fs::read_to_string(root.join("calls")).unwrap(),
+                "freeze\nthaw\n"
+            );
+            assert_eq!(
+                fs::read_to_string(scope_dir.join("cgroup.freeze")).unwrap(),
+                "0\n"
+            );
+            assert_eq!(
+                fs::read_to_string(scope_dir.join("cgroup.events")).unwrap(),
+                "frozen 0\n"
+            );
+            return;
+        }
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let scope_dir = temporary.path().join("cgroup").join(relative);
+        fs::create_dir_all(&scope_dir).unwrap();
+        fs::write(scope_dir.join("cgroup.freeze"), "0\n").unwrap();
+        fs::write(scope_dir.join("cgroup.events"), "frozen 0\n").unwrap();
+        let systemctl = temporary.path().join("systemctl");
+        fs::write(
+            &systemctl,
+            r#"#!/bin/sh
+printf '%s\n' "$2" >> "$SDH_TEST_FREEZE_ROOT/calls"
+if [ "$2" = freeze ]; then
+    printf '1\n' > "$SDH_TEST_SCOPE_DIR/cgroup.freeze"
+    printf 'frozen 0\n' > "$SDH_TEST_SCOPE_DIR/cgroup.events"
+else
+    printf '0\n' > "$SDH_TEST_SCOPE_DIR/cgroup.freeze"
+    printf 'frozen 0\n' > "$SDH_TEST_SCOPE_DIR/cgroup.events"
+fi
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&systemctl, fs::Permissions::from_mode(0o755)).unwrap();
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "launch_gate::tests::freeze_timeout_rolls_back_partial_transition",
+                "--nocapture",
+            ])
+            .env("SDH_TEST_FREEZE_ROOT", temporary.path())
+            .env("SDH_TEST_SCOPE_DIR", &scope_dir)
+            .env("PATH", temporary.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "child test failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn prescope_requires_every_thread_stopped_and_no_children() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let task = temporary.path().join("42/task");
+        for tid in [42, 43] {
+            let directory = task.join(tid.to_string());
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(directory.join("stat"), format!("{tid} (worker) T")).unwrap();
+            fs::write(directory.join("children"), "").unwrap();
+        }
+        assert!(thread_group_stopped(temporary.path(), 42));
+        assert!(!has_children(temporary.path(), 42));
+        fs::write(task.join("43/stat"), "43 (worker) S").unwrap();
+        assert!(!thread_group_stopped(temporary.path(), 42));
+        fs::write(task.join("43/children"), "99").unwrap();
+        assert!(has_children(temporary.path(), 42));
+    }
 
     #[test]
     fn vanished_scope_is_an_idempotent_thaw() {

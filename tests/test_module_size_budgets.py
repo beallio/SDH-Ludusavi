@@ -4,10 +4,7 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).parent.parent
-PRODUCTION_ROOTS = (
-    PROJECT_ROOT / "src",
-    PROJECT_ROOT / "py_modules" / "sdh_ludusavi",
-)
+PRODUCTION_ROOTS = (PROJECT_ROOT / "src",)
 PRODUCTION_SUFFIXES = {".py", ".ts", ".tsx"}
 MAX_PRODUCTION_MODULE_LINES = 1_000
 

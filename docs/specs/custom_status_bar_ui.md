@@ -294,13 +294,9 @@ Frontend static tests must verify:
 Validation commands:
 
 ```bash
-./run.sh uv run pytest tests/test_frontend_static.py
 ./run.sh pnpm run typecheck
 ./run.sh pnpm run build
-./run.sh uv run ruff check . --fix
-./run.sh uv run ruff format .
-./run.sh uv run ty check py_modules/sdh_ludusavi/
-./run.sh uv run pytest
+./run.sh bash scripts/quality_gates.sh check
 ```
 
 ## Details-page status row

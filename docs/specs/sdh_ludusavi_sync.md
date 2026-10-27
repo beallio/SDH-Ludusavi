@@ -2,21 +2,14 @@
 
 ## Identity
 
-The plugin name is `SDH-ludusavi`. The Python package is `sdh_ludusavi`, and the
-JavaScript package name is `sdh-ludusavi`.
+The plugin name is `SDH-ludusavi`. The backend is Rust, and the JavaScript
+package name is `sdh-ludusavi`.
 
 ## Ludusavi Integration
 
-The backend constructs `pyludusavi.Ludusavi` with:
-
-```python
-Ludusavi(flatpak_id="com.github.mtkennerly.ludusavi", env=_ludusavi_env())
-```
-
-The adapter passes Deck-compatible environment overrides into `pyludusavi`. It provides
-`XDG_RUNTIME_DIR=/run/user/1000` when Decky omits that variable and clears
-`LD_LIBRARY_PATH` for Ludusavi subprocesses without mutating the plugin process
-environment. Launcher discovery uses the same environment helper.
+The Rust backend invokes the Ludusavi Flatpak CLI. It supplies a suitable
+`XDG_RUNTIME_DIR` when Decky omits one and clears `LD_LIBRARY_PATH` for
+Ludusavi subprocesses without mutating the plugin process environment.
 
 Ludusavi game names are canonical game IDs. Steam app IDs are optional metadata.
 
@@ -26,16 +19,15 @@ Ludusavi game names are canonical game IDs. Steam app IDs are optional metadata.
 available when automatic sync is disabled, subject to game status and the global
 operation lock.
 
-Runtime state is stored as `sdh_ludusavi.json` in `DECKY_SETTINGS_DIR` when Decky
-provides that directory. If Decky does not provide it, the backend uses a private
-`0700` fallback under `DECKY_USER_HOME/.config/sdh-ludusavi/`, then the current user's
-home config directory if `DECKY_USER_HOME` is unavailable.
+Settings are stored in `DECKY_PLUGIN_SETTINGS_DIR/settings.json`; cached runtime
+state is stored separately in `DECKY_PLUGIN_RUNTIME_DIR/cache.json`. Unknown keys
+are preserved across updates.
 
 The persisted state includes settings, cached game metadata, normalized Steam app
 membership metadata, and a backend-owned Ludusavi config modification marker. The cache
 is valid for fast QAM open only when the Steam app marker and Ludusavi config marker
 still match the current runtime state. The Ludusavi marker is based on the active config
-file's `st_mtime_ns` value from `pyludusavi.Ludusavi.config_path()`.
+file's `st_mtime_ns` value.
 
 `installed_app_ids` is treated as frontend-provided input. The backend must bound,
 parse, deduplicate, and sort it before comparison or persistence. Malformed or oversized

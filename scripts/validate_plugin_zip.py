@@ -3,9 +3,64 @@ from __future__ import annotations
 
 import argparse
 import json
+import struct
 import sys
 import zipfile
 from pathlib import Path
+
+
+def validate_static_elf(data: bytes) -> None:
+    """Reject non-x86-64, malformed, or dynamically linked ELF executables."""
+    error = "backend must be a statically linked x86_64 ELF executable"
+    try:
+        if len(data) < 64 or data[:7] != b"\x7fELF\x02\x01\x01":
+            raise ValueError(error)
+        elf_type, machine = struct.unpack_from("<HH", data, 16)
+        entrypoint = struct.unpack_from("<Q", data, 24)[0]
+        phoff = struct.unpack_from("<Q", data, 32)[0]
+        ehsize, phentsize, phnum = struct.unpack_from("<HHH", data, 52)
+        if (
+            elf_type not in (2, 3)
+            or machine != 62
+            or not entrypoint
+            or ehsize != 64
+            or phentsize < 56
+            or not phnum
+            or phoff + phentsize * phnum > len(data)
+        ):
+            raise ValueError(error)
+        executable_load = False
+        for index in range(phnum):
+            offset = phoff + index * phentsize
+            segment_type, flags = struct.unpack_from("<II", data, offset)
+            segment_offset = struct.unpack_from("<Q", data, offset + 8)[0]
+            segment_address = struct.unpack_from("<Q", data, offset + 16)[0]
+            segment_size = struct.unpack_from("<Q", data, offset + 32)[0]
+            if segment_offset + segment_size > len(data):
+                raise ValueError(error)
+            if segment_type == 3:
+                raise ValueError(error)
+            if (
+                segment_type == 1
+                and flags & 1
+                and segment_address <= entrypoint < segment_address + segment_size
+            ):
+                executable_load = True
+            if segment_type == 2:
+                if segment_size % 16:
+                    raise ValueError(error)
+                for entry in range(segment_offset, segment_offset + segment_size, 16):
+                    tag = struct.unpack_from("<q", data, entry)[0]
+                    if tag == 1:
+                        raise ValueError(error)
+                    if tag == 0:
+                        break
+                else:
+                    raise ValueError(error)
+        if not executable_load:
+            raise ValueError(error)
+    except struct.error as exc:
+        raise ValueError(error) from exc
 
 
 def main() -> None:
@@ -47,6 +102,11 @@ def main() -> None:
                 "main.py",
                 "package.json",
                 "plugin.json",
+                "README.md",
+                "bin/backend",
+                "theme/theme.json",
+                "theme/clean.css",
+                "theme/custom.css",
                 "dist/index.js",
             ]
             for file_name in required_files:
@@ -56,11 +116,7 @@ def main() -> None:
                     sys.exit(1)
 
             # 3. Required directories
-            required_dirs = [
-                "py_modules/sdh_ludusavi/",
-                "py_modules/pyludusavi/",
-                "py_modules/pyludusavi-0.3.0.dist-info/",
-            ]
+            required_dirs = ["theme/"]
             for dir_prefix in required_dirs:
                 full_dir_prefix = f"{prefix}{dir_prefix}"
                 if not any(name.startswith(full_dir_prefix) for name in namelist):
@@ -73,6 +129,7 @@ def main() -> None:
             # 4. Forbidden paths
             forbidden_prefixes = [
                 "node_modules/",
+                "py_modules/",
                 "src/",
                 "tests/",
                 "docs/",
@@ -87,12 +144,29 @@ def main() -> None:
             ]
             for name in namelist:
                 rel_path = name[len(prefix) :]
-                if any(rel_path.startswith(f_pref) for f_pref in forbidden_prefixes):
+                if (
+                    any(rel_path.startswith(f_pref) for f_pref in forbidden_prefixes)
+                    or any(
+                        part in {"__pycache__", ".cache", ".pytest_cache", ".ruff_cache", ".venv"}
+                        for part in Path(rel_path).parts
+                    )
+                    or ".." in Path(rel_path).parts
+                ):
                     print(f"Error: ZIP contains forbidden path: {name}", file=sys.stderr)
                     sys.exit(1)
                 if rel_path.endswith(".pyc") or rel_path.endswith(".pyo"):
                     print(f"Error: ZIP contains forbidden file: {name}", file=sys.stderr)
                     sys.exit(1)
+
+            backend_info = archive.getinfo(f"{prefix}bin/backend")
+            if not (backend_info.external_attr >> 16) & 0o111:
+                print("Error: bin/backend is not executable", file=sys.stderr)
+                sys.exit(1)
+            try:
+                validate_static_elf(archive.read(backend_info))
+            except ValueError as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                sys.exit(1)
 
             # 5. Metadata verification
             plugin_json_path = f"{prefix}plugin.json"
@@ -100,6 +174,9 @@ def main() -> None:
 
             plugin_data = json.loads(archive.read(plugin_json_path).decode("utf-8"))
             package_data = json.loads(archive.read(package_json_path).decode("utf-8"))
+            if plugin_data.get("backend") != "bin/backend":
+                print("Error: plugin.json backend must be bin/backend", file=sys.stderr)
+                sys.exit(1)
 
             plugin_name = plugin_data.get("name")
             if plugin_name != args.expected_name:

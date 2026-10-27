@@ -2,6 +2,12 @@
 
 SDH-Ludusavi helps you back up and restore game saves from Gaming Mode on your Steam Deck. It uses Ludusavi to keep copies of your saves. If you turn on **Automatic Sync**, it checks for a newer backup before a game starts and backs up your saves when you quit.
 
+Version 0.5.0 runs its save-management backend as a native program instead of the
+previous Python backend. It is designed to work with both the standard Decky Loader
+and the Decky fork that can start native plugins directly. Existing settings and
+backup history stay in place when you update; your Ludusavi backups are not moved.
+This version has not yet been tested as an installed plugin on a real Deck.
+
 ![SDH-Ludusavi in Gaming Mode](assets/demo.webp?cacheBuster=22)
 
 You can see the latest save result on supported non-Steam game pages without opening the Decky menu. After automatic work when you quit a game, that game's page shows the full save message, such as local backup, upload, or upload-warning progress. Readable messages stay in the normal row even when a transparent footer area overlaps it. If a theme or the footer actually covers the message, a Steam-style fallback shows it on that same page. If you leave the page, the post-game message hides but the work continues. Returning shows the latest active state or retained result. Steam Cloud pages keep their usual Steam Cloud status.
@@ -51,6 +57,9 @@ If double-clicking the launcher does nothing, right-click it and choose **Run**.
 3. Open the **Developer** tab and choose **Install from Local ZIP**.
 4. Select the release ZIP you downloaded and follow Decky's prompts.
 
+The same release ZIP is used for standard Decky Loader and the native-backend fork.
+Keep the ZIP intact; Decky needs both the launcher shim and the backend executable.
+
 ## Start using it
 
 1. Open Ludusavi in Desktop Mode and choose a folder for your backups.
@@ -96,6 +105,10 @@ Open **Updates** in SDH-Ludusavi to check for a new release or enable automatic 
 If a game's page was open during an update and HLTB's times are missing, press **B** to return to Home or your library, then open the same game's page again. The updated display appears on that next visit; SDH-Ludusavi does not force the page to redraw. You do not need to launch a game or restart Steam.
 
 If an update from the plugin does not work, use the [desktop installer](#option-2-desktop-installer) or a [release ZIP](#option-3-install-a-release-zip-through-decky). Open **View Logs** in the plugin if you need to report a problem on the [issue page](https://github.com/beallio/SDH-Ludusavi/issues).
+
+If the plugin does not start after installing the 0.5.0 ZIP, restart Decky or Steam,
+then check **View Logs** and report the loader version and any startup error. Do not
+delete your Ludusavi backup folder to troubleshoot the plugin.
 
 ## License
 

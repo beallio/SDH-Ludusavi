@@ -1,0 +1,5 @@
+[2026-10-26 16:22:44,700][INFO]: frontend: App started: Contract Fixture Game (123456) tracked=true
+[2026-10-26 16:22:44,821][INFO]: Launch gate acquired for root PID 4125439
+[2026-10-26 16:22:45,000][INFO]: frontend: check_game_start result for Contract Fixture Game (123456): {"status":"conflict","game":"Contract Fixture Game"}
+[2026-10-26 16:23:14,824][WARNING]: Watchdog releasing launch gate for root PID 4125439: lease expired
+[2026-10-26 16:23:15,000][INFO]: frontend: [Contract Fixture Game] backup: Kept local save

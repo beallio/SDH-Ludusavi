@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 
 FIXTURES_DIR = Path("tests/fixtures/plugin_logs")
@@ -22,7 +23,7 @@ def load_analyze_module():
     return module
 
 
-def run_json_fixture(name: str) -> dict[str, object]:
+def run_json_fixture(name: str) -> dict[str, Any]:
     result = subprocess.run(
         [
             sys.executable,
@@ -36,6 +37,23 @@ def run_json_fixture(name: str) -> dict[str, object]:
         check=True,
     )
     return json.loads(result.stdout)
+
+
+def test_analyze_real_rust_backend_log(tmp_path: Path) -> None:
+    log = tmp_path / "2026-10-26 16.01.22.log"
+    log.write_text(
+        "[2026-10-26 16:01:22,430][INFO]: init: SDH-ludusavi service initialized\n"
+        "[2026-10-26 16:01:22,435][INFO]: Single-instance check completed: "
+        "status=ok, terminated=0, killed=0, skipped=0, failed=0\n"
+        "[2026-10-26 16:01:22,440][INFO]: frontend: contract log analysis probe\n"
+        "[2026-10-26 16:01:22,440][INFO]: Unloading SDH-Ludusavi\n",
+        encoding="utf-8",
+    )
+    findings, stats = load_analyze_module().analyze_logs([log])
+    assert findings == []
+    assert stats.lines_parsed == 4
+    assert stats.parse_failures == 0
+    assert stats.levels["INFO"] == 4
 
 
 def test_analyze_clean_log() -> None:
@@ -63,6 +81,32 @@ def test_analyze_watchdog_resume_before_resolution() -> None:
     assert any(
         finding["rule_id"] == "launch_gate.resume_before_resolution" for finding in data["findings"]
     )
+
+
+def test_analyze_rust_watchdog_expiry_correlates_with_later_action() -> None:
+    data = run_json_fixture("rust-watchdog.log")
+    findings = {finding["rule_id"]: finding for finding in data["findings"]}
+    assert set(findings) == {
+        "launch_gate.lease_expired",
+        "launch_gate.resume_before_resolution",
+    }
+    assert findings["launch_gate.lease_expired"]["line_number"] == 4
+    assert "PID 4125439: lease expired" in findings["launch_gate.lease_expired"]["evidence"]
+    assert (
+        "watchdog resume at line 4" in findings["launch_gate.resume_before_resolution"]["evidence"]
+    )
+
+
+def test_analyze_rust_watchdog_absolute_ceiling(tmp_path: Path) -> None:
+    log = tmp_path / "rust-ceiling.log"
+    log.write_text(
+        "[2026-10-26 16:23:14,824][WARNING]: "
+        "Watchdog releasing launch gate for root PID 4125439: absolute ceiling\n",
+        encoding="utf-8",
+    )
+    findings, _ = load_analyze_module().analyze_logs([log])
+    assert [finding.rule_id for finding in findings] == ["launch_gate.lease_expired"]
+    assert "absolute ceiling" in findings[0].evidence
 
 
 def test_analyze_syncthing_ttl_expiry() -> None:
@@ -154,7 +198,7 @@ def test_analyze_backend_and_frontend_labels_produce_the_same_findings(tmp_path:
     frontend_findings, frontend_stats = module.analyze_logs([frontend_path])
     backend_findings, backend_stats = module.analyze_logs([backend_path])
 
-    def normalized(findings: list[object]) -> list[tuple[object, ...]]:
+    def normalized(findings: list[Any]) -> list[tuple[object, ...]]:
         return [
             (
                 finding.rule_id,

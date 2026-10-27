@@ -1029,7 +1029,7 @@ mod tests {
     use crate::persistence::StateLock;
 
     use super::{
-        JsonResponse, PluginUpdater, ReleaseClient, parse_plugin_version,
+        GitHubReleaseClient, JsonResponse, PluginUpdater, ReleaseClient, parse_plugin_version,
         pending_install_matches_loaded_version, retry_after,
     };
 
@@ -1076,6 +1076,19 @@ mod tests {
             "../../tests/contract/fixtures/github/recorded.json"
         ))
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn github_client_maps_connection_failure_to_error_response() {
+        let response = tokio::task::spawn_blocking(|| {
+            GitHubReleaseClient::new("0.5.0")
+                .unwrap()
+                .fetch("http://127.0.0.1:0/")
+        })
+        .await
+        .unwrap();
+        assert_eq!(response.status, 500);
+        assert!(!response.body["error"].as_str().unwrap().is_empty());
     }
 
     #[test]

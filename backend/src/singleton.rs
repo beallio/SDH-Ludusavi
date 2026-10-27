@@ -257,6 +257,37 @@ mod tests {
     }
 
     #[test]
+    fn singleton_escalates_only_if_process_identity_stays_the_same() {
+        let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let root = temporary.path();
+        let command = b"/runtime/backend\0--plugin\0SDH-Ludusavi\0";
+        write_process(root, 100, 20, command);
+        write_process(root, 101, 10, command);
+        let mut signals = Vec::new();
+        let report = enforce_single_instance_at(root, 100, |pid, signal| {
+            signals.push((pid, signal));
+            if signal == libc::SIGKILL {
+                fs::remove_dir_all(root.join(pid.to_string()))?;
+            }
+            Ok::<(), io::Error>(())
+        })
+        .unwrap();
+        assert_eq!(signals, [(101, libc::SIGTERM), (101, libc::SIGKILL)]);
+        assert_eq!(report.killed, [101]);
+
+        write_process(root, 101, 10, command);
+        let mut signals = Vec::new();
+        let report = enforce_single_instance_at(root, 100, |pid, signal| {
+            signals.push((pid, signal));
+            write_process(root, pid, 99, command);
+            Ok::<(), io::Error>(())
+        })
+        .unwrap();
+        assert_eq!(signals, [(101, libc::SIGTERM)]);
+        assert_eq!(report.skipped, [101]);
+    }
+
+    #[test]
     fn singleton_signals_only_strictly_older_byte_identical_processes() {
         let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
         let root = temporary.path();

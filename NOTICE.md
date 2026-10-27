@@ -46,14 +46,16 @@ notices are in [LICENSE](LICENSE).
   included.
 - **Code use:** Original status-bar CSS; no upstream stylesheet is bundled.
 
-## Vendored source
+## Native backend and loader shim
 
-### [beallio/pyludusavi 0.3.0](https://github.com/beallio/pyludusavi)
+### [Decky Loader Rust SDK](https://github.com/beallio/decky-loader)
 
-- **Role:** Pure-Python Ludusavi adapter vendored under
-  `py_modules/pyludusavi`.
-- **License:** MIT
-- **Full license:** `py_modules/pyludusavi-0.3.0.dist-info/licenses/LICENSE`
+- **Role:** The stock-Decky compatibility shim in `main.py` is copied from the
+  SDK at revision `98bce11`. The native backend also uses the SDK crate.
+- **Shim license:** 0BSD.
+
+The previous Python backend used `pyludusavi` 0.3.0 (MIT); it is no longer
+vendored or included in the plugin package.
 
 ## Frontend dependencies and bundled icons
 

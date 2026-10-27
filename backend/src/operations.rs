@@ -2093,6 +2093,24 @@ mod tests {
     };
     use zip::{CompressionMethod, ZipWriter, write::FileOptions};
     #[test]
+    fn game_status_maps_error_backup_and_configuration() {
+        for (value, expected) in [
+            (json!({"name":"Game","configured":false}), "error"),
+            (json!({"name":"Game","configured":true}), "configured"),
+            (
+                json!({"name":"Game","needs_first_backup":true}),
+                "needs_first_backup",
+            ),
+            (json!({"name":"Game","has_backup":true}), "has_backup"),
+            (
+                json!({"name":"Game","has_backup":true,"error":"failure"}),
+                "error",
+            ),
+        ] {
+            assert_eq!(Game::from_cache(&value).unwrap().status(), expected);
+        }
+    }
+    #[test]
     fn game_name_sanitization_table_matches_python() {
         for (input, expected) in [
             ("", ""),
@@ -2139,6 +2157,7 @@ mod tests {
             ("hades the game", None, Some("Hades: The Game!")),
             ("Old Hades Name", None, Some("Hades: The Game!")),
             ("Unrelated", Some("300"), Some("Hades: The Game!")),
+            ("Hades", None, Some("Hades: The Game!")),
             ("Portal", None, None),
         ] {
             assert_eq!(

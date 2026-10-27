@@ -99,7 +99,7 @@ def deck(tmp_path: Path):
             cwd=str(tmp_path),
         )
 
-    run.log = log  # type: ignore[attr-defined]
+    setattr(run, "log", log)
     return run
 
 

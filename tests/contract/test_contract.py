@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from contextlib import contextmanager
+from datetime import datetime, timezone
+from contextlib import ExitStack, contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import fcntl
 import json
@@ -17,11 +18,11 @@ import threading
 import time
 from typing import Any, Iterator
 from urllib.parse import parse_qs, urlsplit
+from uuid import uuid4
 
 import pytest
 
-from harness import ContractHarness, FAKE_BIN, REPO_ROOT
-from sdh_ludusavi._version import resolve_version
+from harness import ContractHarness, REPO_ROOT, native_backend_path
 
 
 GAME = "Contract Fixture Game"
@@ -187,21 +188,155 @@ def _assert_history_entry(
 
 
 @dataclass
+class _OwnedUnit:
+    unit: str
+    description: str
+    process: subprocess.Popen[bytes] | None = None
+    invocation_id: str | None = None
+    cleaned: bool = False
+
+
+def _unit_state(unit: str) -> dict[str, str]:
+    result = subprocess.run(
+        [
+            "systemctl",
+            "--user",
+            "show",
+            unit,
+            "--property=LoadState",
+            "--property=Description",
+            "--property=InvocationID",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=True,
+    )
+    values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    if "LoadState" not in values:
+        raise RuntimeError(f"Cannot identify transient unit {unit}")
+    return values
+
+
+def _is_owned_unit(owner: _OwnedUnit) -> bool:
+    state = _unit_state(owner.unit)
+    if state["LoadState"] == "not-found" or state.get("Description") != owner.description:
+        return False
+    invocation = state.get("InvocationID", "")
+    if not invocation or (owner.invocation_id is not None and invocation != owner.invocation_id):
+        return False
+    if owner.invocation_id is None:
+        owner.invocation_id = invocation
+    return True
+
+
+def _owned_unit_gone(owner: _OwnedUnit) -> bool:
+    state = _unit_state(owner.unit)
+    invocation = state.get("InvocationID", "")
+    return (
+        state["LoadState"] == "not-found"
+        or state.get("Description") != owner.description
+        or bool(owner.invocation_id and invocation and invocation != owner.invocation_id)
+    )
+
+
+def _stop_owned_unit(owner: _OwnedUnit) -> None:
+    if owner.cleaned or owner.process is None:
+        return
+    process = owner.process
+    try:
+        if owner.invocation_id is None and not _is_owned_unit(owner):
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and not _is_owned_unit(owner):
+                time.sleep(0.02)
+        if _is_owned_unit(owner):
+            try:
+                subprocess.run(
+                    ["systemctl", "--user", "thaw", owner.unit],
+                    capture_output=True,
+                    timeout=3,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                pass
+            if _is_owned_unit(owner):
+                try:
+                    stopped = (
+                        subprocess.run(
+                            ["systemctl", "--user", "stop", owner.unit],
+                            capture_output=True,
+                            timeout=8,
+                            check=False,
+                        ).returncode
+                        == 0
+                    )
+                except subprocess.TimeoutExpired:
+                    stopped = False
+                if not stopped and _is_owned_unit(owner):
+                    subprocess.run(
+                        ["systemctl", "--user", "--signal=SIGKILL", "kill", owner.unit],
+                        capture_output=True,
+                        timeout=3,
+                        check=False,
+                    )
+                    if _is_owned_unit(owner):
+                        subprocess.run(
+                            ["systemctl", "--user", "stop", owner.unit],
+                            capture_output=True,
+                            timeout=8,
+                            check=False,
+                        )
+        _wait_for(lambda: _owned_unit_gone(owner), 5, f"owned unit {owner.unit} survived cleanup")
+        owner.cleaned = True
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+        else:
+            process.wait(timeout=2)
+
+
+@dataclass
 class _Child:
     pid: int
     process: subprocess.Popen[bytes]
     unit: str
     tick_file: Path
+    owner: _OwnedUnit
 
 
-def _start_systemd_child(root: Path, unit: str, systemd_args: list[str]) -> _Child:
+def _start_systemd_child(
+    root: Path,
+    unit: str,
+    systemd_args: list[str],
+    request: pytest.FixtureRequest,
+    *,
+    thread_count: int = 0,
+) -> _Child:
     systemd_run = shutil.which("systemd-run")
     if systemd_run is None:
         pytest.fail("systemd-run is required to create an isolated child")
+    if _unit_state(unit)["LoadState"] != "not-found":
+        pytest.fail(f"{unit} is already loaded; refusing to replace it")
+    owner = _OwnedUnit(unit, f"sdh-contract-{uuid4().hex}")
+    request.addfinalizer(lambda: _stop_owned_unit(owner))
     pid_file = root / f"{unit}.pid"
     tick_file = root / f"{unit}.tick"
     code = (
-        "import os,sys,time\n"
+        "import os,sys,time,threading\n"
+        f"for _ in range({thread_count}):\n"
+        "    threading.Thread(target=time.sleep, args=(600,), daemon=True).start()\n"
         "pid_file, tick_file = sys.argv[1:]\n"
         "temporary_file = tick_file + '.tmp'\n"
         "open(pid_file, 'w').write(str(os.getpid()))\n"
@@ -217,6 +352,12 @@ def _start_systemd_child(root: Path, unit: str, systemd_args: list[str]) -> _Chi
         [
             systemd_run,
             *systemd_args,
+            f"--unit={unit}",
+            f"--description={owner.description}",
+            "--property=RuntimeMaxSec=600s",
+            "--property=TimeoutStopSec=3s",
+            "--property=SendSIGKILL=yes",
+            "--collect",
             "--",
             sys.executable,
             "-c",
@@ -229,6 +370,8 @@ def _start_systemd_child(root: Path, unit: str, systemd_args: list[str]) -> _Chi
         stderr=subprocess.PIPE,
         start_new_session=True,
     )
+    owner.process = process
+    assert process.stderr is not None
 
     def read_pid() -> int | None:
         if not pid_file.exists():
@@ -239,6 +382,20 @@ def _start_systemd_child(root: Path, unit: str, systemd_args: list[str]) -> _Chi
             return None
 
     try:
+
+        def capture_unit() -> bool:
+            state = _unit_state(unit)
+            if state["LoadState"] == "not-found":
+                return False
+            if state.get("Description") != owner.description:
+                raise RuntimeError(f"{unit} is not the owned transient unit")
+            invocation = state.get("InvocationID", "")
+            if not invocation:
+                return False
+            owner.invocation_id = invocation
+            return True
+
+        _wait_for(capture_unit, 10, f"systemd-run did not register owned unit {unit}")
         pid = _wait_for(
             read_pid,
             10,
@@ -246,19 +403,10 @@ def _start_systemd_child(root: Path, unit: str, systemd_args: list[str]) -> _Chi
             f"{process.stderr.read().decode(errors='replace') if process.poll() is not None else ''}",
         )
         _wait_for(lambda: tick_file.exists(), 5, "systemd child heartbeat did not start")
-        return _Child(pid, process, unit, tick_file)
+        return _Child(pid, process, unit, tick_file, owner)
     except BaseException:
         try:
-            pid = read_pid()
-            if pid is not None:
-                _stop_child(_Child(pid, process, unit, tick_file))
-            elif process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=2)
+            _stop_owned_unit(owner)
         except BaseException as cleanup_error:
             raise RuntimeError(
                 f"Could not clean up failed systemd fixture {unit}"
@@ -266,48 +414,30 @@ def _start_systemd_child(root: Path, unit: str, systemd_args: list[str]) -> _Chi
         raise
 
 
-def _start_scoped_child(root: Path) -> _Child:
+def _start_scoped_child(root: Path, request: pytest.FixtureRequest) -> _Child:
     unit = f"app-steam-app{APP_ID}-{time.time_ns() % 1_000_000_000}.scope"
     return _start_systemd_child(
         root,
         unit,
-        ["--user", "--scope", "--slice=app.slice", f"--unit={unit}", "--quiet"],
+        ["--user", "--scope", "--slice=app.slice", "--quiet"],
+        request,
     )
 
 
-def _start_prescope_child(root: Path) -> _Child:
-    systemctl = shutil.which("systemctl")
-    if systemctl is None:
-        pytest.fail("systemctl is required to verify the exact pre-scope path")
-    existing = subprocess.run(
-        [
-            systemctl,
-            "--user",
-            "show",
-            "steam-launcher.service",
-            "--property=LoadState",
-            "--value",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    if existing.returncode != 0:
-        pytest.fail(f"cannot verify pre-scope unit availability: {existing.stderr.strip()}")
-    if existing.stdout.strip() not in {"", "not-found"}:
-        pytest.fail("steam-launcher.service is already loaded; refusing to replace it")
+def _start_prescope_child(
+    root: Path, request: pytest.FixtureRequest, *, thread_count: int = 0
+) -> _Child:
     return _start_systemd_child(
         root,
         "steam-launcher.service",
         [
             "--user",
-            "--unit=steam-launcher.service",
             "--slice=app.slice",
             "--wait",
-            "--collect",
             "--quiet",
         ],
+        request,
+        thread_count=thread_count,
     )
 
 
@@ -336,32 +466,15 @@ def _tick_count(child: _Child) -> int:
     return int(child.tick_file.read_text(encoding="ascii"))
 
 
-def _force_scope_thaw(harness: ContractHarness, child: _Child) -> None:
-    subprocess.run(
-        [str(FAKE_BIN / "systemctl"), "--user", "thaw", child.unit],
-        env=harness.env,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-
-
 def _stop_child(child: _Child) -> None:
-    if child.process.poll() is None:
-        for signum in (signal.SIGCONT, signal.SIGTERM):
-            try:
-                os.kill(child.pid, signum)
-            except ProcessLookupError:
-                pass
-        try:
-            child.process.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            try:
-                os.kill(child.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            child.process.wait(timeout=2)
+    _stop_owned_unit(child.owner)
+
+
+def _stop_children(*children: _Child | None) -> None:
+    with ExitStack() as cleanup:
+        for child in children:
+            if child is not None:
+                cleanup.callback(_stop_child, child)
 
 
 class _SyncthingServer:
@@ -390,6 +503,7 @@ class _SyncthingServer:
         self.release_watch_event = threading.Event()
         self._events_request_count = 0
         self.requests: list[str] = []
+        self.response_overrides: dict[str, Any] = {}
         self._request_lock = threading.Lock()
         self._status_request_count = 0
         self._system_status_count = 0
@@ -467,6 +581,7 @@ class _SyncthingServer:
                     },
                     "/rest/events": [],
                 }
+                responses.update(owner.response_overrides)
                 if owner.hold_second_status:
                     responses["/rest/db/status"]["sequence"] = 0 if status_request_count == 1 else 2
                 elif not owner.refresh_on_config:
@@ -676,17 +791,6 @@ def test_core_settings_and_logging_contract(backend: ContractHarness) -> None:
     )
     assert "debug while enabled" in plugin_logs
 
-    if backend.backend == "python":
-        # Startup reconciliation runs concurrently with the Python contract socket.
-        startup_deadline = time.monotonic() + 3
-        while time.monotonic() < startup_deadline:
-            logs = rpc(backend, "get_recent_logs")
-            if any(entry["message"].startswith("Startup reconciliation:") for entry in logs):
-                break
-            time.sleep(0.01)
-        else:
-            pytest.fail("Python startup reconciliation did not complete")
-
     for index in range(105):
         rpc(backend, "log", "info", f"ring-{index}")
     logs = rpc(backend, "get_recent_logs")
@@ -705,19 +809,16 @@ def test_core_settings_and_logging_contract(backend: ContractHarness) -> None:
     assert success is False
     assert "Plugin has no method unknown_contract_method" in error
 
-    if backend.backend != "python":
-        assert backend.settings_dir.stat().st_mode & 0o777 == 0o700
-        assert backend.runtime_dir.stat().st_mode & 0o777 == 0o700
-        cache_path = backend.runtime_dir / "cache.json"
-        assert cache_path.stat().st_mode & 0o777 == 0o600
-        assert (backend.runtime_dir / ".sdh_ludusavi.state.lock").stat().st_mode & 0o777 == 0o600
+    assert backend.settings_dir.stat().st_mode & 0o777 == 0o700
+    assert backend.runtime_dir.stat().st_mode & 0o777 == 0o700
+    cache_path = backend.runtime_dir / "cache.json"
+    assert cache_path.stat().st_mode & 0o777 == 0o600
+    assert (backend.runtime_dir / ".sdh_ludusavi.state.lock").stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.contract_core
 def test_native_shutdown_drains_inflight_persistence_call() -> None:
-    native_backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
-    if native_backend == "python":
-        pytest.skip("in-flight native shutdown requires SDH_CONTRACT_BACKEND to select Rust")
+    native_backend = str(native_backend_path())
 
     with tempfile.TemporaryDirectory(
         prefix="sdh-shutdown-", dir="/var/tmp/sdh_ludusavi"
@@ -760,9 +861,7 @@ def test_native_shutdown_drains_inflight_persistence_call() -> None:
 
 @pytest.mark.contract_core
 def test_native_sigterm_during_startup_lock_contention_is_prompt() -> None:
-    native_backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
-    if native_backend == "python":
-        pytest.skip("startup lock contention requires SDH_CONTRACT_BACKEND to select Rust")
+    native_backend = str(native_backend_path())
 
     with tempfile.TemporaryDirectory(
         prefix="sdh-startup-lock-", dir="/var/tmp/sdh_ludusavi"
@@ -804,83 +903,6 @@ def test_native_sigterm_during_startup_lock_contention_is_prompt() -> None:
             backend.close()
 
 
-@pytest.mark.contract_core
-def test_cross_backend_persistence_is_bidirectional() -> None:
-    native_backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
-    if native_backend == "python":
-        pytest.skip("cross-backend persistence requires SDH_CONTRACT_BACKEND to select Rust")
-
-    with tempfile.TemporaryDirectory(
-        prefix="sdh-cross-backend-", dir="/var/tmp/sdh_ludusavi"
-    ) as temporary_root:
-        root = Path(temporary_root)
-        python = ContractHarness(backend="python", root=root).start()
-        try:
-            assert rpc(python, "update_settings", {"kind": "auto_sync", "enabled": True})[
-                "auto_sync_enabled"
-            ]
-            assert (
-                rpc(
-                    python,
-                    "update_settings",
-                    {"kind": "selected_game", "game_name": "Python wrote"},
-                )["selected_game"]
-                == "Python wrote"
-            )
-            assert rpc(python, "set_ludusavi_launcher_shortcut_id", 1234567) is True
-
-            history_entry = {
-                "operation": "backup",
-                "trigger": "manual_backup",
-                "status": "backed_up",
-                "reason": None,
-                "message": "written by Python",
-                "timestamp": "2026-10-24T12:34:56.123456+00:00",
-            }
-            cache_path = python.runtime_dir / "cache.json"
-            cache = json.loads(cache_path.read_text(encoding="utf-8"))
-            cache["game_history"] = {"Cross Backend Game": {"last_backup": history_entry}}
-            cache["python_future_cache_key"] = {"preserve": True}
-            cache_path.write_text(json.dumps(cache), encoding="utf-8")
-        finally:
-            python.close()
-
-        native = ContractHarness(backend=native_backend, root=root).start()
-        try:
-            settings = rpc(native, "get_settings")
-            assert settings["auto_sync_enabled"] is True
-            assert settings["selected_game"] == "Python wrote"
-            assert rpc(native, "get_ludusavi_launcher_shortcut_id") == 1234567
-            history = rpc(native, "get_game_history")
-            _assert_history_map(history)
-            assert history["Cross Backend Game"]["last_backup"]["message"] == "written by Python"
-
-            assert (
-                rpc(
-                    native, "update_settings", {"kind": "selected_game", "game_name": "Rust wrote"}
-                )["selected_game"]
-                == "Rust wrote"
-            )
-            assert rpc(native, "set_ludusavi_launcher_shortcut_id", 7654321) is True
-            cache = json.loads((native.runtime_dir / "cache.json").read_text(encoding="utf-8"))
-            assert cache["python_future_cache_key"] == {"preserve": True}
-            assert cache["game_history"]["Cross Backend Game"]["last_backup"] == history_entry
-        finally:
-            native.close()
-
-        python = ContractHarness(backend="python", root=root).start()
-        try:
-            settings = rpc(python, "get_settings")
-            assert settings["auto_sync_enabled"] is True
-            assert settings["selected_game"] == "Rust wrote"
-            assert rpc(python, "get_ludusavi_launcher_shortcut_id") == 7654321
-            history = rpc(python, "get_game_history")
-            _assert_history_map(history)
-            assert history["Cross Backend Game"]["last_backup"]["message"] == "written by Python"
-        finally:
-            python.close()
-
-
 @pytest.mark.contract_theme
 def test_theme_installation_and_uninstall_ownership(backend: ContractHarness) -> None:
     assert rpc(backend, "consume_theme_refresh_needed") is True
@@ -905,9 +927,7 @@ def test_theme_installation_and_uninstall_ownership(backend: ContractHarness) ->
 
 @pytest.mark.contract_theme
 def test_uninstall_only_theme_cleanup_needs_no_backend_state() -> None:
-    native_backend = os.environ.get("SDH_CONTRACT_BACKEND", "python")
-    if native_backend == "python":
-        pytest.skip("uninstall-only process mode requires SDH_CONTRACT_BACKEND to select Rust")
+    native_backend = str(native_backend_path())
 
     with tempfile.TemporaryDirectory(
         prefix="sdh-contract-uninstall-", dir="/var/tmp/sdh_ludusavi"
@@ -988,6 +1008,7 @@ def test_unload_cancels_and_reaps_ludusavi_process_group() -> None:
         }
     )
     harness.start()
+    assert harness.process is not None
     operations = ThreadPoolExecutor(max_workers=1)
     try:
         result = operations.submit(harness.call, "force_backup", GAME, timeout=30)
@@ -1019,13 +1040,12 @@ def test_unload_cancels_and_reaps_ludusavi_process_group() -> None:
         stop_seconds = time.monotonic() - started
         assert stop_seconds < 5, f"backend shutdown took {stop_seconds:.3f}s"
         assert not _process_group_exists(record["pgid"])
-        if harness.backend != "python":
-            cache = json.loads((harness.runtime_dir / "cache.json").read_text(encoding="utf-8"))
-            entry = cache["game_history"][GAME]
-            assert entry["last_skip"]["status"] == "skipped"
-            assert entry["last_skip"]["reason"] == "cancelled"
-            assert entry["last_failure"] is None
-            assert entry["last_operation"]["status"] == "skipped"
+        cache = json.loads((harness.runtime_dir / "cache.json").read_text(encoding="utf-8"))
+        entry = cache["game_history"][GAME]
+        assert entry["last_skip"]["status"] == "skipped"
+        assert entry["last_skip"]["reason"] == "cancelled"
+        assert entry["last_failure"] is None
+        assert entry["last_operation"]["status"] == "skipped"
         with pytest.raises(ConnectionError, match="backend is shutting down"):
             result.result(timeout=1)
     finally:
@@ -1082,6 +1102,286 @@ def test_non_object_ludusavi_roots_preserve_the_existing_registry(
 
 
 @pytest.mark.contract_operations
+def test_successful_operations_keep_history_when_followup_refresh_fails(
+    backend: ContractHarness,
+) -> None:
+    refreshed = rpc(backend, "refresh_games", True, APP_ID)
+    assert any(game["name"] == GAME and game["has_backup"] for game in refreshed["games"])
+    backend.set_scenario(
+        {"flatpak": {"responses": {"backup_preview": {"exit_code": 23, "stderr": "offline"}}}}
+    )
+
+    assert rpc(backend, "force_backup", GAME)["status"] == "backed_up"
+    assert rpc(backend, "force_restore", GAME)["status"] == "restored"
+    previews = [
+        record
+        for record in backend.fake_processes()
+        if len(record["argv"]) > 2
+        and record["argv"][2] == "backup"
+        and "--preview" in record["argv"]
+    ]
+    assert len(previews) >= 3
+    history = rpc(backend, "get_game_history")[GAME]
+    assert history["last_backup"]["status"] == "backed_up"
+    assert history["last_restore"]["status"] == "restored"
+    backend.restart()
+    history = rpc(backend, "get_game_history")[GAME]
+    assert history["last_backup"]["status"] == "backed_up"
+    assert history["last_restore"]["status"] == "restored"
+
+
+@pytest.mark.contract_lifecycle
+def test_ignored_refresh_entries_and_missing_backup_are_safe(backend: ContractHarness) -> None:
+    preview = _load_fixture("backup-preview.json")
+    ignored = dict(preview["games"][GAME])
+    ignored["decision"] = "Ignored"
+    preview["games"]["Ignored Fixture"] = ignored
+    backend.set_scenario(
+        {
+            "flatpak": {
+                "responses": {
+                    "backup_preview": {"json": preview},
+                    "backups": {"json": {"games": {}}},
+                }
+            }
+        }
+    )
+    refreshed = rpc(backend, "refresh_games", True, APP_ID)
+    assert all(game["name"] != "Ignored Fixture" for game in refreshed["games"])
+    assert any(game["name"] == GAME and not game["has_backup"] for game in refreshed["games"])
+    rpc(backend, "update_settings", {"kind": "auto_sync", "enabled": True})
+    assert rpc(backend, "check_game_start", GAME, APP_ID)["reason"] == "no_backup"
+
+
+@pytest.mark.contract_operations
+def test_refresh_omits_backup_only_and_empty_preview_games(backend: ContractHarness) -> None:
+    preview = _load_fixture("backup-preview.json")
+    preview["games"]["Empty Preview"] = {"files": {}, "registry": {}}
+    preview["games"]["Registry Only"] = {"files": {}, "registry": {"HKCU/example": {}}}
+    backups = _load_fixture("backups.json")
+    backups["games"]["Backup Only"] = {"backups": [{"name": "old"}]}
+    backups["games"]["Empty Preview"] = {"backups": [{"name": "old"}]}
+    backend.set_scenario(
+        {
+            "flatpak": {
+                "responses": {"backup_preview": {"json": preview}, "backups": {"json": backups}}
+            }
+        }
+    )
+
+    result = rpc(backend, "refresh_games", True, APP_ID)
+    assert {game["name"] for game in result["games"]} == {GAME, "Registry Only"}
+
+
+@pytest.mark.contract_operations
+def test_list_backups_sorts_and_prefers_api_sizes(backend: ContractHarness) -> None:
+    backup_path = backend.backup_root / GAME
+    for name in ("older", "newer", "disk"):
+        (backup_path / name).mkdir(parents=True)
+        (backup_path / name / "save").write_bytes(b"abc")
+    backups = {
+        "games": {
+            GAME: {
+                "backupPath": str(backup_path),
+                "backups": [
+                    {"name": "older", "when": "2000-01-01T00:00:00Z", "size": 900, "file_count": 9},
+                    {
+                        "name": "newer",
+                        "when": "2020-01-01T00:00:00Z",
+                        "size": 12345,
+                        "file_count": 42,
+                    },
+                    {"name": "disk", "when": "2010-01-01T00:00:00Z"},
+                ],
+            }
+        }
+    }
+    backend.set_scenario({"flatpak": {"responses": {"backups": {"json": backups}}}})
+    rpc(backend, "refresh_games", True, APP_ID)
+    result = rpc(backend, "list_backups", GAME)
+    assert result["backup_path"] == str(backup_path)
+    assert [item["id"] for item in result["backups"]] == ["newer", "disk", "older"]
+    assert [(item["size_bytes"], item["file_count"]) for item in result["backups"]] == [
+        (12345, 42),
+        (3, 1),
+        (900, 9),
+    ]
+    assert result["total_size_bytes"] == 13248
+
+
+@pytest.mark.contract_operations
+def test_aliases_refresh_on_config_change_and_drop_stale_on_failure(
+    backend: ContractHarness,
+) -> None:
+    alias, other = "Unique Shortcut", "Another Game"
+    preview = _load_fixture("backup-preview.json")
+    preview["games"][other] = dict(preview["games"][GAME])
+
+    def scenario(target: str | None) -> dict[str, Any]:
+        config = (
+            {"json": {"customGames": [{"name": alias, "alias": target}]}}
+            if target is not None
+            else {"exit_code": 23, "stderr": "config unavailable"}
+        )
+        return {
+            "flatpak": {"responses": {"backup_preview": {"json": preview}, "config_show": config}}
+        }
+
+    def change_config() -> None:
+        config = backend.config_dir / "config.yaml"
+        modified = config.stat().st_mtime_ns + 1_000_000_000
+        os.utime(config, ns=(modified, modified))
+
+    backend.set_scenario(scenario(GAME))
+    assert rpc(backend, "refresh_games", True, APP_ID)["aliases"] == {alias: GAME}
+    assert rpc(backend, "list_backups", alias)["game"] == GAME
+    assert rpc(backend, "refresh_games", False, APP_ID)["aliases"] == {alias: GAME}
+
+    change_config()
+    backend.set_scenario(scenario(other))
+    assert rpc(backend, "refresh_games", False, APP_ID)["aliases"] == {alias: other}
+    assert rpc(backend, "list_backups", alias)["game"] == other
+
+    change_config()
+    backend.set_scenario(scenario(None))
+    assert rpc(backend, "refresh_games", False, APP_ID)["aliases"] == {}
+    assert rpc(backend, "list_backups", alias)["reason"] == "unmatched_game"
+
+
+@pytest.mark.contract_lifecycle
+@pytest.mark.parametrize("fallback", ["originalPath", "redirectedPath"])
+def test_conflict_metadata_falls_back_to_original_and_redirected_paths(
+    backend: ContractHarness, fallback: str
+) -> None:
+    save = backend.root / f"{fallback}.sav"
+    save.write_bytes(b"local")
+    os.utime(save, (1_800_000_000, 1_800_000_000))
+    preview = _load_fixture("backup-preview.json")
+    preview["games"][GAME]["files"] = {
+        str(backend.root / "missing.sav"): {
+            "originalPath": str(save) if fallback == "originalPath" else "relative.sav",
+            "redirectedPath": str(save) if fallback == "redirectedPath" else "/missing.sav",
+        }
+    }
+    backups = _load_fixture("backups.json")
+    for item in backups["games"][GAME]["backups"]:
+        item["when"] = "2000-01-01T00:00:00Z"
+    backend.set_scenario(
+        {
+            "flatpak": {
+                "responses": {"backup_preview": {"json": preview}, "backups": {"json": backups}}
+            }
+        }
+    )
+    rpc(backend, "update_settings", {"kind": "auto_sync", "enabled": True})
+    rpc(backend, "refresh_games", True, APP_ID)
+    result = rpc(backend, "check_game_start", GAME, APP_ID)
+    assert result["status"] == "conflict"
+    assert datetime.fromisoformat(result["localModifiedAt"]) == datetime.fromtimestamp(
+        1_800_000_000, tz=timezone.utc
+    )
+    assert result["backupModifiedAt"] == "2000-01-01T00:00:00Z"
+    assert result["backupPath"] == str(backend.backup_root / GAME)
+    assert result["localLabel"] == "Keep Local Save"
+    assert result["backupLabel"] == "Restore Backup Save"
+
+
+@pytest.mark.contract_lifecycle
+def test_disabled_sync_blocks_all_automatic_operations(backend: ContractHarness) -> None:
+    rpc(backend, "refresh_games", True, APP_ID)
+    calls = [
+        ("check_game_start", (GAME, APP_ID)),
+        ("restore_game_on_start", (GAME, APP_ID)),
+        ("resolve_game_start_conflict", (GAME, APP_ID, "restore_backup")),
+        ("check_game_exit", (GAME, APP_ID)),
+        ("backup_game_on_exit", (GAME, APP_ID)),
+    ]
+    for method, args in calls:
+        assert rpc(backend, method, *args)["reason"] == "auto_sync_disabled"
+    rpc(backend, "update_settings", {"kind": "auto_sync", "enabled": True})
+    rpc(backend, "update_settings", {"kind": "game_sync", "game_name": GAME, "enabled": False})
+    for method, args in calls:
+        assert rpc(backend, method, *args)["reason"] == "game_sync_disabled"
+    assert not any(
+        len(record["argv"]) > 2
+        and record["argv"][2] in {"backup", "restore"}
+        and "--preview" not in record["argv"]
+        for record in backend.fake_processes()
+    )
+
+
+@pytest.mark.contract_lifecycle
+@pytest.mark.parametrize("decision", ["Ignored", "Cancelled"])
+def test_exit_preview_not_processed_never_requests_backup(
+    backend: ContractHarness, decision: str
+) -> None:
+    rpc(backend, "refresh_games", True, APP_ID)
+    rpc(backend, "update_settings", {"kind": "auto_sync", "enabled": True})
+    preview = _load_fixture("backup-preview.json")
+    preview["games"][GAME]["decision"] = decision
+    backend.set_scenario({"flatpak": {"responses": {"backup_preview": {"json": preview}}}})
+    assert rpc(backend, "check_game_exit", GAME, APP_ID)["reason"] == "not_processed"
+    assert not any(
+        len(record["argv"]) > 2
+        and record["argv"][2] == "backup"
+        and "--preview" not in record["argv"]
+        for record in backend.fake_processes()
+    )
+
+
+@pytest.mark.contract_operations
+def test_no_change_operations_record_skips(backend: ContractHarness) -> None:
+    rpc(backend, "refresh_games", True, APP_ID)
+    unchanged = {"games": {GAME: {"decision": "Processed", "change": "Same", "files": {}}}}
+    backend.set_scenario(
+        {"flatpak": {"responses": {"backup": {"json": unchanged}, "restore": {"json": unchanged}}}}
+    )
+    for method, args in [
+        ("force_backup", (GAME,)),
+        ("force_restore", (GAME,)),
+        ("restore_backup_version", (GAME, "backup.zip")),
+    ]:
+        result = rpc(backend, method, *args)
+        assert result["status"] == "skipped" and result["reason"] == "local_current"
+        assert rpc(backend, "get_game_history")[GAME]["last_skip"]["reason"] == "local_current"
+
+
+@pytest.mark.contract_lifecycle
+def test_auto_exit_history_survives_failed_followup_refresh(backend: ContractHarness) -> None:
+    rpc(backend, "refresh_games", True, APP_ID)
+    rpc(backend, "update_settings", {"kind": "auto_sync", "enabled": True})
+    backend.set_scenario(
+        {"flatpak": {"responses": {"backup_preview": {"exit_code": 23, "stderr": "offline"}}}}
+    )
+    assert rpc(backend, "backup_game_on_exit", GAME, APP_ID)["status"] == "backed_up"
+    history = rpc(backend, "get_game_history")[GAME]["last_backup"]
+    assert history["status"] == "backed_up" and history["trigger"] == "auto_exit"
+    backend.restart()
+    assert rpc(backend, "get_game_history")[GAME]["last_backup"]["trigger"] == "auto_exit"
+
+
+@pytest.mark.contract_core
+@pytest.mark.parametrize("bad_id", [None, "not-an-id"])
+def test_malformed_legacy_notification_and_shortcut_values(bad_id: Any) -> None:
+    harness = ContractHarness()
+    (harness.settings_dir / "settings.json").write_text(
+        json.dumps({"notifications": {"manual_operations": "invalid", "failures_errors": False}})
+    )
+    (harness.runtime_dir / "cache.json").write_text(
+        json.dumps({"ludusaviLauncherShortcutAppId": bad_id})
+    )
+    try:
+        harness.start()
+        settings = rpc(harness, "get_settings")
+        assert settings["notifications"]["manual_operations"] is True
+        assert settings["notifications"]["failures_errors"] is False
+        assert settings["notifications"]["update_available"] is True
+        assert rpc(harness, "get_ludusavi_launcher_shortcut_id") == -1
+    finally:
+        harness.close()
+
+
+@pytest.mark.contract_operations
 def test_restore_backup_version_rejects_unsafe_id(backend: ContractHarness) -> None:
     backup = rpc(backend, "refresh_games", True, APP_ID)
     assert any(game["name"] == GAME for game in backup["games"])
@@ -1089,6 +1389,30 @@ def test_restore_backup_version_rejects_unsafe_id(backend: ContractHarness) -> N
     assert success is True
     assert result["status"] == "failed"
     assert "Invalid backup ID" in result["message"]
+
+
+@pytest.mark.contract_core
+def test_existing_unknown_settings_and_cache_keys_survive_updates() -> None:
+    harness = ContractHarness()
+    settings_path = harness.settings_dir / "settings.json"
+    cache_path = harness.runtime_dir / "cache.json"
+    settings_path.write_text(json.dumps({"future_setting": {"nested": [1, 2]}}))
+    cache_path.write_text(json.dumps({"future_cache": {"nested": [3, 4]}}))
+    try:
+        harness.start()
+        assert rpc(harness, "update_settings", {"kind": "auto_sync", "enabled": True})[
+            "auto_sync_enabled"
+        ]
+        assert rpc(harness, "set_ludusavi_launcher_shortcut_id", 7654321) is True
+        assert json.loads(settings_path.read_text())["future_setting"] == {"nested": [1, 2]}
+        assert json.loads(cache_path.read_text())["future_cache"] == {"nested": [3, 4]}
+        harness.restart()
+        assert rpc(harness, "get_settings")["auto_sync_enabled"] is True
+        assert rpc(harness, "get_ludusavi_launcher_shortcut_id") == 7654321
+        assert json.loads(settings_path.read_text())["future_setting"] == {"nested": [1, 2]}
+        assert json.loads(cache_path.read_text())["future_cache"] == {"nested": [3, 4]}
+    finally:
+        harness.close()
 
 
 @pytest.mark.contract_operations
@@ -1248,7 +1572,7 @@ def test_update_install_handoff_persistence_contract(backend: ContractHarness) -
 @pytest.mark.contract_updater
 def test_main_reconciles_pending_install_with_loaded_version() -> None:
     harness = ContractHarness()
-    version = resolve_version()
+    version = json.loads((REPO_ROOT / "plugin.json").read_text(encoding="utf-8"))["version"]
     harness.env["DECKY_PLUGIN_VERSION"] = version
     pending = {
         "version": version,
@@ -1286,7 +1610,9 @@ def test_main_reconciles_pending_install_with_loaded_version() -> None:
 
 @pytest.mark.contract_lifecycle
 @pytest.mark.contract_gate
-def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHarness) -> None:
+def test_lifecycle_newer_save_guard_and_launch_gate_contract(
+    backend: ContractHarness, request: pytest.FixtureRequest
+) -> None:
     (backend.root / "save.dat").write_bytes(b"newer local save\n")
     scenario_backups = _load_fixture("backups.json")
     for snapshot in scenario_backups["games"][GAME]["backups"]:
@@ -1310,6 +1636,13 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHa
     )
     start_check = rpc(backend, "check_game_start", GAME, APP_ID)
     assert start_check["status"] == "conflict"
+    assert datetime.fromisoformat(start_check["localModifiedAt"]).timestamp() == pytest.approx(
+        (backend.root / "save.dat").stat().st_mtime
+    )
+    assert start_check["backupModifiedAt"] == "2000-01-01T00:00:00Z"
+    assert start_check["backupPath"] == str(backend.backup_root / GAME)
+    assert start_check["localLabel"] == "Keep Local Save"
+    assert start_check["backupLabel"] == "Restore Backup Save"
     after_restore = sum(
         record["argv"][2] == "restore" and "--preview" not in record["argv"]
         for record in backend.fake_processes()
@@ -1324,7 +1657,7 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHa
     assert rpc(backend, "backup_game_on_exit", GAME, APP_ID)["status"] == "backed_up"
     _assert_command_after(backend, before_exit_backup, "backup")
     _assert_history_entry(backend, "last_backup", "backup", "auto_exit", "backed_up")
-    child = _start_scoped_child(backend.root)
+    child = _start_scoped_child(backend.root, request)
     backend.set_scenario(
         {
             "flatpak": {"responses": {"backups": {"json": scenario_backups}}},
@@ -1404,7 +1737,6 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHa
             "resumed child did not make progress",
         )
     finally:
-        _force_scope_thaw(backend, child)
         _stop_child(child)
     calls = backend.systemctl_calls()
     assert any(call["argv"] == ["--user", "freeze", child.unit] for call in calls)
@@ -1418,6 +1750,139 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHa
     )
     foreign = rpc(backend, "pause_game_process", foreign_pid)
     assert foreign["status"] in {"skipped", "failed"}
+
+
+@pytest.mark.contract_gate
+def test_prescope_gate_stops_every_thread_in_real_multithreaded_child(
+    backend: ContractHarness,
+    request: pytest.FixtureRequest,
+) -> None:
+    child = _start_prescope_child(backend.root, request, thread_count=4)
+    try:
+        threads = [int(path.name) for path in Path(f"/proc/{child.pid}/task").iterdir()]
+        assert len(threads) >= 5
+        paused = rpc(backend, "pause_game_process", child.pid)
+        assert paused["status"] == "paused", paused
+        assert all(_proc_state(tid) == "T" for tid in threads)
+        frozen_ticks = _tick_count(child)
+        time.sleep(0.1)
+        assert _tick_count(child) == frozen_ticks
+        assert (
+            rpc(backend, "resume_game_process", child.pid, paused["lease_id"])["status"]
+            == "resumed"
+        )
+        assert _wait_for(lambda: _tick_count(child) > frozen_ticks, 2, "child did not resume")
+    finally:
+        _stop_child(child)
+
+
+@pytest.mark.contract_gate
+def test_pause_fails_closed_when_scope_discovery_fails(
+    backend: ContractHarness, request: pytest.FixtureRequest
+) -> None:
+    unit = f"non-steam-{time.time_ns() % 1_000_000_000}.scope"
+    child = _start_systemd_child(
+        backend.root, unit, ["--user", "--scope", "--slice=app.slice", "--quiet"], request
+    )
+    try:
+        paused = rpc(backend, "pause_game_process", child.pid)
+        assert paused["status"] == "failed"
+        assert "exact Steam app scope" in paused["message"]
+        assert "lease_id" not in paused
+        ticks = _tick_count(child)
+        assert _wait_for(
+            lambda: _tick_count(child) > ticks, 2, "failed discovery left child stopped"
+        )
+        assert not backend.systemctl_calls()
+    finally:
+        _stop_child(child)
+
+
+@pytest.mark.contract_gate
+def test_partial_freeze_failure_thaws_and_pause_fails_closed(
+    backend: ContractHarness,
+    request: pytest.FixtureRequest,
+) -> None:
+    child = _start_scoped_child(backend.root, request)
+    backend.set_scenario(
+        {
+            "systemctl": {
+                "simulate_scope_freeze": True,
+                "scope_unit": child.unit,
+                "partial_freeze_failure": True,
+            }
+        }
+    )
+    try:
+        failed = rpc(backend, "pause_game_process", child.pid)
+        assert failed["status"] == "failed", failed
+        assert "freeze" in failed["message"]
+        assert "lease_id" not in failed
+        assert not _scope_frozen(child)
+        assert [call["argv"][1] for call in backend.systemctl_calls()] == ["freeze", "thaw"]
+        ticks = _tick_count(child)
+        assert _wait_for(lambda: _tick_count(child) > ticks, 2, "failed freeze left child stopped")
+
+        backend.set_scenario(
+            {"systemctl": {"simulate_scope_freeze": True, "scope_unit": child.unit}}
+        )
+        paused = rpc(backend, "pause_game_process", child.pid)
+        assert paused["status"] == "paused", paused
+        assert _scope_frozen(child)
+        assert (
+            rpc(backend, "resume_game_process", child.pid, paused["lease_id"])["status"]
+            == "resumed"
+        )
+    finally:
+        _stop_child(child)
+
+
+@pytest.mark.contract_gate
+def test_fixture_cleanup_thaws_a_frozen_owned_scope(
+    backend: ContractHarness, request: pytest.FixtureRequest
+) -> None:
+    child = _start_scoped_child(backend.root, request)
+    backend.set_scenario({"systemctl": {"simulate_scope_freeze": True, "scope_unit": child.unit}})
+    try:
+        assert rpc(backend, "pause_game_process", child.pid)["status"] == "paused"
+        assert _scope_frozen(child)
+        _stop_child(child)
+        assert _unit_state(child.unit)["LoadState"] == "not-found"
+    finally:
+        _stop_child(child)
+
+
+@pytest.mark.contract_syncthing
+def test_syncthing_watch_start_classifies_configuration_and_peer_failures(
+    backend: ContractHarness,
+) -> None:
+    def start() -> dict[str, Any]:
+        return rpc(backend, "start_syncthing_activity_watch", "pre_game", GAME, APP_ID)
+
+    assert start()["reason"] == "not_configured"
+    config = backend.xdg_state / "syncthing" / "config.xml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("<configuration><gui><address>127.0.0.1:8384</address></gui></configuration>")
+    assert start()["reason"] == "api_unavailable"
+
+    with _syncthing(backend) as server:
+        folder = {
+            "id": "contract-folder",
+            "path": str(backend.backup_root),
+            "devices": [{"deviceID": "CONTRACT-LOCAL-DEVICE"}],
+        }
+        server.response_overrides["/rest/config/folders"] = [folder]
+        assert start()["reason"] == "folder_not_shared"
+        folder["devices"].append({"deviceID": DEVICE_ID})
+        server.response_overrides["/rest/system/connections"] = {
+            "connections": {DEVICE_ID: {"connected": False}, "UNRELATED": {"connected": True}}
+        }
+        result = start()
+        assert result["reason"] == "no_connected_peers"
+        assert DEVICE_ID not in result["message"]
+        assert "UNRELATED" not in result["message"]
+
+    assert start()["reason"] == "api_unavailable"
 
 
 @pytest.mark.contract_syncthing
@@ -1618,11 +2083,13 @@ def test_config_saved_refreshes_folder_before_publishing_events(backend: Contrac
 @pytest.mark.contract_operations
 @pytest.mark.contract_lifecycle
 @pytest.mark.contract_gate
-def test_hanging_ludusavi_exits_and_reaps_process_group(backend: ContractHarness) -> None:
-    child = _start_prescope_child(backend.root)
+def test_hanging_ludusavi_exits_and_reaps_process_group(
+    backend: ContractHarness, request: pytest.FixtureRequest
+) -> None:
+    child = _start_prescope_child(backend.root, request)
     scoped_child: _Child | None = None
     try:
-        scoped_child = _start_scoped_child(backend.root)
+        scoped_child = _start_scoped_child(backend.root, request)
         backend.set_scenario(
             {
                 "flatpak": {
@@ -1732,10 +2199,7 @@ def test_hanging_ludusavi_exits_and_reaps_process_group(backend: ContractHarness
             f"fake Ludusavi process group {pgid} survived the operation timeout",
         )
     finally:
-        if scoped_child is not None:
-            _force_scope_thaw(backend, scoped_child)
-            _stop_child(scoped_child)
-        _stop_child(child)
+        _stop_children(child, scoped_child)
 
 
 def _process_group_exists(pgid: int) -> bool:
@@ -1752,7 +2216,9 @@ def _process_group_exists(pgid: int) -> bool:
 @pytest.mark.contract_lifecycle
 @pytest.mark.contract_gate
 @pytest.mark.contract_syncthing
-def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
+def test_unload_kills_restore_group_before_releasing_paused_child(
+    request: pytest.FixtureRequest,
+) -> None:
     scenario: dict[str, Any] = {
         "flatpak": {
             "responses": {
@@ -1765,18 +2231,20 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
         }
     }
     harness = ContractHarness(scenario=scenario)
+    request.addfinalizer(harness.close)
     server = _SyncthingServer(harness.backup_root, hold_watch_events=True).start()
+    request.addfinalizer(server.close)
     harness.env.update(
         {"SYNCTHING_API_KEY": API_KEY, "SYNCTHING_API_URL": f"http://127.0.0.1:{server.port}"}
     )
     harness.start()
-    child = _start_prescope_child(harness.root)
+    child = _start_prescope_child(harness.root, request)
     operation_pool = ThreadPoolExecutor(max_workers=1)
     shutdown_pool = ThreadPoolExecutor(max_workers=1)
     stop_future: Future[None] | None = None
     scoped_child: _Child | None = None
     try:
-        scoped_child = _start_scoped_child(harness.root)
+        scoped_child = _start_scoped_child(harness.root, request)
         scenario["systemctl"] = {
             "simulate_scope_freeze": True,
             "scope_unit": scoped_child.unit,
@@ -1879,17 +2347,13 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
         with pytest.raises(ConnectionError, match="backend is shutting down"):
             operation.result(timeout=1)
     finally:
-        server.release_watch_event.set()
-        if scoped_child is not None:
-            _force_scope_thaw(harness, scoped_child)
-            _stop_child(scoped_child)
-        _stop_child(child)
-        try:
-            harness.close()
-        finally:
-            operation_pool.shutdown(wait=True, cancel_futures=True)
-            shutdown_pool.shutdown(wait=True, cancel_futures=True)
-            server.close()
+        with ExitStack() as cleanup:
+            cleanup.callback(server.close)
+            cleanup.callback(shutdown_pool.shutdown, wait=True, cancel_futures=True)
+            cleanup.callback(operation_pool.shutdown, wait=True, cancel_futures=True)
+            cleanup.callback(harness.close)
+            cleanup.callback(_stop_children, child, scoped_child)
+            cleanup.callback(server.release_watch_event.set)
 
 
 @pytest.mark.contract_operations
@@ -1897,6 +2361,7 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
 @pytest.mark.real_ludusavi
 def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
     monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
     binary = os.environ.get("SDH_CONTRACT_LUDUSAVI_BIN")
     if not binary:
@@ -1969,7 +2434,7 @@ def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
         )
         check = rpc(harness, "check_game_start", GAME, APP_ID)
         if check["status"] == "needed":
-            child = _start_scoped_child(harness.root)
+            child = _start_scoped_child(harness.root, request)
             harness.set_scenario(
                 {
                     "flatpak": {"mode": "real"},
@@ -1994,7 +2459,6 @@ def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
                     == "restored"
                 )
             finally:
-                _force_scope_thaw(harness, child)
                 _stop_child(child)
         else:
             assert check["status"] == "conflict"

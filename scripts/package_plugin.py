@@ -3,9 +3,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import zipfile
 from pathlib import Path
+
+if __package__:
+    from .validate_plugin_zip import validate_static_elf
+else:
+    from validate_plugin_zip import validate_static_elf
 
 PROJECT_NAME = "SDH-Ludusavi"
 ZIP_FILENAME = "SDH-Ludusavi.zip"
@@ -14,6 +20,7 @@ ARCHIVE_ROOT = "SDH-Ludusavi"
 REQUIRED_FILES = (
     "LICENSE",
     "NOTICE.md",
+    "README.md",
     "main.py",
     "package.json",
     "plugin.json",
@@ -22,13 +29,7 @@ REQUIRED_FILES = (
     "theme/custom.css",
 )
 REQUIRED_RUNTIME_FILES = ("dist/index.js",)
-REQUIRED_DIRECTORIES = (
-    "dist",
-    "py_modules/pyludusavi",
-    "py_modules/pyludusavi-0.3.0.dist-info",
-    "py_modules/sdh_ludusavi",
-    "theme",
-)
+REQUIRED_DIRECTORIES = ("dist", "theme")
 EXCLUDED_PARTS = {"__pycache__"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo"}
 
@@ -64,12 +65,6 @@ def iter_required_plugin_paths(project_root: Path) -> tuple[str, ...]:
             plugin_paths.add(relative.as_posix())
 
     return tuple(sorted(plugin_paths))
-
-
-def iter_required_archive_names(project_root: Path) -> tuple[str, ...]:
-    return tuple(
-        f"{ARCHIVE_ROOT}/{plugin_path}" for plugin_path in iter_required_plugin_paths(project_root)
-    )
 
 
 def validate_required_files(project_root: Path) -> None:
@@ -111,15 +106,15 @@ def validate_package_versions(project_root: Path) -> str:
     plugin_version = _metadata_version(project_root / "plugin.json")
     package_version = _metadata_version(project_root / "package.json")
 
-    missing = [
-        file_name
-        for file_name, metadata_version in (
-            ("plugin.json", plugin_version),
-            ("package.json", package_version),
-        )
-        if not metadata_version
-    ]
-    if missing:
+    if not plugin_version or not package_version:
+        missing = [
+            file_name
+            for file_name, metadata_version in (
+                ("plugin.json", plugin_version),
+                ("package.json", package_version),
+            )
+            if not metadata_version
+        ]
         raise ValueError(f"Plugin metadata versions must be set in: {', '.join(missing)}")
     if plugin_version != package_version:
         raise ValueError(
@@ -161,7 +156,15 @@ def build_plugin_zip(
     release_tag: str | None = None,
     versioned_output: bool = False,
     emit_release_metadata: bool = False,
+    backend: Path | None = None,
 ) -> Path:
+    if backend is None:
+        target_dir = Path(os.environ.get("CARGO_TARGET_DIR", project_root / "backend" / "target"))
+        backend = target_dir / "x86_64-unknown-linux-musl" / "release" / "backend"
+    if not backend.is_file():
+        raise FileNotFoundError(f"Backend binary is missing: {backend}")
+    backend_bytes = backend.read_bytes()
+    validate_static_elf(backend_bytes)
     ensure_required_files(project_root, is_release=is_release)
     base_version = validate_package_versions(project_root)
     if release_version:
@@ -187,6 +190,11 @@ def build_plugin_zip(
         temporary_zip_path.unlink()
 
     with zipfile.ZipFile(temporary_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        backend_info = zipfile.ZipInfo(f"{ARCHIVE_ROOT}/bin/backend")
+        backend_info.create_system = 3
+        backend_info.external_attr = 0o100755 << 16
+        backend_info.compress_type = zipfile.ZIP_DEFLATED
+        archive.writestr(backend_info, backend_bytes)
         for plugin_path in plugin_paths:
             full_path = project_root / plugin_path
             archive_name = f"{ARCHIVE_ROOT}/{plugin_path}"
@@ -264,6 +272,11 @@ def parse_args() -> argparse.Namespace:
         help="Directory where SDH-Ludusavi.zip will be written.",
     )
     parser.add_argument(
+        "--backend",
+        type=Path,
+        help="Static musl backend binary (defaults to the CARGO_TARGET_DIR release build).",
+    )
+    parser.add_argument(
         "--release",
         action="store_true",
         help="Omit the git hash from the version string for release builds.",
@@ -305,6 +318,7 @@ def main() -> None:
         release_version=args.release_version,
         release_tag=args.release_tag,
         versioned_output=args.versioned_output,
+        backend=args.backend,
         emit_release_metadata=args.emit_release_metadata,
     )
     print(f"Created {zip_path}")

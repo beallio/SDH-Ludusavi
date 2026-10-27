@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export TMPDIR="/tmp/sdh_ludusavi"
+export TMPDIR="/var/tmp/sdh_ludusavi"
 mkdir -p "$TMPDIR"
 
 cd "$(git rev-parse --show-toplevel)"
@@ -30,10 +30,13 @@ echo "Checking Rust formatting..."
 
     echo "Running Rust tests..."
     ../run.sh cargo test --manifest-path Cargo.toml --locked
+
+    echo "Building static Rust backend..."
+    ../run.sh cargo build --manifest-path Cargo.toml --target x86_64-unknown-linux-musl --release --locked
 )
 
 echo "Checking types..."
-./run.sh uv run ty check py_modules/sdh_ludusavi/ || { echo "Type check failed."; exit 1; }
+./run.sh uv run --frozen ty check scripts/ tests/ || { echo "Type check failed."; exit 1; }
 
 # Install frontend deps before pytest: the packaging tests
 # (tests/test_package_plugin.py, tests/test_validate_plugin_zip.py) shell out to
@@ -43,7 +46,8 @@ echo "Installing frontend dependencies (required by packaging tests)..."
 ./run.sh pnpm install --frozen-lockfile || { echo "Frontend dependency install failed."; exit 1; }
 
 echo "Running tests..."
-./run.sh uv run pytest || { echo "Pytest failed."; exit 1; }
+SDH_CONTRACT_BACKEND="$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/backend" \
+    ./run.sh uv run --frozen pytest || { echo "Pytest failed."; exit 1; }
 
 echo "Running frontend supply-chain checks..."
 ./run.sh pnpm run verify || { echo "Frontend supply-chain checks failed."; exit 1; }

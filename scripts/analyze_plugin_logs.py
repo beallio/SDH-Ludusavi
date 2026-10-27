@@ -25,12 +25,14 @@ CHECK_RESULT_RE = re.compile(
 )
 PAUSE_RE = re.compile(
     r"(?:(?:Paused game process tree rooted at|Froze Steam app scope "
-    r"app-steam-app[0-9]+-[0-9]+\.scope for root)\s+PID|Held launch PID)\s+(?P<pid>\d+)"
+    r"app-steam-app[0-9]+-[0-9]+\.scope for root|Launch gate acquired for root)"
+    r"\s+PID|Held launch PID)\s+(?P<pid>\d+)"
 )
 WATCHDOG_RE = re.compile(
-    r"Watchdog detected (?:(?:Steam app scope app-steam-app[0-9]+-[0-9]+\.scope|"
+    r"(?:Watchdog detected (?:(?:Steam app scope app-steam-app[0-9]+-[0-9]+\.scope|"
     r"SIGSTOP gate) for root )?PID\s+(?P<pid>\d+)\s+(?:suspended|frozen|held) for "
     r".*?\((?P<reason>[^)]+)\)\.\s+(?:Resuming|Thawing|Releasing) automatically\."
+    r"|Watchdog releasing launch gate for root PID\s+(?P<rust_pid>\d+):\s*(?P<rust_reason>[^\r\n]+))"
 )
 GATE_FAILURE_RE = re.compile(
     r"Unable to (?P<operation>acquire frozen|discover|freeze) Steam app scope"
@@ -348,8 +350,10 @@ def analyze_logs(paths: list[Path], strict: bool = False) -> tuple[list[LogFindi
 
             watchdog_match = WATCHDOG_RE.search(message)
             if watchdog_match is not None:
-                pid = watchdog_match.group("pid")
-                reason = watchdog_match.group("reason").casefold()
+                pid = watchdog_match.group("pid") or watchdog_match.group("rust_pid")
+                reason = (
+                    watchdog_match.group("reason") or watchdog_match.group("rust_reason")
+                ).casefold()
                 incident = next(
                     (
                         item

@@ -6,16 +6,9 @@ Provide a seamless, low-latency user experience for game selection and plugin in
 ## 2. Backend Interface Requirements
 
 ### 2.1. RPC Async Execution
-All backend methods that perform file I/O, persist state, or perform blocking subprocess discovery MUST be executed on a background thread to prevent blocking the Decky Loader event loop. They must return an `RpcResult` compatible dictionary to communicate failures.
-
-| Method | Original Return | New Return |
-| :--- | :--- | :--- |
-| `set_selected_game` | `dict` | `RpcResult[dict]` |
-| `set_auto_sync_enabled` | `dict` | `RpcResult[dict]` |
-| `set_ludusavi_launcher_shortcut_id` | `bool` | `RpcResult[bool]` |
-| `clear_ludusavi_launcher_shortcut_id` | `bool` | `RpcResult[bool]` |
-| `get_ludusavi_command` | `dict \| None` | `RpcResult[dict \| None]` |
-| `get_ludusavi_logs` | `str` | `RpcResult[str]` |
+The Rust backend dispatches blocking work on Tokio's blocking pool so file I/O
+and subprocess discovery do not block RPC handling. Failures retain the existing
+frontend-facing RPC result shapes.
 
 #### Failure Semantics for `get_ludusavi_command`:
 - **Success (Found)**: Returns the `LudusaviLaunchCommand` object.
@@ -23,14 +16,16 @@ All backend methods that perform file I/O, persist state, or perform blocking su
 - **Failure**: Returns `RpcStatus` (e.g., `{"status": "failed", "message": "..."}`).
 
 ### 2.2. State Concurrency
-The frontend must prevent overlapping user-triggered refresh and settings persistence operations by disabling affected controls while an operation is in flight. A settings save and a refresh save are not expected to run at the same time through the UI, so this feature does not add a broad backend state-locking layer.
+The frontend prevents overlapping user-triggered refresh and settings operations by
+disabling affected controls while work is in flight. The backend also serializes
+persistent state updates with its shared state lock.
 
 ### 2.3. Subprocess Caching
 Subprocess calls to `ludusavi` for static metadata (configuration paths) SHOULD be cached for the duration of the adapter session during normal serial refresh checks.
 
 | Resource | Discovery Command | Cache Key | Behavior on Stat Failure |
 | :--- | :--- | :--- | :--- |
-| Config Path | `ludusavi config path` | `PyludusaviAdapter._cached_config_path` | Keep cached path string, return `None` for mtime |
+| Config Path | `ludusavi config path` | Backend client cache | Keep cached path string, return `None` for mtime |
 
 ## 3. Frontend State Architecture
 

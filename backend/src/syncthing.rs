@@ -1807,6 +1807,337 @@ mod tests {
         assert!(peers.is_empty(), "another folder confirmed this watch");
     }
 
+    fn sample_for_test(
+        state: &str,
+        runtime: &FolderRuntime,
+        local: &LocalActivity,
+        remote: &HashMap<String, RemoteProgress>,
+        peers: &HashMap<String, PeerCompletion>,
+        post_game: bool,
+        now: Instant,
+    ) -> Value {
+        let latest = Mutex::new(Value::Null);
+        let mut streak = 3;
+        publish_sample(
+            &latest,
+            "fixture",
+            state,
+            runtime,
+            local,
+            remote,
+            peers,
+            &HashSet::from(["peer".to_owned()]),
+            post_game,
+            &mut streak,
+            now,
+        );
+        latest.into_inner().unwrap()["sample"].clone()
+    }
+
+    #[test]
+    fn download_and_upload_progress_are_scoped_to_the_watched_folder() {
+        let folder = FolderSelection {
+            id: "watched".to_owned(),
+            label: String::new(),
+            path: PathBuf::new(),
+            device_ids: vec!["peer".to_owned()],
+            watcher_enabled: None,
+            watcher_delay: None,
+            rescan_interval: None,
+        };
+        let mut state = "idle".to_owned();
+        let mut runtime = FolderRuntime::default();
+        let mut remote = HashMap::new();
+        let mut peers = HashMap::new();
+        let mut local = LocalActivity {
+            active_download_files: 2,
+            ..LocalActivity::default()
+        };
+        for (event, count) in [
+            (
+                json!({"type":"DownloadProgress","data":{"other":{"other.dat":{}}}}),
+                2,
+            ),
+            (
+                json!({"type":"DownloadProgress","data":{"watched":{"save.dat":{}}}}),
+                1,
+            ),
+            (
+                json!({"type":"DownloadProgress","data":{"other":{"other.dat":{}}}}),
+                1,
+            ),
+        ] {
+            process_event(
+                &event,
+                &folder,
+                &mut state,
+                &mut runtime,
+                &mut remote,
+                &mut peers,
+                &mut local,
+                false,
+            );
+            assert_eq!(local.active_download_files, count);
+        }
+        let download = sample_for_test(
+            &state,
+            &runtime,
+            &local,
+            &remote,
+            &peers,
+            false,
+            Instant::now(),
+        );
+        assert_eq!(download["downloading"], true);
+        assert_eq!(download["uploading"], false);
+        assert_eq!(download["status"], "ACTIVE_TRANSFER");
+        for (folder_id, expected) in [("other", 0), ("watched", 1)] {
+            process_event(
+                &json!({"type":"RemoteDownloadProgress","data":{"folder":folder_id,"device":"peer","state":{"save.dat":{}}}}),
+                &folder,
+                &mut state,
+                &mut runtime,
+                &mut remote,
+                &mut peers,
+                &mut local,
+                false,
+            );
+            assert_eq!(remote.len(), expected);
+        }
+        let both = sample_for_test(
+            &state,
+            &runtime,
+            &local,
+            &remote,
+            &peers,
+            false,
+            Instant::now(),
+        );
+        assert_eq!(both["downloading"], true);
+        assert_eq!(both["uploading"], true);
+        process_event(
+            &json!({"type":"DownloadProgress","data":{}}),
+            &folder,
+            &mut state,
+            &mut runtime,
+            &mut remote,
+            &mut peers,
+            &mut local,
+            false,
+        );
+        process_event(
+            &json!({"type":"RemoteDownloadProgress","data":{"folder":"watched","device":"peer","state":{}}}),
+            &folder,
+            &mut state,
+            &mut runtime,
+            &mut remote,
+            &mut peers,
+            &mut local,
+            false,
+        );
+        let cleared = sample_for_test(
+            &state,
+            &runtime,
+            &local,
+            &remote,
+            &peers,
+            false,
+            Instant::now(),
+        );
+        assert_eq!(cleared["downloading"], false);
+        assert_eq!(cleared["uploading"], false);
+        assert_ne!(cleared["status"], "ACTIVE_TRANSFER");
+    }
+
+    #[test]
+    fn connection_totals_do_not_invent_pre_game_transfer_direction() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request)
+                .unwrap();
+            let body = r#"{"total":{"inBytesTotal":1000000,"outBytesTotal":1000000},"connections":{"peer":{"connected":true}}}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+        let api = SyncthingApi::new(&format!("http://{address}"), "fixture-key").unwrap();
+        assert_eq!(
+            get_connection_snapshot(&api).unwrap(),
+            HashSet::from(["peer".to_owned()])
+        );
+        server.join().unwrap();
+        let now = Instant::now();
+        let local = LocalActivity {
+            last_local_index: Some(now),
+            last_sequence_change: Some(now),
+            ..LocalActivity::default()
+        };
+        let sample = sample_for_test(
+            "sync-waiting",
+            &FolderRuntime::default(),
+            &local,
+            &HashMap::new(),
+            &HashMap::new(),
+            false,
+            now,
+        );
+        assert_eq!(sample["downloading"], false);
+        assert_eq!(sample["uploading"], false);
+        assert_ne!(sample["status"], "ACTIVE_TRANSFER");
+    }
+
+    #[test]
+    fn settlement_uses_quiet_window_and_pre_game_ignores_peer_needs() {
+        let now = Instant::now();
+        let mut peers = HashMap::new();
+        peers.insert(
+            "peer".to_owned(),
+            PeerCompletion {
+                observed: now,
+                need_bytes: 100,
+                need_items: 1,
+                need_deletes: 0,
+            },
+        );
+        let local = LocalActivity {
+            last_local_change: Some(now),
+            last_scan_progress: Some(now),
+            ..LocalActivity::default()
+        };
+        let runtime = FolderRuntime::default();
+        let remote = HashMap::new();
+        let recent = sample_for_test("idle", &runtime, &local, &remote, &peers, false, now);
+        assert_eq!(recent["settled"], false);
+        assert_eq!(recent["uploading"], false);
+        let quiet = sample_for_test(
+            "idle",
+            &runtime,
+            &local,
+            &remote,
+            &peers,
+            false,
+            now + Duration::from_secs(4),
+        );
+        assert_eq!(quiet["settled"], true);
+        assert_eq!(quiet["update_in_progress"], true);
+        assert_eq!(quiet["status"], "SCANNING");
+
+        let post_game = LocalActivity {
+            last_local_change: Some(now),
+            last_scan_progress: Some(now),
+            outbound_index_observed: Some(now),
+            outbound_hold_deadline: Some(now + OUTBOUND_HOLD),
+            ..LocalActivity::default()
+        };
+        let incomplete = sample_for_test(
+            "idle",
+            &runtime,
+            &post_game,
+            &remote,
+            &peers,
+            true,
+            now + Duration::from_secs(4),
+        );
+        assert_eq!(incomplete["uploading"], true);
+        assert_eq!(incomplete["settled"], false);
+        peers.get_mut("peer").unwrap().need_bytes = 0;
+        peers.get_mut("peer").unwrap().need_items = 0;
+        for (seconds, uploading, settled) in [(2, true, false), (4, false, true)] {
+            let sample = sample_for_test(
+                "idle",
+                &runtime,
+                &post_game,
+                &remote,
+                &peers,
+                true,
+                now + Duration::from_secs(seconds),
+            );
+            assert_eq!(sample["uploading"], uploading);
+            assert_eq!(sample["settled"], settled);
+        }
+
+        let index_only = LocalActivity {
+            last_local_index: Some(now),
+            last_sequence_change: Some(now),
+            ..LocalActivity::default()
+        };
+        let deletes = FolderRuntime {
+            need_deletes: 46,
+            need_total_items: 46,
+            ..FolderRuntime::default()
+        };
+        let preparing = sample_for_test(
+            "sync-preparing",
+            &deletes,
+            &index_only,
+            &remote,
+            &peers,
+            false,
+            now,
+        );
+        assert_eq!(preparing["settled"], true);
+        assert_eq!(preparing["update_in_progress"], true);
+        assert_eq!(preparing["status"], "PREPARING");
+        let content = FolderRuntime {
+            need_files: 1,
+            ..FolderRuntime::default()
+        };
+        assert_eq!(
+            sample_for_test(
+                "sync-preparing",
+                &content,
+                &index_only,
+                &remote,
+                &peers,
+                false,
+                now
+            )["settled"],
+            false
+        );
+        let error = FolderRuntime {
+            watch_error: "watch failed".to_owned(),
+            ..FolderRuntime::default()
+        };
+        assert_eq!(
+            sample_for_test(
+                "sync-preparing",
+                &error,
+                &index_only,
+                &remote,
+                &peers,
+                false,
+                now
+            )["settled"],
+            false
+        );
+        for state in ["syncing", "scanning", "error", "paused"] {
+            assert_eq!(
+                sample_for_test(
+                    state,
+                    &runtime,
+                    &LocalActivity::default(),
+                    &remote,
+                    &peers,
+                    false,
+                    now
+                )["settled"],
+                false,
+                "{state}"
+            );
+        }
+    }
+
     #[test]
     fn folder_runtime_does_not_gate_on_deletes() {
         let runtime = parse_folder_runtime(

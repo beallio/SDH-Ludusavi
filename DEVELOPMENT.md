@@ -7,7 +7,7 @@ This document contains technical information for building, maintaining, and unde
 Use `./run.sh` so Python virtual environments and caches stay outside Dropbox:
 
 ```bash
-./run.sh uv sync
+./run.sh uv sync --frozen
 ```
 
 Python tooling state lives under `/tmp/sdh_ludusavi`. Rust build output is the exception:
@@ -33,9 +33,9 @@ The installable Decky plugin is built from these required files:
 
 - `plugin.json`: Decky plugin metadata.
 - `package.json`: frontend package metadata and version.
-- `main.py`: Python backend entry point for Decky RPC calls.
-- `py_modules/sdh_ludusavi/`: Python backend modules on Decky's runtime import path.
-- `py_modules/pyludusavi/`: vendored pure-Python Ludusavi adapter dependency.
+- `backend/`: Rust source for the native Decky backend.
+- `main.py`: the stock Decky SDK shim copied from revision `98bce11`.
+- `bin/backend`: the static musl executable added to the packaged ZIP.
 - `src/index.tsx`: TypeScript frontend source.
 - `assets/steamgrid/ludusavi/`: bundled local artwork source files for the plugin-managed Ludusavi launcher shortcut.
 - `dist/`: generated frontend bundle, source map, and built frontend assets from `pnpm run build`, including hashed artwork files emitted from the local assets.
@@ -43,8 +43,9 @@ The installable Decky plugin is built from these required files:
 - `LICENSE`: redistributable license text.
 - `NOTICE.md`: source lineage, third-party licenses, API integrations, and artwork provenance.
 
-The Rust crate under `backend/` is a native backend foundation only; `main.py` remains the
-launched backend, and the crate is deliberately excluded from the installable plugin package.
+The Decky fork starts `bin/backend` directly using the `backend` field in `plugin.json`.
+Stock Decky imports the root shim, which stages a runtime copy of the same executable and
+relays RPCs and events. Neither loader uses a Python application backend.
 
 ### Frontend Dependencies
 
@@ -79,38 +80,41 @@ Native DOM fixture waits use standard timer callbacks wrapped in promises, not N
 
 ## Build & Packaging
 
-### Run backend tests:
+### Run the quality gates
 
 ```bash
-./run.sh uv run pytest
+./run.sh bash scripts/quality_gates.sh check
 ```
 
 ### Black-box backend RPC contract suite
 
-Run the same newline-delimited RPC contract against the Python host or a native backend.
-Contract-only runs override the Python coverage threshold:
+The contract suite runs the same newline-delimited RPCs through either loader:
 
 ```bash
-./run.sh uv run pytest -o addopts='' tests/contract/
-SDH_CONTRACT_BACKEND=/path/to/backend \
-  ./run.sh uv run pytest -o addopts='' tests/contract/
+# Stock Decky shim (default); copies the built binary into an isolated plugin directory.
+SDH_CONTRACT_BACKEND=shim ./run.sh uv run --frozen pytest tests/contract/
+
+# Native fork path; starts the same executable directly.
+SDH_CONTRACT_BACKEND=/var/tmp/sdh_ludusavi/cargo-target/x86_64-unknown-linux-musl/release/backend \
+  ./run.sh uv run --frozen pytest tests/contract/
 ```
 
-The Rust backend implements every contract subsystem. Run all native contracts, including the
-required real Ludusavi case and the unmarked harness tests, with:
+Build the binary as shown below first. `SDH_CONTRACT_SHIM_BINARY` can override the
+binary copied by shim mode. Set `SDH_CONTRACT_LUDUSAVI_BIN` to a real Ludusavi
+executable and `SDH_CONTRACT_REQUIRE_REAL=1` to require the real-Ludusavi cases.
+On the local workstation the GTK-enabled wrapper is
+`/var/tmp/sdh_ludusavi/real-ludusavi/ludusavi-gtk`. CI runs the complete suite in
+both modes against one musl binary.
 
-```bash
-SDH_CONTRACT_LUDUSAVI_BIN=/path/to/ludusavi SDH_CONTRACT_REQUIRE_REAL=1 \
-  SDH_CONTRACT_BACKEND=/path/to/backend \
-  ./run.sh uv run pytest -o addopts='' tests/contract/
-```
-The native lifecycle tier exercises the preview-based restore decision, strict 120-second
-timestamp margin, exact lease verification, pre-scope stop-only gate, cgroup freeze/thaw, lease
-expiry and unload ordering. Native runs select the same implemented subsystem markers as Python.
-
+The lifecycle tier exercises the preview-based restore decision, strict 120-second
+timestamp margin, exact lease verification, pre-scope stop-only gate, cgroup freeze/thaw,
+lease expiry and unload ordering.
 The harness isolates Decky, HOME and XDG state and refuses to start unless its `flatpak` and
-`systemctl` fakes resolve first on the backend's `PATH`; it never invokes host Ludusavi or
-`systemctl`. The optional real tier uses Ludusavi v0.31.0
+`systemctl` fakes resolve first on the backend's `PATH`; by default it does not invoke host
+Ludusavi or `systemctl`. Gate fixtures use real user-systemd transient units with a unique ownership
+marker, invocation identity, and ten-minute runtime limit. They refuse a pre-existing unit and
+register independent cleanup before launch, including when the `systemd-run` client exits early.
+The optional real tier uses Ludusavi v0.31.0
 (`ludusavi-v0.31.0-linux.tar.gz`, SHA-256
 `7322ff45d41eae7ae064a80d8c9ecccc5b8fb6fc090a603a66369cd4b054068d`):
 
@@ -128,8 +132,8 @@ SDH_CONTRACT_SDK_EXAMPLE=/path/to/native_example \
 Without `SDH_CONTRACT_LUDUSAVI_BIN`, the real tier skips locally; `SDH_CONTRACT_REQUIRE_REAL=1`
 makes a missing binary an error. The two network updater RPCs, `check_for_plugin_update` and
 `revalidate_plugin_update`, are intentionally outside this contract suite.
-Their discovery and validation decisions are checked without network access by Python and Rust
-tests using the same JSON data in `tests/contract/fixtures/github/recorded.json`.
+Their discovery and validation decisions are checked without network access by Rust
+tests using JSON data in `tests/contract/fixtures/github/recorded.json`.
 Malformed manifests with missing or non-string source-version and generation-time fields are
 rejected in both discovery and revalidation.
 Updater checks snapshot settings before contacting the release client; concurrent settings changes,
@@ -152,11 +156,22 @@ transaction so concurrent updater instances cannot overwrite a newer install han
 
 ### Create the Decky plugin zip locally:
 
+Install `musl-gcc` first: the package is `musl-gcc` on Fedora and `musl-tools`
+on Debian/Ubuntu. `run.sh` selects it for the musl target and reports a missing
+compiler clearly. An explicitly configured `CC_x86_64_unknown_linux_musl` or
+`CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER` takes precedence.
+
 ```bash
-./run.sh uv run python scripts/package_plugin.py
+(cd backend && ../run.sh cargo build --target x86_64-unknown-linux-musl --release --locked)
+./run.sh uv run --frozen python scripts/package_plugin.py
+./run.sh uv run --frozen python scripts/validate_plugin_zip.py out/SDH-Ludusavi.zip
 ```
 
-The package is written to `out/SDH-Ludusavi.zip` and contains a top-level `SDH-Ludusavi/` plugin directory. `LICENSE` and `NOTICE.md` are required package files. The local post-commit hook runs `scripts/post_commit.sh`, which rebuilds `dist/` and recreates that zip after each commit.
+The packager defaults to `$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/backend`;
+use `--backend PATH` to select another static x86-64 executable. It rejects missing or
+dynamically linked inputs. The resulting `out/SDH-Ludusavi.zip` includes the executable
+as mode 0755, the shim, frontend, theme, README, LICENSE and NOTICE. The local post-commit
+hook builds the musl binary and frontend and appends the git hash to the package version.
 
 The ZIP also includes `theme/`. Startup deploys only the managed theme files into Decky's themes directory. Decky runs the same uninstall hook for updates and removal, so the hook keeps a small backup of CSS Loader's choices in the plugin runtime-data directory and restores it on the next install. CSS Loader may need its **Refresh** control after a first install because creating a new theme directory does not necessarily trigger its optional file watcher.
 
@@ -164,8 +179,8 @@ The ZIP also includes `theme/`. Startup deploys only the managed theme files int
 
 Project-authored SDH-Ludusavi code is licensed under MIT. The project originally began as a fork
 of GedasFX/decky-ludusavi, and retained portions from that project and the underlying
-SteamDeckHomebrew Decky plugin template remain BSD-3-Clause. Vendored `pyludusavi` remains
-MIT-licensed under its own included license. Frontend libraries, icon sets, external runtime
+SteamDeckHomebrew Decky plugin template remain BSD-3-Clause. The copied stock-loader
+shim is 0BSD. Frontend libraries, icon sets, external runtime
 integrations, and SteamGridDB artwork retain their respective upstream terms. SDH-GameSync is
 credited as design inspiration for the game-launch pause and pre-launch save-check concept; no
 SDH-GameSync code is bundled. Keep `LICENSE` and `NOTICE.md` synchronized with dependency, asset,
@@ -188,11 +203,7 @@ To create a stable release:
    image refreshes for the new tag.
 3. Run quality checks locally:
    ```bash
-   ./run.sh uv run ruff check . --fix
-   ./run.sh uv run ruff format .
-   ./run.sh uv run ty check py_modules/sdh_ludusavi/
-   ./run.sh uv run pytest
-   ./run.sh pnpm run verify
+   ./run.sh bash scripts/quality_gates.sh check
    ```
 4. Commit the changes and tag it:
    ```bash
@@ -225,8 +236,7 @@ released stable tag (not just an exact tag match), using the shared rule in
 `scripts/version_guard.py` (`check-base`). This prevents the `dev` branch from drifting
 behind `main` and emitting dev builds that sort *below* the current stable release. If you
 hit this refusal, sync `main` into `dev` and bump `package.json`/`plugin.json` to the next
-version first. A CI test (`tests/test_version_config.py::test_dev_version_ahead_of_stable`)
-also asserts the declared version stays strictly ahead of the highest stable tag.
+version first. The version guard checks that the declared version stays ahead of the latest stable tag.
 
 #### Release Artifacts
 
@@ -237,7 +247,12 @@ The packaging automation produces the following versioned artifacts:
 
 ## State and Runtime Privileges
 
-Runtime settings are stored through Decky's `SettingsManager` in `DECKY_PLUGIN_SETTINGS_DIR/settings.json`. Runtime cache data is stored separately in `DECKY_PLUGIN_RUNTIME_DIR/cache.json`, including cached Ludusavi game status, app ID markers, shortcut IDs, and operation history. The plugin does not write mutable data under `DECKY_PLUGIN_DIR`, because Decky can replace that directory during updates. Tooling caches still live under `/tmp/sdh_ludusavi`.
+The native backend stores compatible JSON settings in `DECKY_PLUGIN_SETTINGS_DIR/settings.json`
+and cache data in `DECKY_PLUGIN_RUNTIME_DIR/cache.json`, preserving unknown keys. The cache
+includes game status, app ID markers, shortcut IDs, and operation history. The plugin does not
+write mutable data under `DECKY_PLUGIN_DIR`, because Decky can replace it during updates.
+Python tooling caches live under `/tmp/sdh_ludusavi`; Rust output and disposable scratch live
+under `/var/tmp/sdh_ludusavi`.
 
 ### Frontend Selected-Game State
 
@@ -249,7 +264,9 @@ A deliberate dropdown choice suppresses exactly one subsequent Steam-context aut
 
 ## Ludusavi Integration Details
 
-The backend locates Ludusavi through the vendored `pyludusavi` package. It constructs `pyludusavi.Ludusavi(flatpak_id="com.github.mtkennerly.ludusavi", env=...)` with Deck-compatible environment overrides. The overrides provide `XDG_RUNTIME_DIR` when Decky omits it and clear `LD_LIBRARY_PATH` for Ludusavi subprocesses.
+The Rust backend invokes the Ludusavi Flatpak CLI directly. It supplies Deck-compatible
+environment overrides, including `XDG_RUNTIME_DIR` when Decky omits it, and clears
+`LD_LIBRARY_PATH` for Ludusavi subprocesses without changing the backend environment.
 
 ### Ludusavi Launcher Shortcut
 
@@ -282,21 +299,10 @@ The Steam Deck user interface (SteamOS Big Picture Mode / Overlay / QAM) runs in
 ## Code Quality Boundaries
 
 ### Backend: Updater Orchestration and State
-The updater architecture enforces strict boundaries between domain models, transport, and state orchestration:
-- **`PluginUpdater` Ownership**: The `PluginUpdater` class is the sole owner of updater settings, cache persistence, cooldown logic, update checks, and installer reconciliation.
-- **Model/Client/State Separation**:
-  - `updater_models.py` contains pure dataclasses for JSON definitions and candidate logic.
-  - `updater_client.py` isolates all network transport (`urllib.request`).
-  - `updater_rate_limit.py` is a pure helper that parses `Retry-After` / `X-RateLimit-Reset`
-    headers into the cooldown deadline, shared by both `check_for_update()` and `revalidate()`.
-  - `updater_discovery.py` holds the pure release parsing/validation/selection logic
-    (prevalidate → validate → select candidate).
-  - `updater_pending.py` owns the pending-install ledger (load/promote/reconcile of the
-    persisted cache payload).
-  - `updater.py` is the small façade that orchestrates discovery/validation, the rate-limit
-    cooldown policy, the pending-install ledger, and persistence using the modules above.
-- **Service Isolation**: The `SDHLudusaviService` acts merely as a facade. It holds an instance of `PluginUpdater` and delegates RPC methods to it. Updater modules never import the service or access private service fields.
-- **Unchanged Persistence**: While the logic is decomposed, the data schema in `cache.json` and `settings.json` remains entirely backward-compatible and unchanged. `main.py` simply acts as an async adapter passing calls to the facade.
+`backend/src/updater.rs` owns release selection, validation, cooldowns, installer
+handoff and reconciliation. It uses the shared persistence layer to reload and
+atomically save state under a lock; the service exposes the corresponding RPCs.
+Settings and cache schemas remain compatible with the previous backend.
 
 ### Backend: Launch-Gate Scope Freezing
 
@@ -304,8 +310,8 @@ The launch gate requires a unified cgroup v2 hierarchy and a user systemd manage
 supports `systemctl --user freeze` and `systemctl --user thaw`. Steam may publish its lifetime
 PID just before moving that process from the user's `app.slice` into its exact application
 scope. The backend validates the PID's owner and `/proc/<pid>/stat` start ticks. It may use a
-stop-only `SIGSTOP` gate only for the exact pre-scope membership patterns accepted by the
-Python contract: it confirms the thread group is stopped and the PID has no children, then
+stop-only `SIGSTOP` gate only for the exact pre-scope membership patterns in the
+contract: it confirms the thread group is stopped and the PID has no children, then
 returns without retrying discovery while the process is stopped. Every other incomplete or
 malformed cgroup path, changed identity, wrong owner, path escape, and invalid unit fails closed.
 
@@ -346,14 +352,12 @@ decisions. A remaining `operation_running` result is a visible failure, not a si
 completion. Syncthing's independent 120-second pre-game and 300/900-second post-game observation
 limits are unchanged.
 
-Successful transitions are logged as `Froze Steam app scope ... for root PID ...` and
-`Thawed Steam app scope ... for root PID ...`. Acquisition, discovery, transition, renewal,
-or automatic thaw failures are bounded warning/error diagnostics without raw cgroup paths,
-command environments, D-Bus addresses, or unbounded command output. The log analyzer emits
-the stable `launch_gate.scope_acquisition_failed`, `launch_gate.scope_freeze_failed`, and
-`launch_gate.conflict_skipped` findings for gate startup regressions. It also accepts
-historical process-tree messages so `launch_gate.lease_expired` and
-`launch_gate.resume_before_resolution` remain comparable across versions.
+The Rust backend logs `Launch gate acquired for root PID ...` and
+`Watchdog releasing launch gate for root PID ...: ...`. The log analyzer recognizes those
+messages and historical process-tree and scope messages so `launch_gate.lease_expired` and
+`launch_gate.resume_before_resolution` remain comparable across versions. It also recognizes
+historical gate-startup failures as `launch_gate.scope_acquisition_failed`,
+`launch_gate.scope_freeze_failed`, and `launch_gate.conflict_skipped` findings.
 
 ### Backend: Single-Instance Enforcement
 
@@ -514,9 +518,6 @@ The primary operation labels are:
 Before committing changes, run:
 
 ```bash
-./run.sh uv run ruff check . --fix
-./run.sh uv run ruff format .
-./run.sh uv run ty check py_modules/sdh_ludusavi/
-./run.sh uv run pytest
-./run.sh pnpm run build
+./run.sh bash scripts/quality_gates.sh check
+./run.sh bash scripts/check_tdd.sh
 ```
