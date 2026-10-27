@@ -28,6 +28,7 @@ membership metadata, and a backend-owned Ludusavi config modification marker. Th
 is valid for fast QAM open only when the Steam app marker and Ludusavi config marker
 still match the current runtime state. The Ludusavi marker is based on the active config
 file's `st_mtime_ns` value.
+Game lists returned after refresh or from cache are ordered by Unicode casefolded title.
 
 `installed_app_ids` is treated as frontend-provided input. The backend must bound,
 parse, deduplicate, and sort it before comparison or persistence. Malformed or oversized

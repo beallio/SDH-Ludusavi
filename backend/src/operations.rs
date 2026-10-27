@@ -842,7 +842,6 @@ impl LudusaviOperations {
                 error: game_error(&output),
             });
         }
-        games.sort_by_cached_key(|game| game.name.to_lowercase());
         let reload_aliases = marker.is_none() || lock(&self.registry).aliases_marker != marker;
         let aliases = reload_aliases.then(|| client.aliases());
         {
@@ -919,8 +918,10 @@ impl LudusaviOperations {
 
     fn refresh_result(&self, error: Option<String>) -> Value {
         let registry = lock(&self.registry);
+        let mut games: Vec<_> = registry.games.values().collect();
+        games.sort_by_cached_key(|game| game.name.case_fold().collect::<String>());
         json!({
-            "games": registry.games.values().map(Game::to_value).collect::<Vec<_>>(),
+            "games": games.into_iter().map(Game::to_value).collect::<Vec<_>>(),
             "aliases": registry.aliases,
             "history": self.get_game_history(),
             "dependency_error": error,

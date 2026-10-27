@@ -1297,6 +1297,31 @@ def test_refresh_omits_backup_only_and_empty_preview_games(backend: ContractHarn
 
 
 @pytest.mark.contract_operations
+def test_refresh_orders_unicode_titles_after_refresh_cache_and_restart(
+    backend: ContractHarness,
+) -> None:
+    titles = ["Ñandú", "Straw", "Brotato", "Straße", "apico"]
+    preview = {"games": {title: {"files": {"save": {}}, "registry": {}} for title in titles}}
+    backend.set_scenario({"flatpak": {"responses": {"backup_preview": {"json": preview}}}})
+    expected = ["apico", "Brotato", "Straße", "Straw", "Ñandú"]
+
+    def names(force: bool) -> list[str]:
+        result = rpc(backend, "refresh_games", force, APP_ID)
+        assert result["dependency_error"] is None
+        return [game["name"] for game in result["games"]]
+
+    assert names(True) == expected
+    before = len(backend.fake_processes())
+    assert names(False) == expected
+    backend.restart()
+    assert names(False) == expected
+    commands = [record["argv"][2:] for record in backend.fake_processes()[before:]]
+    assert not any(
+        command and command[0] == "backup" and "--preview" in command for command in commands
+    )
+
+
+@pytest.mark.contract_operations
 def test_list_backups_sorts_and_prefers_api_sizes(backend: ContractHarness) -> None:
     backup_path = backend.backup_root / GAME
     for name in ("older", "newer", "disk"):
