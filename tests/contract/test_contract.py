@@ -1458,6 +1458,58 @@ def test_conflict_metadata_falls_back_to_original_and_redirected_paths(
 
 
 @pytest.mark.contract_lifecycle
+@pytest.mark.parametrize(
+    ("preview_response", "expected_reason", "expects_backups_lookup"),
+    [
+        pytest.param("same", "local_current", False, id="preview-decides"),
+        # Registry says a backup exists but Ludusavi reports none: still ask the user,
+        # whose conflict details come from the backup listing.
+        pytest.param("empty", "ambiguous_recency", True, id="stale-registry-still-prompts"),
+        pytest.param("failed", "ambiguous_recency", True, id="failed-preview-falls-back"),
+        pytest.param("other-game", "ambiguous_recency", True, id="unexpected-preview-falls-back"),
+    ],
+)
+def test_game_start_check_uses_one_restore_preview(
+    backend: ContractHarness,
+    preview_response: str,
+    expected_reason: str,
+    expects_backups_lookup: bool,
+) -> None:
+    # Each Ludusavi launch reloads its manifest; a start check must not pay for a backup
+    # listing when the restore preview already answers.
+    preview = _load_fixture("restore-preview.json")
+    responses: dict[str, Any] = {}
+    if preview_response == "same":
+        preview["games"][GAME]["change"] = "Same"
+        responses["restore_preview"] = {"json": preview}
+    elif preview_response == "empty":
+        responses["restore_preview"] = {"json": {"overall": preview["overall"], "games": {}}}
+    elif preview_response == "failed":
+        responses["restore_preview"] = {"exit_code": 1, "stderr": "preview failed"}
+    else:
+        preview["games"] = {"Some Other Game": preview["games"][GAME]}
+        responses["restore_preview"] = {"json": preview}
+    rpc(backend, "update_settings", {"kind": "auto_sync", "enabled": True})
+    rpc(backend, "refresh_games", True, APP_ID)
+    backend.set_scenario({"flatpak": {"responses": responses}})
+    first_record = len(backend.fake_processes())
+
+    result = rpc(backend, "check_game_start", GAME, APP_ID)
+
+    commands = [record["argv"][2:] for record in backend.fake_processes()[first_record:]]
+    assert result["reason"] == expected_reason, result
+    if expected_reason == "ambiguous_recency":
+        assert result["status"] == "conflict", result
+    restore_previews = [command for command in commands if command[:2] == ["restore", "--preview"]]
+    assert len(restore_previews) == 1, commands
+    used_backups = any(command[:1] == ["backups"] for command in commands)
+    assert used_backups == expects_backups_lookup, commands
+    assert not any(
+        command[:1] == ["restore"] and "--preview" not in command for command in commands
+    ), "a start check ran a real restore"
+
+
+@pytest.mark.contract_lifecycle
 def test_disabled_sync_blocks_all_automatic_operations(backend: ContractHarness) -> None:
     rpc(backend, "refresh_games", True, APP_ID)
     calls = [
