@@ -17,7 +17,7 @@ You can see the latest save result on supported non-Steam game pages without ope
 ## Before you install
 
 - Install [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) on your Steam Deck.
-- Install [Ludusavi](https://flathub.org/apps/com.github.mtkennerly.ludusavi) from the Discover app in Desktop Mode. SDH-Ludusavi needs Ludusavi to make backups.
+- You do not need to install Ludusavi separately. It comes with SDH-Ludusavi.
 
 ## Install SDH-Ludusavi
 
@@ -62,11 +62,13 @@ Keep the ZIP intact; Decky needs both the launcher shim and the backend executab
 
 ## Start using it
 
-1. Open Ludusavi in Desktop Mode and choose a folder for your backups.
+1. In Gaming Mode, open **SDH-Ludusavi** in the Decky menu and choose **Launch** under **Ludusavi**. This opens the Ludusavi window that comes with the plugin. Choose a folder for your backups.
 2. In Gaming Mode, open **SDH-Ludusavi** from the Decky menu. Select a game and choose **Force Backup** to make its first backup.
 3. Turn on **Automatic Sync** to check for newer backups before games start and back up saves when you quit. **Sync This Game** lets you turn this off for one game without changing the others.
 
 You can still use **Force Backup** and **Browse Backups** when Automatic Sync is off. Browse Backups lets you choose an older copy to restore. Check the date before restoring: restoring an older copy can replace your current save.
+
+Ludusavi keeps its settings in `~/.config/ludusavi` (a folder in your home directory). If you used the Ludusavi Flatpak before, the plugin copies your Ludusavi settings and game list from it the first time it starts Ludusavi, so you do not need to set anything up again. It never replaces settings that are already there, and your backup folder does not move.
 
 If a game is missing from the list, check that Ludusavi recognizes it, then choose **Refresh Games** in the plugin. Automatic Sync cannot restore a game until a backup exists.
 
@@ -101,6 +103,8 @@ The plugin keeps Steam's original Play controls, status rows, and Activity posit
 ## Updates and help
 
 Open **Updates** in SDH-Ludusavi to check for a new release or enable automatic checks. The plugin offers stable releases by default. **Receive development releases** is optional; those builds are for testing and may have bugs. When an update is available, Decky asks you to confirm the installation.
+
+If the included Ludusavi cannot start, the plugin tries the Ludusavi Flatpak as a backup if it is installed. Discover in Desktop Mode can install the Flatpak. If neither copy works, check **View Logs** for details.
 
 If a game's page was open during an update and HLTB's times are missing, press **B** to return to Home or your library, then open the same game's page again. The updated display appears on that next visit; SDH-Ludusavi does not force the page to redraw. You do not need to launch a game or restart Steam.
 

@@ -119,11 +119,12 @@ vendored or included in the plugin package.
 - **Role:** External plugin host and RPC runtime; not bundled.
 - **License:** GPL-2.0
 
-### [mtkennerly/ludusavi](https://github.com/mtkennerly/ludusavi)
+### [beallio/ludusavi](https://github.com/beallio/ludusavi)
 
-- **Role:** External save-backup application invoked through its CLI; not
-  bundled.
-- **License:** MIT
+- **Role:** Bundled save-backup application invoked through its CLI; based on
+  [mtkennerly/ludusavi](https://github.com/mtkennerly/ludusavi).
+- **License:** MIT. The plugin ZIP includes `licenses/ludusavi/LICENSE` and
+  `licenses/ludusavi/third-party.txt` for Ludusavi and its dependencies.
 
 ### [syncthing/syncthing](https://github.com/syncthing/syncthing)
 

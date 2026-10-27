@@ -7,9 +7,33 @@ package name is `sdh-ludusavi`.
 
 ## Ludusavi Integration
 
-The Rust backend invokes the Ludusavi Flatpak CLI. It supplies a suitable
-`XDG_RUNTIME_DIR` when Decky omits one and clears `LD_LIBRARY_PATH` for
-Ludusavi subprocesses without mutating the plugin process environment.
+The backend first discovers `<DECKY_PLUGIN_DIR>/bin/ludusavi` if it is a regular
+executable file and `[exe, "--config", N, "--version"]` succeeds. If the bundled
+file exists but fails, log a warning and try the existing Flatpak discovery.
+If neither works, report: `Ludusavi is not available: the bundled copy could not run and the Ludusavi Flatpak was not found`.
+
+`N` is `$XDG_CONFIG_HOME/ludusavi` if `XDG_CONFIG_HOME` is set and absolute,
+otherwise `$HOME/.config/ludusavi`. `F` is
+`$HOME/.var/app/com.github.mtkennerly.ludusavi/config/ludusavi`. Normal
+invocations are `[exe, "--config", N, ...args]` for the bundled binary or
+`[flatpak, "run", "com.github.mtkennerly.ludusavi", "--config", N, ...args]`
+for Flatpak. The backend supplies a suitable `XDG_RUNTIME_DIR` when Decky
+omits one and clears `LD_LIBRARY_PATH` for Ludusavi subprocesses without
+mutating the plugin process environment.
+
+On client creation for either runner, migrate idempotently from F to N; errors
+are non-fatal and logged as warnings. Skip migration entirely if N and F
+canonicalize to the same directory. Never overwrite or delete anything in N.
+If N's `config.yaml` does not exist according to `symlink_metadata` (a dangling
+symlink counts as existing), and F's `config.yaml` is a file following symlinks,
+create N if necessary and copy the bytes atomically using a temporary file in N
+and rename.
+
+Copy F's `manifest.yaml` and `cache.yaml` using temporary files in N and rename
+only if neither exists in N, both exist in F, and `/manifest/url` is present as
+an equal string in the results of `<runner> --config F config show --api` and
+`<runner> --config N config show --api`. Otherwise copy neither; Ludusavi
+downloads its own list.
 
 Ludusavi game names are canonical game IDs. Steam app IDs are optional metadata.
 
@@ -145,6 +169,6 @@ bottom status strip; autosync failures still emit Decky toasts.
 
 ## Runtime Privilege
 
-`plugin.json` does not request Decky's `_root` flag. The backend runs as the Decky user
-so the Ludusavi Flatpak can see that user's Ludusavi configuration, backup metadata,
-and Flatpak runtime state.
+`plugin.json` does not request Decky's `_root` flag. The backend runs as the Decky
+user so either Ludusavi runner can access that user's configuration and backup
+metadata, and the fallback can access the user's Flatpak runtime state.
