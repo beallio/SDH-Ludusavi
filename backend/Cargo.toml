@@ -12,7 +12,7 @@ path = "src/main.rs"
 path = "src/lib.rs"
 
 [dependencies]
-decky-plugin = { git = "https://github.com/beallio/decky-loader", rev = "98bce11fffffa59a331098edd8671591fb98a9a5", package = "decky-plugin" }
+decky-plugin = { git = "https://github.com/beallio/decky-loader", rev = "d283908c55851705f61c0f5e66199168a42edcc8", package = "decky-plugin" }
 libc = "0.2"
 log = "0.4"
 quick-xml = "0.38"

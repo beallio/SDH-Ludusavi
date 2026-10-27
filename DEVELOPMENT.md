@@ -34,7 +34,7 @@ The installable Decky plugin is built from these required files:
 - `plugin.json`: Decky plugin metadata.
 - `package.json`: frontend package metadata and version.
 - `backend/`: Rust source for the native Decky backend.
-- `main.py`: the stock Decky SDK shim copied from revision `98bce11`.
+- `main.py`: the stock Decky SDK shim copied from revision `d283908`.
 - `bin/backend`: the static musl executable added to the packaged ZIP.
 - `src/index.tsx`: TypeScript frontend source.
 - `assets/steamgrid/ludusavi/`: bundled local artwork source files for the plugin-managed Ludusavi launcher shortcut.

@@ -51,7 +51,7 @@ notices are in [LICENSE](LICENSE).
 ### [Decky Loader Rust SDK](https://github.com/beallio/decky-loader)
 
 - **Role:** The stock-Decky compatibility shim in `main.py` is copied from the
-  SDK at revision `98bce11`. The native backend also uses the SDK crate.
+  SDK at revision `d283908`. The native backend also uses the SDK crate.
 - **Shim license:** 0BSD.
 
 The previous Python backend used `pyludusavi` 0.3.0 (MIT); it is no longer
