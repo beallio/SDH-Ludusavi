@@ -11,13 +11,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use std::os::unix::fs::MetadataExt;
-
 use serde_json::{Value, json};
 
 use crate::launch_gate::{
     LaunchProcessIdentity, LaunchScopeAcquirer, ScopeAcquisitionResult, ScopeTransitionResult,
-    SteamAppScope, SystemdScopeController, parse_start_ticks, thread_group_stopped,
+    SteamAppScope, SystemdScopeController, read_process_identity, thread_group_stopped,
 };
 use crate::operations::ProcessGroupCompletion;
 
@@ -484,11 +482,6 @@ impl ProcessWatchdog {
         (!release_requested).then_some(result)
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_stop_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
-        *lock(&self.inner.stop_hook) = Some(hook);
-    }
-
     pub(crate) fn stop_until(&self, deadline: Instant) -> bool {
         let mut stored_deadline = lock(&self.inner.shutdown_deadline);
         *stored_deadline =
@@ -802,24 +795,13 @@ fn stop_only_failure(proc_root: &Path, pid: i32, lease: &PauseLease) -> Option<S
     let Some(identity) = lease.identity.as_ref() else {
         return Some("Launch PID identity changed".to_owned());
     };
-    if process_identity(proc_root, pid).as_ref() != Some(identity) {
+    if read_process_identity(proc_root, pid).as_ref() != Some(identity) {
         return Some("Launch PID identity changed".to_owned());
     }
     if !thread_group_stopped(proc_root, pid) {
         return Some("Launch PID is no longer stopped".to_owned());
     }
     None
-}
-
-fn process_identity(proc_root: &Path, pid: i32) -> Option<LaunchProcessIdentity> {
-    let dir = proc_root.join(pid.to_string());
-    let owner_uid = std::fs::metadata(&dir).ok()?.uid();
-    let stat = std::fs::read_to_string(dir.join("stat")).ok()?;
-    Some(LaunchProcessIdentity {
-        pid,
-        owner_uid,
-        start_ticks: parse_start_ticks(&stat, pid)?,
-    })
 }
 
 fn release_stop_only(
@@ -829,7 +811,7 @@ fn release_stop_only(
     let Some(identity) = identity else {
         return Err("Stop-only lease has no process identity".to_owned());
     };
-    if process_identity(proc_root, identity.pid).as_ref() != Some(identity) {
+    if read_process_identity(proc_root, identity.pid).as_ref() != Some(identity) {
         return Ok(());
     }
     if unsafe { libc::kill(identity.pid, libc::SIGCONT) } == 0 {
@@ -901,6 +883,12 @@ mod tests {
         },
         operations::ProcessGroupCompletion,
     };
+
+    impl ProcessWatchdog {
+        pub(crate) fn set_stop_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+            *lock(&self.inner.stop_hook) = Some(hook);
+        }
+    }
 
     #[test]
     fn lease_expiry_preserves_strict_deadline_and_absolute_ceiling() {
@@ -1298,7 +1286,7 @@ mod tests {
         let guarded_watchdog = watchdog.clone();
         let worker = thread::spawn(move || {
             guarded_watchdog.run_guarded(pid, "cancel-lease", move |cancel, completion| {
-                crate::operations::run_test_cancellable_process(
+                crate::operations::test_support::run_test_cancellable_process(
                     completion,
                     &cancel,
                     move |operation_pid| registered_sender.send(operation_pid).unwrap(),
@@ -1591,7 +1579,7 @@ mod tests {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 worker_watchdog.run_guarded(pid, "panic-lease", move |cancel, completion| {
                     cancel_sender.send(cancel).unwrap();
-                    crate::operations::run_test_process_after_registration(
+                    crate::operations::test_support::run_test_process_after_registration(
                         completion,
                         move |operation_pid| {
                             registered_sender.send(operation_pid).unwrap();

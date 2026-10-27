@@ -19,6 +19,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use unicode_casefold::UnicodeCaseFold;
 
 use crate::{
+    history::valid_history_entry,
     lifecycle::{RestorePreview, classify_restore_change},
     persistence::{StateLock, read_object, write_json_atomic},
 };
@@ -268,46 +269,6 @@ impl LudusaviOperations {
 
     pub fn cancel_processes(&self) {
         self.processes.cancel_all();
-    }
-    #[cfg(test)]
-    pub(crate) fn prepare_cancelled_list_backups_test(&self, include_game: bool) {
-        if include_game {
-            lock(&self.registry).games.insert(
-                "Hades".to_owned(),
-                Game {
-                    name: "Hades".to_owned(),
-                    configured: true,
-                    has_backup: true,
-                    needs_first_backup: false,
-                    steam_id: None,
-                    error: None,
-                },
-            );
-        }
-        *lock(&self.client) = Some(Arc::new(LudusaviClient {
-            processes: Arc::clone(&self.processes),
-            flatpak: PathBuf::new(),
-            config_path: Mutex::new(None),
-            deployment: None,
-            execution_failed: AtomicBool::new(false),
-            version: Mutex::new(None),
-        }));
-        self.cancel_processes();
-    }
-    #[cfg(test)]
-    pub(crate) fn use_ludusavi_test_command(&self, flatpak: PathBuf) {
-        *lock(&self.client) = Some(Arc::new(LudusaviClient {
-            processes: Arc::clone(&self.processes),
-            flatpak,
-            config_path: Mutex::new(None),
-            deployment: None,
-            execution_failed: AtomicBool::new(false),
-            version: Mutex::new(None),
-        }));
-    }
-    #[cfg(test)]
-    pub(crate) fn hold_operation_lock_for_test(&self) -> std::sync::MutexGuard<'_, ()> {
-        lock(&self.operation_lock)
     }
 
     pub fn processes_exited(&self) -> bool {
@@ -1679,41 +1640,6 @@ impl ProcessManager {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn run_test_process_after_registration(
-    completion: &mut ProcessGroupCompletion,
-    after_registration: impl FnOnce(i32) + Send + 'static,
-) {
-    let processes = ProcessManager::default();
-    *lock(&processes.after_track_hook) = Some(Box::new(after_registration));
-    let _ = processes.run_at_cancellable(
-        Path::new("/bin/true"),
-        &[],
-        Duration::from_secs(1),
-        false,
-        None,
-        completion,
-    );
-}
-
-#[cfg(test)]
-pub(crate) fn run_test_cancellable_process(
-    completion: &mut ProcessGroupCompletion,
-    cancellation: &AtomicBool,
-    after_registration: impl FnOnce(i32) + Send + 'static,
-) -> Result<String, String> {
-    let processes = ProcessManager::default();
-    *lock(&processes.after_track_hook) = Some(Box::new(after_registration));
-    processes.run_at_cancellable(
-        Path::new("/bin/sleep"),
-        &["30".to_owned()],
-        Duration::from_secs(30),
-        false,
-        Some(cancellation),
-        completion,
-    )
-}
-
 fn read_pipe(mut pipe: impl Read) -> io::Result<Vec<u8>> {
     let mut output = Vec::new();
     pipe.read_to_end(&mut output)?;
@@ -2099,41 +2025,6 @@ fn backup_file_stats(path: &Path) -> Option<(u64, Option<usize>)> {
     Some((size, count))
 }
 
-fn valid_history_entry(value: &Value) -> Option<Value> {
-    let operation = value.get("operation")?.as_str()?;
-    if !matches!(operation, "backup" | "restore" | "start" | "exit") {
-        return None;
-    }
-    let trigger = value.get("trigger")?.as_str()?;
-    if !matches!(
-        trigger,
-        "manual_backup" | "manual_restore" | "auto_start" | "auto_exit"
-    ) {
-        return None;
-    }
-    let status = value.get("status")?.as_str()?;
-    if !matches!(status, "backed_up" | "restored" | "skipped" | "failed") {
-        return None;
-    }
-    let timestamp = value.get("timestamp")?.as_str()?;
-    let mut entry = Map::new();
-    entry.insert("operation".to_owned(), Value::String(operation.to_owned()));
-    entry.insert("trigger".to_owned(), Value::String(trigger.to_owned()));
-    entry.insert("status".to_owned(), Value::String(status.to_owned()));
-    for key in ["reason", "message"] {
-        entry.insert(
-            key.to_owned(),
-            value
-                .get(key)
-                .filter(|value| value.is_null() || value.is_string())
-                .cloned()
-                .unwrap_or(Value::Null),
-        );
-    }
-    entry.insert("timestamp".to_owned(), Value::String(timestamp.to_owned()));
-    Some(Value::Object(entry))
-}
-
 fn parse_timestamp(value: &str) -> Option<i128> {
     if let Ok(timestamp) = OffsetDateTime::parse(value, &Rfc3339) {
         return Some(timestamp.unix_timestamp_nanos());
@@ -2150,6 +2041,88 @@ fn parse_timestamp(value: &str) -> Option<i128> {
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    impl LudusaviOperations {
+        #[cfg(test)]
+        pub(crate) fn prepare_cancelled_list_backups_test(&self, include_game: bool) {
+            if include_game {
+                lock(&self.registry).games.insert(
+                    "Hades".to_owned(),
+                    Game {
+                        name: "Hades".to_owned(),
+                        configured: true,
+                        has_backup: true,
+                        needs_first_backup: false,
+                        steam_id: None,
+                        error: None,
+                    },
+                );
+            }
+            *lock(&self.client) = Some(Arc::new(LudusaviClient {
+                processes: Arc::clone(&self.processes),
+                flatpak: PathBuf::new(),
+                config_path: Mutex::new(None),
+                deployment: None,
+                execution_failed: AtomicBool::new(false),
+                version: Mutex::new(None),
+            }));
+            self.cancel_processes();
+        }
+        #[cfg(test)]
+        pub(crate) fn use_ludusavi_test_command(&self, flatpak: PathBuf) {
+            *lock(&self.client) = Some(Arc::new(LudusaviClient {
+                processes: Arc::clone(&self.processes),
+                flatpak,
+                config_path: Mutex::new(None),
+                deployment: None,
+                execution_failed: AtomicBool::new(false),
+                version: Mutex::new(None),
+            }));
+        }
+        #[cfg(test)]
+        pub(crate) fn hold_operation_lock_for_test(&self) -> std::sync::MutexGuard<'_, ()> {
+            lock(&self.operation_lock)
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn run_test_process_after_registration(
+        completion: &mut ProcessGroupCompletion,
+        after_registration: impl FnOnce(i32) + Send + 'static,
+    ) {
+        let processes = ProcessManager::default();
+        *lock(&processes.after_track_hook) = Some(Box::new(after_registration));
+        let _ = processes.run_at_cancellable(
+            Path::new("/bin/true"),
+            &[],
+            Duration::from_secs(1),
+            false,
+            None,
+            completion,
+        );
+    }
+
+    #[cfg(test)]
+    pub(crate) fn run_test_cancellable_process(
+        completion: &mut ProcessGroupCompletion,
+        cancellation: &AtomicBool,
+        after_registration: impl FnOnce(i32) + Send + 'static,
+    ) -> Result<String, String> {
+        let processes = ProcessManager::default();
+        *lock(&processes.after_track_hook) = Some(Box::new(after_registration));
+        processes.run_at_cancellable(
+            Path::new("/bin/sleep"),
+            &["30".to_owned()],
+            Duration::from_secs(30),
+            false,
+            Some(cancellation),
+            completion,
+        )
+    }
 }
 
 #[cfg(test)]

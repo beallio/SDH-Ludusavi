@@ -15,6 +15,7 @@ use time::{OffsetDateTime, format_description, format_description::well_known::R
 use tokio::sync::Notify;
 
 use crate::{
+    history::valid_history_entry,
     lifecycle::{TimestampDirection, timestamp_direction},
     operations::{LudusaviOperations, OperationError},
     persistence::{
@@ -1514,40 +1515,6 @@ fn normalize_history(value: Option<&Value>) -> Value {
         normalized.insert(game.clone(), Value::Object(result));
     }
     Value::Object(normalized)
-}
-
-fn valid_history_entry(value: &Value) -> Option<Value> {
-    let entry = value.as_object()?;
-    let operation = entry.get("operation")?.as_str()?;
-    if !matches!(operation, "backup" | "restore" | "start" | "exit") {
-        return None;
-    }
-    let trigger = entry.get("trigger")?.as_str()?;
-    if !matches!(
-        trigger,
-        "manual_backup" | "manual_restore" | "auto_start" | "auto_exit"
-    ) {
-        return None;
-    }
-    let status = entry.get("status")?.as_str()?;
-    if !matches!(status, "backed_up" | "restored" | "skipped" | "failed") {
-        return None;
-    }
-    let timestamp = entry.get("timestamp")?.as_str()?;
-    let mut normalized = Map::new();
-    normalized.insert("operation".to_owned(), Value::String(operation.to_owned()));
-    normalized.insert("trigger".to_owned(), Value::String(trigger.to_owned()));
-    normalized.insert("status".to_owned(), Value::String(status.to_owned()));
-    for key in ["reason", "message"] {
-        let value = entry
-            .get(key)
-            .filter(|value| value.is_string() || value.is_null())
-            .cloned()
-            .unwrap_or(Value::Null);
-        normalized.insert(key.to_owned(), value);
-    }
-    normalized.insert("timestamp".to_owned(), Value::String(timestamp.to_owned()));
-    Some(Value::Object(normalized))
 }
 
 fn parse_iso_timestamp(value: &str) -> Option<i128> {

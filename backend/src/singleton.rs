@@ -5,8 +5,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use std::os::unix::fs::MetadataExt;
-
 const MAX_STALE_SIBLINGS: usize = 8;
 const TERM_TIMEOUT: Duration = Duration::from_secs(3);
 const KILL_TIMEOUT: Duration = Duration::from_secs(1);
@@ -156,9 +154,7 @@ fn capture_identity(proc_root: &Path, pid: i32) -> Option<ProcessIdentity> {
         return None;
     }
     let dir = proc_root.join(pid.to_string());
-    let uid = fs::metadata(&dir).ok()?.uid();
-    let stat = fs::read_to_string(dir.join("stat")).ok()?;
-    let start_ticks = parse_start_ticks(&stat, pid)?;
+    let (uid, start_ticks, stat) = crate::procfs::read_identity(&dir, pid)?;
     let cmdline = fs::read(dir.join("cmdline")).ok()?;
     if cmdline.is_empty() || process_state(&stat) == Some('Z') {
         return None;
@@ -169,15 +165,6 @@ fn capture_identity(proc_root: &Path, pid: i32) -> Option<ProcessIdentity> {
         start_ticks,
         cmdline,
     })
-}
-
-fn parse_start_ticks(stat: &str, pid: i32) -> Option<u64> {
-    let open = stat.find('(')?;
-    let close = stat.rfind(')')?;
-    if close <= open || stat[..open].trim().parse::<i32>().ok()? != pid {
-        return None;
-    }
-    stat[close + 1..].split_whitespace().nth(19)?.parse().ok()
 }
 
 fn process_state(stat: &str) -> Option<char> {

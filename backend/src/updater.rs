@@ -537,27 +537,6 @@ impl PluginUpdater {
             client,
         ))
     }
-    #[cfg(test)]
-    pub(crate) fn set_test_list_releases(&mut self, hook: Arc<dyn Fn() + Send + Sync>) {
-        struct TestClient(Arc<dyn Fn() + Send + Sync>);
-        impl ReleaseClient for TestClient {
-            fn list_releases(&self) -> JsonResponse {
-                (self.0)();
-                JsonResponse {
-                    status: 200,
-                    headers: BTreeMap::new(),
-                    body: json!([]),
-                }
-            }
-            fn get_release(&self, _tag: &str) -> JsonResponse {
-                panic!("unexpected release lookup")
-            }
-            fn get_manifest(&self, _url: &str) -> JsonResponse {
-                panic!("unexpected manifest lookup")
-            }
-        }
-        self.client = Arc::new(TestClient(hook));
-    }
 
     fn with_client(
         state_lock: Arc<StateLock>,
@@ -1024,6 +1003,31 @@ mod tests {
         GitHubReleaseClient, JsonResponse, PluginUpdater, ReleaseClient, parse_plugin_version,
         pending_install_matches_loaded_version, retry_after,
     };
+
+    struct TestClient(Arc<dyn Fn() + Send + Sync>);
+
+    impl ReleaseClient for TestClient {
+        fn list_releases(&self) -> JsonResponse {
+            (self.0)();
+            JsonResponse {
+                status: 200,
+                headers: BTreeMap::new(),
+                body: json!([]),
+            }
+        }
+        fn get_release(&self, _tag: &str) -> JsonResponse {
+            panic!("unexpected release lookup")
+        }
+        fn get_manifest(&self, _url: &str) -> JsonResponse {
+            panic!("unexpected manifest lookup")
+        }
+    }
+
+    impl PluginUpdater {
+        pub(crate) fn set_test_list_releases(&mut self, hook: Arc<dyn Fn() + Send + Sync>) {
+            self.client = Arc::new(TestClient(hook));
+        }
+    }
 
     struct FixtureClient {
         releases: Value,
