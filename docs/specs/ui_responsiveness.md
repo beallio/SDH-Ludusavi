@@ -27,6 +27,11 @@ Subprocess calls to `ludusavi` for static metadata (configuration paths) SHOULD 
 | :--- | :--- | :--- | :--- |
 | Config Path | `ludusavi config path` | Backend client cache | Keep cached path string, return `None` for mtime |
 
+Successful custom-game alias lookups are reused across full refreshes while the
+Ludusavi config marker is unchanged. If the marker is unavailable or changes,
+aliases are loaded again; a failed lookup clears stale aliases and is retried on
+the next full refresh.
+
 ## 3. Frontend State Architecture
 
 ### 3.1. Persistence Across Mounts

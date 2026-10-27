@@ -1234,18 +1234,41 @@ def test_aliases_refresh_on_config_change_and_drop_stale_on_failure(
 
     backend.set_scenario(scenario(GAME))
     assert rpc(backend, "refresh_games", True, APP_ID)["aliases"] == {alias: GAME}
+    first_record = len(backend.fake_processes())
+    assert rpc(backend, "refresh_games", True, APP_ID)["aliases"] == {alias: GAME}
+    commands = [record["argv"][2:] for record in backend.fake_processes()[first_record:]]
+    assert len(commands) == 4, commands
+    assert not any(command[:2] == ["config", "show"] for command in commands)
     assert rpc(backend, "list_backups", alias)["game"] == GAME
     assert rpc(backend, "refresh_games", False, APP_ID)["aliases"] == {alias: GAME}
 
     change_config()
     backend.set_scenario(scenario(other))
+    first_record = len(backend.fake_processes())
     assert rpc(backend, "refresh_games", False, APP_ID)["aliases"] == {alias: other}
+    assert (
+        sum(
+            record["argv"][2:4] == ["config", "show"]
+            for record in backend.fake_processes()[first_record:]
+        )
+        == 1
+    )
     assert rpc(backend, "list_backups", alias)["game"] == other
 
     change_config()
     backend.set_scenario(scenario(None))
+    first_record = len(backend.fake_processes())
     assert rpc(backend, "refresh_games", False, APP_ID)["aliases"] == {}
+    assert (
+        sum(
+            record["argv"][2:4] == ["config", "show"]
+            for record in backend.fake_processes()[first_record:]
+        )
+        == 1
+    )
     assert rpc(backend, "list_backups", alias)["reason"] == "unmatched_game"
+    backend.set_scenario(scenario(other))
+    assert rpc(backend, "refresh_games", True, APP_ID)["aliases"] == {alias: other}
 
 
 @pytest.mark.contract_lifecycle
