@@ -29,12 +29,10 @@ users to inspect logs.
 
 ## Persisted State
 
-Add a `game_history` object to `sdh_ludusavi.json`.
+The `game_history` object is stored in `DECKY_PLUGIN_RUNTIME_DIR/cache.json`.
 
 ```json
 {
-  "auto_sync_enabled": true,
-  "selected_game": "Hades",
   "ludusaviLauncherShortcutAppId": 123456,
   "games": [],
   "aliases": {},

@@ -83,7 +83,7 @@ impl<'a> FileLockGuard<'a> {
     fn acquire(file: &'a File, path: &Path) -> io::Result<Self> {
         let deadline = Instant::now() + LOCK_TIMEOUT;
         loop {
-            // Python and Rust use this lock file to coordinate shared state across processes.
+            // Coordinate shared state across backend processes.
             let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
             if result == 0 {
                 return Ok(Self { file });

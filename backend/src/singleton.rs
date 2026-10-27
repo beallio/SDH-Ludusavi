@@ -244,6 +244,20 @@ mod tests {
 
     use super::{IdentityStatus, capture_identity, enforce_single_instance_at, process_status};
 
+    #[test]
+    fn singleton_requires_byte_identical_full_commandline() {
+        let current = b"/runtime/backend\0--plugin\0SDH-Ludusavi\0";
+        assert!(super::same_commandline(current, current));
+        assert!(!super::same_commandline(
+            current,
+            b"/runtime/backend\0--plugin\0"
+        ));
+        assert!(!super::same_commandline(
+            current,
+            b"/runtime/backend-other\0--plugin\0SDH-Ludusavi\0"
+        ));
+    }
+
     fn write_process(root: &Path, pid: i32, start_ticks: u64, cmdline: &[u8]) {
         let directory = root.join(pid.to_string());
         fs::create_dir_all(&directory).unwrap();

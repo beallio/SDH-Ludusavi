@@ -260,7 +260,7 @@ impl BackendService {
         calls_stopped && processes_exited && watchdog_stopped && watches_stopped
     }
     pub fn unavailable_reply(method: &str) -> Value {
-        python_wrapper_fallback(method)
+        getter_fallback(method)
             .unwrap_or_else(|| failed_reply("Backend has not completed startup".to_owned()))
     }
 
@@ -1252,10 +1252,10 @@ fn failed_reply(message: String) -> Value {
 }
 
 fn failed_dispatch_reply(method: &str, message: String) -> Value {
-    python_wrapper_fallback(method).unwrap_or_else(|| failed_reply(message))
+    getter_fallback(method).unwrap_or_else(|| failed_reply(message))
 }
 
-fn python_wrapper_fallback(method: &str) -> Option<Value> {
+fn getter_fallback(method: &str) -> Option<Value> {
     match method {
         "get_recent_logs" => Some(json!([])),
         "get_operation_status" => Some(idle_operation_status()),
@@ -1277,7 +1277,7 @@ fn idle_operation_status() -> Value {
 }
 
 fn unloading_reply(method: &str) -> Value {
-    python_wrapper_fallback(method).unwrap_or_else(|| {
+    getter_fallback(method).unwrap_or_else(|| {
         json!({
             "status": "skipped",
             "reason": "unloading",
@@ -1946,7 +1946,7 @@ esac
     }
 
     #[tokio::test]
-    async fn dispatcher_errors_use_python_getter_fallbacks() {
+    async fn dispatcher_errors_use_getter_fallbacks() {
         let (_directory, service) = test_service();
         assert_eq!(
             service.dispatch("get_recent_logs", vec![Value::Null]).await,
@@ -1993,7 +1993,7 @@ esac
     }
 
     #[tokio::test]
-    async fn unloading_uses_python_getter_fallbacks() {
+    async fn unloading_uses_getter_fallbacks() {
         let (_directory, service) = test_service();
         assert!(service.shutdown().await);
         assert_eq!(

@@ -1,6 +1,7 @@
 [project]
 name = "SDH-ludusavi"
-dynamic = ["version"]
+# This virtual tooling project is not the versioned Decky plugin package.
+version = "0.0.0"
 description = "Decky Loader plugin for Ludusavi save backup and restore controls"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -35,11 +36,9 @@ extend-exclude = ["main.py"]
 [tool.pytest.ini_options]
 cache_dir = "/tmp/sdh_ludusavi/.pytest_cache"
 pythonpath = ["."]
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
 markers = [
     "real_ludusavi: exercises the pinned Ludusavi CLI binary",
-    "contract_core: exercises RPCs ported to the Rust backend",
+    "contract_core: exercises core RPCs",
     "contract_operations: exercises backup and restore operations",
     "contract_lifecycle: exercises automatic game lifecycle",
     "contract_gate: exercises launch gate behavior",
@@ -48,14 +47,9 @@ markers = [
     "contract_theme: exercises status theme integration",
 ]
 
-[tool.coverage.run]
-data_file = "/tmp/sdh_ludusavi/.coverage"
-
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
-    "pytest-asyncio>=1.3.0",
-    "pytest-cov>=5.0.0",
     "ruff>=0.3.0",
     "ty>=0.0.24",
 ]

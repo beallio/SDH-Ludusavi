@@ -785,7 +785,6 @@ fn verify_frozen(
         return ScopeTransitionResult {
             success: false,
             reason: "Steam app scope is no longer frozen".to_owned(),
-            disappeared: false,
         };
     }
     controller.wait_for_frozen(scope, true)
@@ -903,6 +902,24 @@ mod tests {
         operations::ProcessGroupCompletion,
     };
 
+    #[test]
+    fn lease_expiry_preserves_strict_deadline_and_absolute_ceiling() {
+        assert_eq!(super::lease_expiry_reason(0.0, 30.0, 30.0), None);
+        assert_eq!(
+            super::lease_expiry_reason(0.0, 30.0, 30.001),
+            Some("lease expired")
+        );
+        assert_eq!(super::lease_expiry_reason(0.0, 500.0, 240.0), None);
+        assert_eq!(
+            super::lease_expiry_reason(0.0, 500.0, 240.001),
+            Some("absolute ceiling")
+        );
+        assert_eq!(
+            super::lease_expiry_reason(0.0, 500.0, 241.0),
+            Some("absolute ceiling")
+        );
+    }
+
     fn test_watchdog(
         controller: SystemdScopeController,
         proc_root: std::path::PathBuf,
@@ -977,7 +994,6 @@ mod tests {
                 ScopeTransitionResult {
                     success: true,
                     reason: String::new(),
-                    disappeared: false,
                 }
             }));
         watchdog.inner.ensure_watchdog().unwrap();
@@ -1070,7 +1086,6 @@ mod tests {
                 } else {
                     String::new()
                 },
-                disappeared: false,
             }
         }));
         let uid = unsafe { libc::geteuid() };

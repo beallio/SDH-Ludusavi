@@ -1645,7 +1645,7 @@ def test_settings_cache_shortcut_protocol_and_concurrent_calls(
 def test_operations_logs_status_lock_and_local_update_state(backend: ContractHarness) -> None:
     versions = rpc(backend, "get_versions")
     assert versions["ludusavi"] == "0.31.0"
-    assert "pyludusavi" in versions
+    assert "pyludusavi" not in versions
     command = rpc(backend, "get_ludusavi_command")
     assert command["commandPath"] == "flatpak"
     assert command["args"][:2] == ["run", "com.github.mtkennerly.ludusavi"]

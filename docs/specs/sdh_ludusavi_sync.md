@@ -137,7 +137,7 @@ state and by the global operation lock.
 ## UI
 
 The Decky panel includes an Automatic Sync toggle, a Ludusavi game selector, refresh,
-force backup, force restore, progress state, Ludusavi/rclone versions, dependency
+force backup, force restore, progress state, plugin/Ludusavi/Decky versions, dependency
 states, notification preferences, and a recent log panel. Notification preferences live
 above the Ludusavi launcher panel and can suppress all plugin toasts or supported toast
 categories. Autosync progress and successful autosync results are shown in a compact

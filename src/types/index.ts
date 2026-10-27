@@ -314,8 +314,6 @@ export type Versions = {
   sdh_ludusavi?: string;
   decky?: string;
   ludusavi?: string;
-  pyludusavi?: string;
-  rclone?: string;
   status?: string;
   message?: string;
 };

@@ -943,14 +943,6 @@ impl PluginUpdater {
             false
         })
     }
-
-    pub fn has_pending_install(&self) -> bool {
-        lock(&self.cache)
-            .get("pending_update_install")
-            .is_some_and(|pending| {
-                effective_pending_version(pending, OffsetDateTime::now_utc()).is_some()
-            })
-    }
 }
 
 fn setting_channel(settings: &Map<String, Value>) -> &'static str {
@@ -1430,7 +1422,7 @@ mod tests {
     }
 
     #[test]
-    fn recorded_github_release_results_match_python_fixtures() {
+    fn recorded_github_release_results_match_fixtures() {
         let data = fixture();
         for case in data["checks"].as_array().unwrap() {
             let (_directory, updater, client) = updater(&data, case);
@@ -1476,7 +1468,7 @@ mod tests {
     }
 
     #[test]
-    fn versions_and_retry_after_follow_python_tables() {
+    fn versions_and_retry_after_follow_expected_tables() {
         for (version, valid) in [
             ("1.2.3", true),
             ("1.2.3-dev.g123+build", true),

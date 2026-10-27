@@ -30,7 +30,6 @@ pub struct SteamAppScope {
 pub struct ScopeTransitionResult {
     pub success: bool,
     pub reason: String,
-    pub disappeared: bool,
 }
 
 impl ScopeTransitionResult {
@@ -38,7 +37,6 @@ impl ScopeTransitionResult {
         Self {
             success: true,
             reason: String::new(),
-            disappeared: false,
         }
     }
 
@@ -46,7 +44,6 @@ impl ScopeTransitionResult {
         Self {
             success: false,
             reason: reason.into(),
-            disappeared: false,
         }
     }
 }
@@ -184,11 +181,7 @@ impl SystemdScopeController {
         }
         let (state, reason) = self.scope_state(scope);
         if state == ScopeState::Missing {
-            return ScopeTransitionResult {
-                success: true,
-                reason: String::new(),
-                disappeared: true,
-            };
+            return ScopeTransitionResult::ok();
         }
         if state != ScopeState::Live {
             return ScopeTransitionResult::failed(reason);
@@ -196,11 +189,7 @@ impl SystemdScopeController {
         let command = self.run_unit_command_until("thaw", &scope.unit, deadline);
         if !command.success {
             return if self.scope_state(scope).0 == ScopeState::Missing {
-                ScopeTransitionResult {
-                    success: true,
-                    reason: String::new(),
-                    disappeared: true,
-                }
+                ScopeTransitionResult::ok()
             } else {
                 command
             };
@@ -233,11 +222,7 @@ impl SystemdScopeController {
         loop {
             let (state, reason) = self.scope_state(scope);
             if state == ScopeState::Missing && expected == 0 {
-                return ScopeTransitionResult {
-                    success: true,
-                    reason: String::new(),
-                    disappeared: true,
-                };
+                return ScopeTransitionResult::ok();
             }
             if state != ScopeState::Live {
                 return ScopeTransitionResult::failed(reason);
@@ -887,6 +872,14 @@ mod tests {
     };
 
     #[test]
+    fn proc_start_ticks_use_field_22_after_the_last_comm_parenthesis() {
+        let stat = "57 (worker (nested) name) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 991";
+        assert_eq!(super::parse_start_ticks(stat, 57), Some(991));
+        assert_eq!(super::parse_start_ticks(stat, 58), None);
+        assert_eq!(super::parse_start_ticks("malformed", 57), None);
+    }
+
+    #[test]
     fn scope_validation_rejects_traversal_and_symlink_escape() {
         let temporary = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
         let uid = unsafe { libc::geteuid() };
@@ -1029,7 +1022,6 @@ fi
             .thaw(&scope);
 
         assert!(result.success, "{}", result.reason);
-        assert!(result.disappeared);
     }
     #[test]
     fn launch_pid_identity_rejects_reused_pid_with_new_start_ticks() {

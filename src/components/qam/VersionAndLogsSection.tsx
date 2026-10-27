@@ -69,7 +69,6 @@ export function VersionsSection({ versions }: VersionsSectionProps) {
           >
             <div>SDH-Ludusavi: {versions.sdh_ludusavi ?? "Unknown"}</div>
             <div>Ludusavi: {versions.ludusavi ?? versions.message ?? "Unknown"}</div>
-            <div>pyludusavi: {versions.pyludusavi ?? "Unknown"}</div>
             <div>Decky: {versions.decky ?? "Unknown"}</div>
           </div>
         </Field>

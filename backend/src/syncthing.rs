@@ -1669,7 +1669,7 @@ mod tests {
     }
 
     #[test]
-    fn gui_addresses_and_loopback_validation_match_python_tables() {
+    fn gui_addresses_and_loopback_validation() {
         for (address, tls, expected) in [
             (Some("127.0.0.1:8384"), false, Some("http://127.0.0.1:8384")),
             (Some("127.0.0.1:8384"), true, Some("https://127.0.0.1:8384")),

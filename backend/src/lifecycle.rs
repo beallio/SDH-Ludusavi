@@ -74,7 +74,26 @@ mod tests {
     use super::{RestorePreview, TimestampDirection, classify_restore_change, timestamp_direction};
 
     #[test]
-    fn restore_preview_decisions_match_python_contract() {
+    fn timestamp_direction_accepts_naive_offsets_and_rejects_truncated_times() {
+        assert_eq!(
+            timestamp_direction(
+                Some("2026-06-01 00:00:00"),
+                Some("2026-06-01T00:02:01+00:00"),
+            ),
+            TimestampDirection::BackupNewer
+        );
+        assert_eq!(
+            timestamp_direction(Some("2026-06-01T00:00:00z"), Some("2026-06-01T00:02:01Z"),),
+            TimestampDirection::BackupNewer
+        );
+        assert_eq!(
+            timestamp_direction(Some("2026-06-01T"), Some("2026-06-01T00:02:01Z"),),
+            TimestampDirection::Unknown
+        );
+    }
+
+    #[test]
+    fn restore_preview_decisions_classify_changes() {
         for (change, expected) in [
             (Some("Same"), RestorePreview::LocalCurrent),
             (Some("New"), RestorePreview::BackupNewer),

@@ -425,7 +425,6 @@ impl LudusaviOperations {
             .to_owned();
         let mut versions = Map::new();
         versions.insert("ludusavi".to_owned(), Value::String(normalized));
-        versions.insert("pyludusavi".to_owned(), Value::String("unknown".to_owned()));
         versions.insert(
             "sdh_ludusavi".to_owned(),
             Value::String(
@@ -2191,7 +2190,7 @@ mod tests {
         }
     }
     #[test]
-    fn game_name_sanitization_table_matches_python() {
+    fn game_name_sanitization_trims_and_collapses_whitespace() {
         for (input, expected) in [
             ("", ""),
             (" \t\n", ""),
@@ -2251,7 +2250,7 @@ mod tests {
     }
 
     #[test]
-    fn installed_app_id_normalization_table_matches_python() {
+    fn installed_app_id_normalization_sorts_and_deduplicates() {
         for (input, expected) in [
             (None, None),
             (Some(""), Some("")),
@@ -2543,7 +2542,7 @@ mod tests {
     }
 
     #[test]
-    fn backup_disk_stats_matches_python_snapshot_layouts() {
+    fn backup_disk_stats_supports_snapshot_layouts() {
         let directory = tempfile::tempdir().unwrap();
         let archive_path = directory.path().join("snap1.zip");
         let archive_size = write_zip(&archive_path, &["f1.txt", "f2.txt", "folder/"]);
