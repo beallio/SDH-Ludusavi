@@ -162,12 +162,23 @@ impl LudusaviClient {
             Runner::Bundled { exe, .. } => exe.to_string_lossy().into_owned(),
             Runner::Flatpak { .. } => "flatpak".to_owned(),
         };
-        let args: Vec<_> = self
+        let mut args: Vec<_> = self
             .runner
             .arguments(&self.native_config, &[])
             .into_iter()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
+        if matches!(self.runner, Runner::Bundled { .. }) {
+            // The Ludusavi Flatpak sets this too. Without it, winit derives a scale of about 1.7 from
+            // gamescope's screen size, the window outgrows the screen and edge controls are unreachable.
+            args.splice(
+                0..0,
+                [
+                    "WINIT_X11_SCALE_FACTOR=1".to_owned(),
+                    "%command%".to_owned(),
+                ],
+            );
+        }
         json!({"commandPath": command, "args": args, "compatTool": ""})
     }
 
@@ -691,7 +702,13 @@ mod tests {
             let expected = if mode == "working" {
                 json!({
                     "commandPath": fixture.paths.bundled,
-                    "args": ["--config", fixture.paths.native_config],
+                    // Same override the Ludusavi Flatpak sets; see launcher_command.
+                    "args": [
+                        "WINIT_X11_SCALE_FACTOR=1",
+                        "%command%",
+                        "--config",
+                        fixture.paths.native_config
+                    ],
                     "compatTool": "",
                 })
             } else {
