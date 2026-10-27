@@ -9,9 +9,10 @@ import zipfile
 from pathlib import Path
 
 
-def validate_static_elf(data: bytes) -> None:
-    """Reject non-x86-64, malformed, or dynamically linked ELF executables."""
-    error = "backend must be a statically linked x86_64 ELF executable"
+def validate_elf(data: bytes, *, name: str, static: bool) -> None:
+    """Reject malformed or non-x86-64 ELF executables and require static linkage when requested."""
+    linkage = "statically linked " if static else ""
+    error = f"{name} must be a {linkage}x86_64 ELF executable"
     try:
         if len(data) < 64 or data[:7] != b"\x7fELF\x02\x01\x01":
             raise ValueError(error)
@@ -38,7 +39,7 @@ def validate_static_elf(data: bytes) -> None:
             segment_size = struct.unpack_from("<Q", data, offset + 32)[0]
             if segment_offset + segment_size > len(data):
                 raise ValueError(error)
-            if segment_type == 3:
+            if static and segment_type == 3:
                 raise ValueError(error)
             if (
                 segment_type == 1
@@ -46,7 +47,7 @@ def validate_static_elf(data: bytes) -> None:
                 and segment_address <= entrypoint < segment_address + segment_size
             ):
                 executable_load = True
-            if segment_type == 2:
+            if static and segment_type == 2:
                 if segment_size % 16:
                     raise ValueError(error)
                 for entry in range(segment_offset, segment_offset + segment_size, 16):
@@ -61,6 +62,14 @@ def validate_static_elf(data: bytes) -> None:
             raise ValueError(error)
     except struct.error as exc:
         raise ValueError(error) from exc
+
+
+def validate_static_elf(data: bytes) -> None:
+    validate_elf(data, name="backend", static=True)
+
+
+def validate_ludusavi_elf(data: bytes) -> None:
+    validate_elf(data, name="ludusavi", static=False)
 
 
 def main() -> None:
@@ -104,6 +113,9 @@ def main() -> None:
                 "plugin.json",
                 "README.md",
                 "bin/backend",
+                "bin/ludusavi",
+                "licenses/ludusavi/LICENSE",
+                "licenses/ludusavi/third-party.txt",
                 "theme/theme.json",
                 "theme/clean.css",
                 "theme/custom.css",
@@ -167,6 +179,20 @@ def main() -> None:
             except ValueError as exc:
                 print(f"Error: {exc}", file=sys.stderr)
                 sys.exit(1)
+
+            ludusavi_info = archive.getinfo(f"{prefix}bin/ludusavi")
+            if not (ludusavi_info.external_attr >> 16) & 0o111:
+                print("Error: bin/ludusavi is not executable", file=sys.stderr)
+                sys.exit(1)
+            try:
+                validate_ludusavi_elf(archive.read(ludusavi_info))
+            except ValueError as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                sys.exit(1)
+            for license_file in ("licenses/ludusavi/LICENSE", "licenses/ludusavi/third-party.txt"):
+                if not archive.read(f"{prefix}{license_file}"):
+                    print(f"Error: {license_file} is empty", file=sys.stderr)
+                    sys.exit(1)
 
             # 5. Metadata verification
             plugin_json_path = f"{prefix}plugin.json"

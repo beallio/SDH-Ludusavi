@@ -167,7 +167,7 @@ def _assert_backup_list(result: Any) -> None:
 
 def _assert_command_after(backend: ContractHarness, first_record: int, verb: str) -> None:
     assert any(
-        len(record["argv"]) > 2 and record["argv"][2] == verb and "--preview" not in record["argv"]
+        record["command_args"][:1] == [verb] and "--preview" not in record["command_args"]
         for record in backend.fake_processes()[first_record:]
     ), f"lifecycle result had no real Ludusavi {verb} command"
 
@@ -967,6 +967,124 @@ def test_uninstall_only_theme_cleanup_needs_no_backend_state() -> None:
 
 
 @pytest.mark.contract_operations
+def test_bundled_runner_is_preferred_and_reused_until_its_target_changes() -> None:
+    harness = ContractHarness()
+    bundled = harness.install_bundled_fake()
+    first = harness.root / "ludusavi-first"
+    second = harness.root / "ludusavi-second"
+    bundled.rename(first)
+    shutil.copyfile(first, second)
+    second.chmod(0o755)
+    bundled.symlink_to(first)
+    harness.start()
+    try:
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
+        assert rpc(harness, "get_ludusavi_command") == {
+            "commandPath": str(bundled),
+            "args": ["--config", str(harness.config_dir)],
+            "compatTool": "",
+        }
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
+        before = len(harness.fake_processes())
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
+        reused = harness.fake_processes()[before:]
+        assert reused and all(record["runner"] == "bundled" for record in reused)
+        assert not any(record["command_args"] == ["--version"] for record in reused)
+        assert all(record["argv"][:2] == ["--config", str(harness.config_dir)] for record in reused)
+
+        bundled.unlink()
+        bundled.symlink_to(second)
+        before = len(harness.fake_processes())
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
+        assert (
+            sum(
+                record["command_args"] == ["--version"]
+                for record in harness.fake_processes()[before:]
+            )
+            == 1
+        )
+    finally:
+        harness.close()
+
+
+@pytest.mark.contract_operations
+def test_failing_bundled_runner_falls_back_to_flatpak_with_config() -> None:
+    harness = ContractHarness(scenario={"bundled": {"responses": {"version": {"exit_code": 1}}}})
+    harness.install_bundled_fake()
+    harness.start()
+    try:
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
+        assert rpc(harness, "get_ludusavi_command") == {
+            "commandPath": "flatpak",
+            "args": ["run", "com.github.mtkennerly.ludusavi", "--config", str(harness.config_dir)],
+            "compatTool": "",
+        }
+        records = harness.fake_processes()
+        assert [record["runner"] for record in records] == ["bundled", "flatpak"]
+        assert records[0]["argv"] == ["--config", str(harness.config_dir), "--version"]
+        assert records[1]["argv"] == [
+            "run",
+            "com.github.mtkennerly.ludusavi",
+            "--config",
+            str(harness.config_dir),
+            "--version",
+        ]
+    finally:
+        harness.close()
+
+
+@pytest.mark.contract_operations
+@pytest.mark.parametrize("bundled", [False, True])
+def test_config_and_matching_manifest_migrate_once_for_either_runner(bundled: bool) -> None:
+    scenario = {
+        runner: {
+            "responses": {
+                "config_show": {"json": {"manifest": {"url": "https://example.test/list"}}}
+            }
+        }
+        for runner in ("flatpak", "bundled")
+    }
+    harness = ContractHarness(scenario=scenario)
+    if bundled:
+        harness.install_bundled_fake()
+    source = harness.home / ".var/app/com.github.mtkennerly.ludusavi/config/ludusavi"
+    source.mkdir(parents=True)
+    expected = {
+        "config.yaml": "source config",
+        "manifest.yaml": "source manifest",
+        "cache.yaml": "source cache",
+    }
+    for name, content in expected.items():
+        (source / name).write_text(content, encoding="utf-8")
+    (harness.config_dir / "config.yaml").unlink()
+    harness.start()
+    try:
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
+        for name, content in expected.items():
+            assert (harness.config_dir / name).read_text(encoding="utf-8") == content
+            (source / name).write_text("changed source", encoding="utf-8")
+        lookups = [
+            record
+            for record in harness.fake_processes()
+            if record["command_args"] == ["config", "show", "--api"]
+        ]
+        assert len(lookups) == 2
+        for record in lookups:
+            # `config show` writes default files, so each address is read from a private copy.
+            scratch = Path(record["config"])
+            assert scratch.parent == harness.config_dir
+            assert scratch.name.startswith(".sdh-ludusavi-")
+            assert not scratch.exists()
+        assert sorted(path.name for path in source.iterdir()) == sorted(expected)
+        harness.restart()
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
+        for name, content in expected.items():
+            assert (harness.config_dir / name).read_text(encoding="utf-8") == content
+    finally:
+        harness.close()
+
+
+@pytest.mark.contract_operations
 def test_version_discovery_cache_tracks_the_active_flatpak_deployment() -> None:
     harness = ContractHarness()
     old_deployment = harness.root / "deployment-old"
@@ -980,12 +1098,12 @@ def test_version_discovery_cache_tracks_the_active_flatpak_deployment() -> None:
     try:
         assert harness.fake_processes() == []
         assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
-        assert [record["argv"][2:] for record in harness.fake_processes()] == [["--version"]]
+        assert [record["command_args"] for record in harness.fake_processes()] == [["--version"]]
 
         assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
         before = len(harness.fake_processes())
         assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
-        commands = [record["argv"][2:] for record in harness.fake_processes()[before:]]
+        commands = [record["command_args"] for record in harness.fake_processes()[before:]]
         assert len(commands) == 3, commands
         assert not any(command == ["--version"] for command in commands)
 
@@ -997,7 +1115,7 @@ def test_version_discovery_cache_tracks_the_active_flatpak_deployment() -> None:
         before = len(harness.fake_processes())
         assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
         assert rpc(harness, "get_versions")["ludusavi"] == "0.32.0"
-        commands = [record["argv"][2:] for record in harness.fake_processes()[before:]]
+        commands = [record["command_args"] for record in harness.fake_processes()[before:]]
         assert commands.count(["--version"]) == 1, commands
 
         active.unlink()
@@ -1012,7 +1130,7 @@ def test_version_discovery_cache_tracks_the_active_flatpak_deployment() -> None:
         harness.restart()
         before = len(harness.fake_processes())
         assert rpc(harness, "get_versions")["ludusavi"] == "0.32.0"
-        assert [record["argv"][2:] for record in harness.fake_processes()[before:]] == [
+        assert [record["command_args"] for record in harness.fake_processes()[before:]] == [
             ["--version"]
         ]
     finally:
@@ -1063,7 +1181,7 @@ def test_ludusavi_execution_failure_invalidates_cached_availability(
         assert rpc(harness, "get_versions")["status"] == "failed"
         assert rpc(harness, "get_ludusavi_command") is None
         assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"]
-        commands = [record["argv"][2:] for record in harness.fake_processes()[before:]]
+        commands = [record["command_args"] for record in harness.fake_processes()[before:]]
         assert commands.count(["--version"]) >= 3, commands
         assert all(command == ["--version"] for command in commands), commands
 
@@ -1080,7 +1198,7 @@ def test_version_discovery_rechecks_when_deployment_cannot_be_identified(
     backend: ContractHarness,
 ) -> None:
     assert rpc(backend, "get_versions")["ludusavi"] == "0.31.0"
-    assert [record["argv"][2:] for record in backend.fake_processes()] == [["--version"]]
+    assert [record["command_args"] for record in backend.fake_processes()] == [["--version"]]
     backend.set_scenario({"flatpak": {"responses": {"version": {"exit_code": 1}}}})
     assert rpc(backend, "refresh_games", True, APP_ID)["dependency_error"]
     assert rpc(backend, "get_ludusavi_command") is None
@@ -1140,9 +1258,8 @@ def test_unload_cancels_and_reaps_ludusavi_process_group() -> None:
                 (
                     item
                     for item in harness.fake_processes()
-                    if len(item["argv"]) > 2
-                    and item["argv"][2] == "backup"
-                    and "--preview" not in item["argv"]
+                    if item["command_args"][:1] == ["backup"]
+                    and "--preview" not in item["command_args"]
                 ),
                 None,
             ),
@@ -1187,9 +1304,7 @@ def test_force_backup_skips_unknown_game_without_starting_backup(
         "reason": "unmatched_game",
     }
     assert not any(
-        len(record["argv"]) > 2
-        and record["argv"][2] == "backup"
-        and "--preview" not in record["argv"]
+        record["command_args"][:1] == ["backup"] and "--preview" not in record["command_args"]
         for record in backend.fake_processes()
     )
 
@@ -1239,9 +1354,7 @@ def test_successful_operations_keep_history_when_followup_refresh_fails(
     previews = [
         record
         for record in backend.fake_processes()
-        if len(record["argv"]) > 2
-        and record["argv"][2] == "backup"
-        and "--preview" in record["argv"]
+        if record["command_args"][:1] == ["backup"] and "--preview" in record["command_args"]
     ]
     assert len(previews) >= 3
     history = rpc(backend, "get_game_history")[GAME]
@@ -1315,7 +1428,7 @@ def test_refresh_orders_unicode_titles_after_refresh_cache_and_restart(
     assert names(False) == expected
     backend.restart()
     assert names(False) == expected
-    commands = [record["argv"][2:] for record in backend.fake_processes()[before:]]
+    commands = [record["command_args"] for record in backend.fake_processes()[before:]]
     assert not any(
         command and command[0] == "backup" and "--preview" in command for command in commands
     )
@@ -1384,7 +1497,7 @@ def test_aliases_refresh_on_config_change_and_drop_stale_on_failure(
     assert rpc(backend, "refresh_games", True, APP_ID)["aliases"] == {alias: GAME}
     first_record = len(backend.fake_processes())
     assert rpc(backend, "refresh_games", True, APP_ID)["aliases"] == {alias: GAME}
-    commands = [record["argv"][2:] for record in backend.fake_processes()[first_record:]]
+    commands = [record["command_args"] for record in backend.fake_processes()[first_record:]]
     assert len(commands) == 4, commands
     assert not any(command[:2] == ["config", "show"] for command in commands)
     assert rpc(backend, "list_backups", alias)["game"] == GAME
@@ -1396,7 +1509,7 @@ def test_aliases_refresh_on_config_change_and_drop_stale_on_failure(
     assert rpc(backend, "refresh_games", False, APP_ID)["aliases"] == {alias: other}
     assert (
         sum(
-            record["argv"][2:4] == ["config", "show"]
+            record["command_args"][:2] == ["config", "show"]
             for record in backend.fake_processes()[first_record:]
         )
         == 1
@@ -1409,7 +1522,7 @@ def test_aliases_refresh_on_config_change_and_drop_stale_on_failure(
     assert rpc(backend, "refresh_games", False, APP_ID)["aliases"] == {}
     assert (
         sum(
-            record["argv"][2:4] == ["config", "show"]
+            record["command_args"][:2] == ["config", "show"]
             for record in backend.fake_processes()[first_record:]
         )
         == 1
@@ -1496,7 +1609,7 @@ def test_game_start_check_uses_one_restore_preview(
 
     result = rpc(backend, "check_game_start", GAME, APP_ID)
 
-    commands = [record["argv"][2:] for record in backend.fake_processes()[first_record:]]
+    commands = [record["command_args"] for record in backend.fake_processes()[first_record:]]
     assert result["reason"] == expected_reason, result
     if expected_reason == "ambiguous_recency":
         assert result["status"] == "conflict", result
@@ -1526,9 +1639,8 @@ def test_disabled_sync_blocks_all_automatic_operations(backend: ContractHarness)
     for method, args in calls:
         assert rpc(backend, method, *args)["reason"] == "game_sync_disabled"
     assert not any(
-        len(record["argv"]) > 2
-        and record["argv"][2] in {"backup", "restore"}
-        and "--preview" not in record["argv"]
+        record["command_args"][:1] in (["backup"], ["restore"])
+        and "--preview" not in record["command_args"]
         for record in backend.fake_processes()
     )
 
@@ -1545,9 +1657,7 @@ def test_exit_preview_not_processed_never_requests_backup(
     backend.set_scenario({"flatpak": {"responses": {"backup_preview": {"json": preview}}}})
     assert rpc(backend, "check_game_exit", GAME, APP_ID)["reason"] == "not_processed"
     assert not any(
-        len(record["argv"]) > 2
-        and record["argv"][2] == "backup"
-        and "--preview" not in record["argv"]
+        record["command_args"][:1] == ["backup"] and "--preview" not in record["command_args"]
         for record in backend.fake_processes()
     )
 
@@ -1723,15 +1833,12 @@ def test_operations_logs_status_lock_and_local_update_state(backend: ContractHar
     assert selected["status"] == "restored"
     records = backend.fake_processes()
     assert any(
-        len(record["argv"]) > 2
-        and record["argv"][2] == "restore"
-        and "--force" in record["argv"][2:]
+        record["command_args"][:1] == ["restore"] and "--force" in record["command_args"]
         for record in records
     )
     assert any(
-        len(record["argv"]) > 2
-        and record["argv"][2] == "restore"
-        and _option_value(record["argv"][2:], "--backup") == backup_id
+        record["command_args"][:1] == ["restore"]
+        and _option_value(record["command_args"], "--backup") == backup_id
         for record in records
     )
 
@@ -1741,7 +1848,7 @@ def test_operations_logs_status_lock_and_local_update_state(backend: ContractHar
         first = pool.submit(backend.call, "force_backup", GAME)
         _wait_for(
             lambda: any(
-                "backup" in record["argv"] and "--preview" not in record["argv"]
+                "backup" in record["command_args"] and "--preview" not in record["command_args"]
                 for record in backend.fake_processes()[prior_record_count:]
             ),
             5,
@@ -1853,9 +1960,8 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(
     rpc(backend, "refresh_games", True, APP_ID)
 
     before_restore = sum(
-        record["argv"][2] == "restore" and "--preview" not in record["argv"]
+        record["command_args"][:1] == ["restore"] and "--preview" not in record["command_args"]
         for record in backend.fake_processes()
-        if len(record["argv"]) > 2
     )
     start_check = rpc(backend, "check_game_start", GAME, APP_ID)
     assert start_check["status"] == "conflict"
@@ -1867,9 +1973,8 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(
     assert start_check["localLabel"] == "Keep Local Save"
     assert start_check["backupLabel"] == "Restore Backup Save"
     after_restore = sum(
-        record["argv"][2] == "restore" and "--preview" not in record["argv"]
+        record["command_args"][:1] == ["restore"] and "--preview" not in record["command_args"]
         for record in backend.fake_processes()
-        if len(record["argv"]) > 2
     )
     assert after_restore == before_restore, "a newer local save triggered a real restore"
 
@@ -2396,9 +2501,8 @@ def test_hanging_ludusavi_exits_and_reaps_process_group(
                     (
                         record
                         for record in backend.fake_processes()
-                        if len(record["argv"]) > 2
-                        and record["argv"][2] == "backup"
-                        and "--preview" not in record["argv"]
+                        if record["command_args"][:1] == ["backup"]
+                        and "--preview" not in record["command_args"]
                     ),
                     None,
                 ),
@@ -2561,9 +2665,8 @@ def test_unload_kills_restore_group_before_releasing_paused_child(
                 (
                     record
                     for record in harness.fake_processes()
-                    if len(record["argv"]) > 2
-                    and record["argv"][2] == "restore"
-                    and "--preview" not in record["argv"]
+                    if record["command_args"][:1] == ["restore"]
+                    and "--preview" not in record["command_args"]
                 ),
                 None,
             )
@@ -2710,9 +2813,8 @@ def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
         )
         rpc(harness, "refresh_games", True, APP_ID)
         restore_count = sum(
-            record["argv"][2] == "restore" and "--preview" not in record["argv"]
+            record["command_args"][:1] == ["restore"] and "--preview" not in record["command_args"]
             for record in harness.fake_processes()
-            if len(record["argv"]) > 2
         )
         check = rpc(harness, "check_game_start", GAME, APP_ID)
         if check["status"] == "needed":
@@ -2747,9 +2849,9 @@ def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
         assert save.read_bytes() == b"newer local version C\x00\n"
         assert (
             sum(
-                record["argv"][2] == "restore" and "--preview" not in record["argv"]
+                record["command_args"][:1] == ["restore"]
+                and "--preview" not in record["command_args"]
                 for record in harness.fake_processes()
-                if len(record["argv"]) > 2
             )
             == restore_count
         )

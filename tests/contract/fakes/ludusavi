@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+from fake_commands import run_ludusavi
+import sys
+
+raise SystemExit(run_ludusavi(sys.argv[1:]))

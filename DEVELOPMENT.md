@@ -80,6 +80,16 @@ Native DOM fixture waits use standard timer callbacks wrapped in promises, not N
 
 ## Build & Packaging
 
+Local packaging needs the bundled binary and license files. Fetch the pinned fork
+release before packaging:
+
+```bash
+./run.sh uv run python scripts/fetch_ludusavi.py
+```
+
+The pin is `ludusavi-bundle.json`; downloads are cached under
+`/var/tmp/sdh_ludusavi/ludusavi-bundle/`.
+
 ### Run the quality gates
 
 ```bash
@@ -102,9 +112,8 @@ SDH_CONTRACT_BACKEND=/var/tmp/sdh_ludusavi/cargo-target/x86_64-unknown-linux-mus
 Build the binary as shown below first. `SDH_CONTRACT_SHIM_BINARY` can override the
 binary copied by shim mode. Set `SDH_CONTRACT_LUDUSAVI_BIN` to a real Ludusavi
 executable and `SDH_CONTRACT_REQUIRE_REAL=1` to require the real-Ludusavi cases.
-On the local workstation the GTK-enabled wrapper is
-`/var/tmp/sdh_ludusavi/real-ludusavi/ludusavi-gtk`. CI runs the complete suite in
-both modes against one musl binary.
+CI uses the pinned fork binary for the real tier and runs the suite in both modes
+against one musl backend binary.
 
 The lifecycle tier exercises the preview-based restore decision, strict 120-second
 timestamp margin, exact lease verification, pre-scope stop-only gate, cgroup freeze/thaw,
@@ -114,9 +123,8 @@ The harness isolates Decky, HOME and XDG state and refuses to start unless its `
 Ludusavi or `systemctl`. Gate fixtures use real user-systemd transient units with a unique ownership
 marker, invocation identity, and ten-minute runtime limit. They refuse a pre-existing unit and
 register independent cleanup before launch, including when the `systemd-run` client exits early.
-The optional real tier uses Ludusavi v0.31.0
-(`ludusavi-v0.31.0-linux.tar.gz`, SHA-256
-`7322ff45d41eae7ae064a80d8c9ecccc5b8fb6fc090a603a66369cd4b054068d`):
+The optional real tier uses the pinned fork binary from `ludusavi-bundle.json`
+(release `v0.31.0-beallio.1`, reporting Ludusavi version 0.31.0):
 
 ```bash
 SDH_CONTRACT_LUDUSAVI_BIN=/path/to/ludusavi SDH_CONTRACT_REQUIRE_REAL=1 \
@@ -171,10 +179,12 @@ The release profile keeps backend code optimized for speed, optimizes dependency
 for size, and retains `panic = "unwind"` for SDK error replies and cleanup.
 
 The packager defaults to `$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/backend`;
-use `--backend PATH` to select another static x86-64 executable. It rejects missing or
-dynamically linked inputs. The resulting `out/SDH-Ludusavi.zip` includes the executable
-as mode 0755, the shim, frontend, theme, README, LICENSE and NOTICE. The local post-commit
-hook builds the musl binary and frontend and appends the git hash to the package version.
+use `--backend PATH` to select another static x86-64 backend executable. It rejects
+missing or dynamically linked backend inputs. The ZIP also includes the bundled
+glibc-linked x86-64 Ludusavi executable at `bin/ludusavi` with mode 0755, and
+its licenses under `licenses/ludusavi/`, alongside the shim, frontend, theme,
+README, LICENSE and NOTICE. The local post-commit hook builds the musl backend
+and frontend and appends the git hash to the package version.
 
 The ZIP also includes `theme/`. Startup deploys only the managed theme files into Decky's themes directory. Decky runs the same uninstall hook for updates and removal, so the hook keeps a small backup of CSS Loader's choices in the plugin runtime-data directory and restores it on the next install. CSS Loader may need its **Refresh** control after a first install because creating a new theme directory does not necessarily trigger its optional file watcher.
 
@@ -263,20 +273,39 @@ The frontend deliberately keeps two game-selection values with different lifetim
 
 A deliberate dropdown choice suppresses exactly one subsequent Steam-context auto-selection while the QAM is visible, preventing dropdown-induced visibility churn from replacing that choice with the running game. The suppression is one-shot: after it is consumed, a genuine QAM close and reopen still auto-selects the running game.
 
-`plugin.json` does not request Decky's `_root` flag. The backend runs as the Decky user so the Ludusavi Flatpak can see that user's Ludusavi configuration, backup metadata, and Flatpak runtime state.
+`plugin.json` does not request Decky's `_root` flag. The backend runs as the Decky user so Ludusavi can access that user's configuration, backup metadata, and Flatpak runtime state.
 
 ## Ludusavi Integration Details
 
-The Rust backend invokes the Ludusavi Flatpak CLI directly. It supplies Deck-compatible
-environment overrides, including `XDG_RUNTIME_DIR` when Decky omits it, and clears
-`LD_LIBRARY_PATH` for Ludusavi subprocesses without changing the backend environment.
+The backend first tries `<DECKY_PLUGIN_DIR>/bin/ludusavi` when it is a regular
+executable file and `--config N --version` succeeds. If it exists but fails,
+the backend warns and falls back to the existing Flatpak discovery. If neither
+works, it reports: `Ludusavi is not available: the bundled copy could not run and the Ludusavi Flatpak was not found`.
 
-The backend caches the successful Ludusavi version check in memory and reuses it on
-forced refresh only when `flatpak info --show-location` resolves to the same canonical
-deployment. A failed Ludusavi command or an unavailable or changed deployment discards
-the cached client so the next request rechecks availability with `--version`.
-The cache assumes Flatpak deployments are immutable OSTree checkouts addressed by
-commit, with a different canonical path for a different deployed commit.
+`N` is `$XDG_CONFIG_HOME/ludusavi` when `XDG_CONFIG_HOME` is set and absolute,
+otherwise `$HOME/.config/ludusavi`. `F` is
+`$HOME/.var/app/com.github.mtkennerly.ludusavi/config/ludusavi`. Normal calls
+are `[exe, "--config", N, ...args]` or
+`[flatpak, "run", "com.github.mtkennerly.ludusavi", "--config", N, ...args]`.
+The backend supplies Deck-compatible environment overrides, including
+`XDG_RUNTIME_DIR` when Decky omits it, and clears `LD_LIBRARY_PATH` for
+Ludusavi subprocesses without changing the backend environment.
+
+On client creation for either runner, migration is idempotent and non-fatal:
+errors are logged as warnings, and it is skipped if N and F canonicalize to the
+same directory. If N's `config.yaml` is absent according to `symlink_metadata`
+(a dangling symlink counts as present), and F's is a file following symlinks,
+it creates N as needed and copies the bytes via a temporary file in N and rename.
+It never overwrites or deletes files in N. It copies F's `manifest.yaml` and
+`cache.yaml` via temporary files and rename only when neither exists in N, both
+exist in F, and the present string `/manifest/url` values from
+`<runner> --config F config show --api` and `--config N config show --api`
+match. Otherwise it copies neither and Ludusavi downloads its own list.
+
+The successful version check is cached in memory. For Flatpak, forced refresh
+reuses it only when `flatpak info --show-location` resolves to the same canonical
+deployment; a failed command or unavailable or changed deployment discards the
+cached client. The Flatpak cache assumes immutable OSTree deployments.
 
 ### Ludusavi Launcher Shortcut
 

@@ -1,12 +1,30 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(scope="module")
+def bundle_args(tmp_path_factory: pytest.TempPathFactory) -> list[str]:
+    source = tmp_path_factory.mktemp("ludusavi-fixtures")
+    license_path = source / "LICENSE"
+    third_party = source / "third-party.txt"
+    license_path.write_text("license", encoding="utf-8")
+    third_party.write_text("third-party notices", encoding="utf-8")
+    return [
+        "--ludusavi",
+        "/bin/ls",
+        "--ludusavi-license",
+        str(license_path),
+        "--ludusavi-third-party",
+        str(third_party),
+    ]
 
 
 def test_validator_rejects_missing_native_backend(tmp_path: Path) -> None:
@@ -49,11 +67,53 @@ def test_validator_rejects_missing_native_backend(tmp_path: Path) -> None:
     assert "bin/backend" in result.stderr
 
 
+def test_validator_requires_bundled_ludusavi_without_packager(tmp_path: Path) -> None:
+    zip_path = tmp_path / "missing-ludusavi.zip"
+    backend = Path(os.environ["CARGO_TARGET_DIR"]) / "x86_64-unknown-linux-musl/release/backend"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        info = zipfile.ZipInfo("SDH-Ludusavi/bin/backend")
+        info.create_system = 3
+        info.external_attr = 0o100755 << 16
+        archive.writestr(info, backend.read_bytes())
+        archive.writestr(
+            "SDH-Ludusavi/plugin.json",
+            json.dumps({"name": "SDH-Ludusavi", "version": "0.2.1", "backend": "bin/backend"}),
+        )
+        archive.writestr("SDH-Ludusavi/package.json", json.dumps({"version": "0.2.1"}))
+        for name in (
+            "LICENSE",
+            "NOTICE.md",
+            "README.md",
+            "main.py",
+            "theme/theme.json",
+            "theme/clean.css",
+            "theme/custom.css",
+            "dist/index.js",
+            "licenses/ludusavi/LICENSE",
+            "licenses/ludusavi/third-party.txt",
+        ):
+            archive.writestr(f"SDH-Ludusavi/{name}", "fixture")
+    result = subprocess.run(
+        [sys.executable, "scripts/validate_plugin_zip.py", str(zip_path)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "bin/ludusavi" in result.stderr
+
+
 @pytest.fixture(scope="module")
-def packaged_zip(tmp_path_factory: pytest.TempPathFactory) -> Path:
+def packaged_zip(tmp_path_factory: pytest.TempPathFactory, bundle_args: list[str]) -> Path:
     output = tmp_path_factory.mktemp("native-package")
     subprocess.run(
-        [sys.executable, "scripts/package_plugin.py", "--release", "--output-dir", str(output)],
+        [
+            sys.executable,
+            "scripts/package_plugin.py",
+            "--release",
+            "--output-dir",
+            str(output),
+            *bundle_args,
+        ],
         check=True,
     )
     return output / "SDH-Ludusavi.zip"
@@ -67,6 +127,15 @@ def packaged_zip(tmp_path_factory: pytest.TempPathFactory) -> Path:
         ("invalid_entry", "static"),
         ("mode", "executable"),
         ("metadata", "backend"),
+        ("missing_ludusavi", "bin/ludusavi"),
+        ("missing_license", "licenses/ludusavi/LICENSE"),
+        ("missing_third_party", "licenses/ludusavi/third-party.txt"),
+        ("empty_license", "licenses/ludusavi/LICENSE"),
+        ("empty_third_party", "licenses/ludusavi/third-party.txt"),
+        ("ludusavi_mode", "executable"),
+        ("ludusavi_invalid", "ludusavi"),
+        ("ludusavi_wrong_arch", "ludusavi"),
+        ("ludusavi_invalid_entry", "ludusavi"),
         ("py_modules", "forbidden"),
         ("backend_source", "forbidden"),
         ("cache", "forbidden"),
@@ -90,6 +159,30 @@ def test_validator_rejects_native_package_mutations(
                     data = data[:24] + b"\0" * 8 + data[32:]
                 if mutation == "mode":
                     info.external_attr = 0o100644 << 16
+            if info.filename == "SDH-Ludusavi/bin/ludusavi":
+                if mutation == "missing_ludusavi":
+                    continue
+                if mutation == "ludusavi_mode":
+                    info.external_attr = 0o100644 << 16
+                if mutation == "ludusavi_invalid":
+                    data = b"not an ELF"
+                if mutation == "ludusavi_wrong_arch":
+                    data = data[:18] + b"\xb7\x00" + data[20:]
+                if mutation == "ludusavi_invalid_entry":
+                    data = data[:24] + b"\0" * 8 + data[32:]
+            licenses = {
+                "SDH-Ludusavi/licenses/ludusavi/LICENSE": ("missing_license", "empty_license"),
+                "SDH-Ludusavi/licenses/ludusavi/third-party.txt": (
+                    "missing_third_party",
+                    "empty_third_party",
+                ),
+            }
+            if info.filename in licenses:
+                missing, empty = licenses[info.filename]
+                if mutation == missing:
+                    continue
+                if mutation == empty:
+                    data = b""
             if info.filename == "SDH-Ludusavi/plugin.json" and mutation in ("metadata", "root"):
                 metadata = json.loads(data)
                 if mutation == "metadata":
@@ -116,7 +209,7 @@ def test_validator_rejects_native_package_mutations(
     assert message.lower() in check.stderr.lower()
 
 
-def test_validator_accepts_valid_zip(tmp_path: Path) -> None:
+def test_validator_accepts_valid_zip(tmp_path: Path, bundle_args: list[str]) -> None:
     # 1. Create a valid zip using the packager script
     subprocess.run(
         [
@@ -128,6 +221,7 @@ def test_validator_accepts_valid_zip(tmp_path: Path) -> None:
             "--versioned-output",
             "--output-dir",
             str(tmp_path),
+            *bundle_args,
         ],
         check=True,
     )

@@ -15,7 +15,7 @@ This is an example, not a required folder name. If you choose a different path, 
 
 ## 1. Set up Ludusavi on the Deck
 
-Install [Ludusavi](https://flathub.org/apps/com.github.mtkennerly.ludusavi) from Discover in Desktop Mode. Open it and choose where to keep backups. The example above uses `/home/deck/ludusavi-backup`. Make sure that folder exists, then use **Force Backup** for a game in SDH-Ludusavi so you have a first backup to share.
+Ludusavi comes with SDH-Ludusavi. In Gaming Mode, open the plugin and choose **Launch** under **Ludusavi** to open its window from the shortcut. Choose where to keep backups. The example above uses `/home/deck/ludusavi-backup`. Make sure that folder exists, then use **Force Backup** for a game in SDH-Ludusavi so you have a first backup to share.
 
 ## 2. Install SyncThingy and keep it running
 

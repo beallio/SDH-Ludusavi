@@ -140,22 +140,25 @@ export type LudusaviLaunchCommand = {
 };
 ```
 
-Example Flatpak-based command:
+The host uses bundled-first discovery and a shared native config directory as
+specified in [the sync spec](sdh_ludusavi_sync.md#ludusavi-integration). Let
+`N` be that config directory and `exe` the absolute path
+`<DECKY_PLUGIN_DIR>/bin/ludusavi`. For the bundled runner:
 
 ```ts
 const ludusaviCommand: LudusaviLaunchCommand = {
-  commandPath: "/usr/bin/flatpak",
-  args: ["run", "com.github.mtkennerly.ludusavi"],
+  commandPath: exe,
+  args: ["--config", N],
   compatTool: "",
 };
 ```
 
-Example native binary command:
+If the bundled binary cannot run and the Flatpak is available:
 
 ```ts
 const ludusaviCommand: LudusaviLaunchCommand = {
-  commandPath: "/home/deck/.local/bin/ludusavi",
-  args: [],
+  commandPath: "flatpak",
+  args: ["run", "com.github.mtkennerly.ludusavi", "--config", N],
   compatTool: "",
 };
 ```

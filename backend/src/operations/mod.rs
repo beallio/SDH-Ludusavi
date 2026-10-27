@@ -1,7 +1,11 @@
 mod client;
+mod migration;
 mod process;
 
-use client::{LudusaviClient, deployment_location, find_flatpak, game_objects};
+pub(crate) use client::LudusaviPaths;
+#[cfg(test)]
+use client::Runner;
+use client::{LudusaviClient, find_flatpak, game_objects};
 pub(crate) use process::ProcessGroupCompletion;
 use process::ProcessManager;
 
@@ -247,6 +251,7 @@ impl OperationStatus {
 pub struct LudusaviOperations {
     cache_path: PathBuf,
     state_lock: Arc<StateLock>,
+    paths: LudusaviPaths,
     registry: Mutex<Registry>,
     history: Mutex<Value>,
     client: Mutex<Option<Arc<LudusaviClient>>>,
@@ -256,14 +261,16 @@ pub struct LudusaviOperations {
 }
 
 impl LudusaviOperations {
-    pub fn new(
+    pub(crate) fn new(
         cache_path: PathBuf,
         state_lock: Arc<StateLock>,
         cache: &Map<String, Value>,
         history: Value,
+        paths: LudusaviPaths,
     ) -> Self {
         Self {
             cache_path,
+            paths,
             state_lock,
             registry: Mutex::new(Registry::load(cache)),
             history: Mutex::new(history),
@@ -425,14 +432,8 @@ impl LudusaviOperations {
     }
 
     pub fn get_ludusavi_command(&self) -> Value {
-        match self.client() {
-            Ok(_) => json!({
-                "commandPath": "flatpak",
-                "args": ["run", FLATPAK_ID],
-                "compatTool": "",
-            }),
-            Err(_) => Value::Null,
-        }
+        self.client()
+            .map_or(Value::Null, |client| client.launcher_command())
     }
 
     pub fn get_ludusavi_logs(&self) -> Result<Value, String> {
@@ -472,10 +473,7 @@ impl LudusaviOperations {
         if force {
             let mut client = lock(&self.client);
             if let Some(existing) = client.as_ref()
-                && !existing.execution_failed.load(Ordering::Acquire)
-                && existing.deployment.is_some()
-                && find_flatpak().as_ref() == Some(&existing.flatpak)
-                && existing.deployment == deployment_location(&self.processes, &existing.flatpak)
+                && existing.reusable()
             {
                 *lock(&existing.config_path) = None;
             } else {
@@ -914,7 +912,11 @@ impl LudusaviOperations {
             return Ok(Arc::clone(client));
         }
         *client = None;
-        let created = Arc::new(LudusaviClient::new(Arc::clone(&self.processes))?);
+        let created = Arc::new(LudusaviClient::new(
+            Arc::clone(&self.processes),
+            &self.paths,
+            find_flatpak(),
+        )?);
         *client = Some(Arc::clone(&created));
         Ok(created)
     }
@@ -1275,9 +1277,12 @@ pub(crate) mod test_support {
             }
             *lock(&self.client) = Some(Arc::new(LudusaviClient {
                 processes: Arc::clone(&self.processes),
-                flatpak: PathBuf::new(),
+                runner: Runner::Flatpak {
+                    flatpak: PathBuf::new(),
+                    deployment: None,
+                },
+                native_config: self.paths.native_config.clone(),
                 config_path: Mutex::new(None),
-                deployment: None,
                 execution_failed: AtomicBool::new(false),
                 version: Mutex::new(None),
             }));
@@ -1287,9 +1292,12 @@ pub(crate) mod test_support {
         pub(crate) fn use_ludusavi_test_command(&self, flatpak: PathBuf) {
             *lock(&self.client) = Some(Arc::new(LudusaviClient {
                 processes: Arc::clone(&self.processes),
-                flatpak,
+                runner: Runner::Flatpak {
+                    flatpak,
+                    deployment: None,
+                },
+                native_config: self.paths.native_config.clone(),
                 config_path: Mutex::new(None),
-                deployment: None,
                 execution_failed: AtomicBool::new(false),
                 version: Mutex::new(None),
             }));
@@ -1326,7 +1334,7 @@ pub(crate) mod test_support {
         *lock(&processes.after_track_hook) = Some(Box::new(after_registration));
         processes.run_at_cancellable(
             Path::new("/bin/sleep"),
-            &["30".to_owned()],
+            &["30".into()],
             Duration::from_secs(30),
             false,
             Some(cancellation),
@@ -1338,8 +1346,9 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::{
-        Game, LudusaviClient, LudusaviOperations, Registry, fuzzy_match_allowed, lock,
-        normalize_game_name, normalize_installed_app_ids, sanitize_game_name, valid_history_entry,
+        Game, LudusaviClient, LudusaviOperations, LudusaviPaths, Registry, fuzzy_match_allowed,
+        lock, normalize_game_name, normalize_installed_app_ids, sanitize_game_name,
+        valid_history_entry,
     };
     use crate::persistence::{StateLock, read_object};
     use serde_json::json;
@@ -1486,6 +1495,7 @@ mod tests {
             Arc::clone(&state_lock),
             &serde_json::Map::new(),
             json!({"snapshot":"old"}),
+            LudusaviPaths::new(directory.path(), directory.path(), None),
         ));
         let entered = Arc::new(Barrier::new(2));
         let release = Arc::new(Barrier::new(2));
@@ -1520,6 +1530,7 @@ mod tests {
             Arc::new(StateLock::new(&directory.path().join("cache.json")).unwrap()),
             &serde_json::Map::new(),
             json!({}),
+            LudusaviPaths::new(directory.path(), directory.path(), None),
         );
         lock(&operations.registry).games.insert(
             "Hades".to_owned(),
@@ -1534,10 +1545,13 @@ mod tests {
         );
         *lock(&operations.client) = Some(Arc::new(LudusaviClient {
             processes: Arc::clone(&operations.processes),
-            flatpak: PathBuf::new(),
+            runner: super::Runner::Flatpak {
+                flatpak: PathBuf::new(),
+                deployment: None,
+            },
+            native_config: operations.paths.native_config.clone(),
             config_path: std::sync::Mutex::new(None),
             version: std::sync::Mutex::new(None),
-            deployment: None,
             execution_failed: AtomicBool::new(false),
         }));
         operations.cancel_processes();

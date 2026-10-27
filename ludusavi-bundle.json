@@ -1,0 +1,18 @@
+{
+  "version": "v0.31.0-beallio.1",
+  "source_repo": "https://github.com/beallio/ludusavi",
+  "commit": "f295e0996d708ceff74dec064bf7ff7487916d3f",
+  "archive": {
+    "url": "https://github.com/beallio/ludusavi/releases/download/v0.31.0-beallio.1/ludusavi-v0.31.0-beallio.1-linux.tar.gz",
+    "sha256": "6a758f440567e27be30c1e2785022c02df92f01527a8aa49976755a31b9dfcfe"
+  },
+  "license": {
+    "url": "https://github.com/beallio/ludusavi/releases/download/v0.31.0-beallio.1/ludusavi-v0.31.0-beallio.1-LICENSE.txt",
+    "sha256": "dba5a9bdc2280142b90a68fcd76134f48e6c765f14bfde7356b19b55370b27aa"
+  },
+  "third_party": {
+    "url": "https://github.com/beallio/ludusavi/releases/download/v0.31.0-beallio.1/ludusavi-v0.31.0-beallio.1-third-party.txt",
+    "sha256": "2af39935ebf6516127643404ff60803ed7b0d2a45e8713625b5559750503451c"
+  },
+  "binary_sha256": "a65b8ce759ba90e79e1011afba333d6244a3628575e1e89b85d77de74056ba98"
+}

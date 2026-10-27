@@ -9,9 +9,11 @@ import zipfile
 from pathlib import Path
 
 if __package__:
-    from .validate_plugin_zip import validate_static_elf
+    from .fetch_ludusavi import fetch_bundle
+    from .validate_plugin_zip import validate_ludusavi_elf, validate_static_elf
 else:
-    from validate_plugin_zip import validate_static_elf
+    from fetch_ludusavi import fetch_bundle
+    from validate_plugin_zip import validate_ludusavi_elf, validate_static_elf
 
 PROJECT_NAME = "SDH-Ludusavi"
 ZIP_FILENAME = "SDH-Ludusavi.zip"
@@ -157,6 +159,9 @@ def build_plugin_zip(
     versioned_output: bool = False,
     emit_release_metadata: bool = False,
     backend: Path | None = None,
+    ludusavi: Path | None = None,
+    ludusavi_license: Path | None = None,
+    ludusavi_third_party: Path | None = None,
 ) -> Path:
     if backend is None:
         target_dir = Path(os.environ.get("CARGO_TARGET_DIR", project_root / "backend" / "target"))
@@ -165,6 +170,16 @@ def build_plugin_zip(
         raise FileNotFoundError(f"Backend binary is missing: {backend}")
     backend_bytes = backend.read_bytes()
     validate_static_elf(backend_bytes)
+    if ludusavi is None and ludusavi_license is None and ludusavi_third_party is None:
+        ludusavi, ludusavi_license, ludusavi_third_party = fetch_bundle()
+    if ludusavi is None or ludusavi_license is None or ludusavi_third_party is None:
+        raise ValueError("All three Ludusavi bundle paths must be supplied together")
+    ludusavi_bytes = ludusavi.read_bytes()
+    validate_ludusavi_elf(ludusavi_bytes)
+    license_bytes = ludusavi_license.read_bytes()
+    third_party_bytes = ludusavi_third_party.read_bytes()
+    if not license_bytes or not third_party_bytes:
+        raise ValueError("Ludusavi license files must not be empty")
     ensure_required_files(project_root, is_release=is_release)
     base_version = validate_package_versions(project_root)
     if release_version:
@@ -190,11 +205,17 @@ def build_plugin_zip(
         temporary_zip_path.unlink()
 
     with zipfile.ZipFile(temporary_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        backend_info = zipfile.ZipInfo(f"{ARCHIVE_ROOT}/bin/backend")
-        backend_info.create_system = 3
-        backend_info.external_attr = 0o100755 << 16
-        backend_info.compress_type = zipfile.ZIP_DEFLATED
-        archive.writestr(backend_info, backend_bytes)
+        for name, data, mode in (
+            ("bin/backend", backend_bytes, 0o755),
+            ("bin/ludusavi", ludusavi_bytes, 0o755),
+            ("licenses/ludusavi/LICENSE", license_bytes, 0o644),
+            ("licenses/ludusavi/third-party.txt", third_party_bytes, 0o644),
+        ):
+            info = zipfile.ZipInfo(f"{ARCHIVE_ROOT}/{name}")
+            info.create_system = 3
+            info.external_attr = (0o100000 | mode) << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            archive.writestr(info, data)
         for plugin_path in plugin_paths:
             full_path = project_root / plugin_path
             archive_name = f"{ARCHIVE_ROOT}/{plugin_path}"
@@ -276,6 +297,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Static musl backend binary (defaults to the CARGO_TARGET_DIR release build).",
     )
+    parser.add_argument("--ludusavi", type=Path, help="Ludusavi ELF binary override.")
+    parser.add_argument("--ludusavi-license", type=Path, help="Ludusavi license override.")
+    parser.add_argument(
+        "--ludusavi-third-party", type=Path, help="Ludusavi third-party notices override."
+    )
     parser.add_argument(
         "--release",
         action="store_true",
@@ -319,6 +345,9 @@ def main() -> None:
         release_tag=args.release_tag,
         versioned_output=args.versioned_output,
         backend=args.backend,
+        ludusavi=args.ludusavi,
+        ludusavi_license=args.ludusavi_license,
+        ludusavi_third_party=args.ludusavi_third_party,
         emit_release_metadata=args.emit_release_metadata,
     )
     print(f"Created {zip_path}")
