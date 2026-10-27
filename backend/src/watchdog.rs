@@ -61,6 +61,8 @@ struct Inner {
     shutdown_deadline: Mutex<Option<Instant>>,
     #[cfg(test)]
     stop_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    #[cfg(test)]
+    iterations: std::sync::atomic::AtomicUsize,
 }
 
 trait ScopeAcquirer: Send + Sync {
@@ -93,19 +95,19 @@ impl GuardedOperationGuard {
         let _transition = lock(&transition);
         let mut state = lock(&self.inner.state);
         let Some(lease) = state.leases.get_mut(&self.pid) else {
-            self.inner.changed.notify_all();
+            self.inner.notify_changed();
             return None;
         };
         if lease.generation != self.generation
             || lease.guarded_generation != self.guarded_generation
         {
-            self.inner.changed.notify_all();
+            self.inner.notify_changed();
             return None;
         }
         lease.guarded_active = false;
         lease.cancellation = None;
         let release_requested = lease.release_requested;
-        self.inner.changed.notify_all();
+        self.inner.notify_changed();
         Some(release_requested)
     }
 
@@ -152,6 +154,8 @@ impl Default for ProcessWatchdog {
                 thread: Mutex::new(None),
                 #[cfg(test)]
                 stop_hook: Mutex::new(None),
+                #[cfg(test)]
+                iterations: std::sync::atomic::AtomicUsize::new(0),
                 shutdown_deadline: Mutex::new(None),
             }),
         }
@@ -262,7 +266,7 @@ impl ProcessWatchdog {
                 release_in_progress: false,
             },
         );
-        self.inner.changed.notify_all();
+        self.inner.notify_changed();
         log::info!("Launch gate acquired for root PID {pid}");
         json!({"status":"paused", "pid":pid, "lease_id":lease_id, "lease_ttl_seconds":LEASE_TTL.as_secs()})
     }
@@ -427,7 +431,7 @@ impl ProcessWatchdog {
         {
             current.release_in_progress = false;
         }
-        self.inner.changed.notify_all();
+        self.inner.notify_changed();
     }
 
     pub(crate) fn run_guarded<T>(
@@ -491,7 +495,7 @@ impl ProcessWatchdog {
             Some((*stored_deadline).map_or(deadline, |current| current.min(deadline)));
         drop(stored_deadline);
         self.inner.stopping.store(true, Ordering::Release);
-        self.inner.changed.notify_all();
+        self.inner.notify_changed();
         #[cfg(test)]
         if let Some(hook) = lock(&self.inner.stop_hook).clone() {
             hook();
@@ -609,7 +613,7 @@ impl ProcessWatchdog {
                     current.release_in_progress = false;
                 }
                 drop(state);
-                self.inner.changed.notify_all();
+                self.inner.notify_changed();
                 return gate_failure(
                     pid,
                     failure_reason
@@ -631,11 +635,22 @@ impl ProcessWatchdog {
         {
             state.leases.remove(&pid);
         }
+        drop(state);
+        self.inner.notify_changed();
         json!({"status":"resumed", "pid":pid})
     }
 }
 
 impl Inner {
+    fn notify_changed(&self) {
+        self.changed.notify_all();
+        if let Some(handle) = lock(&self.thread).as_ref()
+            && handle.thread().id() != thread::current().id()
+        {
+            handle.thread().unpark();
+        }
+    }
+
     fn transition_lock(&self, pid: i32) -> Arc<Mutex<()>> {
         Arc::clone(
             lock(&self.transition_locks)
@@ -664,14 +679,37 @@ impl Inner {
                 .name("sdh-ludusavi-watchdog".to_owned())
                 .spawn(move || {
                     while let Some(inner) = weak.upgrade() {
+                        #[cfg(test)]
+                        inner.iterations.fetch_add(1, Ordering::Relaxed);
                         let state = lock(&inner.state);
                         if inner.stopping.load(Ordering::Acquire) {
                             break;
                         }
-                        let (state, _) = inner
-                            .changed
-                            .wait_timeout(state, WATCHDOG_INTERVAL)
-                            .unwrap_or_else(|error| error.into_inner());
+                        let now = Instant::now();
+                        let delay = state
+                            .leases
+                            .values()
+                            .map(|lease| lease.deadline.min(lease.started + ABSOLUTE_RESUME))
+                            .min()
+                            .map(|deadline| {
+                                let remaining = deadline.saturating_duration_since(now);
+                                if remaining.is_zero() {
+                                    WATCHDOG_INTERVAL
+                                } else {
+                                    remaining.min(WATCHDOG_INTERVAL)
+                                }
+                            });
+                        drop(state);
+                        drop(inner);
+                        if let Some(delay) = delay {
+                            thread::park_timeout(delay);
+                        } else {
+                            thread::park();
+                        }
+                        let Some(inner) = weak.upgrade() else {
+                            break;
+                        };
+                        let state = lock(&inner.state);
                         if inner.stopping.load(Ordering::Acquire) {
                             break;
                         }
@@ -698,6 +736,18 @@ impl Inner {
                 })?,
         );
         Ok(())
+    }
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        if let Some(handle) = self
+            .thread
+            .get_mut()
+            .unwrap_or_else(|error| error.into_inner())
+        {
+            handle.thread().unpark();
+        }
     }
 }
 
@@ -838,7 +888,7 @@ mod tests {
     use tempfile::tempdir_in;
 
     use super::{
-        Inner, LEASE_TTL, PauseLease, ProcessWatchdog, ScopeAcquirer, State, lock,
+        ABSOLUTE_RESUME, Inner, LEASE_TTL, PauseLease, ProcessWatchdog, ScopeAcquirer, State, lock,
         thread_group_stopped,
     };
     use crate::{
@@ -867,9 +917,109 @@ mod tests {
                 thread: std::sync::Mutex::new(None),
                 #[cfg(test)]
                 stop_hook: std::sync::Mutex::new(None),
+                #[cfg(test)]
+                iterations: std::sync::atomic::AtomicUsize::new(0),
                 shutdown_deadline: std::sync::Mutex::new(None),
             }),
         }
+    }
+
+    #[test]
+    fn watchdog_blocks_while_no_leases_remain_and_stops_promptly() {
+        let watchdog = ProcessWatchdog::default();
+        watchdog.inner.ensure_watchdog().unwrap();
+        thread::sleep(Duration::from_millis(100));
+        let before = watchdog
+            .inner
+            .iterations
+            .load(std::sync::atomic::Ordering::Relaxed);
+        thread::sleep(Duration::from_millis(2200));
+        let after = watchdog
+            .inner
+            .iterations
+            .load(std::sync::atomic::Ordering::Relaxed);
+        assert!(watchdog.stop_until(std::time::Instant::now() + Duration::from_secs(1)));
+        assert_eq!(after - before, 0, "idle watchdog kept waking");
+    }
+
+    #[test]
+    fn idle_watchdog_wakes_for_earliest_lease_and_absolute_deadlines() {
+        let watchdog = ProcessWatchdog::default();
+        let (sent, received) = mpsc::channel();
+        watchdog
+            .inner
+            .controller
+            .set_thaw_hook(Arc::new(move |scope| {
+                sent.send(scope.root_pid).unwrap();
+                ScopeTransitionResult {
+                    success: true,
+                    reason: String::new(),
+                    disappeared: false,
+                }
+            }));
+        watchdog.inner.ensure_watchdog().unwrap();
+        thread::sleep(Duration::from_millis(50));
+        let now = std::time::Instant::now();
+        {
+            let mut state = lock(&watchdog.inner.state);
+            for (pid, started, deadline) in [
+                (42, now, now + Duration::from_millis(600)),
+                (
+                    43,
+                    now - ABSOLUTE_RESUME + Duration::from_millis(250),
+                    now + LEASE_TTL,
+                ),
+            ] {
+                state.leases.insert(
+                    pid,
+                    PauseLease {
+                        scope: Some(SteamAppScope {
+                            unit: format!("app-steam-app1-{pid}.scope"),
+                            cgroup_path: String::new(),
+                            root_pid: pid,
+                            device: 1,
+                            inode: pid as u64,
+                        }),
+                        recovery_scopes: Vec::new(),
+                        started,
+                        deadline,
+                        lease_id: pid.to_string(),
+                        identity: None,
+                        generation: pid as u64,
+                        guarded_generation: 0,
+                        guarded_active: false,
+                        cancellation: None,
+                        release_requested: false,
+                        release_in_progress: false,
+                    },
+                );
+            }
+        }
+        watchdog.inner.notify_changed();
+        assert!(received.recv_timeout(Duration::from_millis(100)).is_err());
+        assert_eq!(
+            received.recv_timeout(Duration::from_millis(650)).unwrap(),
+            43
+        );
+        assert_eq!(
+            received.recv_timeout(Duration::from_millis(650)).unwrap(),
+            42
+        );
+        assert!(watchdog.stop_until(std::time::Instant::now() + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn dropping_an_idle_watchdog_does_not_retain_its_state() {
+        let watchdog = ProcessWatchdog::default();
+        let weak = Arc::downgrade(&watchdog.inner);
+        watchdog.inner.ensure_watchdog().unwrap();
+        thread::sleep(Duration::from_millis(50));
+        drop(watchdog);
+        let deadline = std::time::Instant::now() + Duration::from_millis(500);
+        while weak.upgrade().is_some() && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(weak.upgrade().is_none());
     }
 
     #[test]
