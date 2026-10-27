@@ -289,6 +289,7 @@ impl LudusaviOperations {
             flatpak: PathBuf::new(),
             config_path: Mutex::new(None),
             deployment: None,
+            execution_failed: AtomicBool::new(false),
             version: Mutex::new(None),
         }));
         self.cancel_processes();
@@ -300,6 +301,7 @@ impl LudusaviOperations {
             flatpak,
             config_path: Mutex::new(None),
             deployment: None,
+            execution_failed: AtomicBool::new(false),
             version: Mutex::new(None),
         }));
     }
@@ -496,6 +498,7 @@ impl LudusaviOperations {
         if force {
             let mut client = lock(&self.client);
             if let Some(existing) = client.as_ref()
+                && !existing.execution_failed.load(Ordering::Acquire)
                 && existing.deployment.is_some()
                 && find_flatpak().as_ref() == Some(&existing.flatpak)
                 && existing.deployment == deployment_location(&self.processes, &existing.flatpak)
@@ -930,9 +933,12 @@ impl LudusaviOperations {
 
     fn client(&self) -> Result<Arc<LudusaviClient>, String> {
         let mut client = lock(&self.client);
-        if let Some(client) = client.as_ref() {
+        if let Some(client) = client.as_ref()
+            && !client.execution_failed.load(Ordering::Acquire)
+        {
             return Ok(Arc::clone(client));
         }
+        *client = None;
         let created = Arc::new(LudusaviClient::new(Arc::clone(&self.processes))?);
         *client = Some(Arc::clone(&created));
         Ok(created)
@@ -1031,6 +1037,7 @@ struct LudusaviClient {
     processes: Arc<ProcessManager>,
     flatpak: PathBuf,
     deployment: Option<PathBuf>,
+    execution_failed: AtomicBool,
     config_path: Mutex<Option<PathBuf>>,
     version: Mutex<Option<String>>,
 }
@@ -1054,6 +1061,7 @@ impl LudusaviClient {
             processes,
             flatpak,
             deployment,
+            execution_failed: AtomicBool::new(false),
             config_path: Mutex::new(None),
             version: Mutex::new(Some(version.trim().to_owned())),
         })
@@ -1090,6 +1098,7 @@ impl LudusaviClient {
                 cancellation,
                 completion,
             )
+            .inspect_err(|_| self.execution_failed.store(true, Ordering::Release))
             .and_then(|output| parse_ludusavi_json(&output))
     }
 
@@ -1100,6 +1109,7 @@ impl LudusaviClient {
             .collect();
         self.processes
             .run_at(&self.flatpak, &arguments, timeout, true)
+            .inspect_err(|_| self.execution_failed.store(true, Ordering::Release))
     }
 
     fn version(&self) -> Result<String, String> {
@@ -2130,7 +2140,7 @@ mod tests {
         io::Write,
         os::unix::fs::{PermissionsExt, symlink},
         path::{Path, PathBuf},
-        sync::{Arc, Barrier},
+        sync::{Arc, Barrier, atomic::AtomicBool},
         time::Duration,
     };
     use zip::{CompressionMethod, ZipWriter, write::FileOptions};
@@ -2466,6 +2476,7 @@ mod tests {
             config_path: std::sync::Mutex::new(None),
             version: std::sync::Mutex::new(None),
             deployment: None,
+            execution_failed: AtomicBool::new(false),
         }));
         operations.cancel_processes();
 
@@ -2586,6 +2597,7 @@ mod tests {
             config_path: std::sync::Mutex::new(None),
             version: std::sync::Mutex::new(None),
             deployment: None,
+            execution_failed: AtomicBool::new(false),
         };
 
         assert_eq!(client.logs().unwrap(), "original path");

@@ -1020,6 +1020,62 @@ def test_version_discovery_cache_tracks_the_active_flatpak_deployment() -> None:
 
 
 @pytest.mark.contract_operations
+@pytest.mark.parametrize("failed_operation", ["refresh", "text", "backup"])
+def test_ludusavi_execution_failure_invalidates_cached_availability(
+    failed_operation: str,
+) -> None:
+    harness = ContractHarness()
+    deployment = harness.root / "deployment"
+    deployment.mkdir()
+    active = harness.root / "active"
+    active.symlink_to(deployment, target_is_directory=True)
+    harness.env["SDH_CONTRACT_FLATPAK_LOCATION"] = str(active)
+    harness.start()
+    try:
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
+        assert rpc(harness, "get_ludusavi_command")["commandPath"] == "flatpak"
+        if failed_operation != "text":
+            assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
+
+        command = {
+            "refresh": "backup_preview",
+            "text": "config_path",
+            "backup": "backup",
+        }[failed_operation]
+        harness.set_scenario(
+            {
+                "flatpak": {
+                    "responses": {
+                        command: {"exit_code": 23, "stderr": "Flatpak runtime unavailable"},
+                        "version": {"exit_code": 23, "stderr": "Flatpak runtime unavailable"},
+                    }
+                }
+            }
+        )
+        if failed_operation == "refresh":
+            assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"]
+        elif failed_operation == "text":
+            assert rpc(harness, "get_ludusavi_logs")["status"] == "failed"
+        else:
+            assert rpc(harness, "force_backup", GAME)["status"] == "failed"
+
+        before = len(harness.fake_processes())
+        assert rpc(harness, "get_versions")["status"] == "failed"
+        assert rpc(harness, "get_ludusavi_command") is None
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"]
+        commands = [record["argv"][2:] for record in harness.fake_processes()[before:]]
+        assert commands.count(["--version"]) >= 3, commands
+        assert all(command == ["--version"] for command in commands), commands
+
+        harness.set_scenario({})
+        assert rpc(harness, "get_versions")["ludusavi"] == "0.31.0"
+        assert rpc(harness, "get_ludusavi_command")["commandPath"] == "flatpak"
+        assert rpc(harness, "refresh_games", True, APP_ID)["dependency_error"] is None
+    finally:
+        harness.close()
+
+
+@pytest.mark.contract_operations
 def test_version_discovery_rechecks_when_deployment_cannot_be_identified(
     backend: ContractHarness,
 ) -> None:

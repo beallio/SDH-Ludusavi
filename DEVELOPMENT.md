@@ -167,6 +167,9 @@ compiler clearly. An explicitly configured `CC_x86_64_unknown_linux_musl` or
 ./run.sh uv run --frozen python scripts/validate_plugin_zip.py out/SDH-Ludusavi.zip
 ```
 
+The release profile keeps backend code optimized for speed, optimizes dependency code
+for size, and retains `panic = "unwind"` for SDK error replies and cleanup.
+
 The packager defaults to `$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/backend`;
 use `--backend PATH` to select another static x86-64 executable. It rejects missing or
 dynamically linked inputs. The resulting `out/SDH-Ludusavi.zip` includes the executable
@@ -268,6 +271,13 @@ The Rust backend invokes the Ludusavi Flatpak CLI directly. It supplies Deck-com
 environment overrides, including `XDG_RUNTIME_DIR` when Decky omits it, and clears
 `LD_LIBRARY_PATH` for Ludusavi subprocesses without changing the backend environment.
 
+The backend caches the successful Ludusavi version check in memory and reuses it on
+forced refresh only when `flatpak info --show-location` resolves to the same canonical
+deployment. A failed Ludusavi command or an unavailable or changed deployment discards
+the cached client so the next request rechecks availability with `--version`.
+The cache assumes Flatpak deployments are immutable OSTree checkouts addressed by
+commit, with a different canonical path for a different deployed commit.
+
 ### Ludusavi Launcher Shortcut
 
 When launching the Ludusavi GUI, the plugin uses a visible non-Steam shortcut named `"Ludusavi"`. The plugin searches Steam's app list by that exact name before using the cached AppID. If a matching shortcut already exists, the plugin adopts the matching shortcut and refreshes its cached AppID instead of creating a duplicate.
@@ -338,6 +348,9 @@ absolute watchdog ceiling, and plugin shutdown first request cancellation for th
 operation; the scope is thawed only after its cancellation callback returns and its worker
 confirms completion. If process-group termination or reaping cannot be confirmed, the gate
 remains held and release is reported as failed rather than risking concurrent save writes.
+
+The watchdog blocks until notified when no leases exist; with leases, it waits for the
+earliest renewal expiry or absolute ceiling, capped at one second.
 
 Every start-side mutation — the normal start restore and both conflict choices including
 `keep_local` — requires the exact backend-owned `(pid, lease_id)` pair. After the coordinator
