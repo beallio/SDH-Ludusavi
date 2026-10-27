@@ -46,6 +46,8 @@ if ! ./run.sh uv run python scripts/version_guard.py check-base "$BASE_VERSION";
 fi
 
 echo "Requesting dev release for base version: $BASE_VERSION at commit: $FULL_SHA"
+# Use dev's workflow definition: the default branch's copy can lag behind dev's build steps.
 gh workflow run dev-release.yml \
+  --ref dev \
   -f commit="$FULL_SHA" \
   -f base_version="$BASE_VERSION"

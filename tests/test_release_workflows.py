@@ -171,6 +171,8 @@ def test_request_dev_release_calls_gh_workflow_run(tmp_path: Path) -> None:
     assert "workflow run dev-release.yml" in calls
     assert "-f commit=1234567890abcdef1234567890abcdef12345678" in calls
     assert "-f base_version=0.2.1" in calls
+    # The default branch's workflow can lag behind dev, so dispatch dev's definition.
+    assert "--ref dev" in calls
 
 
 def test_request_dev_release_with_explicit_commit(tmp_path: Path) -> None:
