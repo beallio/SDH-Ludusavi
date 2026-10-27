@@ -110,8 +110,11 @@ The lifecycle tier exercises the preview-based restore decision, strict 120-seco
 timestamp margin, exact lease verification, pre-scope stop-only gate, cgroup freeze/thaw,
 lease expiry and unload ordering.
 The harness isolates Decky, HOME and XDG state and refuses to start unless its `flatpak` and
-`systemctl` fakes resolve first on the backend's `PATH`; it never invokes host Ludusavi or
-`systemctl`. The optional real tier uses Ludusavi v0.31.0
+`systemctl` fakes resolve first on the backend's `PATH`; by default it does not invoke host
+Ludusavi or `systemctl`. Gate fixtures use real user-systemd transient units with a unique ownership
+marker, invocation identity, and ten-minute runtime limit. They refuse a pre-existing unit and
+register independent cleanup before launch, including when the `systemd-run` client exits early.
+The optional real tier uses Ludusavi v0.31.0
 (`ludusavi-v0.31.0-linux.tar.gz`, SHA-256
 `7322ff45d41eae7ae064a80d8c9ecccc5b8fb6fc090a603a66369cd4b054068d`):
 

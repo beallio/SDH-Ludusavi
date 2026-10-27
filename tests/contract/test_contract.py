@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import fcntl
 import json
@@ -18,10 +18,11 @@ import threading
 import time
 from typing import Any, Iterator
 from urllib.parse import parse_qs, urlsplit
+from uuid import uuid4
 
 import pytest
 
-from harness import ContractHarness, FAKE_BIN, REPO_ROOT, native_backend_path
+from harness import ContractHarness, REPO_ROOT, native_backend_path
 
 
 GAME = "Contract Fixture Game"
@@ -187,19 +188,149 @@ def _assert_history_entry(
 
 
 @dataclass
+class _OwnedUnit:
+    unit: str
+    description: str
+    process: subprocess.Popen[bytes] | None = None
+    invocation_id: str | None = None
+    cleaned: bool = False
+
+
+def _unit_state(unit: str) -> dict[str, str]:
+    result = subprocess.run(
+        [
+            "systemctl",
+            "--user",
+            "show",
+            unit,
+            "--property=LoadState",
+            "--property=Description",
+            "--property=InvocationID",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=True,
+    )
+    values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    if "LoadState" not in values:
+        raise RuntimeError(f"Cannot identify transient unit {unit}")
+    return values
+
+
+def _is_owned_unit(owner: _OwnedUnit) -> bool:
+    state = _unit_state(owner.unit)
+    if state["LoadState"] == "not-found" or state.get("Description") != owner.description:
+        return False
+    invocation = state.get("InvocationID", "")
+    if not invocation or (owner.invocation_id is not None and invocation != owner.invocation_id):
+        return False
+    if owner.invocation_id is None:
+        owner.invocation_id = invocation
+    return True
+
+
+def _owned_unit_gone(owner: _OwnedUnit) -> bool:
+    state = _unit_state(owner.unit)
+    invocation = state.get("InvocationID", "")
+    return (
+        state["LoadState"] == "not-found"
+        or state.get("Description") != owner.description
+        or bool(owner.invocation_id and invocation and invocation != owner.invocation_id)
+    )
+
+
+def _stop_owned_unit(owner: _OwnedUnit) -> None:
+    if owner.cleaned or owner.process is None:
+        return
+    process = owner.process
+    try:
+        if owner.invocation_id is None and not _is_owned_unit(owner):
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and not _is_owned_unit(owner):
+                time.sleep(0.02)
+        if _is_owned_unit(owner):
+            try:
+                subprocess.run(
+                    ["systemctl", "--user", "thaw", owner.unit],
+                    capture_output=True,
+                    timeout=3,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                pass
+            if _is_owned_unit(owner):
+                try:
+                    stopped = (
+                        subprocess.run(
+                            ["systemctl", "--user", "stop", owner.unit],
+                            capture_output=True,
+                            timeout=8,
+                            check=False,
+                        ).returncode
+                        == 0
+                    )
+                except subprocess.TimeoutExpired:
+                    stopped = False
+                if not stopped and _is_owned_unit(owner):
+                    subprocess.run(
+                        ["systemctl", "--user", "--signal=SIGKILL", "kill", owner.unit],
+                        capture_output=True,
+                        timeout=3,
+                        check=False,
+                    )
+                    if _is_owned_unit(owner):
+                        subprocess.run(
+                            ["systemctl", "--user", "stop", owner.unit],
+                            capture_output=True,
+                            timeout=8,
+                            check=False,
+                        )
+        _wait_for(lambda: _owned_unit_gone(owner), 5, f"owned unit {owner.unit} survived cleanup")
+        owner.cleaned = True
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+        else:
+            process.wait(timeout=2)
+
+
+@dataclass
 class _Child:
     pid: int
     process: subprocess.Popen[bytes]
     unit: str
     tick_file: Path
+    owner: _OwnedUnit
 
 
 def _start_systemd_child(
-    root: Path, unit: str, systemd_args: list[str], *, thread_count: int = 0
+    root: Path,
+    unit: str,
+    systemd_args: list[str],
+    request: pytest.FixtureRequest,
+    *,
+    thread_count: int = 0,
 ) -> _Child:
     systemd_run = shutil.which("systemd-run")
     if systemd_run is None:
         pytest.fail("systemd-run is required to create an isolated child")
+    if _unit_state(unit)["LoadState"] != "not-found":
+        pytest.fail(f"{unit} is already loaded; refusing to replace it")
+    owner = _OwnedUnit(unit, f"sdh-contract-{uuid4().hex}")
+    request.addfinalizer(lambda: _stop_owned_unit(owner))
     pid_file = root / f"{unit}.pid"
     tick_file = root / f"{unit}.tick"
     code = (
@@ -221,6 +352,12 @@ def _start_systemd_child(
         [
             systemd_run,
             *systemd_args,
+            f"--unit={unit}",
+            f"--description={owner.description}",
+            "--property=RuntimeMaxSec=600s",
+            "--property=TimeoutStopSec=3s",
+            "--property=SendSIGKILL=yes",
+            "--collect",
             "--",
             sys.executable,
             "-c",
@@ -233,6 +370,7 @@ def _start_systemd_child(
         stderr=subprocess.PIPE,
         start_new_session=True,
     )
+    owner.process = process
     assert process.stderr is not None
 
     def read_pid() -> int | None:
@@ -244,6 +382,20 @@ def _start_systemd_child(
             return None
 
     try:
+
+        def capture_unit() -> bool:
+            state = _unit_state(unit)
+            if state["LoadState"] == "not-found":
+                return False
+            if state.get("Description") != owner.description:
+                raise RuntimeError(f"{unit} is not the owned transient unit")
+            invocation = state.get("InvocationID", "")
+            if not invocation:
+                return False
+            owner.invocation_id = invocation
+            return True
+
+        _wait_for(capture_unit, 10, f"systemd-run did not register owned unit {unit}")
         pid = _wait_for(
             read_pid,
             10,
@@ -251,19 +403,10 @@ def _start_systemd_child(
             f"{process.stderr.read().decode(errors='replace') if process.poll() is not None else ''}",
         )
         _wait_for(lambda: tick_file.exists(), 5, "systemd child heartbeat did not start")
-        return _Child(pid, process, unit, tick_file)
+        return _Child(pid, process, unit, tick_file, owner)
     except BaseException:
         try:
-            pid = read_pid()
-            if pid is not None:
-                _stop_child(_Child(pid, process, unit, tick_file))
-            elif process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=2)
+            _stop_owned_unit(owner)
         except BaseException as cleanup_error:
             raise RuntimeError(
                 f"Could not clean up failed systemd fixture {unit}"
@@ -271,48 +414,29 @@ def _start_systemd_child(
         raise
 
 
-def _start_scoped_child(root: Path) -> _Child:
+def _start_scoped_child(root: Path, request: pytest.FixtureRequest) -> _Child:
     unit = f"app-steam-app{APP_ID}-{time.time_ns() % 1_000_000_000}.scope"
     return _start_systemd_child(
         root,
         unit,
-        ["--user", "--scope", "--slice=app.slice", f"--unit={unit}", "--quiet"],
+        ["--user", "--scope", "--slice=app.slice", "--quiet"],
+        request,
     )
 
 
-def _start_prescope_child(root: Path, *, thread_count: int = 0) -> _Child:
-    systemctl = shutil.which("systemctl")
-    if systemctl is None:
-        pytest.fail("systemctl is required to verify the exact pre-scope path")
-    existing = subprocess.run(
-        [
-            systemctl,
-            "--user",
-            "show",
-            "steam-launcher.service",
-            "--property=LoadState",
-            "--value",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    if existing.returncode != 0:
-        pytest.fail(f"cannot verify pre-scope unit availability: {existing.stderr.strip()}")
-    if existing.stdout.strip() not in {"", "not-found"}:
-        pytest.fail("steam-launcher.service is already loaded; refusing to replace it")
+def _start_prescope_child(
+    root: Path, request: pytest.FixtureRequest, *, thread_count: int = 0
+) -> _Child:
     return _start_systemd_child(
         root,
         "steam-launcher.service",
         [
             "--user",
-            "--unit=steam-launcher.service",
             "--slice=app.slice",
             "--wait",
-            "--collect",
             "--quiet",
         ],
+        request,
         thread_count=thread_count,
     )
 
@@ -342,32 +466,15 @@ def _tick_count(child: _Child) -> int:
     return int(child.tick_file.read_text(encoding="ascii"))
 
 
-def _force_scope_thaw(harness: ContractHarness, child: _Child) -> None:
-    subprocess.run(
-        [str(FAKE_BIN / "systemctl"), "--user", "thaw", child.unit],
-        env=harness.env,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-
-
 def _stop_child(child: _Child) -> None:
-    if child.process.poll() is None:
-        for signum in (signal.SIGCONT, signal.SIGTERM):
-            try:
-                os.kill(child.pid, signum)
-            except ProcessLookupError:
-                pass
-        try:
-            child.process.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            try:
-                os.kill(child.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            child.process.wait(timeout=2)
+    _stop_owned_unit(child.owner)
+
+
+def _stop_children(*children: _Child | None) -> None:
+    with ExitStack() as cleanup:
+        for child in children:
+            if child is not None:
+                cleanup.callback(_stop_child, child)
 
 
 class _SyncthingServer:
@@ -1503,7 +1610,9 @@ def test_main_reconciles_pending_install_with_loaded_version() -> None:
 
 @pytest.mark.contract_lifecycle
 @pytest.mark.contract_gate
-def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHarness) -> None:
+def test_lifecycle_newer_save_guard_and_launch_gate_contract(
+    backend: ContractHarness, request: pytest.FixtureRequest
+) -> None:
     (backend.root / "save.dat").write_bytes(b"newer local save\n")
     scenario_backups = _load_fixture("backups.json")
     for snapshot in scenario_backups["games"][GAME]["backups"]:
@@ -1548,7 +1657,7 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHa
     assert rpc(backend, "backup_game_on_exit", GAME, APP_ID)["status"] == "backed_up"
     _assert_command_after(backend, before_exit_backup, "backup")
     _assert_history_entry(backend, "last_backup", "backup", "auto_exit", "backed_up")
-    child = _start_scoped_child(backend.root)
+    child = _start_scoped_child(backend.root, request)
     backend.set_scenario(
         {
             "flatpak": {"responses": {"backups": {"json": scenario_backups}}},
@@ -1628,7 +1737,6 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHa
             "resumed child did not make progress",
         )
     finally:
-        _force_scope_thaw(backend, child)
         _stop_child(child)
     calls = backend.systemctl_calls()
     assert any(call["argv"] == ["--user", "freeze", child.unit] for call in calls)
@@ -1647,8 +1755,9 @@ def test_lifecycle_newer_save_guard_and_launch_gate_contract(backend: ContractHa
 @pytest.mark.contract_gate
 def test_prescope_gate_stops_every_thread_in_real_multithreaded_child(
     backend: ContractHarness,
+    request: pytest.FixtureRequest,
 ) -> None:
-    child = _start_prescope_child(backend.root, thread_count=4)
+    child = _start_prescope_child(backend.root, request, thread_count=4)
     try:
         threads = [int(path.name) for path in Path(f"/proc/{child.pid}/task").iterdir()]
         assert len(threads) >= 5
@@ -1668,10 +1777,12 @@ def test_prescope_gate_stops_every_thread_in_real_multithreaded_child(
 
 
 @pytest.mark.contract_gate
-def test_pause_fails_closed_when_scope_discovery_fails(backend: ContractHarness) -> None:
+def test_pause_fails_closed_when_scope_discovery_fails(
+    backend: ContractHarness, request: pytest.FixtureRequest
+) -> None:
     unit = f"non-steam-{time.time_ns() % 1_000_000_000}.scope"
     child = _start_systemd_child(
-        backend.root, unit, ["--user", "--scope", "--slice=app.slice", f"--unit={unit}", "--quiet"]
+        backend.root, unit, ["--user", "--scope", "--slice=app.slice", "--quiet"], request
     )
     try:
         paused = rpc(backend, "pause_game_process", child.pid)
@@ -1690,8 +1801,9 @@ def test_pause_fails_closed_when_scope_discovery_fails(backend: ContractHarness)
 @pytest.mark.contract_gate
 def test_partial_freeze_failure_thaws_and_pause_fails_closed(
     backend: ContractHarness,
+    request: pytest.FixtureRequest,
 ) -> None:
-    child = _start_scoped_child(backend.root)
+    child = _start_scoped_child(backend.root, request)
     backend.set_scenario(
         {
             "systemctl": {
@@ -1722,7 +1834,21 @@ def test_partial_freeze_failure_thaws_and_pause_fails_closed(
             == "resumed"
         )
     finally:
-        _force_scope_thaw(backend, child)
+        _stop_child(child)
+
+
+@pytest.mark.contract_gate
+def test_fixture_cleanup_thaws_a_frozen_owned_scope(
+    backend: ContractHarness, request: pytest.FixtureRequest
+) -> None:
+    child = _start_scoped_child(backend.root, request)
+    backend.set_scenario({"systemctl": {"simulate_scope_freeze": True, "scope_unit": child.unit}})
+    try:
+        assert rpc(backend, "pause_game_process", child.pid)["status"] == "paused"
+        assert _scope_frozen(child)
+        _stop_child(child)
+        assert _unit_state(child.unit)["LoadState"] == "not-found"
+    finally:
         _stop_child(child)
 
 
@@ -1957,11 +2083,13 @@ def test_config_saved_refreshes_folder_before_publishing_events(backend: Contrac
 @pytest.mark.contract_operations
 @pytest.mark.contract_lifecycle
 @pytest.mark.contract_gate
-def test_hanging_ludusavi_exits_and_reaps_process_group(backend: ContractHarness) -> None:
-    child = _start_prescope_child(backend.root)
+def test_hanging_ludusavi_exits_and_reaps_process_group(
+    backend: ContractHarness, request: pytest.FixtureRequest
+) -> None:
+    child = _start_prescope_child(backend.root, request)
     scoped_child: _Child | None = None
     try:
-        scoped_child = _start_scoped_child(backend.root)
+        scoped_child = _start_scoped_child(backend.root, request)
         backend.set_scenario(
             {
                 "flatpak": {
@@ -2071,10 +2199,7 @@ def test_hanging_ludusavi_exits_and_reaps_process_group(backend: ContractHarness
             f"fake Ludusavi process group {pgid} survived the operation timeout",
         )
     finally:
-        if scoped_child is not None:
-            _force_scope_thaw(backend, scoped_child)
-            _stop_child(scoped_child)
-        _stop_child(child)
+        _stop_children(child, scoped_child)
 
 
 def _process_group_exists(pgid: int) -> bool:
@@ -2091,7 +2216,9 @@ def _process_group_exists(pgid: int) -> bool:
 @pytest.mark.contract_lifecycle
 @pytest.mark.contract_gate
 @pytest.mark.contract_syncthing
-def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
+def test_unload_kills_restore_group_before_releasing_paused_child(
+    request: pytest.FixtureRequest,
+) -> None:
     scenario: dict[str, Any] = {
         "flatpak": {
             "responses": {
@@ -2104,18 +2231,20 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
         }
     }
     harness = ContractHarness(scenario=scenario)
+    request.addfinalizer(harness.close)
     server = _SyncthingServer(harness.backup_root, hold_watch_events=True).start()
+    request.addfinalizer(server.close)
     harness.env.update(
         {"SYNCTHING_API_KEY": API_KEY, "SYNCTHING_API_URL": f"http://127.0.0.1:{server.port}"}
     )
     harness.start()
-    child = _start_prescope_child(harness.root)
+    child = _start_prescope_child(harness.root, request)
     operation_pool = ThreadPoolExecutor(max_workers=1)
     shutdown_pool = ThreadPoolExecutor(max_workers=1)
     stop_future: Future[None] | None = None
     scoped_child: _Child | None = None
     try:
-        scoped_child = _start_scoped_child(harness.root)
+        scoped_child = _start_scoped_child(harness.root, request)
         scenario["systemctl"] = {
             "simulate_scope_freeze": True,
             "scope_unit": scoped_child.unit,
@@ -2218,17 +2347,13 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
         with pytest.raises(ConnectionError, match="backend is shutting down"):
             operation.result(timeout=1)
     finally:
-        server.release_watch_event.set()
-        if scoped_child is not None:
-            _force_scope_thaw(harness, scoped_child)
-            _stop_child(scoped_child)
-        _stop_child(child)
-        try:
-            harness.close()
-        finally:
-            operation_pool.shutdown(wait=True, cancel_futures=True)
-            shutdown_pool.shutdown(wait=True, cancel_futures=True)
-            server.close()
+        with ExitStack() as cleanup:
+            cleanup.callback(server.close)
+            cleanup.callback(shutdown_pool.shutdown, wait=True, cancel_futures=True)
+            cleanup.callback(operation_pool.shutdown, wait=True, cancel_futures=True)
+            cleanup.callback(harness.close)
+            cleanup.callback(_stop_children, child, scoped_child)
+            cleanup.callback(server.release_watch_event.set)
 
 
 @pytest.mark.contract_operations
@@ -2236,6 +2361,7 @@ def test_unload_kills_restore_group_before_releasing_paused_child() -> None:
 @pytest.mark.real_ludusavi
 def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
     monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
     binary = os.environ.get("SDH_CONTRACT_LUDUSAVI_BIN")
     if not binary:
@@ -2308,7 +2434,7 @@ def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
         )
         check = rpc(harness, "check_game_start", GAME, APP_ID)
         if check["status"] == "needed":
-            child = _start_scoped_child(harness.root)
+            child = _start_scoped_child(harness.root, request)
             harness.set_scenario(
                 {
                     "flatpak": {"mode": "real"},
@@ -2333,7 +2459,6 @@ def test_real_ludusavi_backup_restore_versions_and_newer_local_guard(
                     == "restored"
                 )
             finally:
-                _force_scope_thaw(harness, child)
                 _stop_child(child)
         else:
             assert check["status"] == "conflict"
