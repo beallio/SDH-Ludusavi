@@ -691,14 +691,7 @@ impl Inner {
                             .values()
                             .map(|lease| lease.deadline.min(lease.started + ABSOLUTE_RESUME))
                             .min()
-                            .map(|deadline| {
-                                let remaining = deadline.saturating_duration_since(now);
-                                if remaining.is_zero() {
-                                    WATCHDOG_INTERVAL
-                                } else {
-                                    remaining.min(WATCHDOG_INTERVAL)
-                                }
-                            });
+                            .map(|deadline| deadline_wait(deadline, now));
                         drop(state);
                         drop(inner);
                         if let Some(delay) = delay {
@@ -748,6 +741,17 @@ impl Drop for Inner {
         {
             handle.thread().unpark();
         }
+    }
+}
+
+fn deadline_wait(deadline: Instant, now: Instant) -> Duration {
+    if deadline < now {
+        WATCHDOG_INTERVAL
+    } else {
+        deadline
+            .duration_since(now)
+            .max(Duration::from_micros(1))
+            .min(WATCHDOG_INTERVAL)
     }
 }
 
@@ -925,6 +929,24 @@ mod tests {
     }
 
     #[test]
+    fn watchdog_wait_handles_exact_deadlines_and_caps_retries() {
+        let now = std::time::Instant::now();
+        assert_eq!(super::deadline_wait(now, now), Duration::from_micros(1));
+        assert_eq!(
+            super::deadline_wait(now - Duration::from_nanos(1), now),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            super::deadline_wait(now + Duration::from_millis(250), now),
+            Duration::from_millis(250)
+        );
+        assert_eq!(
+            super::deadline_wait(now + Duration::from_secs(2), now),
+            Duration::from_secs(1)
+        );
+    }
+
+    #[test]
     fn watchdog_blocks_while_no_leases_remain_and_stops_promptly() {
         let watchdog = ProcessWatchdog::default();
         watchdog.inner.ensure_watchdog().unwrap();
@@ -939,7 +961,8 @@ mod tests {
             .iterations
             .load(std::sync::atomic::Ordering::Relaxed);
         assert!(watchdog.stop_until(std::time::Instant::now() + Duration::from_secs(1)));
-        assert_eq!(after - before, 0, "idle watchdog kept waking");
+        // Thread parking may return spuriously.
+        assert!(after - before <= 1, "idle watchdog kept waking");
     }
 
     #[test]
