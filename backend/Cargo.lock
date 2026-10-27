@@ -830,7 +830,6 @@ dependencies = [
  "log",
  "quick-xml",
  "reqwest",
- "rustls",
  "serde",
  "serde_json",
  "sha2",

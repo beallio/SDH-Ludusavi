@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -1939,6 +1940,65 @@ def test_fixture_cleanup_thaws_a_frozen_owned_scope(
         assert _unit_state(child.unit)["LoadState"] == "not-found"
     finally:
         _stop_child(child)
+
+
+@pytest.mark.contract_syncthing
+@pytest.mark.parametrize("version", [ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3])
+def test_syncthing_watch_supports_local_https(
+    backend: ContractHarness, version: ssl.TLSVersion
+) -> None:
+    openssl = shutil.which("openssl")
+    if openssl is None:
+        pytest.skip("openssl is required to generate the local TLS fixture")
+    certificate = backend.root / "syncthing-cert.pem"
+    key = backend.root / "syncthing-key.pem"
+    subprocess.run(
+        [
+            openssl,
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=localhost",
+            "-keyout",
+            str(key),
+            "-out",
+            str(certificate),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=10,
+    )
+    server = _SyncthingServer(backend.backup_root)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = version
+    context.maximum_version = version
+    context.load_cert_chain(certificate, key)
+    server.server.socket = context.wrap_socket(server.server.socket, server_side=True)
+    server.start()
+    try:
+        config = backend.xdg_state / "syncthing" / "config.xml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(
+            '<configuration><gui enabled="true" tls="true">'
+            f"<address>127.0.0.1:{server.port}</address><apikey>{API_KEY}</apikey>"
+            "</gui></configuration>",
+            encoding="utf-8",
+        )
+        started = rpc(backend, "start_syncthing_activity_watch", "pre_game", GAME, APP_ID)
+        assert started["status"] == "watching", started
+        assert (
+            rpc(backend, "stop_syncthing_activity_watch", started["watch_id"])["status"]
+            == "stopped"
+        )
+        assert any(path.startswith("/rest/system/status") for path in server.requests)
+    finally:
+        server.close()
 
 
 @pytest.mark.contract_syncthing
