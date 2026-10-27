@@ -192,7 +192,6 @@ fn parse_syncthing_config(path: &Path) -> Option<SyncthingConfig> {
 
 fn parse_xml_config(text: &str) -> Option<SyncthingConfig> {
     let mut reader = Reader::from_str(text);
-    reader.config_mut().trim_text(true);
     let mut in_gui = false;
     let mut tls = false;
     let mut field = None;
@@ -223,17 +222,31 @@ fn parse_xml_config(text: &str) -> Option<SyncthingConfig> {
                 let decoded = value.decode().ok()?;
                 let decoded = quick_xml::escape::unescape(&decoded).ok()?;
                 match field {
-                    Some(0) => key.push_str(decoded.trim()),
-                    Some(1) => address.push_str(decoded.trim()),
+                    Some(0) => key.push_str(&decoded),
+                    Some(1) => address.push_str(&decoded),
                     _ => (),
                 }
             }
             Ok(Event::CData(value)) if in_gui => {
                 let decoded = value.decode().ok()?;
                 match field {
-                    Some(0) => key.push_str(decoded.trim()),
-                    Some(1) => address.push_str(decoded.trim()),
+                    Some(0) => key.push_str(&decoded),
+                    Some(1) => address.push_str(&decoded),
                     _ => (),
+                }
+            }
+            Ok(Event::GeneralRef(value)) if in_gui => {
+                let target = match field {
+                    Some(0) => &mut key,
+                    Some(1) => &mut address,
+                    _ => continue,
+                };
+                if let Some(character) = value.resolve_char_ref().ok()? {
+                    target.push(character);
+                } else {
+                    target.push_str(quick_xml::escape::resolve_xml_entity(
+                        &value.decode().ok()?,
+                    )?);
                 }
             }
             Ok(Event::End(element)) if in_gui => match element.local_name().as_ref() {
@@ -1688,6 +1701,14 @@ mod tests {
                 "{host}"
             );
         }
+    }
+
+    #[test]
+    fn xml_credentials_decode_character_and_predefined_references() {
+        let input = r#"<configuration><gui><address>127.0.0.1:83&#56;&#x34;/a&amp;b</address><apikey> A&#99;&#x63;&amp;&lt;&gt;&apos;&quot; Z </apikey></gui></configuration>"#;
+        let parsed = parse_xml_config(input).unwrap();
+        assert_eq!(parsed.api_key, "Acc&<>'\" Z");
+        assert_eq!(parsed.api_url.as_deref(), Some("http://127.0.0.1:8384/a&b"));
     }
 
     #[test]

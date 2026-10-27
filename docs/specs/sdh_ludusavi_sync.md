@@ -70,6 +70,8 @@ cached status.
 To track synchronization of backup data to other devices, the plugin monitors Syncthing activity in the background.
 
 - **Non-blocking Behavior**: Monitoring is advisory and display-only. Syncthing connection/API issues or slow sync will never block game launch or game exit.
+- **Credentials**: The API key and GUI address read from Syncthing's XML configuration
+  resolve numeric character references and predefined XML entities before use.
 - **Path Resolution**: The watched folder is resolved dynamically by matching Syncthing configured folders against Ludusavi's backup path.
 - **Conflict Handling**: The monitor is stopped when a conflict is detected and is restarted only after a resolution operation is chosen, preventing the conflict screen from being overridden by temporary Syncthing statuses.
 - **Peer Connectivity Gate**: Peer connectivity, not internet connectivity, controls monitoring. Before a watch starts, the backend intersects the matched folder's configured remote devices with the currently connected devices from `/rest/system/connections`. A folder with no configured remote devices is classified `folder_not_shared` (rendered as `LOCAL BACKUP SAVED - PATH NOT SHARED`); configured devices with none connected is classified `no_connected_peers`. Connected devices that do not share the matched folder do not count.
