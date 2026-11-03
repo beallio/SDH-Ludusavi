@@ -8,11 +8,11 @@ and the Decky fork that can start native plugins directly. Existing settings and
 backup history stay in place when you update; your Ludusavi backups are not moved.
 This version has not yet been tested as an installed plugin on a real Deck.
 
-![SDH-Ludusavi in Gaming Mode](assets/demo.webp?cacheBuster=23)
+![SDH-Ludusavi in Gaming Mode](assets/demo.webp?cacheBuster=24)
 
 You can see the latest save result on supported non-Steam game pages without opening the Decky menu. After automatic work when you quit a game, that game's page shows the full save message, such as local backup, upload, or upload-warning progress. Readable messages stay in the normal row even when a transparent footer area overlaps it. If a theme or the footer actually covers the message, a Steam-style fallback shows it on that same page. If you leave the page, the post-game message hides but the work continues. Returning shows the latest active state or retained result. Steam Cloud pages keep their usual Steam Cloud status.
 
-![Ludusavi showing Game save up to date on the X-Men Origins: Wolverine game page](assets/native-status-row.webp?cacheBuster=22)
+![Ludusavi showing Game save up to date on the X-Men Origins: Wolverine game page](assets/native-status-row.webp?cacheBuster=23)
 
 ## Before you install
 
