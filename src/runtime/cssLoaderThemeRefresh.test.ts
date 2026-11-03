@@ -34,6 +34,18 @@ describe("resetCssLoaderThemes", () => {
 
     await expect(resetCssLoaderThemes()).rejects.toThrow("CSS Loader is not loaded");
   });
+
+  it("reports failure when CSS Loader could not load the status theme", async () => {
+    pluginCall = async () => ({ fails: [["SDH-Ludusavi Status", "invalid theme.json"]] });
+
+    await expect(resetCssLoaderThemes()).resolves.toBe(false);
+  });
+
+  it("ignores load failures of other users' themes", async () => {
+    pluginCall = async () => ({ fails: [["Broken Theme", "invalid theme.json"]] });
+
+    await expect(resetCssLoaderThemes()).resolves.toBe(true);
+  });
 });
 
 describe("CSS Loader theme refresh", () => {
