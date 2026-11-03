@@ -31,8 +31,8 @@ export function startCssLoaderThemeRefresh(deps: ThemeRefreshDeps): {
 export async function resetCssLoaderThemes(): Promise<boolean> {
   const backend = window.DeckyBackend;
   if (typeof backend?.callable !== "function") return false;
-  const result = await backend.callable("loader/call_legacy_plugin_method")(
-    "CSS Loader", "reset", {},
-  );
-  return typeof result === "object" && result !== null && "success" in result && result.success === true;
+  // Native plugin backends refuse the legacy route; the modern one rejects on a
+  // real failure, and CSS Loader's own reply ({"fails": []}) carries no success flag.
+  await backend.callable("loader/call_plugin_method")("CSS Loader", "reset");
+  return true;
 }

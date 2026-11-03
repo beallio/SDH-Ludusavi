@@ -493,6 +493,13 @@ the assets to be deployed: without it, no theme CSS is injected. CSS Loader's Re
 control discovers a new theme when it was already running and did not observe directory
 creation.
 
+When startup replaces managed theme files, the frontend asks CSS Loader to reload them
+with its `reset` method through Decky's `loader/call_plugin_method` route. The legacy
+`loader/call_legacy_plugin_method` route is not used: the Decky Rust fork refuses legacy
+calls to native plugin backends, so the request would fail while CSS Loader's own file
+watcher had already reloaded the theme. The plugin logs a warning only when the `reset`
+call fails, and CSS Loader's reply (`{"fails": []}`) carries no success flag to test.
+
 `layout.css` retains the v0.4.9 empty-slot selectors. It reserves a 30-pixel direct empty
 panel immediately after the Play section, before Activity. Only a native route containing
 that empty panel receives the `--CGV-image-height + 30px` artwork minimum. Populated Steam

@@ -11,7 +11,10 @@ export interface SteamLifecycleObserver {
   onAppExit: (session: RunningSession) => Promise<void>;
 }
 
-export function createSteamLifecycleSource(observer: SteamLifecycleObserver) {
+export function createSteamLifecycleSource(
+  observer: SteamLifecycleObserver,
+  isTrackedAppID: (appID: string) => boolean = () => false,
+) {
   const activeSessions = new Map<number, RunningSession>();
   let fallbackIntervalID: number | null = null;
   let fallbackPreviousAppID: string | null = null;
@@ -77,8 +80,12 @@ export function createSteamLifecycleSource(observer: SteamLifecycleObserver) {
     try {
       const session = resolveLifetimeSession(notification);
       if (!session?.name) {
+        // Unnamed apps are untracked games Ludusavi cannot act on; only a tracked
+        // app ID makes an unresolved notification a real failure worth warning.
+        const tracked =
+          notification.unAppID > 0 && isTrackedAppID(String(notification.unAppID));
         log(
-          "warning",
+          tracked ? "warning" : "debug",
           `Could not resolve app lifetime notification: ${JSON.stringify(notification)}`,
           "lifecycle",
         );
