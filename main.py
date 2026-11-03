@@ -1,4 +1,4 @@
-# Source: decky-loader backend-rust/decky-plugin/shim/main.py at revision d283908.
+# Source: decky-loader backend-rust/decky-plugin/shim/main.py at revision 192cedc.
 # SPDX-License-Identifier: 0BSD
 """Runs a native plugin backend on the upstream Python Decky Loader.
 
