@@ -565,8 +565,8 @@ fn backup_file_stats(path: &Path) -> Option<(u64, Option<usize>)> {
     let count = match zip::ZipArchive::new(fs::File::open(path).ok()?) {
         Ok(archive) if archive.len() <= MAX_BACKUP_STAT_ENTRIES => Some(
             archive
-                .file_names()
-                .filter(|entry| !entry.ends_with('/'))
+                .file_names_raw()
+                .filter(|entry| !entry.ends_with(b"/"))
                 .count(),
         ),
         Ok(_) => return None,
@@ -583,7 +583,7 @@ mod tests {
         io::Write,
         os::unix::fs::{PermissionsExt, symlink},
     };
-    use zip::{CompressionMethod, ZipWriter, write::FileOptions};
+    use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
     #[test]
     fn flatpak_commands_include_the_native_config_prefix() {
         let directory = tempfile::tempdir().unwrap();
@@ -1057,7 +1057,8 @@ mod tests {
         let file = fs::File::create(path).unwrap();
         let mut archive = ZipWriter::new(file);
         for entry in entries {
-            let options = FileOptions::default().compression_method(CompressionMethod::Stored);
+            let options =
+                SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
             if entry.ends_with('/') {
                 archive.add_directory(*entry, options).unwrap();
             } else {
