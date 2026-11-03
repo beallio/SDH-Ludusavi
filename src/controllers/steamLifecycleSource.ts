@@ -2,6 +2,7 @@ import { log, logUiEvent } from "../utils/logging";
 import { registerAppLifetimeNotification, getRouterRunningApps, getRouterMainRunningApp, asRecord } from "../utils/steamRuntime";
 import {
   getMainRunningSession,
+  getSteamAppNameFromStores,
   sessionFromAppOverview,
 } from "../utils/steam";
 import type { AppLifetimeNotification, RunningSession } from "../types";
@@ -13,7 +14,7 @@ export interface SteamLifecycleObserver {
 
 export function createSteamLifecycleSource(
   observer: SteamLifecycleObserver,
-  isTrackedAppID: (appID: string) => boolean = () => false,
+  isTrackedApp: (appID: string, name?: string) => boolean = () => false,
 ) {
   const activeSessions = new Map<number, RunningSession>();
   let fallbackIntervalID: number | null = null;
@@ -51,6 +52,29 @@ export function createSteamLifecycleSource(
     return null;
   };
 
+  // The startup session (-1) is not an instance and is promoted separately.
+  const findActiveSessionByAppID = (appID: string): RunningSession | null => {
+    let found: RunningSession | null = null;
+    for (const [instanceID, session] of activeSessions) {
+      if (instanceID !== -1 && session.appID === appID) {
+        found = session;
+      }
+    }
+    return found;
+  };
+
+  const removeMostRecentActiveSessionForAppID = (appID: string) => {
+    let removedInstanceID: number | null = null;
+    for (const [instanceID, session] of activeSessions) {
+      if (instanceID !== -1 && session.appID === appID) {
+        removedInstanceID = instanceID;
+      }
+    }
+    if (removedInstanceID !== null) {
+      activeSessions.delete(removedInstanceID);
+    }
+  };
+
   const resolveLifetimeSession = (notification: AppLifetimeNotification): RunningSession | null => {
     const existingSession = activeSessions.get(notification.nInstanceID);
     if (existingSession) {
@@ -66,6 +90,14 @@ export function createSteamLifecycleSource(
 
     if (notification.unAppID > 0) {
       const appID = String(notification.unAppID);
+      if (!notification.bRunning) {
+        // Steam can report a different instance ID on exit; fall back to the
+        // most recent active session for the app before the Router state.
+        const activeSession = findActiveSessionByAppID(appID);
+        if (activeSession) {
+          return activeSession;
+        }
+      }
       const runningSession = findRunningSessionByAppID(appID);
       if (runningSession) {
         return runningSession;
@@ -80,10 +112,15 @@ export function createSteamLifecycleSource(
     try {
       const session = resolveLifetimeSession(notification);
       if (!session?.name) {
-        // Unnamed apps are untracked games Ludusavi cannot act on; only a tracked
-        // app ID makes an unresolved notification a real failure worth warning.
+        // Unnamed apps are usually untracked games Ludusavi cannot act on. Warn
+        // only when the notification concerns a tracked app or one that already
+        // has a session, where losing the lifecycle event is a real failure.
+        const appID = notification.unAppID > 0 ? String(notification.unAppID) : null;
         const tracked =
-          notification.unAppID > 0 && isTrackedAppID(String(notification.unAppID));
+          appID !== null &&
+          (findActiveSessionByAppID(appID) !== null ||
+            findStartupSession(notification) !== null ||
+            isTrackedApp(appID, getSteamAppNameFromStores(appID) ?? undefined));
         log(
           tracked ? "warning" : "debug",
           `Could not resolve app lifetime notification: ${JSON.stringify(notification)}`,
@@ -121,7 +158,11 @@ export function createSteamLifecycleSource(
         return;
       }
 
-      activeSessions.delete(notification.nInstanceID);
+      if (!activeSessions.delete(notification.nInstanceID)) {
+        // The exit reported an instance ID never seen at start; close the most
+        // recently started session recorded for the app.
+        removeMostRecentActiveSessionForAppID(session.appID);
+      }
       const startupSession = activeSessions.get(-1);
       if (startupSession?.appID === session.appID) {
         activeSessions.delete(-1);

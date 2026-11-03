@@ -436,7 +436,7 @@ export function createGameLifecycleController(
         await handleAppExit(session.name, session.appID);
       },
     },
-    (appID) => ludusaviStore.getSnapshot().trackedAppIDs.has(appID),
+    (appID, name) => ludusaviStore.isTracked(name ?? "", appID),
   );
 
   function start() {
