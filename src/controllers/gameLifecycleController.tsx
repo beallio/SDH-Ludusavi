@@ -427,14 +427,17 @@ export function createGameLifecycleController(
     }
   };
 
-  const steamLifecycleSource = createSteamLifecycleSource({
-    onAppStart: async (session, instanceID) => {
-      await handleAppStart(session.name, session.appID, instanceID);
+  const steamLifecycleSource = createSteamLifecycleSource(
+    {
+      onAppStart: async (session, instanceID) => {
+        await handleAppStart(session.name, session.appID, instanceID);
+      },
+      onAppExit: async (session) => {
+        await handleAppExit(session.name, session.appID);
+      },
     },
-    onAppExit: async (session) => {
-      await handleAppExit(session.name, session.appID);
-    }
-  });
+    (appID) => ludusaviStore.getSnapshot().trackedAppIDs.has(appID),
+  );
 
   function start() {
     steamLifecycleSource.start();
