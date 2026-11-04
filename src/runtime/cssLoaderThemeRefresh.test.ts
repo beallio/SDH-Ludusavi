@@ -46,6 +46,54 @@ describe("resetCssLoaderThemes", () => {
 
     await expect(resetCssLoaderThemes()).resolves.toBe(true);
   });
+
+  describe("stock CSS Loader (api_version 0)", () => {
+    const api0 = new Error(
+      "api_version 1 or newer is required to call methods with index-based arguments",
+    );
+    let legacyReply: unknown;
+
+    beforeEach(() => {
+      legacyReply = { success: true, result: { fails: [] } };
+      pluginCall = async (...args: unknown[]) => {
+        // The legacy route is the only one that passes a kwargs object.
+        if (args.length === 3) return legacyReply;
+        throw api0;
+      };
+    });
+
+    it("retries once on the legacy route after the api_version rejection", async () => {
+      await expect(resetCssLoaderThemes()).resolves.toBe(true);
+      expect(calls).toEqual([
+        ["loader/call_plugin_method", "CSS Loader", "reset"],
+        ["loader/call_legacy_plugin_method", "CSS Loader", "reset", {}],
+      ]);
+    });
+
+    it("reports failure when the legacy call fails", async () => {
+      legacyReply = { success: false, result: "boom" };
+
+      await expect(resetCssLoaderThemes()).resolves.toBe(false);
+    });
+
+    it("reports failure when the legacy reply lists the status theme", async () => {
+      legacyReply = { success: true, result: { fails: [["SDH-Ludusavi Status", "bad"]] } };
+
+      await expect(resetCssLoaderThemes()).resolves.toBe(false);
+    });
+  });
+
+  it("never retries on the legacy route after any other rejection", async () => {
+    for (const message of ["CSS Loader is not loaded", "reset raised inside the plugin"]) {
+      calls.length = 0;
+      pluginCall = async () => {
+        throw new Error(message);
+      };
+
+      await expect(resetCssLoaderThemes()).rejects.toThrow(message);
+      expect(calls).toEqual([["loader/call_plugin_method", "CSS Loader", "reset"]]);
+    }
+  });
 });
 
 describe("CSS Loader theme refresh", () => {

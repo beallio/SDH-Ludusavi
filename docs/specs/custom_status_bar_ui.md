@@ -494,12 +494,16 @@ control discovers a new theme when it was already running and did not observe di
 creation.
 
 When startup replaces managed theme files, the frontend asks CSS Loader to reload them
-with its `reset` method through Decky's `loader/call_plugin_method` route. The legacy
-`loader/call_legacy_plugin_method` route is not used: the Decky Rust fork refuses legacy
-calls to native plugin backends, so the request would fail while CSS Loader's own file
-watcher had already reloaded the theme. The plugin logs a warning when the `reset` call
-fails or when CSS Loader's reply (`{"fails": [[theme_dir, error], ...]}`) lists the
-`SDH-Ludusavi Status` theme; load errors of other themes are ignored.
+with its `reset` method through Decky's `loader/call_plugin_method` route, which native
+backends (the Rust CSS Loader fork) require. The stock DeckThemes CSS Loader declares no
+`api_version` (0), and Decky rejects positional calls to such plugins before running the
+method (`api_version 1 or newer is required to call methods with index-based arguments`).
+Only after that exact rejection does the frontend retry once with
+`loader/call_legacy_plugin_method`, whose reply counts as success only when `success` is
+`true`. Any other rejection is reported unchanged and never retried, because the method may
+already have run. The plugin logs a warning when the reload fails or when CSS Loader's
+reply (`{"fails": [[theme_dir, error], ...]}`) lists the `SDH-Ludusavi Status` theme; load
+errors of other themes are ignored.
 
 `layout.css` retains the v0.4.9 empty-slot selectors. It reserves a 30-pixel direct empty
 panel immediately after the Play section, before Activity. Only a native route containing
