@@ -121,11 +121,7 @@ impl BackendService {
             .and_then(python_integer)
             .unwrap_or(-1);
 
-        log::set_max_level(if debug_logging {
-            log::LevelFilter::Debug
-        } else {
-            log::LevelFilter::Info
-        });
+        let debug_logging = apply_debug_logging(debug_logging);
 
         let service = Self {
             settings_path,
@@ -1127,12 +1123,8 @@ impl BackendService {
                 write_json_atomic(&self.settings_path, &settings, mode, b"    ")?;
                 let debug_logging = setting_bool(&settings, "debug_logging", true);
                 *lock(&self.settings) = settings;
-                self.debug_logging.store(debug_logging, Ordering::Relaxed);
-                log::set_max_level(if debug_logging {
-                    log::LevelFilter::Debug
-                } else {
-                    log::LevelFilter::Info
-                });
+                self.debug_logging
+                    .store(apply_debug_logging(debug_logging), Ordering::Relaxed);
                 Ok(())
             })
             .map_err(|error| error.to_string())?;
@@ -1310,6 +1302,25 @@ fn python_integer(value: &Value) -> Option<i64> {
 
 fn setting_bool(settings: &Map<String, Value>, key: &str, default: bool) -> bool {
     settings.get(key).map_or(default, python_truthy)
+}
+
+/// The loader asks for DEBUG through `DECKY_PLUGIN_LOG_LEVEL` (the `plugin.json` `debug` flag); the
+/// setting can add DEBUG but must never lower the level below that request.
+fn effective_debug_logging(setting: bool, loader_level: Option<&str>) -> bool {
+    setting || loader_level.is_some_and(|level| level.trim().eq_ignore_ascii_case("debug"))
+}
+
+/// Sets the log filter from the setting and the loader's level; returns the effective state.
+fn apply_debug_logging(setting: bool) -> bool {
+    static LOADER_LEVEL: std::sync::LazyLock<Option<String>> =
+        std::sync::LazyLock::new(|| std::env::var("DECKY_PLUGIN_LOG_LEVEL").ok());
+    let enabled = effective_debug_logging(setting, LOADER_LEVEL.as_deref());
+    log::set_max_level(if enabled {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    });
+    enabled
 }
 
 fn python_truthy(value: &Value) -> bool {
@@ -1627,7 +1638,17 @@ mod tests {
     use serde_json::{Value, json};
     use tempfile::tempdir_in;
 
-    use super::{BackendService, LOG_LIMIT};
+    use super::{BackendService, LOG_LIMIT, effective_debug_logging};
+
+    #[test]
+    fn loader_debug_request_survives_a_disabled_setting() {
+        assert!(effective_debug_logging(false, Some("DEBUG")));
+        assert!(effective_debug_logging(false, Some(" debug ")));
+        assert!(effective_debug_logging(true, None));
+        assert!(effective_debug_logging(true, Some("INFO")));
+        assert!(!effective_debug_logging(false, Some("INFO")));
+        assert!(!effective_debug_logging(false, None));
+    }
 
     fn test_service() -> (tempfile::TempDir, Arc<BackendService>) {
         let directory = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
