@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs::File,
     io::{Read, Seek, SeekFrom},
     os::fd::AsRawFd,
@@ -35,7 +36,7 @@ impl MountWatcher {
                     if snapshot == previous { continue; }
                     thread::sleep(Duration::from_millis(700));
                     let Ok(settled) = read_mount_snapshot(&mut mounts) else { continue; };
-                    let changed = settled != previous;
+                    let changed = has_sd_mount_change(&previous, &settled);
                     previous = settled;
                     if changed && !thread_stop.load(Ordering::Acquire) {
                         if let Err(error) = runtime.block_on(context.emit("sdh_ludusavi_mount_changed", Vec::new())) {
@@ -58,4 +59,15 @@ fn read_mount_snapshot(file: &mut File) -> std::io::Result<String> {
     let mut snapshot = String::new();
     file.read_to_string(&mut snapshot)?;
     Ok(snapshot)
+}
+
+fn has_sd_mount_change(previous: &str, current: &str) -> bool {
+    let old: HashSet<&str> = previous.lines().collect();
+    let new: HashSet<&str> = current.lines().collect();
+    old.symmetric_difference(&new).any(|line| {
+        let Some(mount_point) = line.split_whitespace().nth(1) else {
+            return false;
+        };
+        mount_point.starts_with("/run/media/deck/") || mount_point.starts_with("/media/")
+    })
 }
