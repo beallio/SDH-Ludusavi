@@ -79,7 +79,9 @@ impl MountWatcher {
                         {
                             Ok(()) => {}
                             Err(error) => {
-                                log::debug!("Could not notify frontend about mount change: {error}");
+                                log::debug!(
+                                    "Could not notify frontend about mount change: {error}"
+                                );
                             }
                         }
                     }
