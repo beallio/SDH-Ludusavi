@@ -18,12 +18,11 @@ pub struct MountWatcher {
 }
 
 impl MountWatcher {
-    pub fn start(context: Context) -> std::io::Result<Self> {
+    pub fn start(context: Context, runtime: tokio::runtime::Handle) -> std::io::Result<Self> {
         let mut mounts = File::open("/proc/self/mounts")?;
         let mut previous = read_mount_snapshot(&mut mounts)?;
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
-        let runtime = tokio::runtime::Handle::try_current().map_err(std::io::Error::other)?;
         let stop_fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
         if stop_fd < 0 { return Err(std::io::Error::last_os_error()); }
         let stop_signal = unsafe { OwnedFd::from_raw_fd(stop_fd) };
