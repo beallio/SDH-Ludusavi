@@ -224,6 +224,7 @@ impl BackendService {
 
     async fn shutdown_until(&self, deadline: Instant) -> bool {
         self.calls.stop_admission();
+        let tokio_deadline = tokio::time::Instant::from_std(deadline);
         if let Some(watcher) = lock(&self.mount_watcher).take() {
             let stopped = tokio::time::timeout_at(
                 tokio_deadline,
@@ -234,7 +235,6 @@ impl BackendService {
             }
         }
         self.operations.cancel_processes();
-        let tokio_deadline = tokio::time::Instant::from_std(deadline);
         let calls_stopped = self.calls.wait_for_drain_until(tokio_deadline).await;
         let processes_exited = calls_stopped && self.operations.processes_exited();
         let watchdog_stopped = if calls_stopped && processes_exited {
