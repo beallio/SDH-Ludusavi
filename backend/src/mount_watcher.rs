@@ -89,3 +89,28 @@ fn has_sd_mount_change(previous: &str, current: &str) -> bool {
         mount_point.starts_with("/run/media/deck/") || mount_point.starts_with("/media/")
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::has_sd_mount_change;
+
+    #[test]
+    fn detects_steam_deck_removable_media_mount_changes() {
+        let before = "devtmpfs /dev devtmpfs rw 0 0\n/dev/mmcblk0p1 /run/media/deck/OLD ext4 rw 0 0\n";
+        let after = "devtmpfs /dev devtmpfs rw 0 0\n/dev/mmcblk0p1 /run/media/deck/NEW ext4 rw 0 0\n";
+        assert!(has_sd_mount_change(before, after));
+    }
+
+    #[test]
+    fn ignores_unrelated_mount_changes() {
+        let before = "tmpfs /run/user/1000 tmpfs rw 0 0\n";
+        let after = "tmpfs /run/user/1000 tmpfs rw 0 0\n/dev/sda1 /mnt/backup ext4 rw 0 0\n";
+        assert!(!has_sd_mount_change(before, after));
+    }
+
+    #[test]
+    fn detects_removal_of_a_removable_media_mount() {
+        let before = "/dev/mmcblk0p1 /run/media/deck/GAMES ext4 rw 0 0\n";
+        assert!(has_sd_mount_change(before, ""));
+    }
+}
