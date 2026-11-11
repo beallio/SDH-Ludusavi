@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     fs::File,
     io::{Read, Seek, SeekFrom},
-    os::fd::AsRawFd,
+    os::fd::{AsRawFd, FromRawFd, OwnedFd},
     sync::{Arc, atomic::{AtomicBool, Ordering}},
     thread::{self, JoinHandle},
     time::Duration,
@@ -13,6 +13,7 @@ use decky_plugin::Context;
 /// Uses procfs POLLPRI notifications; the kernel sleeps while the mount table is unchanged.
 pub struct MountWatcher {
     stop: Arc<AtomicBool>,
+    stop_signal: OwnedFd,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -23,15 +24,25 @@ impl MountWatcher {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let runtime = tokio::runtime::Handle::try_current().map_err(std::io::Error::other)?;
+        let stop_fd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+        if stop_fd < 0 { return Err(std::io::Error::last_os_error()); }
+        let stop_signal = unsafe { OwnedFd::from_raw_fd(stop_fd) };
+        let thread_signal = stop_signal.try_clone()?;
         let thread = thread::Builder::new()
             .name("sdh-ludusavi-mount-watch".to_owned())
             .spawn(move || {
-                let mut descriptor = libc::pollfd { fd: mounts.as_raw_fd(), events: libc::POLLPRI, revents: 0 };
+                let mut descriptors = [
+                    libc::pollfd { fd: mounts.as_raw_fd(), events: libc::POLLPRI, revents: 0 },
+                    libc::pollfd { fd: thread_signal.as_raw_fd(), events: libc::POLLIN, revents: 0 },
+                ];
                 while !thread_stop.load(Ordering::Acquire) {
-                    descriptor.revents = 0;
-                    // Timeout bounds unload latency; no periodic scan occurs while idle.
-                    let ready = unsafe { libc::poll(&mut descriptor, 1, 1000) };
-                    if ready <= 0 || descriptor.revents & libc::POLLPRI == 0 { continue; }
+                    descriptors[0].revents = 0;
+                    descriptors[1].revents = 0;
+                    // Block indefinitely: eventfd wakes this thread immediately on unload.
+                    let ready = unsafe { libc::poll(descriptors.as_mut_ptr(), 2, -1) };
+                    if ready < 0 { continue; }
+                    if descriptors[1].revents & libc::POLLIN != 0 { break; }
+                    if descriptors[0].revents & libc::POLLPRI == 0 { continue; }
                     let Ok(snapshot) = read_mount_snapshot(&mut mounts) else { continue; };
                     if snapshot == previous { continue; }
                     thread::sleep(Duration::from_millis(700));
@@ -45,11 +56,19 @@ impl MountWatcher {
                     }
                 }
             })?;
-        Ok(Self { stop, thread: Some(thread) })
+        Ok(Self { stop, stop_signal, thread: Some(thread) })
     }
 
     pub fn stop(mut self) {
         self.stop.store(true, Ordering::Release);
+        let wake = 1_u64;
+        unsafe {
+            libc::write(
+                self.stop_signal.as_raw_fd(),
+                (&wake as *const u64).cast(),
+                std::mem::size_of::<u64>(),
+            );
+        }
         if let Some(thread) = self.thread.take() { let _ = thread.join(); }
     }
 }
