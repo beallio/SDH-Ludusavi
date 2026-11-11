@@ -34,10 +34,12 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@decky/api", () => ({
+  addEventListener: vi.fn((_event: string, listener: (...args: unknown[]) => void) => listener),
   definePlugin: (factory: PluginFactory) => {
     mocks.pluginFactory = factory;
     return {};
   },
+  removeEventListener: vi.fn(),
   toaster: { toast: vi.fn() },
 }));
 
