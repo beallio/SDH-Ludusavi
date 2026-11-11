@@ -176,9 +176,19 @@ impl BackendService {
         match crate::mount_watcher::MountWatcher::start(context.clone(), runtime) {
             Ok(watcher) => {
                 *lock(&self.mount_watcher) = Some(watcher);
-                self.log("info", "SD-card mount event watcher started", Some("mount_watcher"), None);
+                self.log(
+                    "info",
+                    "SD-card mount event watcher started",
+                    Some("mount_watcher"),
+                    None,
+                );
             }
-            Err(error) => self.log("warning", &format!("SD-card mount event watcher could not start: {error}"), Some("mount_watcher"), None),
+            Err(error) => self.log(
+                "warning",
+                &format!("SD-card mount event watcher could not start: {error}"),
+                Some("mount_watcher"),
+                None,
+            ),
         }
         if let Err(error) = self.updater.reconcile_pending_install(&env.plugin_version) {
             self.log(
@@ -229,7 +239,8 @@ impl BackendService {
             let stopped = tokio::time::timeout_at(
                 tokio_deadline,
                 tokio::task::spawn_blocking(move || watcher.stop()),
-            ).await;
+            )
+            .await;
             if !matches!(stopped, Ok(Ok(()))) {
                 self.log("warning", "SD-card mount watcher did not stop cleanly before unload", Some("mount_watcher"), None);
             }
