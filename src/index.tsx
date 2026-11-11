@@ -279,7 +279,7 @@ export default definePlugin(() => {
     try {
       const operation = await getOperationStatus();
       if (operation.is_running) {
-        log("warning", "SD-card changed while a Ludusavi operation is active; automatic refresh deferred to avoid interference.", "mount_watcher");
+        log("warning", "SD-card changed while a Ludusavi operation is active; automatic refresh skipped to avoid interference; refresh tracking manually after the operation.", "mount_watcher");
         return;
       }
       const installedAppIds = await getInstalledAppIdsString();
