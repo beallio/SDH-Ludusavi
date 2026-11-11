@@ -11,6 +11,7 @@ import {
   checkForPluginUpdateCall,
   getGameHistoryCall,
   getSettings,
+  getOperationStatus,
   getUpdateCheckContextCall,
   markUpdateNotifiedCall,
   pauseGameProcessCall,
@@ -276,6 +277,11 @@ export default definePlugin(() => {
   const mountChangeListener = addEventListener("sdh_ludusavi_mount_changed", async () => {
     logUiEvent("sd_card_mount_changed", {}, "info");
     try {
+      const operation = await getOperationStatus();
+      if (operation.is_running) {
+        log("warning", "SD-card changed while a Ludusavi operation is active; automatic refresh deferred to avoid interference.", "mount_watcher");
+        return;
+      }
       const installedAppIds = await getInstalledAppIdsString();
       const tracking = await refreshGamesCall(true, installedAppIds);
       if (isRpcStatus(tracking)) {
