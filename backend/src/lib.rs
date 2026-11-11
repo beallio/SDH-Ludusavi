@@ -3,6 +3,7 @@ mod history;
 mod http;
 mod launch_gate;
 mod lifecycle;
+mod mount_watcher;
 mod operations;
 pub mod singleton;
 mod syncthing;
