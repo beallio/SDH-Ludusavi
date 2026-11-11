@@ -60,7 +60,9 @@ async fn run() -> io::Result<()> {
             if let Some(service) = startup_service.get() {
                 let service = Arc::clone(service);
                 let env = context.env().clone();
-                if let Err(error) = tokio::task::spawn_blocking(move || service.startup(&env)).await {
+                let plugin_context = context.clone();
+                let runtime_handle = tokio::runtime::Handle::current();
+                if let Err(error) = tokio::task::spawn_blocking(move || service.startup(&env, &plugin_context, runtime_handle)).await {
                     log::error!("Backend startup task failed: {error}");
                 }
             }

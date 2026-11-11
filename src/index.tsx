@@ -1,5 +1,5 @@
 import { showModal } from "@decky/ui";
-import { definePlugin, toaster } from "@decky/api";
+import { addEventListener, definePlugin, removeEventListener, toaster } from "@decky/api";
 import { FaExclamationTriangle } from "react-icons/fa";
 import type { ReactNode } from "react";
 
@@ -11,6 +11,7 @@ import {
   checkForPluginUpdateCall,
   getGameHistoryCall,
   getSettings,
+  getOperationStatus,
   getUpdateCheckContextCall,
   markUpdateNotifiedCall,
   pauseGameProcessCall,
@@ -273,6 +274,31 @@ export default definePlugin(() => {
   lifecycleController.start();
   updatePoller.start();
 
+  const mountChangeListener = addEventListener("sdh_ludusavi_mount_changed", async () => {
+    logUiEvent("sd_card_mount_changed", {}, "info");
+    try {
+      const operation = await getOperationStatus();
+      if (operation.is_running) {
+        log("warning", "SD-card changed while a Ludusavi operation is active; automatic refresh skipped to avoid interference; refresh tracking manually after the operation.", "mount_watcher");
+        return;
+      }
+      const installedAppIds = await getInstalledAppIdsString();
+      const tracking = await refreshGamesCall(true, installedAppIds);
+      if (isRpcStatus(tracking)) {
+        ludusaviStore.markTrackingFailed();
+        logRpcStatus(tracking, "SD-card change refresh");
+        return;
+      }
+      ludusaviStore.applyRefreshResult(tracking);
+      logUiEvent("sd_card_tracking_refreshed", {
+        game_count: tracking.games.length,
+        alias_count: Object.keys(tracking.aliases ?? {}).length,
+      }, "info");
+    } catch (error) {
+      log("error", "Failed to refresh tracking after SD-card change: " + error, "mount_watcher");
+    }
+  });
+
   return {
     name: "SDH-Ludusavi",
     titleView: <div className="sdh-ludusavi-title">SDH-Ludusavi</div>,
@@ -292,6 +318,7 @@ export default definePlugin(() => {
     onDismount() {
       logUiEvent("plugin_dismounting", {}, "info");
       startupHydration.dispose();
+      removeEventListener("sdh_ludusavi_mount_changed", mountChangeListener);
       cssLoaderThemeRefresh.dispose();
       updatePoller.dispose();
 
