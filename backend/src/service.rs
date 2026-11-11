@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use decky_plugin::Env;
+use decky_plugin::{Context, Env};
 use serde_json::{Map, Value, json};
 use time::{OffsetDateTime, format_description, format_description::well_known::Rfc3339};
 use tokio::sync::Notify;
@@ -48,6 +48,7 @@ pub struct BackendService {
     updater: PluginUpdater,
     syncthing: Arc<SyncthingWatchManager>,
     watchdog: ProcessWatchdog,
+    mount_watcher: Mutex<Option<crate::mount_watcher::MountWatcher>>,
     debug_logging: AtomicBool,
     logs: Mutex<VecDeque<Value>>,
     calls: Arc<CallTracker>,
@@ -133,6 +134,7 @@ impl BackendService {
             updater,
             syncthing: Arc::new(SyncthingWatchManager::default()),
             watchdog: ProcessWatchdog::default(),
+            mount_watcher: Mutex::new(None),
             debug_logging: AtomicBool::new(debug_logging),
             logs: Mutex::new(VecDeque::with_capacity(LOG_LIMIT)),
             calls: Arc::new(CallTracker::default()),
@@ -148,7 +150,7 @@ impl BackendService {
         Ok(service)
     }
 
-    pub fn startup(&self, env: &Env) {
+    pub fn startup(&self, env: &Env, context: &Context) {
         let result = crate::status_theme::install_status_theme(
             &env.plugin_dir.join("theme"),
             &env.decky_home,
@@ -171,6 +173,13 @@ impl BackendService {
         state.ready = true;
         self.theme_ready.notify_all();
         drop(state);
+        match crate::mount_watcher::MountWatcher::start(context.clone()) {
+            Ok(watcher) => {
+                *lock(&self.mount_watcher) = Some(watcher);
+                self.log("info", "SD-card mount event watcher started", Some("mount_watcher"), None);
+            }
+            Err(error) => self.log("warning", &format!("SD-card mount event watcher could not start: {error}"), Some("mount_watcher"), None),
+        }
         if let Err(error) = self.updater.reconcile_pending_install(&env.plugin_version) {
             self.log(
                 "warning",
@@ -215,6 +224,15 @@ impl BackendService {
 
     async fn shutdown_until(&self, deadline: Instant) -> bool {
         self.calls.stop_admission();
+        if let Some(watcher) = lock(&self.mount_watcher).take() {
+            let stopped = tokio::time::timeout_at(
+                tokio_deadline,
+                tokio::task::spawn_blocking(move || watcher.stop()),
+            ).await;
+            if !matches!(stopped, Ok(Ok(()))) {
+                self.log("warning", "SD-card mount watcher did not stop cleanly before unload", Some("mount_watcher"), None);
+            }
+        }
         self.operations.cancel_processes();
         let tokio_deadline = tokio::time::Instant::from_std(deadline);
         let calls_stopped = self.calls.wait_for_drain_until(tokio_deadline).await;
