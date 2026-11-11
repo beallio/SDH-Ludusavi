@@ -71,9 +71,9 @@ impl MountWatcher {
                     let Ok(settled) = read_mount_snapshot(&mut mounts) else {
                         continue;
                     };
-                    let changed = has_sd_mount_change(&previous, &settled);
+                    let added = has_sd_mount_added(&previous, &settled);
                     previous = settled;
-                    if changed && !thread_stop.load(Ordering::Acquire) {
+                    if added && !thread_stop.load(Ordering::Acquire) {
                         match runtime
                             .block_on(context.emit("sdh_ludusavi_mount_changed", Vec::new()))
                         {
@@ -117,10 +117,10 @@ fn read_mount_snapshot(file: &mut File) -> std::io::Result<String> {
     Ok(snapshot)
 }
 
-fn has_sd_mount_change(previous: &str, current: &str) -> bool {
+fn has_sd_mount_added(previous: &str, current: &str) -> bool {
     let old: HashSet<&str> = previous.lines().collect();
     let new: HashSet<&str> = current.lines().collect();
-    old.symmetric_difference(&new).any(|line| {
+    new.difference(&old).any(|line| {
         let Some(mount_point) = line.split_whitespace().nth(1) else {
             return false;
         };
@@ -130,7 +130,7 @@ fn has_sd_mount_change(previous: &str, current: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::has_sd_mount_change;
+    use super::has_sd_mount_added;
 
     #[test]
     fn detects_steam_deck_removable_media_mount_changes() {
@@ -138,14 +138,14 @@ mod tests {
             "devtmpfs /dev devtmpfs rw 0 0\n/dev/mmcblk0p1 /run/media/deck/OLD ext4 rw 0 0\n";
         let after =
             "devtmpfs /dev devtmpfs rw 0 0\n/dev/mmcblk0p1 /run/media/deck/NEW ext4 rw 0 0\n";
-        assert!(has_sd_mount_change(before, after));
+        assert!(has_sd_mount_added(before, after));
     }
 
     #[test]
     fn ignores_unrelated_mount_changes() {
         let before = "tmpfs /run/user/1000 tmpfs rw 0 0\n";
         let after = "tmpfs /run/user/1000 tmpfs rw 0 0\n/dev/sda1 /mnt/backup ext4 rw 0 0\n";
-        assert!(!has_sd_mount_change(before, after));
+        assert!(!has_sd_mount_added(before, after));
     }
 
     #[test]
