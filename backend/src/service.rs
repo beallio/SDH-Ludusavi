@@ -242,7 +242,12 @@ impl BackendService {
             )
             .await;
             if !matches!(stopped, Ok(Ok(()))) {
-                self.log("warning", "SD-card mount watcher did not stop cleanly before unload", Some("mount_watcher"), None);
+                self.log(
+                    "warning",
+                    "SD-card mount watcher did not stop cleanly before unload",
+                    Some("mount_watcher"),
+                    None,
+                );
             }
         }
         self.operations.cancel_processes();
