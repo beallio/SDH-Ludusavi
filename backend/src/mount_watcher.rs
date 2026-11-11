@@ -74,10 +74,13 @@ impl MountWatcher {
                     let changed = has_sd_mount_change(&previous, &settled);
                     previous = settled;
                     if changed && !thread_stop.load(Ordering::Acquire) {
-                        if let Err(error) =
-                            runtime.block_on(context.emit("sdh_ludusavi_mount_changed", Vec::new()))
+                        match runtime
+                            .block_on(context.emit("sdh_ludusavi_mount_changed", Vec::new()))
                         {
-                            log::debug!("Could not notify frontend about mount change: {error}");
+                            Ok(()) => {}
+                            Err(error) => {
+                                log::debug!("Could not notify frontend about mount change: {error}");
+                            }
                         }
                     }
                 }
