@@ -133,7 +133,7 @@ mod tests {
     use super::has_sd_mount_added;
 
     #[test]
-    fn detects_steam_deck_removable_media_mount_changes() {
+    fn detects_new_steam_deck_removable_media_mounts() {
         let before =
             "devtmpfs /dev devtmpfs rw 0 0\n/dev/mmcblk0p1 /run/media/deck/OLD ext4 rw 0 0\n";
         let after =
@@ -149,8 +149,15 @@ mod tests {
     }
 
     #[test]
-    fn detects_removal_of_a_removable_media_mount() {
+    fn ignores_removal_of_a_removable_media_mount() {
         let before = "/dev/mmcblk0p1 /run/media/deck/GAMES ext4 rw 0 0\n";
-        assert!(has_sd_mount_change(before, ""));
+        assert!(!has_sd_mount_added(before, ""));
+    }
+
+    #[test]
+    fn detects_replacement_at_the_same_mount_point() {
+        let before = "/dev/mmcblk0p1 /run/media/deck/GAMES ext4 rw 0 0\n";
+        let after = "/dev/mmcblk1p1 /run/media/deck/GAMES ext4 rw 0 0\n";
+        assert!(has_sd_mount_added(before, after));
     }
 }
