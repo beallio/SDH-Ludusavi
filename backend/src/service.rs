@@ -150,7 +150,7 @@ impl BackendService {
         Ok(service)
     }
 
-    pub fn startup(&self, env: &Env, context: &Context) {
+    pub fn startup(&self, env: &Env, context: &Context, runtime: tokio::runtime::Handle) {
         let result = crate::status_theme::install_status_theme(
             &env.plugin_dir.join("theme"),
             &env.decky_home,
@@ -173,7 +173,7 @@ impl BackendService {
         state.ready = true;
         self.theme_ready.notify_all();
         drop(state);
-        match crate::mount_watcher::MountWatcher::start(context.clone()) {
+        match crate::mount_watcher::MountWatcher::start(context.clone(), runtime) {
             Ok(watcher) => {
                 *lock(&self.mount_watcher) = Some(watcher);
                 self.log("info", "SD-card mount event watcher started", Some("mount_watcher"), None);
