@@ -119,6 +119,45 @@ it("does not replace native presentation when Steam class capabilities are unava
   expect(host.querySelector("button")?.textContent).toBe("Native Cloud");
 });
 
+it("resolves translated Vite classes and injects zero-specificity fallback styles when Steam JS class modules are empty", async () => {
+  const { setTranslatedGameDetailsStatusClasses } = await import("./gameDetailsStatusClasses");
+  const savedPlay = { ...nativeClasses.play };
+  for (const key of Object.keys(nativeClasses.play)) {
+    nativeClasses.play[key] = undefined;
+  }
+  setTranslatedGameDetailsStatusClasses({
+    row: "_705czaYU-Ik-",
+    icon: "P5EjdmRjmj0-",
+    iconSvg: "MM-IDQ0LGKM-",
+    label: "_3mmwkeZuHuQ-",
+    problem: "H6ihgnZPsKc-",
+    syncing: "-iwRb5dqNlw-",
+    playSection: "XzQVNZx-stM-",
+  });
+  try {
+    await render(composeInNativeStatusSlot(header(createElement("div")), pluginRow()) as ReactElement);
+    const row = host.querySelector('[data-sdh-ludusavi-status-row="true"]') as HTMLElement | null;
+    expect(row?.classList.contains("_705czaYU-Ik-")).toBe(true);
+    expect(row?.querySelector(":scope > .P5EjdmRjmj0- > svg.MM-IDQ0LGKM-")).not.toBeNull();
+    expect(document.getElementById("sdh-ludusavi-status-fallback-style")?.textContent).toContain(":where([data-sdh-ludusavi-status-row=\"true\"])");
+  } finally {
+    Object.assign(nativeClasses.play, savedPlay);
+    setTranslatedGameDetailsStatusClasses(null);
+  }
+});
+
+it("falls back to semantic classes on Vite even without css_translations.json", async () => {
+  nativeClasses.play.CloudStatusRow = undefined;
+  (globalThis as { __DECKY_ESM__?: Map<string, unknown> }).__DECKY_ESM__ = new Map();
+  try {
+    await render(composeInNativeStatusSlot(header(createElement("div")), pluginRow()) as ReactElement);
+    const row = host.querySelector('[data-sdh-ludusavi-status-row="true"]') as HTMLElement | null;
+    expect(row?.classList.contains("sdh-ludusavi-status-row")).toBe(true);
+  } finally {
+    delete (globalThis as { __DECKY_ESM__?: Map<string, unknown> }).__DECKY_ESM__;
+  }
+});
+
 it("accepts a fully visible compact indicator instead of requiring a full-height status band", () => {
   const row = document.createElement("div"); document.body.append(row);
   row.getBoundingClientRect = () => ({ width: 32, height: 16, left: 640, top: 100, right: 672, bottom: 116 } as DOMRect);

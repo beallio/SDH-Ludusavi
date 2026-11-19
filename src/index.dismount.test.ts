@@ -52,6 +52,7 @@ vi.mock("./api/ludusaviRpc", () => ({
   checkGameStartCall: vi.fn(),
   consumeThemeRefreshNeededCall: vi.fn().mockResolvedValue(false),
   getGameHistoryCall: vi.fn(),
+  getNativeStatusClassesCall: vi.fn().mockResolvedValue({}),
   getSettings: vi.fn(),
   getSyncthingActivityCall: vi.fn(),
   getUpdateCheckContextCall: vi.fn(),

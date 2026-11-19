@@ -8,6 +8,7 @@ import {
   checkGameExitCall,
   checkGameStartCall,
   consumeThemeRefreshNeededCall,
+  getNativeStatusClassesCall,
   checkForPluginUpdateCall,
   getGameHistoryCall,
   getSettings,
@@ -48,6 +49,7 @@ import { createPluginRuntime } from "./runtime/pluginRuntime";
 import { resetCssLoaderThemes, startCssLoaderThemeRefresh } from "./runtime/cssLoaderThemeRefresh";
 import { createStartupHydration } from "./runtime/startupHydration";
 import { createUpdatePoller } from "./runtime/updatePoller";
+import { setTranslatedGameDetailsStatusClasses } from "./surfaces/gameDetailsStatusClasses";
 
 
 async function syncGlobalHistory(store: LudusaviStateStore) {
@@ -210,6 +212,9 @@ export default definePlugin(() => {
     document.head.appendChild(dropdownStyleEl);
     logUiEvent("qam_styles_attached");
   }
+  void getNativeStatusClassesCall()
+    .then((classes) => setTranslatedGameDetailsStatusClasses(classes))
+    .catch(() => undefined);
 
   const ludusaviStore = createLudusaviStateStore();
   const runtime = createPluginRuntime(ludusaviStore);

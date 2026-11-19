@@ -1,13 +1,97 @@
 use std::{
+    collections::BTreeMap,
     fs,
     io::{self, Write},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
 
+use serde_json::Value;
 use tempfile::Builder;
 
 const THEME_NAME: &str = "SDH-Ludusavi Status";
+const TRANSLATIONS_FILE: &str = "css_translations.json";
+const MAX_TRANSLATIONS_BYTES: u64 = 16 * 1024 * 1024;
+const STATUS_CLASS_LOOKUPS: [(&str, &[&str]); 10] = [
+    (
+        "row",
+        &[
+            "cuOVbdpY_CloudStatusRow",
+            "appdetailsplaysection_CloudStatusRow_QvHky",
+            "appdetailsplaysection_CloudStatusRow",
+        ],
+    ),
+    (
+        "icon",
+        &[
+            "cuOVbdpY_CloudStatusIcon",
+            "appdetailsplaysection_CloudStatusIcon_1Prjv",
+            "appdetailsplaysection_CloudStatusIcon",
+        ],
+    ),
+    (
+        "iconSvg",
+        &[
+            "cuOVbdpY_CloudIconSVG",
+            "appdetailsplaysection_CloudIconSVG",
+        ],
+    ),
+    (
+        "label",
+        &[
+            "cuOVbdpY_CloudStatusLabel",
+            "appdetailsplaysection_CloudStatusLabel_fUTbl",
+            "appdetailsplaysection_CloudStatusLabel",
+        ],
+    ),
+    (
+        "problem",
+        &[
+            "cuOVbdpY_CloudSyncProblem",
+            "appdetailsplaysection_CloudSyncProblem_2bzio",
+            "appdetailsplaysection_CloudSyncProblem",
+        ],
+    ),
+    (
+        "syncing",
+        &[
+            "cuOVbdpY_CloudSynching",
+            "appdetailsplaysection_CloudSynching_1swfo",
+            "appdetailsplaysection_CloudSynching",
+        ],
+    ),
+    (
+        "activeValue",
+        &[
+            "cuOVbdpY_CloudStatusUploading",
+            "appdetailsplaysection_CloudStatusUploading",
+        ],
+    ),
+    (
+        "appDetailsInnerContainer",
+        &[
+            "9jzUK0EK_InnerContainer",
+            "appdetails_InnerContainer_1Svpj",
+            "appdetails_InnerContainer",
+        ],
+    ),
+    (
+        "playSection",
+        &[
+            "L3jh3XgZ_PlaySection",
+            "basicappdetailssectionstyler_PlaySection_3scbH",
+            "basicappdetailssectionstyler_PlaySection",
+        ],
+    ),
+    (
+        "headerBackgroundImage",
+        &[
+            "ELzXGJn8_HeaderBackgroundImage",
+            "sharedappdetailsheader_HeaderBackgroundImage_1sarA",
+            "sharedappdetailsheader_HeaderBackgroundImage",
+        ],
+    ),
+];
 const THEME_FILES: [&str; 4] = ["theme.json", "clean.css", "custom.css", "layout.css"];
 const MARKER: &str = ".sdh-ludusavi-status-theme";
 const MARKER_VALUE: &[u8] = b"sdh-ludusavi-status-theme-1\n";
@@ -222,13 +306,77 @@ fn uninstall(decky_home: &Path, preferences_dir: &Path) -> io::Result<()> {
     fs::remove_dir(destination)
 }
 
+fn is_valid_css_class(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    let valid_start = first.is_ascii_alphabetic() || first == b'_' || first == b'-';
+    valid_start && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
+/// Resolve current Steam CSS class hashes from CSS Loader's local `css_translations.json`, if
+/// present. Returns an empty map when CSS Loader is not installed or the file is unreadable.
+pub fn resolve_translated_status_classes(decky_home: &Path) -> BTreeMap<String, String> {
+    let mut resolved = BTreeMap::new();
+    let path = decky_home.join("themes").join(TRANSLATIONS_FILE);
+    let Ok(meta) = fs::symlink_metadata(&path) else {
+        return resolved;
+    };
+    if !meta.file_type().is_file() || meta.len() > MAX_TRANSLATIONS_BYTES {
+        return resolved;
+    }
+    let Ok(bytes) = fs::read(&path) else {
+        return resolved;
+    };
+    let Ok(Value::Object(entries)) = serde_json::from_slice::<Value>(&bytes) else {
+        return resolved;
+    };
+
+    for (field, needles) in STATUS_CLASS_LOOKUPS {
+        let mut target: Option<&str> = None;
+        for needle in needles {
+            if let Some(latest) = entries
+                .get(*needle)
+                .and_then(Value::as_array)
+                .and_then(|values| values.last())
+                .and_then(Value::as_str)
+            {
+                target = Some(latest);
+                break;
+            }
+        }
+        if target.is_none() {
+            'scan: for values in entries.values().filter_map(Value::as_array) {
+                let Some(latest) = values.last().and_then(Value::as_str) else {
+                    continue;
+                };
+                if values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|alias| needles.contains(&alias))
+                {
+                    target = Some(latest);
+                    break 'scan;
+                }
+            }
+        }
+        if let Some(class_name) = target
+            && is_valid_css_class(class_name)
+        {
+            resolved.insert(field.to_owned(), class_name.to_owned());
+        }
+    }
+    resolved
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
     use tempfile::tempdir_in;
 
-    use super::{install_status_theme, uninstall_status_theme};
+    use super::{install_status_theme, resolve_translated_status_classes, uninstall_status_theme};
 
     fn fixture(root: &Path) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
         let source = root.join("plugin/theme");
@@ -313,5 +461,50 @@ mod tests {
             fs::metadata(&themes).unwrap().permissions().mode() & 0o777,
             0o755
         );
+    }
+
+    #[test]
+    fn resolve_translated_status_classes_reads_latest_entries_and_rejects_symlinks() {
+        let root = tempdir_in("/var/tmp/sdh_ludusavi").unwrap();
+        let home = root.path().join("homebrew");
+        assert!(resolve_translated_status_classes(&home).is_empty());
+
+        let themes = home.join("themes");
+        fs::create_dir_all(&themes).unwrap();
+        fs::write(
+            themes.join("css_translations.json"),
+            r#"{
+                "cuOVbdpY_CloudStatusRow": ["appdetailsplaysection_CloudStatusRow_QvHky", "_705czaYU-Ik-"],
+                "cuOVbdpY_CloudStatusIcon": ["_1PrjvpmQ3CUjn45PN1Ed6V", "P5EjdmRjmj0-"],
+                "L3jh3XgZ_PlaySection": ["_3scbHORkYB7utTUGfkMCC_", "XzQVNZx-stM-"],
+                "ELzXGJn8_HeaderBackgroundImage": ["_1IX7FPSY9Jb82KhBVBSkZa", "rzNYjeGJ-u8-"],
+                "cuOVbdpY_CloudSyncProblem": ["_2bzio1wm1zWNDGZdaQ2qHo", "invalid class!"]
+            }"#,
+        )
+        .unwrap();
+        let resolved = resolve_translated_status_classes(&home);
+        assert_eq!(
+            resolved.get("row").map(String::as_str),
+            Some("_705czaYU-Ik-")
+        );
+        assert_eq!(
+            resolved.get("icon").map(String::as_str),
+            Some("P5EjdmRjmj0-")
+        );
+        assert_eq!(
+            resolved.get("playSection").map(String::as_str),
+            Some("XzQVNZx-stM-")
+        );
+        assert_eq!(
+            resolved.get("headerBackgroundImage").map(String::as_str),
+            Some("rzNYjeGJ-u8-")
+        );
+        assert!(!resolved.contains_key("problem"));
+
+        let outside = root.path().join("outside.json");
+        fs::write(&outside, r#"{"cuOVbdpY_CloudStatusRow":["_705czaYU-Ik-"]}"#).unwrap();
+        fs::remove_file(themes.join("css_translations.json")).unwrap();
+        std::os::unix::fs::symlink(&outside, themes.join("css_translations.json")).unwrap();
+        assert!(resolve_translated_status_classes(&home).is_empty());
     }
 }

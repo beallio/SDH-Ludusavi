@@ -91,6 +91,7 @@ async fn run() -> io::Result<()> {
         "mark_update_notified",
         "clear_pending_update_install",
         "consume_theme_refresh_needed",
+        "get_native_status_classes",
         "start_syncthing_activity_watch",
         "get_syncthing_activity",
         "stop_syncthing_activity_watch",
