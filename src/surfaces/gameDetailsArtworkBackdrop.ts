@@ -1,5 +1,4 @@
-import { getNativeGameDetailsStatusClasses } from "./gameDetailsStatusClasses";
-import { appDetailsHeaderClasses } from "@decky/ui";
+import { getNativeGameDetailsStatusClasses, getNativeHeaderBackgroundClass } from "./gameDetailsStatusClasses";
 
 type HostWindow = Window & {
   MutationObserver?: typeof MutationObserver;
@@ -173,7 +172,7 @@ export function mountGameDetailsArtworkBackdrop(hostWindow: Window, appID: strin
   let reservationBackground: HTMLElement | null = null;
   let coverageBackground: HTMLElement | null = null;
   let coverageImage: HTMLImageElement | null = null;
-  const backgroundClass = (appDetailsHeaderClasses as Record<string, string | undefined> | undefined)?.HeaderBackgroundImage;
+  const backgroundClass = getNativeHeaderBackgroundClass() ?? undefined;
 
   function cancelFrame(): void {
     if (frame === null) return;

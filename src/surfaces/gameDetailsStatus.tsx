@@ -10,7 +10,7 @@ import { isStatusPaintMeasurement, measureStatusBandPaint, mountGameDetailsArtwo
 import { nativeIconSvgForAutoSyncStatus } from "./nativeGameDetailsStatusIcon";
 import type { DetailsStatusPresentationSurface } from "./autoSyncStatusSurface";
 import { isNativeStatusMessageUnoccluded } from "./nativeStatusMessageVisibility";
-import { getNativeGameDetailsStatusClasses, type NativeGameDetailsStatusClasses } from "./gameDetailsStatusClasses";
+import { ensureStatusRowFallbackStyles, getNativeGameDetailsStatusClasses, type NativeGameDetailsStatusClasses } from "./gameDetailsStatusClasses";
 
 const GAME_DETAILS_ROUTE = "/library/app/:appid";
 // Runtime disposal can follow the launch-lease cleanup ceiling. Retain only
@@ -380,6 +380,7 @@ export function GameDetailsStatusRow({ appID, model, statusSurface, suppressed, 
     return statusSurface.registerDetailsOwner({ appID, visible: true, layoutValid: true });
   }, [appID, model.canOwnStatusArea, statusSurface, visible, nativeOccupied]);
   useLayoutEffect(() => {
+    ensureStatusRowFallbackStyles(element?.ownerDocument);
     onElement?.(element);
     return () => onElement?.(null);
   }, [element, onElement]);

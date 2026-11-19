@@ -39,6 +39,7 @@ const DEFAULT_NOTIFICATIONS: [&str; 7] = [
 ];
 
 pub struct BackendService {
+    decky_home: PathBuf,
     settings_path: PathBuf,
     cache_path: PathBuf,
     state_lock: Arc<StateLock>,
@@ -124,6 +125,7 @@ impl BackendService {
         let debug_logging = apply_debug_logging(debug_logging);
 
         let service = Self {
+            decky_home: env.decky_home.clone(),
             settings_path,
             cache_path,
             state_lock,
@@ -275,6 +277,12 @@ impl BackendService {
             "consume_theme_refresh_needed" => {
                 expect_args(method, args, 0)?;
                 Ok(Value::Bool(self.consume_theme_refresh_needed()))
+            }
+            "get_native_status_classes" => {
+                expect_args(method, args, 0)?;
+                let classes =
+                    crate::status_theme::resolve_translated_status_classes(&self.decky_home);
+                serde_json::to_value(classes).map_err(|error| error.to_string())
             }
             "start_syncthing_activity_watch" => {
                 expect_args(method, args, 3)?;
@@ -1260,6 +1268,7 @@ fn failed_dispatch_reply(method: &str, message: String) -> Value {
 fn getter_fallback(method: &str) -> Option<Value> {
     match method {
         "get_recent_logs" => Some(json!([])),
+        "get_native_status_classes" => Some(json!({})),
         "get_operation_status" => Some(idle_operation_status()),
         "get_ludusavi_launcher_shortcut_id" => Some(json!(-1)),
         "is_game_cache_current" => Some(Value::Bool(false)),
